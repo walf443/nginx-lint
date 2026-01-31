@@ -1,10 +1,32 @@
-use crate::linter::{LintError, LintRule, Severity};
+use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
 
 /// Check for unclosed string quotes
 pub struct UnclosedQuote;
+
+impl UnclosedQuote {
+    /// Try to create a fix for an unclosed quote
+    /// If the line ends with a semicolon, insert the closing quote before it
+    fn create_fix(quote: char, line_number: usize, line_content: &str) -> Option<Fix> {
+        let trimmed = line_content.trim_end();
+
+        // If the line ends with semicolon, insert the closing quote before it
+        if trimmed.ends_with(';') {
+            let semicolon_pos = trimmed.rfind(';').unwrap();
+            let before_semicolon = &trimmed[..semicolon_pos];
+            let fixed_line = format!("{}{};", before_semicolon, quote);
+            // Preserve original indentation
+            let indent = line_content.len() - line_content.trim_start().len();
+            let fixed_line_with_indent =
+                format!("{}{}", " ".repeat(indent), fixed_line.trim_start());
+            return Some(Fix::replace_line(line_number, &fixed_line_with_indent));
+        }
+
+        None
+    }
+}
 
 impl LintRule for UnclosedQuote {
     fn name(&self) -> &'static str {
@@ -28,10 +50,11 @@ impl LintRule for UnclosedQuote {
         };
 
         let mut in_comment = false;
-        let mut string_start: Option<(char, usize, usize)> = None; // (quote_char, line, column)
+        let mut string_start: Option<(char, usize, usize, String)> = None; // (quote_char, line, column, line_content)
         let mut prev_char = ' ';
+        let lines_vec: Vec<&str> = content.lines().collect();
 
-        for (line_num, line) in content.lines().enumerate() {
+        for (line_num, line) in lines_vec.iter().enumerate() {
             let line_number = line_num + 1;
             let chars: Vec<char> = line.chars().collect();
 
@@ -50,13 +73,13 @@ impl LintRule for UnclosedQuote {
 
                 // Start of string
                 if (ch == '"' || ch == '\'') && string_start.is_none() {
-                    string_start = Some((ch, line_number, column));
+                    string_start = Some((ch, line_number, column, line.to_string()));
                     prev_char = ch;
                     continue;
                 }
 
                 // End string only with matching quote (and not escaped)
-                if let Some((quote, _, _)) = string_start {
+                if let Some((quote, _, _, _)) = string_start {
                     if ch == quote && prev_char != '\\' {
                         string_start = None;
                     }
@@ -73,17 +96,26 @@ impl LintRule for UnclosedQuote {
         }
 
         // Report unclosed strings at end of file
-        if let Some((quote, start_line, start_col)) = string_start {
+        if let Some((quote, start_line, start_col, start_line_content)) = string_start {
             let quote_name = if quote == '"' {
                 "double quote"
             } else {
                 "single quote"
             };
             let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
-            errors.push(
+
+            // Try to create a fix: if the line ends with semicolon, insert quote before it
+            let fix = Self::create_fix(quote, start_line, &start_line_content);
+
+            let mut error =
                 LintError::new(self.name(), self.category(), &message, Severity::Error)
-                    .with_location(start_line, start_col),
-            );
+                    .with_location(start_line, start_col);
+
+            if let Some(f) = fix {
+                error = error.with_fix(f);
+            }
+
+            errors.push(error);
         }
 
         errors
