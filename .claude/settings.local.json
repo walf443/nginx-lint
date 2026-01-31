@@ -6,7 +6,12 @@
       "WebFetch(domain:docs.rs)",
       "Bash(cargo run:*)",
       "Bash(cargo test:*)",
-      "Bash(cargo clippy:*)"
+      "Bash(cargo clippy:*)",
+      "Bash(for f in tests/fixtures/test_generated/*.conf)",
+      "Bash(do echo \"=== Testing: $f ===\")",
+      "Bash(./target/release/nginx-lint:*)",
+      "Bash(done)",
+      "Bash(git add:*)"
     ]
   }
 }
