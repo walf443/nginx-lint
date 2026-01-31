@@ -60,11 +60,11 @@ impl LintRule for MissingSemicolon {
                 if (ch == '"' || ch == '\'') && string_char.is_none() {
                     string_char = Some(ch);
                     in_string = true;
-                } else if let Some(quote) = string_char {
-                    if ch == quote {
-                        string_char = None;
-                        in_string = false;
-                    }
+                } else if let Some(quote) = string_char
+                    && ch == quote
+                {
+                    string_char = None;
+                    in_string = false;
                 }
             }
 
