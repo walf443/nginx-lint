@@ -160,6 +160,8 @@ impl Directive {
 pub struct Block {
     pub items: Vec<ConfigItem>,
     pub span: Span,
+    /// Raw content for special blocks like *_by_lua_block (Lua code)
+    pub raw_content: Option<String>,
 }
 
 impl Block {
@@ -169,6 +171,11 @@ impl Block {
             ConfigItem::Directive(d) => Some(d.as_ref()),
             _ => None,
         })
+    }
+
+    /// Check if this is a raw content block (like lua_block)
+    pub fn is_raw(&self) -> bool {
+        self.raw_content.is_some()
     }
 }
 
@@ -291,12 +298,14 @@ mod tests {
                                         trailing_comment: None,
                                     }))],
                                     span: Span::default(),
+                                    raw_content: None,
                                 }),
                                 span: Span::default(),
                                 trailing_comment: None,
                             })),
                         ],
                         span: Span::default(),
+                        raw_content: None,
                     }),
                     span: Span::default(),
                     trailing_comment: None,

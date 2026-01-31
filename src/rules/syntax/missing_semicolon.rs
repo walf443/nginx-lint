@@ -1,5 +1,6 @@
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
+use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
 
@@ -25,6 +26,8 @@ impl LintRule for MissingSemicolon {
 
         let mut in_string = false;
         let mut string_char: Option<char> = None;
+        let mut in_lua_block = false;
+        let mut lua_brace_depth = 0;
 
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
@@ -38,6 +41,31 @@ impl LintRule for MissingSemicolon {
             // Skip comment lines
             if trimmed.starts_with('#') {
                 continue;
+            }
+
+            // Check if we're entering a raw block (like lua_block)
+            if !in_lua_block && is_raw_block_line(trimmed) {
+                in_lua_block = true;
+                lua_brace_depth = 1;
+                continue;
+            }
+
+            // Track brace depth inside lua_block
+            if in_lua_block {
+                for ch in trimmed.chars() {
+                    if ch == '{' {
+                        lua_brace_depth += 1;
+                    } else if ch == '}' {
+                        lua_brace_depth -= 1;
+                        if lua_brace_depth == 0 {
+                            in_lua_block = false;
+                        }
+                    }
+                }
+                // Skip all lines inside lua_block
+                if in_lua_block || trimmed == "}" {
+                    continue;
+                }
             }
 
             // Skip lines that are just closing braces
@@ -101,6 +129,15 @@ impl LintRule for MissingSemicolon {
 
         errors
     }
+}
+
+/// Check if a line starts a raw block directive (like lua_block)
+fn is_raw_block_line(line: &str) -> bool {
+    // Extract the first word (directive name) from the line
+    let directive_name = line.split_whitespace().next().unwrap_or("");
+
+    // Check if it's a raw block directive and the line contains an opening brace
+    is_raw_block_directive(directive_name) && line.contains('{')
 }
 
 /// Strip inline comments from a line, respecting string literals
@@ -300,6 +337,54 @@ worker_processes auto;
             errors.len(),
             1,
             "Expected 1 error - comment ending with ; should not count"
+        );
+    }
+
+    #[test]
+    fn test_lua_block_ignored() {
+        // Lua code inside lua_block should not trigger missing semicolon errors
+        let content = r#"http {
+    server {
+        listen 80;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            ngx.say(cjson.encode({status = "ok"}))
+        }
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors in lua_block, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiple_lua_blocks_ignored() {
+        let content = r#"http {
+    init_by_lua_block {
+        require "resty.core"
+        cjson = require "cjson"
+    }
+
+    server {
+        listen 80;
+        access_by_lua_block {
+            local token = ngx.var.http_authorization
+            if not token then
+                ngx.exit(ngx.HTTP_UNAUTHORIZED)
+            end
+        }
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors in lua_blocks, got: {:?}",
+            errors
         );
     }
 }

@@ -8,7 +8,7 @@ pub mod ast;
 pub mod error;
 pub mod lexer;
 
-use ast::{Argument, ArgumentValue, Block, Comment, Config, ConfigItem, Directive, Span};
+use ast::{Argument, ArgumentValue, Block, Comment, Config, ConfigItem, Directive, Position, Span};
 use error::{ParseError, ParseResult};
 use lexer::{Lexer, Token, TokenKind};
 use std::fs;
@@ -98,7 +98,10 @@ impl Parser {
                     let pos = self.current().span.start;
                     return Err(ParseError::UnmatchedCloseBrace { position: pos });
                 }
-                TokenKind::Ident(_) | TokenKind::Argument(_) => {
+                TokenKind::Ident(_)
+                | TokenKind::Argument(_)
+                | TokenKind::SingleQuotedString(_)
+                | TokenKind::DoubleQuotedString(_) => {
                     let directive = self.parse_directive()?;
                     items.push(ConfigItem::Directive(Box::new(directive)));
                     consecutive_newlines = 0;
@@ -120,16 +123,19 @@ impl Parser {
     fn parse_directive(&mut self) -> ParseResult<Directive> {
         let start_pos = self.current().span.start;
 
-        // Get directive name
-        let (name, name_span) = match &self.current().kind {
-            TokenKind::Ident(name) => (name.clone(), self.current().span),
-            TokenKind::Argument(name) => (name.clone(), self.current().span),
+        // Get directive name (can be identifier, argument, or quoted string for map blocks)
+        let (name, name_span, name_raw) = match &self.current().kind {
+            TokenKind::Ident(name) => (name.clone(), self.current().span, self.current().raw.clone()),
+            TokenKind::Argument(name) => (name.clone(), self.current().span, self.current().raw.clone()),
+            TokenKind::SingleQuotedString(name) => (name.clone(), self.current().span, self.current().raw.clone()),
+            TokenKind::DoubleQuotedString(name) => (name.clone(), self.current().span, self.current().raw.clone()),
             _ => {
                 return Err(ParseError::ExpectedDirectiveName {
                     position: self.current().span.start,
                 })
             }
         };
+        let _ = name_raw; // Used for potential future raw reconstruction
         self.advance();
 
         // Parse arguments
@@ -165,8 +171,35 @@ impl Parser {
                 TokenKind::OpenBrace => {
                     let block_start = self.current().span.start;
                     self.advance();
-                    self.skip_newlines();
 
+                    // Check if this is a raw block directive (like *_lua_block)
+                    if is_raw_block_directive(&name) {
+                        let (raw_content, block_end) = self.read_raw_block(block_start)?;
+
+                        // Check for trailing comment
+                        if let TokenKind::Comment(text) = &self.current().kind {
+                            trailing_comment = Some(Comment {
+                                text: text.clone(),
+                                span: self.current().span,
+                            });
+                            self.advance();
+                        }
+
+                        return Ok(Directive {
+                            name,
+                            name_span,
+                            args,
+                            block: Some(Block {
+                                items: Vec::new(),
+                                span: Span::new(block_start, block_end),
+                                raw_content: Some(raw_content),
+                            }),
+                            span: Span::new(start_pos, block_end),
+                            trailing_comment,
+                        });
+                    }
+
+                    self.skip_newlines();
                     let block_items = self.parse_items(true)?;
 
                     // Expect closing brace
@@ -194,6 +227,7 @@ impl Parser {
                         block: Some(Block {
                             items: block_items,
                             span: Span::new(block_start, block_end),
+                            raw_content: None,
                         }),
                         span: Span::new(start_pos, block_end),
                         trailing_comment,
@@ -272,6 +306,80 @@ impl Parser {
             }
         }
     }
+
+    /// Read a raw block content (for lua_block directives)
+    /// Returns the raw content and the end position
+    fn read_raw_block(&mut self, block_start: Position) -> ParseResult<(String, Position)> {
+        let mut content = String::new();
+        let mut brace_depth = 1;
+
+        loop {
+            match &self.current().kind {
+                TokenKind::OpenBrace => {
+                    content.push('{');
+                    brace_depth += 1;
+                    self.advance();
+                }
+                TokenKind::CloseBrace => {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        let end_pos = self.current().span.end;
+                        self.advance();
+                        // Trim leading/trailing whitespace from content
+                        let trimmed = content.trim().to_string();
+                        return Ok((trimmed, end_pos));
+                    }
+                    content.push('}');
+                    self.advance();
+                }
+                TokenKind::Eof => {
+                    return Err(ParseError::UnclosedBlock {
+                        position: block_start,
+                    });
+                }
+                _ => {
+                    // Append raw token text
+                    content.push_str(&self.current().raw);
+                    // Add space between tokens (but not for newlines)
+                    if !matches!(self.current().kind, TokenKind::Newline) {
+                        // Check if next token needs spacing
+                        self.advance();
+                        if !matches!(
+                            self.current().kind,
+                            TokenKind::Newline
+                                | TokenKind::Eof
+                                | TokenKind::CloseBrace
+                                | TokenKind::Semicolon
+                        ) {
+                            content.push(' ');
+                        }
+                    } else {
+                        content.push('\n');
+                        self.advance();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Check if a directive name indicates a raw block (Lua code, etc.)
+///
+/// Raw block directives contain code (like Lua) that should not be parsed
+/// as nginx configuration. The content inside the block is preserved as-is.
+///
+/// # Examples
+/// ```
+/// use nginx_lint::parser::is_raw_block_directive;
+///
+/// assert!(is_raw_block_directive("content_by_lua_block"));
+/// assert!(is_raw_block_directive("init_by_lua_block"));
+/// assert!(!is_raw_block_directive("server"));
+/// ```
+pub fn is_raw_block_directive(name: &str) -> bool {
+    // OpenResty / lua-nginx-module directives
+    // Using ends_with covers all *_by_lua_block patterns
+    name.ends_with("_by_lua_block")
 }
 
 #[cfg(test)]
@@ -451,5 +559,67 @@ http {
         let directive = config.directives().next().unwrap();
         assert_eq!(directive.name, "gzip_types");
         assert_eq!(directive.args.len(), 3);
+    }
+
+    #[test]
+    fn test_lua_block_directive() {
+        let config = parse_string(
+            r#"content_by_lua_block {
+    local cjson = require "cjson"
+    ngx.say(cjson.encode({status = "ok"}))
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "content_by_lua_block");
+        assert!(directive.block.is_some());
+
+        let block = directive.block.as_ref().unwrap();
+        assert!(block.is_raw());
+        assert!(block.raw_content.is_some());
+
+        let content = block.raw_content.as_ref().unwrap();
+        assert!(content.contains("local cjson = require"));
+        assert!(content.contains("ngx.say"));
+    }
+
+    #[test]
+    fn test_map_with_empty_string_key() {
+        let config = parse_string(
+            r#"map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "map");
+        assert!(directive.block.is_some());
+
+        let block = directive.block.as_ref().unwrap();
+        let directives: Vec<_> = block.directives().collect();
+        assert_eq!(directives.len(), 2);
+        assert_eq!(directives[0].name, "default");
+        assert_eq!(directives[1].name, ""); // empty string key
+    }
+
+    #[test]
+    fn test_init_by_lua_block() {
+        let config = parse_string(
+            r#"init_by_lua_block {
+    require "resty.core"
+    cjson = require "cjson"
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "init_by_lua_block");
+        assert!(directive.block.is_some());
+
+        let block = directive.block.as_ref().unwrap();
+        assert!(block.is_raw());
+
+        let content = block.raw_content.as_ref().unwrap();
+        assert!(content.contains("require \"resty.core\""));
     }
 }
