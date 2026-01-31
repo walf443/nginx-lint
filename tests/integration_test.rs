@@ -780,6 +780,54 @@ fn test_fix_produces_expected(category: &str, rule: &str) {
     );
 }
 
+/// Helper function for rules that read from file directly (can't parse normally)
+fn test_fix_produces_expected_with_dummy_config(category: &str, rule: &str) {
+    use nginx_lint::parse_string;
+    use std::io::Write;
+
+    let error_path = rule_error_fixture(category, rule);
+    let expected_path = rule_expected_fixture(category, rule);
+
+    // Read error content
+    let error_content = fs::read_to_string(&error_path)
+        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}: {}", category, rule, e));
+
+    // Create a temp file with error content
+    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+    write!(temp_file, "{}", error_content).expect("Failed to write temp file");
+    let temp_path = temp_file.path();
+
+    // Use dummy config since the rule reads from file directly
+    let config = parse_string("").unwrap();
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, temp_path);
+
+    // Apply fixes
+    let fix_count = apply_fixes(temp_path, &errors)
+        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}: {}", category, rule, e));
+
+    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}", category, rule);
+
+    // Read the fixed content
+    let fixed_content = fs::read_to_string(temp_path)
+        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}: {}", category, rule, e));
+
+    // Read expected content
+    let expected_content = fs::read_to_string(&expected_path)
+        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}: {}", category, rule, e));
+
+    // Compare
+    assert_eq!(
+        fixed_content.trim(),
+        expected_content.trim(),
+        "Fixed content for {}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
+        category,
+        rule,
+        fixed_content,
+        expected_content
+    );
+}
+
 #[test]
 fn test_fix_server_tokens_enabled() {
     test_fix_produces_expected("security", "server_tokens_enabled");
@@ -793,4 +841,9 @@ fn test_fix_autoindex_enabled() {
 #[test]
 fn test_fix_duplicate_directive() {
     test_fix_produces_expected("syntax", "duplicate_directive");
+}
+
+#[test]
+fn test_fix_missing_semicolon() {
+    test_fix_produces_expected_with_dummy_config("syntax", "missing_semicolon");
 }

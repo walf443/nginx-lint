@@ -1,4 +1,4 @@
-use crate::linter::{LintError, LintRule, Severity};
+use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::is_raw_block_directive;
 use std::fs;
@@ -131,6 +131,11 @@ impl LintRule for MissingSemicolon {
                     };
 
                     if !is_continuation {
+                        let fix = Fix::replace(
+                            line_number,
+                            code_part,
+                            &format!("{};", code_part),
+                        );
                         errors.push(
                             LintError::new(
                                 self.name(),
@@ -138,7 +143,8 @@ impl LintRule for MissingSemicolon {
                                 "Missing semicolon at end of directive",
                                 Severity::Error,
                             )
-                            .with_location(line_number, trimmed.len()),
+                            .with_location(line_number, trimmed.len())
+                            .with_fix(fix),
                         );
                     }
                 }
