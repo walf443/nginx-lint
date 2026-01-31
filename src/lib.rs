@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
     use linter::LintRule;
     use parser::ast::Config;
-    use rules::{MissingSemicolon, UnmatchedBraces};
+    use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
     // Create a dummy config for the check (the rule reads from file directly)
     let dummy_config = Config::new();
@@ -24,6 +24,10 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
     // Check for unmatched braces
     let brace_rule = UnmatchedBraces;
     errors.extend(brace_rule.check(&dummy_config, path));
+
+    // Check for unclosed quotes
+    let quote_rule = UnclosedQuote;
+    errors.extend(quote_rule.check(&dummy_config, path));
 
     // Check for missing semicolons
     let semicolon_rule = MissingSemicolon;
