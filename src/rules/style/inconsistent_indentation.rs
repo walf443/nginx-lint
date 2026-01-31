@@ -1,5 +1,6 @@
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
+use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
 
@@ -34,6 +35,10 @@ impl LintRule for InconsistentIndentation {
 
         let mut expected_depth: i32 = 0;
         let mut detected_indent_size: Option<usize> = None;
+        let mut in_raw_block = false;
+        let mut raw_block_brace_depth = 0;
+        let mut in_multiline_string = false;
+        let mut string_char: Option<char> = None;
 
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
@@ -44,50 +49,88 @@ impl LintRule for InconsistentIndentation {
                 continue;
             }
 
-            // Calculate current indentation
-            let leading_spaces = line.len() - line.trim_start().len();
-
-            // Detect if line uses tabs
-            if line.starts_with('\t') {
-                errors.push(
-                    LintError::new(
-                        self.name(),
-                        "Use spaces instead of tabs for indentation",
-                        Severity::Warning,
-                    )
-                    .with_location(line_number, 1),
+            // Check if we're entering a raw block (like lua_block)
+            if !in_raw_block && !in_multiline_string && is_raw_block_line(trimmed) {
+                in_raw_block = true;
+                raw_block_brace_depth = 1;
+                // Still check indentation for the opening line
+                check_line_indentation(
+                    &mut errors,
+                    self.name(),
+                    line,
+                    trimmed,
+                    line_number,
+                    expected_depth,
+                    &mut detected_indent_size,
+                    self.indent_size,
                 );
+                expected_depth += 1;
                 continue;
             }
 
-            // Adjust expected depth before checking if line starts with }
+            // Track brace depth inside raw_block
+            if in_raw_block {
+                for ch in trimmed.chars() {
+                    if ch == '{' {
+                        raw_block_brace_depth += 1;
+                    } else if ch == '}' {
+                        raw_block_brace_depth -= 1;
+                        if raw_block_brace_depth == 0 {
+                            in_raw_block = false;
+                        }
+                    }
+                }
+                // Skip indentation check for lines inside raw_block
+                if in_raw_block {
+                    continue;
+                }
+                // Handle the closing brace line of raw_block
+                if trimmed == "}" {
+                    expected_depth -= 1;
+                    check_line_indentation(
+                        &mut errors,
+                        self.name(),
+                        line,
+                        trimmed,
+                        line_number,
+                        expected_depth,
+                        &mut detected_indent_size,
+                        self.indent_size,
+                    );
+                    continue;
+                }
+            }
+
+            // Track multiline strings (for mruby inline code etc.)
+            if !in_raw_block {
+                let (still_in_string, new_string_char) =
+                    track_multiline_string(trimmed, in_multiline_string, string_char);
+                if in_multiline_string && still_in_string {
+                    // Skip lines inside multiline strings
+                    in_multiline_string = still_in_string;
+                    string_char = new_string_char;
+                    continue;
+                }
+                in_multiline_string = still_in_string;
+                string_char = new_string_char;
+            }
+
+            // Handle closing brace - adjust depth before checking
             let closes_block = trimmed.starts_with('}');
             if closes_block {
                 expected_depth -= 1;
             }
 
-            // Detect indent size from first indented line
-            if detected_indent_size.is_none() && leading_spaces > 0 && expected_depth > 0 {
-                detected_indent_size = Some(leading_spaces / expected_depth as usize);
-            }
-
-            let indent_size = detected_indent_size.unwrap_or(self.indent_size);
-            let expected_spaces = (expected_depth.max(0) as usize) * indent_size;
-
-            // Check indentation
-            if leading_spaces != expected_spaces {
-                errors.push(
-                    LintError::new(
-                        self.name(),
-                        &format!(
-                            "Expected {} spaces of indentation, found {}",
-                            expected_spaces, leading_spaces
-                        ),
-                        Severity::Warning,
-                    )
-                    .with_location(line_number, 1),
-                );
-            }
+            check_line_indentation(
+                &mut errors,
+                self.name(),
+                line,
+                trimmed,
+                line_number,
+                expected_depth,
+                &mut detected_indent_size,
+                self.indent_size,
+            );
 
             // Adjust expected depth after checking if line ends with {
             if trimmed.ends_with('{') {
@@ -96,6 +139,91 @@ impl LintRule for InconsistentIndentation {
         }
 
         errors
+    }
+}
+
+/// Check if a line starts a raw block directive (like lua_block)
+fn is_raw_block_line(line: &str) -> bool {
+    let directive_name = line.split_whitespace().next().unwrap_or("");
+    is_raw_block_directive(directive_name) && line.contains('{')
+}
+
+/// Track multiline string state
+/// Returns (still_in_string, string_char)
+fn track_multiline_string(
+    line: &str,
+    was_in_string: bool,
+    prev_string_char: Option<char>,
+) -> (bool, Option<char>) {
+    let mut in_string = was_in_string;
+    let mut current_char = prev_string_char;
+    let mut prev_ch = None;
+
+    for ch in line.chars() {
+        if (ch == '\'' || ch == '"') && prev_ch != Some('\\') {
+            if !in_string {
+                in_string = true;
+                current_char = Some(ch);
+            } else if current_char == Some(ch) {
+                in_string = false;
+                current_char = None;
+            }
+        }
+        prev_ch = Some(ch);
+    }
+
+    (in_string, current_char)
+}
+
+/// Check indentation for a single line
+#[allow(clippy::too_many_arguments)]
+fn check_line_indentation(
+    errors: &mut Vec<LintError>,
+    rule_name: &'static str,
+    line: &str,
+    _trimmed: &str,
+    line_number: usize,
+    expected_depth: i32,
+    detected_indent_size: &mut Option<usize>,
+    default_indent_size: usize,
+) {
+    // Calculate current indentation
+    let leading_spaces = line.len() - line.trim_start().len();
+
+    // Detect if line uses tabs
+    if line.starts_with('\t') {
+        errors.push(
+            LintError::new(
+                rule_name,
+                "Use spaces instead of tabs for indentation",
+                Severity::Warning,
+            )
+            .with_location(line_number, 1),
+        );
+        return;
+    }
+
+    // Detect indent size from first indented line
+    if detected_indent_size.is_none() && leading_spaces > 0 && expected_depth > 0 {
+        *detected_indent_size = Some(leading_spaces / expected_depth as usize);
+    }
+
+    let indent_size = detected_indent_size.unwrap_or(default_indent_size);
+    let expected_spaces = (expected_depth.max(0) as usize) * indent_size;
+
+    // Check indentation
+    if leading_spaces != expected_spaces {
+        errors.push(
+            LintError::new(
+                rule_name,
+                &format!(
+                    "Expected {} spaces of indentation, found {}",
+                    expected_spaces, leading_spaces
+                ),
+                Severity::Warning,
+            )
+            .with_location(line_number, 1),
+        );
     }
 }
 
