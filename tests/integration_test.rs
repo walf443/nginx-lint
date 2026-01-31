@@ -1,4 +1,4 @@
-use nginx_lint::{parse_config, Linter, Severity};
+use nginx_lint::{parse_config, pre_parse_checks, Linter, Severity};
 use std::path::PathBuf;
 
 fn fixtures_path(name: &str) -> PathBuf {
@@ -213,4 +213,34 @@ fn test_bad_indentation_config() {
     for warning in &indentation_warnings {
         assert_eq!(warning.severity, Severity::Warning);
     }
+}
+
+#[test]
+fn test_unmatched_braces_config() {
+    let path = fixtures_path("unmatched_braces");
+
+    // Pre-parse checks should detect unmatched braces
+    let errors = pre_parse_checks(&path);
+
+    // Should have unmatched braces errors
+    let brace_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "unmatched-braces")
+        .collect();
+
+    assert!(
+        !brace_errors.is_empty(),
+        "Expected unmatched-braces errors"
+    );
+
+    // All brace issues should be errors (not warnings)
+    for error in &brace_errors {
+        assert_eq!(error.severity, Severity::Error);
+    }
+
+    // Parsing should fail for this file
+    assert!(
+        parse_config(&path).is_err(),
+        "Expected parse error for unmatched braces"
+    );
 }

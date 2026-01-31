@@ -68,6 +68,7 @@ impl Linter {
 
         // Syntax rules
         linter.add_rule(Box::new(syntax::DuplicateDirective));
+        linter.add_rule(Box::new(syntax::UnmatchedBraces));
 
         // Security rules
         linter.add_rule(Box::new(security::DeprecatedSslProtocol));
