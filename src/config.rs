@@ -8,6 +8,48 @@ use std::path::Path;
 pub struct LintConfig {
     #[serde(default)]
     pub rules: HashMap<String, RuleConfig>,
+    #[serde(default)]
+    pub color: ColorConfig,
+}
+
+/// Color output configuration
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ColorConfig {
+    /// Color mode: "auto" (default), true, or false
+    #[serde(default)]
+    pub ui: ColorMode,
+}
+
+/// Color mode for output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorMode {
+    /// Automatically detect (default) - respects NO_COLOR env and terminal detection
+    #[default]
+    Auto,
+    /// Always use colors
+    Always,
+    /// Never use colors
+    Never,
+}
+
+impl<'de> Deserialize<'de> for ColorMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "auto" => Ok(ColorMode::Auto),
+            "always" => Ok(ColorMode::Always),
+            "never" => Ok(ColorMode::Never),
+            _ => Err(D::Error::custom(format!(
+                "invalid color mode '{}', expected 'auto', 'always', or 'never'",
+                s
+            ))),
+        }
+    }
 }
 
 /// Configuration for a specific lint rule
@@ -65,6 +107,11 @@ impl LintConfig {
     /// Get the configuration for a specific rule
     pub fn get_rule_config(&self, name: &str) -> Option<&RuleConfig> {
         self.rules.get(name)
+    }
+
+    /// Get the color mode setting
+    pub fn color_mode(&self) -> ColorMode {
+        self.color.ui
     }
 }
 
@@ -145,5 +192,50 @@ enabled = false
 
         let config = LintConfig::from_file(file.path()).unwrap();
         assert!(config.is_rule_enabled("any-rule"));
+    }
+
+    #[test]
+    fn test_color_config_default() {
+        let config = LintConfig::default();
+        assert_eq!(config.color_mode(), ColorMode::Auto);
+    }
+
+    #[test]
+    fn test_color_config_auto() {
+        let toml_content = r#"
+[color]
+ui = "auto"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Auto);
+    }
+
+    #[test]
+    fn test_color_config_never() {
+        let toml_content = r#"
+[color]
+ui = "never"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Never);
+    }
+
+    #[test]
+    fn test_color_config_always() {
+        let toml_content = r#"
+[color]
+ui = "always"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Always);
     }
 }

@@ -1,7 +1,8 @@
 use clap::Parser;
+use colored::control;
 use nginx_lint::{
-    apply_fixes, parse_config, pre_parse_checks, LintConfig, Linter, OutputFormat, Reporter,
-    Severity,
+    apply_fixes, parse_config, pre_parse_checks, ColorMode, LintConfig, Linter, OutputFormat,
+    Reporter, Severity,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -25,6 +26,14 @@ struct Cli {
     /// Path to configuration file
     #[arg(short, long, value_name = "FILE")]
     config: Option<PathBuf>,
+
+    /// Force colored output
+    #[arg(long, conflicts_with = "no_color")]
+    color: bool,
+
+    /// Disable colored output
+    #[arg(long)]
+    no_color: bool,
 
     /// Show verbose output
     #[arg(short, long)]
@@ -88,6 +97,19 @@ fn main() -> ExitCode {
         }
         config
     };
+
+    // Configure color output (CLI flags take precedence over config)
+    if cli.color {
+        control::set_override(true);
+    } else if cli.no_color {
+        control::set_override(false);
+    } else if let Some(ref config) = lint_config {
+        match config.color_mode() {
+            ColorMode::Always => control::set_override(true),
+            ColorMode::Never => control::set_override(false),
+            ColorMode::Auto => {} // Let colored crate decide
+        }
+    }
 
     if cli.verbose {
         eprintln!("Linting: {}", file_path.display());
