@@ -847,3 +847,8 @@ fn test_fix_duplicate_directive() {
 fn test_fix_missing_semicolon() {
     test_fix_produces_expected_with_dummy_config("syntax", "missing_semicolon");
 }
+
+#[test]
+fn test_fix_inconsistent_indentation() {
+    test_fix_produces_expected_with_dummy_config("style", "inconsistent_indentation");
+}

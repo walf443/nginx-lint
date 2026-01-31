@@ -1,4 +1,4 @@
-use crate::linter::{LintError, LintRule, Severity};
+use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::is_raw_block_directive;
 use std::fs;
@@ -189,17 +189,23 @@ fn check_line_indentation(
     rule_name: &'static str,
     category: &'static str,
     line: &str,
-    _trimmed: &str,
+    trimmed: &str,
     line_number: usize,
     expected_depth: i32,
-    detected_indent_size: &mut Option<usize>,
+    _detected_indent_size: &mut Option<usize>,
     default_indent_size: usize,
 ) {
     // Calculate current indentation
     let leading_spaces = line.len() - line.trim_start().len();
 
+    // Always use default indent size for consistent formatting
+    let expected_spaces = (expected_depth.max(0) as usize) * default_indent_size;
+
     // Detect if line uses tabs
     if line.starts_with('\t') {
+        let correct_indent = " ".repeat(expected_spaces);
+        let fixed_line = format!("{}{}", correct_indent, trimmed);
+        let fix = Fix::replace_line(line_number, &fixed_line);
         errors.push(
             LintError::new(
                 rule_name,
@@ -207,18 +213,11 @@ fn check_line_indentation(
                 "Use spaces instead of tabs for indentation",
                 Severity::Warning,
             )
-            .with_location(line_number, 1),
+            .with_location(line_number, 1)
+            .with_fix(fix),
         );
         return;
     }
-
-    // Detect indent size from first indented line
-    if detected_indent_size.is_none() && leading_spaces > 0 && expected_depth > 0 {
-        *detected_indent_size = Some(leading_spaces / expected_depth as usize);
-    }
-
-    let indent_size = detected_indent_size.unwrap_or(default_indent_size);
-    let expected_spaces = (expected_depth.max(0) as usize) * indent_size;
 
     // Check indentation
     if leading_spaces != expected_spaces {
@@ -226,9 +225,13 @@ fn check_line_indentation(
             "Expected {} spaces of indentation, found {}",
             expected_spaces, leading_spaces
         );
+        let correct_indent = " ".repeat(expected_spaces);
+        let fixed_line = format!("{}{}", correct_indent, trimmed);
+        let fix = Fix::replace_line(line_number, &fixed_line);
         errors.push(
             LintError::new(rule_name, category, &message, Severity::Warning)
-                .with_location(line_number, 1),
+                .with_location(line_number, 1)
+                .with_fix(fix),
         );
     }
 }
