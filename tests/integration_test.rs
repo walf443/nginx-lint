@@ -16,12 +16,29 @@ fn parser_fixture(name: &str) -> PathBuf {
         .join("nginx.conf")
 }
 
+/// Find the first case directory for a rule (sorted alphabetically)
+fn find_first_case(category: &str, rule: &str) -> Option<String> {
+    let rule_dir = fixtures_base().join("rules").join(category).join(rule);
+    let mut cases: Vec<_> = fs::read_dir(&rule_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .collect();
+    cases.sort();
+    cases.into_iter().next()
+}
+
 fn rule_error_fixture(category: &str, rule: &str) -> PathBuf {
-    rule_case_error_fixture(category, rule, "001_basic")
+    let case = find_first_case(category, rule)
+        .unwrap_or_else(|| panic!("No case directory found for {}/{}", category, rule));
+    rule_case_error_fixture(category, rule, &case)
 }
 
 fn rule_expected_fixture(category: &str, rule: &str) -> PathBuf {
-    rule_case_expected_fixture(category, rule, "001_basic")
+    let case = find_first_case(category, rule)
+        .unwrap_or_else(|| panic!("No case directory found for {}/{}", category, rule));
+    rule_case_expected_fixture(category, rule, &case)
 }
 
 fn rule_case_error_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
@@ -876,4 +893,183 @@ fn test_fix_inconsistent_indentation() {
 #[test]
 fn test_fix_unmatched_braces() {
     test_fix_produces_expected_with_dummy_config("syntax", "unmatched_braces");
+}
+
+// ============================================================================
+// Automatic fixture discovery tests
+// ============================================================================
+
+/// Get the rule name from a directory name (e.g., "server_tokens_enabled" -> "server-tokens-enabled")
+fn dir_name_to_rule_name(dir_name: &str) -> String {
+    dir_name.replace('_', "-")
+}
+
+/// Automatically discover and test all rule fixtures
+/// This test iterates over all fixtures in tests/fixtures/rules/ and runs appropriate tests
+#[test]
+fn test_all_rule_fixtures() {
+    use nginx_lint::parse_string;
+    use std::io::Write;
+
+    let rules_dir = fixtures_base().join("rules");
+
+    // Iterate over categories (security, syntax, style, best_practices)
+    for category_entry in fs::read_dir(&rules_dir).expect("Failed to read rules directory") {
+        let category_entry = category_entry.expect("Failed to read category entry");
+        let category_path = category_entry.path();
+        if !category_path.is_dir() {
+            continue;
+        }
+        let category = category_path.file_name().unwrap().to_str().unwrap();
+
+        // Iterate over rules in this category
+        for rule_entry in fs::read_dir(&category_path).expect("Failed to read category directory") {
+            let rule_entry = rule_entry.expect("Failed to read rule entry");
+            let rule_path = rule_entry.path();
+            if !rule_path.is_dir() {
+                continue;
+            }
+            let rule_dir_name = rule_path.file_name().unwrap().to_str().unwrap();
+            let rule_name = dir_name_to_rule_name(rule_dir_name);
+
+            // Iterate over test cases for this rule
+            for case_entry in fs::read_dir(&rule_path).expect("Failed to read rule directory") {
+                let case_entry = case_entry.expect("Failed to read case entry");
+                let case_path = case_entry.path();
+                if !case_path.is_dir() {
+                    continue;
+                }
+                let case = case_path.file_name().unwrap().to_str().unwrap();
+
+                let error_path = case_path.join("error").join("nginx.conf");
+                let expected_path = case_path.join("expected").join("nginx.conf");
+
+                // Test error fixture: should detect errors
+                if error_path.exists() {
+                    // Try to parse - some syntax error fixtures can't be parsed
+                    let can_parse = parse_config(&error_path).is_ok();
+
+                    if can_parse {
+                        let config = parse_config(&error_path).unwrap();
+                        let linter = Linter::with_default_rules();
+                        let errors = linter.lint(&config, &error_path);
+
+                        let rule_errors: Vec<_> = errors
+                            .iter()
+                            .filter(|e| e.rule == rule_name)
+                            .collect();
+
+                        assert!(
+                            !rule_errors.is_empty(),
+                            "Expected {} errors in {}/{}/{}/error/nginx.conf, got none",
+                            rule_name, category, rule_dir_name, case
+                        );
+                    } else {
+                        // For unparseable files, use pre_parse_checks
+                        let errors = pre_parse_checks(&error_path);
+                        let rule_errors: Vec<_> = errors
+                            .iter()
+                            .filter(|e| e.rule == rule_name)
+                            .collect();
+
+                        assert!(
+                            !rule_errors.is_empty(),
+                            "Expected {} errors in {}/{}/{}/error/nginx.conf (pre-parse), got none",
+                            rule_name, category, rule_dir_name, case
+                        );
+                    }
+                }
+
+                // Test expected fixture: should have no errors for this rule
+                if expected_path.exists() {
+                    let can_parse = parse_config(&expected_path).is_ok();
+
+                    if can_parse {
+                        let config = parse_config(&expected_path).unwrap();
+                        let linter = Linter::with_default_rules();
+                        let errors = linter.lint(&config, &expected_path);
+
+                        let rule_errors: Vec<_> = errors
+                            .iter()
+                            .filter(|e| e.rule == rule_name)
+                            .collect();
+
+                        assert!(
+                            rule_errors.is_empty(),
+                            "Expected no {} errors in {}/{}/{}/expected/nginx.conf, got: {:?}",
+                            rule_name, category, rule_dir_name, case, rule_errors
+                        );
+                    } else {
+                        // For unparseable expected files, use pre_parse_checks
+                        let errors = pre_parse_checks(&expected_path);
+                        let rule_errors: Vec<_> = errors
+                            .iter()
+                            .filter(|e| e.rule == rule_name)
+                            .collect();
+
+                        assert!(
+                            rule_errors.is_empty(),
+                            "Expected no {} errors in {}/{}/{}/expected/nginx.conf (pre-parse), got: {:?}",
+                            rule_name, category, rule_dir_name, case, rule_errors
+                        );
+                    }
+                }
+
+                // Test fix: if both error and expected exist, verify fix produces expected
+                // Only test if this rule has fixes (filter to just this rule's errors)
+                if error_path.exists() && expected_path.exists() {
+                    let error_content = fs::read_to_string(&error_path)
+                        .expect("Failed to read error fixture");
+
+                    // Create temp file with error content
+                    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
+                    write!(temp_file, "{}", error_content).expect("Failed to write temp file");
+                    let temp_path = temp_file.path();
+
+                    // Get all errors (try parsing first, fall back to dummy config)
+                    let all_errors = if let Ok(config) = parse_config(temp_path) {
+                        let linter = Linter::with_default_rules();
+                        linter.lint(&config, temp_path)
+                    } else {
+                        let config = parse_string("").unwrap();
+                        let linter = Linter::with_default_rules();
+                        linter.lint(&config, temp_path)
+                    };
+
+                    // Filter to only this rule's errors with fixes
+                    let rule_errors_with_fixes: Vec<_> = all_errors
+                        .iter()
+                        .filter(|e| e.rule == rule_name && e.fix.is_some())
+                        .cloned()
+                        .collect();
+
+                    // Skip if this rule has no fixes
+                    if rule_errors_with_fixes.is_empty() {
+                        continue;
+                    }
+
+                    // Apply only this rule's fixes
+                    let fix_count = apply_fixes(temp_path, &rule_errors_with_fixes)
+                        .expect("Failed to apply fixes");
+
+                    if fix_count == 0 {
+                        continue; // Skip if no fixes were applied
+                    }
+
+                    // Read fixed content and expected content
+                    let fixed_content = fs::read_to_string(temp_path)
+                        .expect("Failed to read fixed file");
+                    let expected_content = fs::read_to_string(&expected_path)
+                        .expect("Failed to read expected file");
+
+                    assert_eq!(
+                        fixed_content.trim(),
+                        expected_content.trim(),
+                        "Fix for {}/{}/{} did not produce expected output.\n\nFixed:\n{}\n\nExpected:\n{}",
+                        category, rule_dir_name, case, fixed_content, expected_content
+                    );
+                }
+            }
+        }
+    }
 }
