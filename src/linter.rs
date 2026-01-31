@@ -1,3 +1,4 @@
+use crate::config::LintConfig;
 use crate::parser::ast::Config;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -137,6 +138,10 @@ impl Linter {
     }
 
     pub fn with_default_rules() -> Self {
+        Self::with_config(None)
+    }
+
+    pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
             AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
             InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
@@ -145,23 +150,52 @@ impl Linter {
 
         let mut linter = Self::new();
 
+        let is_enabled = |name: &str| config.is_none_or(|c| c.is_rule_enabled(name));
+
         // Syntax rules
-        linter.add_rule(Box::new(DuplicateDirective));
-        linter.add_rule(Box::new(UnmatchedBraces));
-        linter.add_rule(Box::new(UnclosedQuote));
-        linter.add_rule(Box::new(MissingSemicolon));
+        if is_enabled("duplicate-directive") {
+            linter.add_rule(Box::new(DuplicateDirective));
+        }
+        if is_enabled("unmatched-braces") {
+            linter.add_rule(Box::new(UnmatchedBraces));
+        }
+        if is_enabled("unclosed-quote") {
+            linter.add_rule(Box::new(UnclosedQuote));
+        }
+        if is_enabled("missing-semicolon") {
+            linter.add_rule(Box::new(MissingSemicolon));
+        }
 
         // Security rules
-        linter.add_rule(Box::new(DeprecatedSslProtocol));
-        linter.add_rule(Box::new(ServerTokensEnabled));
-        linter.add_rule(Box::new(AutoindexEnabled));
+        if is_enabled("deprecated-ssl-protocol") {
+            linter.add_rule(Box::new(DeprecatedSslProtocol));
+        }
+        if is_enabled("server-tokens-enabled") {
+            linter.add_rule(Box::new(ServerTokensEnabled));
+        }
+        if is_enabled("autoindex-enabled") {
+            linter.add_rule(Box::new(AutoindexEnabled));
+        }
 
         // Style rules
-        linter.add_rule(Box::new(InconsistentIndentation::default()));
+        if is_enabled("inconsistent-indentation") {
+            let mut rule = InconsistentIndentation::default();
+            if let Some(indent_size) = config
+                .and_then(|c| c.get_rule_config("inconsistent-indentation"))
+                .and_then(|cfg| cfg.indent_size)
+            {
+                rule.indent_size = indent_size;
+            }
+            linter.add_rule(Box::new(rule));
+        }
 
         // Best practices
-        linter.add_rule(Box::new(GzipNotEnabled));
-        linter.add_rule(Box::new(MissingErrorLog));
+        if is_enabled("gzip-not-enabled") {
+            linter.add_rule(Box::new(GzipNotEnabled));
+        }
+        if is_enabled("missing-error-log") {
+            linter.add_rule(Box::new(MissingErrorLog));
+        }
 
         linter
     }

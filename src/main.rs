@@ -1,6 +1,7 @@
 use clap::Parser;
 use nginx_lint::{
-    apply_fixes, parse_config, pre_parse_checks, Linter, OutputFormat, Reporter, Severity,
+    apply_fixes, parse_config, pre_parse_checks, LintConfig, Linter, OutputFormat, Reporter,
+    Severity,
 };
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -20,6 +21,10 @@ struct Cli {
     /// Automatically fix problems
     #[arg(long)]
     fix: bool,
+
+    /// Path to configuration file
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<PathBuf>,
 
     /// Show verbose output
     #[arg(short, long)]
@@ -58,6 +63,30 @@ fn main() -> ExitCode {
         nginx_conf
     } else {
         cli.file.clone()
+    };
+
+    // Load configuration
+    let lint_config = if let Some(config_path) = &cli.config {
+        match LintConfig::from_file(config_path) {
+            Ok(cfg) => {
+                if cli.verbose {
+                    eprintln!("Using config: {}", config_path.display());
+                }
+                Some(cfg)
+            }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        // Try to find .nginx-lint.toml in file's directory or current directory
+        let search_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        let config = LintConfig::find_and_load(search_dir);
+        if cli.verbose && config.is_some() {
+            eprintln!("Found .nginx-lint.toml");
+        }
+        config
     };
 
     if cli.verbose {
@@ -99,7 +128,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let linter = Linter::with_default_rules();
+    let linter = Linter::with_config(lint_config.as_ref());
     let errors = linter.lint(&config, &file_path);
 
     if cli.fix {
