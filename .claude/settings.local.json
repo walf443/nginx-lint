@@ -11,7 +11,9 @@
       "Bash(do echo \"=== Testing: $f ===\")",
       "Bash(./target/release/nginx-lint:*)",
       "Bash(done)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(ls:*)",
+      "Bash(while read f)"
     ]
   }
 }
