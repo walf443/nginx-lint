@@ -852,3 +852,8 @@ fn test_fix_missing_semicolon() {
 fn test_fix_inconsistent_indentation() {
     test_fix_produces_expected_with_dummy_config("style", "inconsistent_indentation");
 }
+
+#[test]
+fn test_fix_unmatched_braces() {
+    test_fix_produces_expected_with_dummy_config("syntax", "unmatched_braces");
+}

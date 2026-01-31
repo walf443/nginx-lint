@@ -44,13 +44,37 @@ pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> 
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
     // Collect fixes and sort by line number (descending to avoid offset issues)
+    // For insert_after fixes at the same line, sort by indent ascending
+    // (process outer blocks first so inner blocks end up on top)
     let mut fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
-    fixes.sort_by(|a, b| b.line.cmp(&a.line));
+    fixes.sort_by(|a, b| {
+        match b.line.cmp(&a.line) {
+            std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                // For insert_after at same line, sort by indent ascending
+                let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                a_indent.cmp(&b_indent)
+            }
+            other => other,
+        }
+    });
 
     let mut fix_count = 0;
 
     for fix in fixes {
-        if fix.line == 0 || fix.line > lines.len() {
+        if fix.line == 0 {
+            continue;
+        }
+
+        if fix.insert_after {
+            // Insert a new line after the specified line
+            let insert_idx = fix.line.min(lines.len());
+            lines.insert(insert_idx, fix.new_text.clone());
+            fix_count += 1;
+            continue;
+        }
+
+        if fix.line > lines.len() {
             continue;
         }
 

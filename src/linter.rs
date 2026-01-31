@@ -32,6 +32,9 @@ pub struct Fix {
     /// Whether to delete the entire line
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub delete_line: bool,
+    /// Whether to insert new_text as a new line after the specified line
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub insert_after: bool,
 }
 
 impl Fix {
@@ -42,6 +45,7 @@ impl Fix {
             old_text: Some(old_text.to_string()),
             new_text: new_text.to_string(),
             delete_line: false,
+            insert_after: false,
         }
     }
 
@@ -52,6 +56,7 @@ impl Fix {
             old_text: None,
             new_text: new_text.to_string(),
             delete_line: false,
+            insert_after: false,
         }
     }
 
@@ -62,6 +67,18 @@ impl Fix {
             old_text: None,
             new_text: String::new(),
             delete_line: true,
+            insert_after: false,
+        }
+    }
+
+    /// Create a fix that inserts a new line after the specified line
+    pub fn insert_after(line: usize, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: new_text.to_string(),
+            delete_line: false,
+            insert_after: true,
         }
     }
 }

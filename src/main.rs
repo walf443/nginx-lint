@@ -67,10 +67,27 @@ fn main() -> ExitCode {
     // Run pre-parse checks first (these work even if parsing fails)
     let pre_parse_errors = pre_parse_checks(&file_path);
 
-    // If there are pre-parse errors (like unmatched braces), report them and exit
+    // If there are pre-parse errors (like unmatched braces), handle them
     // This avoids cryptic parser error messages
     if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
-        reporter.report(&pre_parse_errors, &file_path);
+        if cli.fix {
+            // Apply fixes for pre-parse errors
+            match apply_fixes(&file_path, &pre_parse_errors) {
+                Ok(count) => {
+                    if count > 0 {
+                        eprintln!("Applied {} fix(es) to {}", count, file_path.display());
+                    } else {
+                        eprintln!("No automatic fixes available");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error applying fixes: {}", e);
+                    return ExitCode::from(2);
+                }
+            }
+        } else {
+            reporter.report(&pre_parse_errors, &file_path);
+        }
         return ExitCode::from(1);
     }
 
