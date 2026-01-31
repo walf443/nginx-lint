@@ -1,54 +1,7 @@
 use crate::linter::{LintError, LintRule, Severity};
 use nginx_config::ast::Main;
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-
-/// Check for duplicate directives that should only appear once
-pub struct DuplicateDirective;
-
-impl LintRule for DuplicateDirective {
-    fn name(&self) -> &'static str {
-        "duplicate-directive"
-    }
-
-    fn description(&self) -> &'static str {
-        "Detects duplicate directives that should only appear once in a context"
-    }
-
-    fn check(&self, config: &Main, _path: &Path) -> Vec<LintError> {
-        let mut errors = Vec::new();
-
-        // Directives that should only appear once in main context
-        let unique_directives = [
-            "worker_processes",
-            "pid",
-            "error_log",
-        ];
-
-        // Check main context
-        let mut seen: HashMap<&str, usize> = HashMap::new();
-        for directive in &config.directives {
-            let name = directive.item.directive_name();
-            if unique_directives.contains(&name) {
-                let count = seen.entry(name).or_insert(0);
-                *count += 1;
-                if *count > 1 {
-                    errors.push(
-                        LintError::new(
-                            self.name(),
-                            &format!("Duplicate directive '{}' in main context", name),
-                            Severity::Warning,
-                        )
-                        .with_location(directive.position.line, directive.position.column),
-                    );
-                }
-            }
-        }
-
-        errors
-    }
-}
 
 /// Check for unmatched braces
 pub struct UnmatchedBraces;

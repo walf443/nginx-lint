@@ -62,25 +62,28 @@ impl Linter {
     }
 
     pub fn with_default_rules() -> Self {
-        use crate::rules::{best_practices, security, style, syntax};
+        use crate::rules::{
+            AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
+            InconsistentIndentation, MissingErrorLog, ServerTokensEnabled, UnmatchedBraces,
+        };
 
         let mut linter = Self::new();
 
         // Syntax rules
-        linter.add_rule(Box::new(syntax::DuplicateDirective));
-        linter.add_rule(Box::new(syntax::UnmatchedBraces));
+        linter.add_rule(Box::new(DuplicateDirective));
+        linter.add_rule(Box::new(UnmatchedBraces));
 
         // Security rules
-        linter.add_rule(Box::new(security::DeprecatedSslProtocol));
-        linter.add_rule(Box::new(security::ServerTokensEnabled));
-        linter.add_rule(Box::new(security::AutoindexEnabled));
+        linter.add_rule(Box::new(DeprecatedSslProtocol));
+        linter.add_rule(Box::new(ServerTokensEnabled));
+        linter.add_rule(Box::new(AutoindexEnabled));
 
         // Style rules
-        linter.add_rule(Box::new(style::InconsistentIndentation::default()));
+        linter.add_rule(Box::new(InconsistentIndentation::default()));
 
         // Best practices
-        linter.add_rule(Box::new(best_practices::GzipNotEnabled));
-        linter.add_rule(Box::new(best_practices::MissingErrorLog));
+        linter.add_rule(Box::new(GzipNotEnabled));
+        linter.add_rule(Box::new(MissingErrorLog));
 
         linter
     }

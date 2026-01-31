@@ -12,7 +12,7 @@ use std::path::Path;
 /// Run pre-parse checks that can detect errors before parsing
 /// These checks work on the raw file content and don't require a valid AST
 pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
-    use rules::syntax::UnmatchedBraces;
+    use rules::UnmatchedBraces;
     use linter::LintRule;
     use nginx_config::ast::Main;
 
