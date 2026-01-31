@@ -198,4 +198,43 @@ worker_processes auto;
         let errors = check_content(content);
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_semicolon_in_string() {
+        // Semicolon inside string, but line ends with proper semicolon
+        let content = r#"http {
+    server {
+        return 200 "hello; world";
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_semicolon_in_string_no_trailing() {
+        // Semicolon inside string but no trailing semicolon - should error
+        let content = r#"http {
+    server {
+        return 200 "hello; world"
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_string_ending_with_semicolon() {
+        // String content ends with semicolon but line doesn't
+        let content = r#"http {
+    server {
+        return 200 "test;"
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error - string ending with ; is not a real semicolon");
+    }
 }
