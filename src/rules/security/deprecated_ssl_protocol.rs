@@ -3,10 +3,20 @@ use crate::parser::ast::Config;
 use std::path::Path;
 
 /// Check for deprecated SSL/TLS protocols
-pub struct DeprecatedSslProtocol;
+pub struct DeprecatedSslProtocol {
+    /// Allowed protocols to use in fix (default: ["TLSv1.2", "TLSv1.3"])
+    pub allowed_protocols: Vec<String>,
+}
 
 const DEPRECATED_PROTOCOLS: &[&str] = &["SSLv2", "SSLv3", "TLSv1", "TLSv1.1"];
-const RECOMMENDED_PROTOCOLS: &str = "TLSv1.2 TLSv1.3";
+
+impl Default for DeprecatedSslProtocol {
+    fn default() -> Self {
+        Self {
+            allowed_protocols: vec!["TLSv1.2".to_string(), "TLSv1.3".to_string()],
+        }
+    }
+}
 
 impl LintRule for DeprecatedSslProtocol {
     fn name(&self) -> &'static str {
@@ -39,7 +49,8 @@ impl LintRule for DeprecatedSslProtocol {
                 // Generate the fixed protocol list
                 let current_protocols: Vec<&str> =
                     directive.args.iter().map(|a| a.as_str()).collect();
-                let fixed_protocols = generate_fixed_protocols(&current_protocols);
+                let fixed_protocols =
+                    generate_fixed_protocols(&current_protocols, &self.allowed_protocols);
 
                 // Calculate indentation from the directive's position
                 let indent = " ".repeat(directive.span.start.column.saturating_sub(1));
@@ -72,33 +83,35 @@ impl LintRule for DeprecatedSslProtocol {
 }
 
 /// Generate the fixed protocol list by removing deprecated protocols
-/// and ensuring recommended protocols are present
-fn generate_fixed_protocols(current: &[&str]) -> String {
-    // Filter out deprecated protocols
-    let mut protocols: Vec<&str> = current
+/// and using the allowed protocols
+fn generate_fixed_protocols(current: &[&str], allowed: &[String]) -> String {
+    // Filter out deprecated protocols from current
+    let safe_current: Vec<&str> = current
         .iter()
         .filter(|p| !DEPRECATED_PROTOCOLS.contains(p))
         .copied()
         .collect();
 
-    // If no safe protocols remain, use the recommended ones
-    if protocols.is_empty() {
-        return RECOMMENDED_PROTOCOLS.to_string();
+    // Start with safe current protocols
+    let mut protocols: Vec<String> = safe_current.iter().map(|s| s.to_string()).collect();
+
+    // Add allowed protocols that aren't already present
+    for proto in allowed {
+        if !protocols.contains(proto) {
+            protocols.push(proto.clone());
+        }
     }
 
-    // Ensure we have at least TLSv1.2 and TLSv1.3
-    if !protocols.contains(&"TLSv1.2") {
-        protocols.push("TLSv1.2");
-    }
-    if !protocols.contains(&"TLSv1.3") {
-        protocols.push("TLSv1.3");
+    // If still empty, use all allowed protocols
+    if protocols.is_empty() {
+        return allowed.join(" ");
     }
 
     // Sort protocols for consistent output
     protocols.sort_by(|a, b| {
         let order = ["TLSv1.2", "TLSv1.3"];
-        let a_idx = order.iter().position(|&x| x == *a).unwrap_or(99);
-        let b_idx = order.iter().position(|&x| x == *b).unwrap_or(99);
+        let a_idx = order.iter().position(|x| x == a).unwrap_or(99);
+        let b_idx = order.iter().position(|x| x == b).unwrap_or(99);
         a_idx.cmp(&b_idx)
     });
 

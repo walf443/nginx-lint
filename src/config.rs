@@ -145,7 +145,10 @@ impl<'de> Deserialize<'de> for ColorMode {
 pub struct RuleConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// For inconsistent-indentation rule
     pub indent_size: Option<usize>,
+    /// For deprecated-ssl-protocol rule: allowed protocols (default: ["TLSv1.2", "TLSv1.3"])
+    pub allowed_protocols: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {

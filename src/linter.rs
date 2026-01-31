@@ -168,7 +168,14 @@ impl Linter {
 
         // Security rules
         if is_enabled("deprecated-ssl-protocol") {
-            linter.add_rule(Box::new(DeprecatedSslProtocol));
+            let mut rule = DeprecatedSslProtocol::default();
+            if let Some(allowed) = config
+                .and_then(|c| c.get_rule_config("deprecated-ssl-protocol"))
+                .and_then(|cfg| cfg.allowed_protocols.clone())
+            {
+                rule.allowed_protocols = allowed;
+            }
+            linter.add_rule(Box::new(rule));
         }
         if is_enabled("server-tokens-enabled") {
             linter.add_rule(Box::new(ServerTokensEnabled));
