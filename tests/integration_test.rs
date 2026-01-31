@@ -1,17 +1,36 @@
 use nginx_lint::{parse_config, pre_parse_checks, Linter, Severity};
 use std::path::PathBuf;
 
-fn fixtures_path(name: &str) -> PathBuf {
+fn fixtures_base() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
         .join("fixtures")
+}
+
+fn parser_fixture(name: &str) -> PathBuf {
+    fixtures_base()
+        .join("parser")
+        .join(name)
+        .join("nginx.conf")
+}
+
+fn rule_fixture(category: &str, rule: &str) -> PathBuf {
+    fixtures_base()
+        .join("rules")
+        .join(category)
+        .join(rule)
+        .join("nginx.conf")
+}
+
+fn misc_fixture(name: &str) -> PathBuf {
+    fixtures_base()
         .join(name)
         .join("nginx.conf")
 }
 
 #[test]
 fn test_valid_config() {
-    let path = fixtures_path("valid");
+    let path = parser_fixture("valid");
     let config = parse_config(&path).expect("Failed to parse valid config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -30,9 +49,9 @@ fn test_valid_config() {
 }
 
 #[test]
-fn test_warnings_config() {
-    let path = fixtures_path("warnings");
-    let config = parse_config(&path).expect("Failed to parse warnings config");
+fn test_server_tokens_enabled() {
+    let path = rule_fixture("security", "server_tokens_enabled");
+    let config = parse_config(&path).expect("Failed to parse config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
 
@@ -50,7 +69,7 @@ fn test_warnings_config() {
 
 #[test]
 fn test_multiple_issues_config() {
-    let path = fixtures_path("multiple_issues");
+    let path = misc_fixture("multiple_issues");
     let config = parse_config(&path).expect("Failed to parse multiple_issues config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -71,7 +90,7 @@ fn test_multiple_issues_config() {
 
 #[test]
 fn test_minimal_config() {
-    let path = fixtures_path("minimal");
+    let path = parser_fixture("minimal");
     let config = parse_config(&path).expect("Failed to parse minimal config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -93,7 +112,7 @@ fn test_minimal_config() {
 
 #[test]
 fn test_with_ssl_config() {
-    let path = fixtures_path("with_ssl");
+    let path = parser_fixture("with_ssl");
     let config = parse_config(&path).expect("Failed to parse with_ssl config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -113,7 +132,7 @@ fn test_with_ssl_config() {
 
 #[test]
 fn test_with_include_config() {
-    let path = fixtures_path("with_include");
+    let path = parser_fixture("with_include");
     let config = parse_config(&path).expect("Failed to parse with_include config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -129,7 +148,7 @@ fn test_with_include_config() {
 
 #[test]
 fn test_with_nested_include_config() {
-    let path = fixtures_path("with_nested_include");
+    let path = parser_fixture("with_nested_include");
     let config = parse_config(&path).expect("Failed to parse with_nested_include config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -144,8 +163,8 @@ fn test_with_nested_include_config() {
 
 #[test]
 fn test_error_locations() {
-    let path = fixtures_path("warnings");
-    let config = parse_config(&path).expect("Failed to parse warnings config");
+    let path = rule_fixture("security", "server_tokens_enabled");
+    let config = parse_config(&path).expect("Failed to parse config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
 
@@ -168,7 +187,7 @@ fn test_error_locations() {
 
 #[test]
 fn test_severity_counts() {
-    let path = fixtures_path("multiple_issues");
+    let path = misc_fixture("multiple_issues");
     let config = parse_config(&path).expect("Failed to parse config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
@@ -192,9 +211,9 @@ fn test_severity_counts() {
 }
 
 #[test]
-fn test_bad_indentation_config() {
-    let path = fixtures_path("bad_indentation");
-    let config = parse_config(&path).expect("Failed to parse bad_indentation config");
+fn test_inconsistent_indentation() {
+    let path = rule_fixture("style", "inconsistent_indentation");
+    let config = parse_config(&path).expect("Failed to parse config");
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
 
@@ -216,8 +235,8 @@ fn test_bad_indentation_config() {
 }
 
 #[test]
-fn test_unmatched_braces_config() {
-    let path = fixtures_path("unmatched_braces");
+fn test_unmatched_braces() {
+    let path = rule_fixture("syntax", "unmatched_braces");
 
     // Pre-parse checks should detect unmatched braces
     let errors = pre_parse_checks(&path);
@@ -246,8 +265,8 @@ fn test_unmatched_braces_config() {
 }
 
 #[test]
-fn test_missing_semicolon_config() {
-    let path = fixtures_path("missing_semicolon");
+fn test_missing_semicolon() {
+    let path = rule_fixture("syntax", "missing_semicolon");
 
     // Pre-parse checks should detect missing semicolons
     let errors = pre_parse_checks(&path);
@@ -356,10 +375,7 @@ server {
 fn test_generated_fixtures_parse_without_errors() {
     use std::fs;
 
-    let test_generated_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("fixtures")
-        .join("test_generated");
+    let test_generated_dir = fixtures_base().join("test_generated");
 
     // Skip if directory doesn't exist
     if !test_generated_dir.exists() {
