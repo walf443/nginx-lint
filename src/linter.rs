@@ -62,7 +62,7 @@ impl Linter {
     }
 
     pub fn with_default_rules() -> Self {
-        use crate::rules::{best_practices, security, syntax};
+        use crate::rules::{best_practices, security, style, syntax};
 
         let mut linter = Self::new();
 
@@ -73,6 +73,9 @@ impl Linter {
         linter.add_rule(Box::new(security::DeprecatedSslProtocol));
         linter.add_rule(Box::new(security::ServerTokensEnabled));
         linter.add_rule(Box::new(security::AutoindexEnabled));
+
+        // Style rules
+        linter.add_rule(Box::new(style::InconsistentIndentation::default()));
 
         // Best practices
         linter.add_rule(Box::new(best_practices::GzipNotEnabled));

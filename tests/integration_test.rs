@@ -190,3 +190,27 @@ fn test_severity_counts() {
     assert_eq!(warning_count, 2, "Expected 2 warnings");
     assert_eq!(info_count, 2, "Expected 2 infos");
 }
+
+#[test]
+fn test_bad_indentation_config() {
+    let path = fixtures_path("bad_indentation");
+    let config = parse_config(&path).expect("Failed to parse bad_indentation config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, &path);
+
+    // Should have indentation warnings
+    let indentation_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "inconsistent-indentation")
+        .collect();
+
+    assert!(
+        !indentation_warnings.is_empty(),
+        "Expected inconsistent-indentation warnings"
+    );
+
+    // All indentation issues should be warnings
+    for warning in &indentation_warnings {
+        assert_eq!(warning.severity, Severity::Warning);
+    }
+}
