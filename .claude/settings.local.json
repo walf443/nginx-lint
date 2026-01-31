@@ -5,7 +5,8 @@
       "Bash(cargo doc:*)",
       "WebFetch(domain:docs.rs)",
       "Bash(cargo run:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(cargo clippy:*)"
     ]
   }
 }
