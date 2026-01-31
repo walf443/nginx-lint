@@ -908,7 +908,6 @@ fn dir_name_to_rule_name(dir_name: &str) -> String {
 /// This test iterates over all fixtures in tests/fixtures/rules/ and runs appropriate tests
 #[test]
 fn test_all_rule_fixtures() {
-    use nginx_lint::parse_string;
     use std::io::Write;
 
     let rules_dir = fixtures_base().join("rules");
@@ -1026,15 +1025,12 @@ fn test_all_rule_fixtures() {
                     write!(temp_file, "{}", error_content).expect("Failed to write temp file");
                     let temp_path = temp_file.path();
 
-                    // Get all errors (try parsing first, fall back to dummy config)
-                    let all_errors = if let Ok(config) = parse_config(temp_path) {
+                    // Get all errors: combine pre-parse checks and linter errors
+                    let mut all_errors = pre_parse_checks(temp_path);
+                    if let Ok(config) = parse_config(temp_path) {
                         let linter = Linter::with_default_rules();
-                        linter.lint(&config, temp_path)
-                    } else {
-                        let config = parse_string("").unwrap();
-                        let linter = Linter::with_default_rules();
-                        linter.lint(&config, temp_path)
-                    };
+                        all_errors.extend(linter.lint(&config, temp_path));
+                    }
 
                     // Filter to only this rule's errors with fixes
                     let rule_errors_with_fixes: Vec<_> = all_errors
