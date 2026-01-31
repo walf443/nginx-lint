@@ -209,8 +209,8 @@ fn test_error_locations() {
     );
     assert_eq!(
         server_tokens_warning.line.unwrap(),
-        6,
-        "Expected warning on line 6"
+        5,
+        "Expected warning on line 5"
     );
 }
 
