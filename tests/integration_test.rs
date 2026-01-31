@@ -17,19 +17,29 @@ fn parser_fixture(name: &str) -> PathBuf {
 }
 
 fn rule_error_fixture(category: &str, rule: &str) -> PathBuf {
+    rule_case_error_fixture(category, rule, "001_basic")
+}
+
+fn rule_expected_fixture(category: &str, rule: &str) -> PathBuf {
+    rule_case_expected_fixture(category, rule, "001_basic")
+}
+
+fn rule_case_error_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
     fixtures_base()
         .join("rules")
         .join(category)
         .join(rule)
+        .join(case)
         .join("error")
         .join("nginx.conf")
 }
 
-fn rule_expected_fixture(category: &str, rule: &str) -> PathBuf {
+fn rule_case_expected_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
     fixtures_base()
         .join("rules")
         .join(category)
         .join(rule)
+        .join(case)
         .join("expected")
         .join("nginx.conf")
 }
@@ -734,14 +744,18 @@ fn test_generated_fixtures_parse_without_errors() {
 
 /// Helper function to test that applying fixes to an error fixture produces the expected fixture
 fn test_fix_produces_expected(category: &str, rule: &str) {
+    test_fix_case_produces_expected(category, rule, "001_basic");
+}
+
+fn test_fix_case_produces_expected(category: &str, rule: &str, case: &str) {
     use std::io::Write;
 
-    let error_path = rule_error_fixture(category, rule);
-    let expected_path = rule_expected_fixture(category, rule);
+    let error_path = rule_case_error_fixture(category, rule, case);
+    let expected_path = rule_case_expected_fixture(category, rule, case);
 
     // Read error content
     let error_content = fs::read_to_string(&error_path)
-        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}/{}: {}", category, rule, case, e));
 
     // Create a temp file with error content
     let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -750,31 +764,32 @@ fn test_fix_produces_expected(category: &str, rule: &str) {
 
     // Parse and get errors with fixes
     let config = parse_config(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to parse error fixture for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to parse error fixture for {}/{}/{}: {}", category, rule, case, e));
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, temp_path);
 
     // Apply fixes
     let fix_count = apply_fixes(temp_path, &errors)
-        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}/{}: {}", category, rule, case, e));
 
-    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}", category, rule);
+    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}/{}", category, rule, case);
 
     // Read the fixed content
     let fixed_content = fs::read_to_string(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}/{}: {}", category, rule, case, e));
 
     // Read expected content
     let expected_content = fs::read_to_string(&expected_path)
-        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}/{}: {}", category, rule, case, e));
 
     // Compare
     assert_eq!(
         fixed_content.trim(),
         expected_content.trim(),
-        "Fixed content for {}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
+        "Fixed content for {}/{}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
         category,
         rule,
+        case,
         fixed_content,
         expected_content
     );
@@ -782,15 +797,19 @@ fn test_fix_produces_expected(category: &str, rule: &str) {
 
 /// Helper function for rules that read from file directly (can't parse normally)
 fn test_fix_produces_expected_with_dummy_config(category: &str, rule: &str) {
+    test_fix_case_produces_expected_with_dummy_config(category, rule, "001_basic");
+}
+
+fn test_fix_case_produces_expected_with_dummy_config(category: &str, rule: &str, case: &str) {
     use nginx_lint::parse_string;
     use std::io::Write;
 
-    let error_path = rule_error_fixture(category, rule);
-    let expected_path = rule_expected_fixture(category, rule);
+    let error_path = rule_case_error_fixture(category, rule, case);
+    let expected_path = rule_case_expected_fixture(category, rule, case);
 
     // Read error content
     let error_content = fs::read_to_string(&error_path)
-        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}/{}: {}", category, rule, case, e));
 
     // Create a temp file with error content
     let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
@@ -804,25 +823,26 @@ fn test_fix_produces_expected_with_dummy_config(category: &str, rule: &str) {
 
     // Apply fixes
     let fix_count = apply_fixes(temp_path, &errors)
-        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}/{}: {}", category, rule, case, e));
 
-    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}", category, rule);
+    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}/{}", category, rule, case);
 
     // Read the fixed content
     let fixed_content = fs::read_to_string(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}/{}: {}", category, rule, case, e));
 
     // Read expected content
     let expected_content = fs::read_to_string(&expected_path)
-        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}: {}", category, rule, e));
+        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}/{}: {}", category, rule, case, e));
 
     // Compare
     assert_eq!(
         fixed_content.trim(),
         expected_content.trim(),
-        "Fixed content for {}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
+        "Fixed content for {}/{}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
         category,
         rule,
+        case,
         fixed_content,
         expected_content
     );
