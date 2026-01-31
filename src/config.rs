@@ -13,11 +13,99 @@ pub struct LintConfig {
 }
 
 /// Color output configuration
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ColorConfig {
-    /// Color mode: "auto" (default), true, or false
+    /// Color mode: "auto" (default), "always", or "never"
     #[serde(default)]
     pub ui: ColorMode,
+    /// Color for error messages (default: "red")
+    #[serde(default = "default_error_color")]
+    pub error: Color,
+    /// Color for warning messages (default: "yellow")
+    #[serde(default = "default_warning_color")]
+    pub warning: Color,
+    /// Color for info messages (default: "blue")
+    #[serde(default = "default_info_color")]
+    pub info: Color,
+}
+
+impl Default for ColorConfig {
+    fn default() -> Self {
+        Self {
+            ui: ColorMode::Auto,
+            error: Color::Red,
+            warning: Color::Yellow,
+            info: Color::Blue,
+        }
+    }
+}
+
+fn default_error_color() -> Color {
+    Color::Red
+}
+
+fn default_warning_color() -> Color {
+    Color::Yellow
+}
+
+fn default_info_color() -> Color {
+    Color::Blue
+}
+
+/// Available colors for output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Color {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    #[default]
+    White,
+    BrightBlack,
+    BrightRed,
+    BrightGreen,
+    BrightYellow,
+    BrightBlue,
+    BrightMagenta,
+    BrightCyan,
+    BrightWhite,
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "black" => Ok(Color::Black),
+            "red" => Ok(Color::Red),
+            "green" => Ok(Color::Green),
+            "yellow" => Ok(Color::Yellow),
+            "blue" => Ok(Color::Blue),
+            "magenta" => Ok(Color::Magenta),
+            "cyan" => Ok(Color::Cyan),
+            "white" => Ok(Color::White),
+            "bright_black" | "brightblack" => Ok(Color::BrightBlack),
+            "bright_red" | "brightred" => Ok(Color::BrightRed),
+            "bright_green" | "brightgreen" => Ok(Color::BrightGreen),
+            "bright_yellow" | "brightyellow" => Ok(Color::BrightYellow),
+            "bright_blue" | "brightblue" => Ok(Color::BrightBlue),
+            "bright_magenta" | "brightmagenta" => Ok(Color::BrightMagenta),
+            "bright_cyan" | "brightcyan" => Ok(Color::BrightCyan),
+            "bright_white" | "brightwhite" => Ok(Color::BrightWhite),
+            _ => Err(D::Error::custom(format!(
+                "invalid color '{}', expected one of: black, red, green, yellow, blue, magenta, cyan, white, \
+                 bright_black, bright_red, bright_green, bright_yellow, bright_blue, bright_magenta, bright_cyan, bright_white",
+                s
+            ))),
+        }
+    }
 }
 
 /// Color mode for output
@@ -237,5 +325,47 @@ ui = "always"
 
         let config = LintConfig::from_file(file.path()).unwrap();
         assert_eq!(config.color_mode(), ColorMode::Always);
+    }
+
+    #[test]
+    fn test_color_config_default_colors() {
+        let config = LintConfig::default();
+        assert_eq!(config.color.error, Color::Red);
+        assert_eq!(config.color.warning, Color::Yellow);
+        assert_eq!(config.color.info, Color::Blue);
+    }
+
+    #[test]
+    fn test_color_config_custom_colors() {
+        let toml_content = r#"
+[color]
+error = "magenta"
+warning = "cyan"
+info = "green"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color.error, Color::Magenta);
+        assert_eq!(config.color.warning, Color::Cyan);
+        assert_eq!(config.color.info, Color::Green);
+    }
+
+    #[test]
+    fn test_color_config_bright_colors() {
+        let toml_content = r#"
+[color]
+error = "bright_red"
+warning = "bright_yellow"
+info = "bright_blue"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color.error, Color::BrightRed);
+        assert_eq!(config.color.warning, Color::BrightYellow);
+        assert_eq!(config.color.info, Color::BrightBlue);
     }
 }

@@ -4,7 +4,7 @@ pub mod parser;
 pub mod reporter;
 pub mod rules;
 
-pub use config::{ColorMode, LintConfig};
+pub use config::{Color, ColorConfig, ColorMode, LintConfig};
 pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 pub use reporter::{OutputFormat, Reporter};

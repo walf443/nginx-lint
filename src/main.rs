@@ -57,7 +57,6 @@ impl From<Format> for OutputFormat {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let reporter = Reporter::new(cli.format.into());
 
     // If a directory is specified, look for nginx.conf inside it
     let file_path = if cli.file.is_dir() {
@@ -110,6 +109,13 @@ fn main() -> ExitCode {
             ColorMode::Auto => {} // Let colored crate decide
         }
     }
+
+    // Create reporter with color configuration
+    let color_config = lint_config
+        .as_ref()
+        .map(|c| c.color.clone())
+        .unwrap_or_default();
+    let reporter = Reporter::with_colors(cli.format.into(), color_config);
 
     if cli.verbose {
         eprintln!("Linting: {}", file_path.display());
