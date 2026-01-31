@@ -71,36 +71,40 @@ impl LintRule for UnmatchedBraces {
         };
 
         let mut brace_stack: Vec<(usize, usize)> = Vec::new(); // (line, column)
-        let mut in_string = false;
+        let mut string_char: Option<char> = None; // Track which quote started the string
         let mut in_comment = false;
+        let mut prev_char = ' ';
 
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
-            let mut chars = line.chars().enumerate().peekable();
+            let chars: Vec<char> = line.chars().collect();
 
-            while let Some((col, ch)) = chars.next() {
+            for (col, &ch) in chars.iter().enumerate() {
                 let column = col + 1;
 
-                // Handle comments
-                if ch == '#' && !in_string {
+                // Handle comments (only outside strings)
+                if ch == '#' && string_char.is_none() {
                     in_comment = true;
                 }
 
                 if in_comment {
+                    prev_char = ch;
                     continue;
                 }
 
-                // Handle strings (simple handling for single and double quotes)
-                if (ch == '"' || ch == '\'') && !in_string {
-                    in_string = true;
-                    continue;
-                }
-                if (ch == '"' || ch == '\'') && in_string {
-                    in_string = false;
+                // Handle strings - track which quote type started it
+                if (ch == '"' || ch == '\'') && string_char.is_none() {
+                    string_char = Some(ch);
+                    prev_char = ch;
                     continue;
                 }
 
-                if in_string {
+                // End string only with matching quote (and not escaped)
+                if let Some(quote) = string_char {
+                    if ch == quote && prev_char != '\\' {
+                        string_char = None;
+                    }
+                    prev_char = ch;
                     continue;
                 }
 
@@ -119,10 +123,13 @@ impl LintRule for UnmatchedBraces {
                         );
                     }
                 }
+
+                prev_char = ch;
             }
 
             // Reset comment flag at end of line
             in_comment = false;
+            prev_char = ' ';
         }
 
         // Report unclosed braces
@@ -213,6 +220,44 @@ mod tests {
         let content = r#"http {
     server {
         return 200 "{ json }";
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_braces_in_single_quote_string() {
+        let content = r#"http {
+    server {
+        return 200 '{ json }';
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_mixed_quotes_with_braces() {
+        // Double quote containing single quote and braces
+        let content = r#"http {
+    server {
+        return 200 "it's { working }";
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_escaped_quote_in_string() {
+        // Escaped quote should not end the string
+        let content = r#"http {
+    server {
+        return 200 "hello \"{ world }\"";
     }
 }
 "#;
