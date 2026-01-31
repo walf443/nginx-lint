@@ -14,7 +14,8 @@
       "Bash(git add:*)",
       "Bash(ls:*)",
       "Bash(while read f)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(xxd:*)"
     ]
   }
 }
