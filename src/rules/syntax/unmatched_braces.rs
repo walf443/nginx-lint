@@ -11,6 +11,10 @@ impl LintRule for UnmatchedBraces {
         "unmatched-braces"
     }
 
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
     fn description(&self) -> &'static str {
         "Detects unmatched opening or closing braces"
     }
@@ -68,6 +72,7 @@ impl LintRule for UnmatchedBraces {
                     errors.push(
                         LintError::new(
                             self.name(),
+                            self.category(),
                             "Unexpected closing brace '}' without matching opening brace",
                             Severity::Error,
                         )
@@ -88,6 +93,7 @@ impl LintRule for UnmatchedBraces {
             errors.push(
                 LintError::new(
                     self.name(),
+                    self.category(),
                     "Unclosed brace '{' - missing closing brace '}'",
                     Severity::Error,
                 )

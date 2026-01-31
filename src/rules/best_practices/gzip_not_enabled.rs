@@ -10,6 +10,10 @@ impl LintRule for GzipNotEnabled {
         "gzip-not-enabled"
     }
 
+    fn category(&self) -> &'static str {
+        "best-practices"
+    }
+
     fn description(&self) -> &'static str {
         "Suggests enabling gzip compression for better performance"
     }
@@ -27,6 +31,7 @@ impl LintRule for GzipNotEnabled {
         if !gzip_on {
             vec![LintError::new(
                 self.name(),
+                self.category(),
                 "Consider enabling gzip compression for better performance",
                 Severity::Info,
             )]

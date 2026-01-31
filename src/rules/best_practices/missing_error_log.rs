@@ -10,6 +10,10 @@ impl LintRule for MissingErrorLog {
         "missing-error-log"
     }
 
+    fn category(&self) -> &'static str {
+        "best-practices"
+    }
+
     fn description(&self) -> &'static str {
         "Checks if error_log is configured"
     }
@@ -27,6 +31,7 @@ impl LintRule for MissingErrorLog {
         if !error_log_found {
             vec![LintError::new(
                 self.name(),
+                self.category(),
                 "Consider configuring error_log for debugging",
                 Severity::Info,
             )]

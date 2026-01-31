@@ -11,6 +11,10 @@ impl LintRule for UnclosedQuote {
         "unclosed-quote"
     }
 
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
     fn description(&self) -> &'static str {
         "Detects unclosed string quotes"
     }
@@ -77,7 +81,7 @@ impl LintRule for UnclosedQuote {
             };
             let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
             errors.push(
-                LintError::new(self.name(), &message, Severity::Error)
+                LintError::new(self.name(), self.category(), &message, Severity::Error)
                     .with_location(start_line, start_col),
             );
         }

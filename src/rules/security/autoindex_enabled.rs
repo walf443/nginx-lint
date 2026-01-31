@@ -10,6 +10,10 @@ impl LintRule for AutoindexEnabled {
         "autoindex-enabled"
     }
 
+    fn category(&self) -> &'static str {
+        "security"
+    }
+
     fn description(&self) -> &'static str {
         "Detects when autoindex is enabled (can expose directory contents)"
     }
@@ -22,6 +26,7 @@ impl LintRule for AutoindexEnabled {
                 errors.push(
                     LintError::new(
                         self.name(),
+                        self.category(),
                         "autoindex is enabled, which can expose directory contents",
                         Severity::Warning,
                     )

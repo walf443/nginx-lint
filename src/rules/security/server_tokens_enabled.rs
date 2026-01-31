@@ -10,6 +10,10 @@ impl LintRule for ServerTokensEnabled {
         "server-tokens-enabled"
     }
 
+    fn category(&self) -> &'static str {
+        "security"
+    }
+
     fn description(&self) -> &'static str {
         "Detects when server_tokens is enabled (exposes nginx version)"
     }
@@ -22,6 +26,7 @@ impl LintRule for ServerTokensEnabled {
                 errors.push(
                     LintError::new(
                         self.name(),
+                        self.category(),
                         "server_tokens should be 'off' to hide nginx version",
                         Severity::Warning,
                     )

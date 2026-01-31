@@ -23,6 +23,7 @@ impl std::fmt::Display for Severity {
 #[derive(Debug, Clone, Serialize)]
 pub struct LintError {
     pub rule: String,
+    pub category: String,
     pub message: String,
     pub severity: Severity,
     pub line: Option<usize>,
@@ -30,9 +31,10 @@ pub struct LintError {
 }
 
 impl LintError {
-    pub fn new(rule: &str, message: &str, severity: Severity) -> Self {
+    pub fn new(rule: &str, category: &str, message: &str, severity: Severity) -> Self {
         Self {
             rule: rule.to_string(),
+            category: category.to_string(),
             message: message.to_string(),
             severity,
             line: None,
@@ -49,6 +51,7 @@ impl LintError {
 
 pub trait LintRule: Send + Sync {
     fn name(&self) -> &'static str;
+    fn category(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError>;
 }

@@ -12,6 +12,10 @@ impl LintRule for DeprecatedSslProtocol {
         "deprecated-ssl-protocol"
     }
 
+    fn category(&self) -> &'static str {
+        "security"
+    }
+
     fn description(&self) -> &'static str {
         "Detects usage of deprecated SSL/TLS protocols (SSLv3, TLSv1, TLSv1.1)"
     }
@@ -24,16 +28,13 @@ impl LintRule for DeprecatedSslProtocol {
                 for arg in &directive.args {
                     let protocol = arg.as_str();
                     if DEPRECATED_PROTOCOLS.contains(&protocol) {
+                        let message = format!(
+                            "Deprecated SSL/TLS protocol '{}' should not be used",
+                            protocol
+                        );
                         errors.push(
-                            LintError::new(
-                                self.name(),
-                                &format!(
-                                    "Deprecated SSL/TLS protocol '{}' should not be used",
-                                    protocol
-                                ),
-                                Severity::Warning,
-                            )
-                            .with_location(arg.span.start.line, arg.span.start.column),
+                            LintError::new(self.name(), self.category(), &message, Severity::Warning)
+                                .with_location(arg.span.start.line, arg.span.start.column),
                         );
                     }
                 }

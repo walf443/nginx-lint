@@ -21,6 +21,10 @@ impl LintRule for InconsistentIndentation {
         "inconsistent-indentation"
     }
 
+    fn category(&self) -> &'static str {
+        "style"
+    }
+
     fn description(&self) -> &'static str {
         "Detects inconsistent indentation in nginx configuration"
     }
@@ -57,6 +61,7 @@ impl LintRule for InconsistentIndentation {
                 check_line_indentation(
                     &mut errors,
                     self.name(),
+                    self.category(),
                     line,
                     trimmed,
                     line_number,
@@ -90,6 +95,7 @@ impl LintRule for InconsistentIndentation {
                     check_line_indentation(
                         &mut errors,
                         self.name(),
+                        self.category(),
                         line,
                         trimmed,
                         line_number,
@@ -124,6 +130,7 @@ impl LintRule for InconsistentIndentation {
             check_line_indentation(
                 &mut errors,
                 self.name(),
+                self.category(),
                 line,
                 trimmed,
                 line_number,
@@ -180,6 +187,7 @@ fn track_multiline_string(
 fn check_line_indentation(
     errors: &mut Vec<LintError>,
     rule_name: &'static str,
+    category: &'static str,
     line: &str,
     _trimmed: &str,
     line_number: usize,
@@ -195,6 +203,7 @@ fn check_line_indentation(
         errors.push(
             LintError::new(
                 rule_name,
+                category,
                 "Use spaces instead of tabs for indentation",
                 Severity::Warning,
             )
@@ -213,16 +222,13 @@ fn check_line_indentation(
 
     // Check indentation
     if leading_spaces != expected_spaces {
+        let message = format!(
+            "Expected {} spaces of indentation, found {}",
+            expected_spaces, leading_spaces
+        );
         errors.push(
-            LintError::new(
-                rule_name,
-                &format!(
-                    "Expected {} spaces of indentation, found {}",
-                    expected_spaces, leading_spaces
-                ),
-                Severity::Warning,
-            )
-            .with_location(line_number, 1),
+            LintError::new(rule_name, category, &message, Severity::Warning)
+                .with_location(line_number, 1),
         );
     }
 }

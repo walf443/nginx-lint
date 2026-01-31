@@ -12,6 +12,10 @@ impl LintRule for MissingSemicolon {
         "missing-semicolon"
     }
 
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
     fn description(&self) -> &'static str {
         "Detects missing semicolons at the end of directives"
     }
@@ -130,6 +134,7 @@ impl LintRule for MissingSemicolon {
                         errors.push(
                             LintError::new(
                                 self.name(),
+                                self.category(),
                                 "Missing semicolon at end of directive",
                                 Severity::Error,
                             )

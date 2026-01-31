@@ -42,7 +42,7 @@ impl Reporter {
                 Severity::Info => format!("[{}]", error.severity).blue().bold(),
             };
 
-            let rule_str = format!("[{}]", error.rule).dimmed();
+            let rule_str = format!("[{}/{}]", error.category, error.rule).dimmed();
 
             println!("{} {} {} {}", location, severity_str, rule_str, error.message);
         }

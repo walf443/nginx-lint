@@ -11,6 +11,10 @@ impl LintRule for DuplicateDirective {
         "duplicate-directive"
     }
 
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
     fn description(&self) -> &'static str {
         "Detects duplicate directives that should only appear once in a context"
     }
@@ -29,13 +33,10 @@ impl LintRule for DuplicateDirective {
                 let count = seen.entry(name).or_insert(0);
                 *count += 1;
                 if *count > 1 {
+                    let message = format!("Duplicate directive '{}' in main context", name);
                     errors.push(
-                        LintError::new(
-                            self.name(),
-                            &format!("Duplicate directive '{}' in main context", name),
-                            Severity::Warning,
-                        )
-                        .with_location(directive.span.start.line, directive.span.start.column),
+                        LintError::new(self.name(), self.category(), &message, Severity::Warning)
+                            .with_location(directive.span.start.line, directive.span.start.column),
                     );
                 }
             }
