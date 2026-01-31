@@ -1,4 +1,4 @@
-use crate::linter::{LintError, LintRule, Severity};
+use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,9 +34,11 @@ impl LintRule for DuplicateDirective {
                 *count += 1;
                 if *count > 1 {
                     let message = format!("Duplicate directive '{}' in main context", name);
+                    let fix = Fix::delete(directive.span.start.line);
                     errors.push(
                         LintError::new(self.name(), self.category(), &message, Severity::Warning)
-                            .with_location(directive.span.start.line, directive.span.start.column),
+                            .with_location(directive.span.start.line, directive.span.start.column)
+                            .with_fix(fix),
                     );
                 }
             }

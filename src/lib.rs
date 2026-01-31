@@ -56,7 +56,11 @@ pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> 
 
         let line_idx = fix.line - 1;
 
-        if let Some(old_text) = &fix.old_text {
+        if fix.delete_line {
+            // Delete the entire line
+            lines.remove(line_idx);
+            fix_count += 1;
+        } else if let Some(old_text) = &fix.old_text {
             // Replace specific text on the line
             if lines[line_idx].contains(old_text) {
                 lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);

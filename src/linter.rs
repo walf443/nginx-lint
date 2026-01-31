@@ -25,10 +25,13 @@ impl std::fmt::Display for Severity {
 pub struct Fix {
     /// Line number where the fix should be applied (1-indexed)
     pub line: usize,
-    /// The original text to replace (if None, insert at the line)
+    /// The original text to replace (if None and new_text is empty, delete the line)
     pub old_text: Option<String>,
-    /// The new text to insert
+    /// The new text to insert (empty string with old_text=None means delete)
     pub new_text: String,
+    /// Whether to delete the entire line
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub delete_line: bool,
 }
 
 impl Fix {
@@ -38,6 +41,7 @@ impl Fix {
             line,
             old_text: Some(old_text.to_string()),
             new_text: new_text.to_string(),
+            delete_line: false,
         }
     }
 
@@ -47,6 +51,17 @@ impl Fix {
             line,
             old_text: None,
             new_text: new_text.to_string(),
+            delete_line: false,
+        }
+    }
+
+    /// Create a fix that deletes an entire line
+    pub fn delete(line: usize) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: String::new(),
+            delete_line: true,
         }
     }
 }
