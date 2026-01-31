@@ -281,31 +281,105 @@ impl<'a> Lexer<'a> {
 
         // Continue reading if we have argument characters (like / or .)
         // This handles cases like "text/plain", "TLSv1.2", etc.
-        while let Some(ch) = self.peek() {
-            if is_argument_char(ch) || is_ident_continue(ch) {
-                value.push(ch);
-                self.advance();
-            } else {
-                break;
-            }
-        }
+        self.read_argument_continuation(&mut value);
 
         value
     }
 
     fn read_argument(&mut self, first: char) -> String {
         let mut value = String::from(first);
+        self.read_argument_continuation(&mut value);
+        value
+    }
 
+    /// Continue reading argument characters, including regex quantifiers like {8,}
+    fn read_argument_continuation(&mut self, value: &mut String) {
         while let Some(ch) = self.peek() {
             if is_argument_char(ch) || is_ident_continue(ch) {
                 value.push(ch);
                 self.advance();
+            } else if ch == '{' {
+                // Check if this looks like a regex quantifier using lookahead
+                if let Some(quantifier) = self.peek_regex_quantifier() {
+                    // Consume the quantifier
+                    for _ in 0..quantifier.len() {
+                        self.advance();
+                    }
+                    value.push_str(&quantifier);
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Peek ahead to check if we have a regex quantifier pattern like {8}, {8,}, {1,3}
+    /// This doesn't consume any characters, just looks ahead in the source
+    fn peek_regex_quantifier(&self) -> Option<String> {
+        // Get remaining source from current position
+        let remaining = &self.source[self.offset..];
+
+        // Must start with '{'
+        if !remaining.starts_with('{') {
+            return None;
+        }
+
+        let mut chars = remaining.chars().peekable();
+        chars.next(); // consume '{'
+
+        let mut quantifier = String::from("{");
+
+        // Must have at least one digit
+        match chars.peek() {
+            Some(ch) if ch.is_ascii_digit() => {
+                quantifier.push(*ch);
+                chars.next();
+            }
+            _ => return None,
+        }
+
+        // Read more digits
+        while let Some(&ch) = chars.peek() {
+            if ch.is_ascii_digit() {
+                quantifier.push(ch);
+                chars.next();
             } else {
                 break;
             }
         }
 
-        value
+        // Check for ',' or '}'
+        match chars.peek() {
+            Some('}') => {
+                quantifier.push('}');
+                Some(quantifier)
+            }
+            Some(',') => {
+                quantifier.push(',');
+                chars.next();
+
+                // Read optional second number
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_digit() {
+                        quantifier.push(ch);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Must end with '}'
+                if chars.peek() == Some(&'}') {
+                    quantifier.push('}');
+                    Some(quantifier)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Tokenize the entire input and return all tokens

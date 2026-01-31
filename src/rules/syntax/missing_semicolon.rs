@@ -29,7 +29,10 @@ impl LintRule for MissingSemicolon {
         let mut in_lua_block = false;
         let mut lua_brace_depth = 0;
 
-        for (line_num, line) in content.lines().enumerate() {
+        let lines: Vec<&str> = content.lines().collect();
+        let num_lines = lines.len();
+
+        for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
 
@@ -115,14 +118,24 @@ impl LintRule for MissingSemicolon {
                 // This line looks like a directive but doesn't end with semicolon
                 // Make sure it's not just a value continuation or include pattern
                 if looks_like_directive(code_part) {
-                    errors.push(
-                        LintError::new(
-                            self.name(),
-                            "Missing semicolon at end of directive",
-                            Severity::Error,
-                        )
-                        .with_location(line_number, trimmed.len()),
-                    );
+                    // Check if this might be a multi-line directive by looking at the next line
+                    let is_continuation = if line_num + 1 < num_lines {
+                        let next_line = lines[line_num + 1].trim();
+                        is_continuation_line(code_part, next_line)
+                    } else {
+                        false
+                    };
+
+                    if !is_continuation {
+                        errors.push(
+                            LintError::new(
+                                self.name(),
+                                "Missing semicolon at end of directive",
+                                Severity::Error,
+                            )
+                            .with_location(line_number, trimmed.len()),
+                        );
+                    }
                 }
             }
         }
@@ -169,6 +182,41 @@ fn strip_inline_comment(line: &str) -> &str {
     line
 }
 
+/// Check if the next line is a continuation of the current directive
+fn is_continuation_line(current_line: &str, next_line: &str) -> bool {
+    // Empty next line is not a continuation
+    if next_line.is_empty() {
+        return false;
+    }
+
+    // If next line is a closing brace, it's not a continuation
+    if next_line == "}" || next_line.starts_with('}') {
+        return false;
+    }
+
+    // If current line ends with a quote and next line starts with a quote,
+    // it's likely a continuation (multi-line string concatenation)
+    let current_ends_with_quote = current_line.ends_with('\'') || current_line.ends_with('"');
+    let next_starts_with_quote = next_line.starts_with('\'') || next_line.starts_with('"');
+
+    if current_ends_with_quote && next_starts_with_quote {
+        return true;
+    }
+
+    // If next line starts with a quote, it's a continuation
+    if next_starts_with_quote {
+        return true;
+    }
+
+    // If next line doesn't look like a directive (doesn't start with identifier),
+    // it might be a continuation of arguments
+    if !looks_like_directive(next_line) {
+        return true;
+    }
+
+    false
+}
+
 /// Check if a line looks like a directive (has a name and potentially arguments)
 fn looks_like_directive(line: &str) -> bool {
     // A directive typically starts with an identifier
@@ -189,6 +237,20 @@ fn looks_like_directive(line: &str) -> bool {
         .map(|c| c.is_alphabetic() || c == '_')
         .unwrap_or(false)
     {
+        return false;
+    }
+
+    // If the line starts with a quote, it's likely a continuation of a multi-line directive
+    // e.g., the second line of:
+    //   log_format main '{"timestamp":"$time_iso8601",'
+    //       '"client":"$remote_addr"}';
+    if first_word.starts_with('"') || first_word.starts_with('\'') {
+        return false;
+    }
+
+    // If the first word contains a slash, it's likely a MIME type or path, not a directive
+    // e.g., "application/json" or "/path/to/file"
+    if first_word.contains('/') {
         return false;
     }
 
