@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo doc:*)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(cargo run:*)"
+    ]
+  }
+}
