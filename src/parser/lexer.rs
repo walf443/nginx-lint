@@ -293,9 +293,18 @@ impl<'a> Lexer<'a> {
     }
 
     /// Continue reading argument characters, including regex quantifiers like {8,}
+    /// and escaped braces like \{ and \}
     fn read_argument_continuation(&mut self, value: &mut String) {
         while let Some(ch) = self.peek() {
             if is_argument_char(ch) || is_ident_continue(ch) {
+                // Check for escaped brace: if current char is '\' and next is '{' or '}'
+                if ch == '\\' && let Some(escaped) = self.peek_escaped_brace() {
+                    value.push('\\');
+                    self.advance(); // consume '\'
+                    value.push(escaped);
+                    self.advance(); // consume '{' or '}'
+                    continue;
+                }
                 value.push(ch);
                 self.advance();
             } else if ch == '{' {
@@ -309,9 +318,58 @@ impl<'a> Lexer<'a> {
                 } else {
                     break;
                 }
+            } else if ch == '$' {
+                // Check if this is a regex end anchor ($) rather than a variable
+                // If $ is followed by whitespace or {, it's part of the regex pattern
+                if self.is_regex_end_anchor() {
+                    value.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
+        }
+    }
+
+    /// Check if $ is a regex end anchor (followed by whitespace or {)
+    fn is_regex_end_anchor(&self) -> bool {
+        let remaining = &self.source[self.offset..];
+        let mut chars = remaining.chars();
+
+        // First char should be '$'
+        if chars.next() != Some('$') {
+            return false;
+        }
+
+        // Check what follows $
+        match chars.next() {
+            None => true,                          // End of input
+            Some(c) if c.is_whitespace() => true,  // Followed by whitespace
+            Some('{') => true,                     // Followed by block opening brace
+            Some(c) if c.is_alphanumeric() => false, // Followed by variable name
+            Some('_') => false,                    // Followed by variable name
+            _ => true,                             // Other chars - treat as end anchor
+        }
+    }
+
+    /// Peek ahead to check if we have an escaped brace (\{ or \})
+    /// Returns the brace character if found
+    fn peek_escaped_brace(&self) -> Option<char> {
+        let remaining = &self.source[self.offset..];
+        let mut chars = remaining.chars();
+
+        // First char should be '\'
+        if chars.next() != Some('\\') {
+            return None;
+        }
+
+        // Second char should be '{' or '}'
+        match chars.next() {
+            Some('{') => Some('{'),
+            Some('}') => Some('}'),
+            _ => None,
         }
     }
 
@@ -634,5 +692,85 @@ mod tests {
         // "listen" at line 2, column 5
         assert_eq!(tokens[3].span.start.line, 2);
         assert_eq!(tokens[3].span.start.column, 5);
+    }
+
+    #[test]
+    fn test_regex_quantifier() {
+        // Regex quantifier {8} should be part of the argument
+        let tokens = tokenize(r"location ~ ^/[a-z]{8}$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~".to_string()),
+                TokenKind::Argument("^/[a-z]{8}$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_regex_quantifier_range() {
+        // Regex quantifier {1,3} should be part of the argument
+        let tokens = tokenize(r"location ~ ^/[0-9]{1,3}$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~".to_string()),
+                TokenKind::Argument("^/[0-9]{1,3}$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_regex_quantifier_open_ended() {
+        // Regex quantifier {8,} should be part of the argument
+        let tokens = tokenize(r"location ~ ^/[a-z]{8,}$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~".to_string()),
+                TokenKind::Argument("^/[a-z]{8,}$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escaped_braces_in_regex() {
+        // Escaped braces \{ and \} should be part of the argument
+        let tokens = tokenize(r"location ~ ^/nested/\{[a-z]+\}$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~".to_string()),
+                TokenKind::Argument(r"^/nested/\{[a-z]+\}$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_multiple_escaped_braces() {
+        // Multiple escaped braces in pattern
+        let tokens = tokenize(r"location ~ ^/data/\{id\}/\{name\}$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~".to_string()),
+                TokenKind::Argument(r"^/data/\{id\}/\{name\}$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
     }
 }
