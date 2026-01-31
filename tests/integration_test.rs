@@ -268,3 +268,86 @@ fn test_missing_semicolon_config() {
         assert_eq!(error.severity, Severity::Error);
     }
 }
+
+#[test]
+fn test_extension_module_directives() {
+    // Test that extension module directives can be parsed
+    use nginx_lint::parse_string;
+
+    let config = parse_string(
+        r#"
+http {
+    server {
+        more_set_headers "Server: Custom";
+        lua_code_cache on;
+        gzip_types text/plain application/json;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        autoindex off;
+    }
+}
+"#,
+    )
+    .expect("Failed to parse extension module directives");
+
+    // Verify all directives were parsed
+    let directives: Vec<_> = config.all_directives().collect();
+    let names: Vec<&str> = directives.iter().map(|d| d.name.as_str()).collect();
+
+    assert!(names.contains(&"more_set_headers"));
+    assert!(names.contains(&"lua_code_cache"));
+    assert!(names.contains(&"gzip_types"));
+    assert!(names.contains(&"ssl_protocols"));
+    assert!(names.contains(&"autoindex"));
+}
+
+#[test]
+fn test_deprecated_ssl_protocol_detection() {
+    use nginx_lint::parse_string;
+
+    let config = parse_string(
+        r#"
+server {
+    ssl_protocols SSLv3 TLSv1 TLSv1.2;
+}
+"#,
+    )
+    .expect("Failed to parse ssl_protocols");
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Should detect deprecated protocols
+    let ssl_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "deprecated-ssl-protocol")
+        .collect();
+
+    assert_eq!(ssl_warnings.len(), 2, "Expected 2 deprecated protocol warnings (SSLv3 and TLSv1)");
+}
+
+#[test]
+fn test_autoindex_enabled_detection() {
+    use nginx_lint::parse_string;
+
+    let config = parse_string(
+        r#"
+server {
+    location /files {
+        autoindex on;
+    }
+}
+"#,
+    )
+    .expect("Failed to parse autoindex");
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Should detect autoindex enabled
+    let autoindex_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "autoindex-enabled")
+        .collect();
+
+    assert_eq!(autoindex_warnings.len(), 1, "Expected 1 autoindex warning");
+}

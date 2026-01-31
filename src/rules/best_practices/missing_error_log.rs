@@ -1,5 +1,5 @@
 use crate::linter::{LintError, LintRule, Severity};
-use nginx_config::ast::{Item, Main};
+use crate::parser::ast::Config;
 use std::path::Path;
 
 /// Check if error_log is configured
@@ -14,11 +14,11 @@ impl LintRule for MissingErrorLog {
         "Checks if error_log is configured"
     }
 
-    fn check(&self, config: &Main, _path: &Path) -> Vec<LintError> {
+    fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
         let mut error_log_found = false;
 
         for directive in config.all_directives() {
-            if let Item::ErrorLog { .. } = directive.item {
+            if directive.is("error_log") {
                 error_log_found = true;
                 break;
             }

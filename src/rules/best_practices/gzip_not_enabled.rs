@@ -1,5 +1,5 @@
 use crate::linter::{LintError, LintRule, Severity};
-use nginx_config::ast::{Item, Main};
+use crate::parser::ast::Config;
 use std::path::Path;
 
 /// Check if gzip compression is enabled
@@ -14,15 +14,13 @@ impl LintRule for GzipNotEnabled {
         "Suggests enabling gzip compression for better performance"
     }
 
-    fn check(&self, config: &Main, _path: &Path) -> Vec<LintError> {
+    fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
         let mut gzip_on = false;
 
         for directive in config.all_directives() {
-            if let Item::Gzip(enabled) = directive.item {
-                if enabled {
-                    gzip_on = true;
-                    break;
-                }
+            if directive.is("gzip") && directive.first_arg_is("on") {
+                gzip_on = true;
+                break;
             }
         }
 

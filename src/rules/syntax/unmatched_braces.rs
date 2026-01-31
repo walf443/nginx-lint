@@ -1,5 +1,5 @@
 use crate::linter::{LintError, LintRule, Severity};
-use nginx_config::ast::Main;
+use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ impl LintRule for UnmatchedBraces {
         "Detects unmatched opening or closing braces"
     }
 
-    fn check(&self, _config: &Main, path: &Path) -> Vec<LintError> {
+    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
         let mut errors = Vec::new();
 
         let content = match fs::read_to_string(path) {
@@ -64,17 +64,15 @@ impl LintRule for UnmatchedBraces {
                 // Track braces
                 if ch == '{' {
                     brace_stack.push((line_number, column));
-                } else if ch == '}' {
-                    if brace_stack.pop().is_none() {
-                        errors.push(
-                            LintError::new(
-                                self.name(),
-                                "Unexpected closing brace '}' without matching opening brace",
-                                Severity::Error,
-                            )
-                            .with_location(line_number, column),
-                        );
-                    }
+                } else if ch == '}' && brace_stack.pop().is_none() {
+                    errors.push(
+                        LintError::new(
+                            self.name(),
+                            "Unexpected closing brace '}' without matching opening brace",
+                            Severity::Error,
+                        )
+                        .with_location(line_number, column),
+                    );
                 }
 
                 prev_char = ch;
@@ -104,6 +102,7 @@ impl LintRule for UnmatchedBraces {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ast::Config;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -113,7 +112,7 @@ mod tests {
         let path = file.path().to_path_buf();
 
         let rule = UnmatchedBraces;
-        let config = nginx_config::parse_main("http {}").unwrap();
+        let config = Config::new();
         rule.check(&config, &path)
     }
 

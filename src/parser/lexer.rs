@@ -1,0 +1,564 @@
+use crate::parser::ast::{Position, Span};
+use crate::parser::error::{LexerError, ParseResult};
+
+/// Token types for nginx configuration
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
+    /// Identifier or keyword (http, server, listen, more_set_headers, etc.)
+    Ident(String),
+    /// Unquoted argument (80, /path/to/file, on, off, etc.)
+    /// Arguments can contain special chars like *, ?, etc.
+    Argument(String),
+    /// Double-quoted string (includes the processed content without quotes)
+    DoubleQuotedString(String),
+    /// Single-quoted string (includes the processed content without quotes)
+    SingleQuotedString(String),
+    /// Variable ($variable_name)
+    Variable(String),
+    /// Semicolon ;
+    Semicolon,
+    /// Open brace {
+    OpenBrace,
+    /// Close brace }
+    CloseBrace,
+    /// Comment (# ...)
+    Comment(String),
+    /// Newline (for tracking blank lines)
+    Newline,
+    /// End of file
+    Eof,
+}
+
+impl TokenKind {
+    pub fn display_name(&self) -> &str {
+        match self {
+            TokenKind::Ident(_) => "identifier",
+            TokenKind::Argument(_) => "argument",
+            TokenKind::DoubleQuotedString(_) => "string",
+            TokenKind::SingleQuotedString(_) => "string",
+            TokenKind::Variable(_) => "variable",
+            TokenKind::Semicolon => "';'",
+            TokenKind::OpenBrace => "'{'",
+            TokenKind::CloseBrace => "'}'",
+            TokenKind::Comment(_) => "comment",
+            TokenKind::Newline => "newline",
+            TokenKind::Eof => "end of file",
+        }
+    }
+}
+
+/// A token with its position in the source
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub kind: TokenKind,
+    pub span: Span,
+    pub raw: String, // Original source text
+}
+
+/// Lexer for tokenizing nginx configuration files
+pub struct Lexer<'a> {
+    source: &'a str,
+    chars: std::iter::Peekable<std::str::CharIndices<'a>>,
+    line: usize,
+    column: usize,
+    offset: usize,
+}
+
+impl<'a> Lexer<'a> {
+    pub fn new(source: &'a str) -> Self {
+        Self {
+            source,
+            chars: source.char_indices().peekable(),
+            line: 1,
+            column: 1,
+            offset: 0,
+        }
+    }
+
+    fn position(&self) -> Position {
+        Position::new(self.line, self.column, self.offset)
+    }
+
+    fn advance(&mut self) -> Option<(usize, char)> {
+        if let Some((idx, ch)) = self.chars.next() {
+            self.offset = idx + ch.len_utf8();
+            if ch == '\n' {
+                self.line += 1;
+                self.column = 1;
+            } else {
+                self.column += 1;
+            }
+            Some((idx, ch))
+        } else {
+            None
+        }
+    }
+
+    fn peek(&mut self) -> Option<char> {
+        self.chars.peek().map(|(_, ch)| *ch)
+    }
+
+    fn skip_whitespace_same_line(&mut self) {
+        while let Some(ch) = self.peek() {
+            if ch == ' ' || ch == '\t' {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    pub fn next_token(&mut self) -> ParseResult<Token> {
+        self.skip_whitespace_same_line();
+
+        let start_pos = self.position();
+        let start_offset = self.offset;
+
+        let Some((_, ch)) = self.advance() else {
+            return Ok(Token {
+                kind: TokenKind::Eof,
+                span: Span::new(start_pos, start_pos),
+                raw: String::new(),
+            });
+        };
+
+        let kind = match ch {
+            '\n' => TokenKind::Newline,
+            ';' => TokenKind::Semicolon,
+            '{' => TokenKind::OpenBrace,
+            '}' => TokenKind::CloseBrace,
+            '#' => {
+                // Comment - read until end of line
+                let mut text = String::from('#');
+                while let Some(c) = self.peek() {
+                    if c == '\n' {
+                        break;
+                    }
+                    text.push(c);
+                    self.advance();
+                }
+                TokenKind::Comment(text)
+            }
+            '"' => self.read_double_quoted_string(start_pos)?,
+            '\'' => self.read_single_quoted_string(start_pos)?,
+            '$' => {
+                // Variable
+                let name = self.read_variable_name();
+                TokenKind::Variable(name)
+            }
+            _ if is_ident_start(ch) => {
+                // Identifier or argument
+                let value = self.read_identifier(ch);
+                TokenKind::Ident(value)
+            }
+            _ if is_argument_char(ch) => {
+                // Unquoted argument (numbers, paths, etc.)
+                let value = self.read_argument(ch);
+                TokenKind::Argument(value)
+            }
+            _ => {
+                return Err(LexerError::UnexpectedChar {
+                    ch,
+                    position: start_pos,
+                }
+                .into());
+            }
+        };
+
+        let end_pos = self.position();
+        let raw = self.source[start_offset..self.offset].to_string();
+
+        Ok(Token {
+            kind,
+            span: Span::new(start_pos, end_pos),
+            raw,
+        })
+    }
+
+    fn read_double_quoted_string(&mut self, start_pos: Position) -> ParseResult<TokenKind> {
+        let mut value = String::new();
+
+        loop {
+            match self.advance() {
+                Some((_, '"')) => break,
+                Some((_, '\\')) => {
+                    // Escape sequence
+                    match self.advance() {
+                        Some((_, 'n')) => value.push('\n'),
+                        Some((_, 't')) => value.push('\t'),
+                        Some((_, 'r')) => value.push('\r'),
+                        Some((_, '\\')) => value.push('\\'),
+                        Some((_, '"')) => value.push('"'),
+                        Some((_, '$')) => value.push('$'),
+                        Some((_, c)) => {
+                            // For unknown escapes, keep the backslash and char
+                            value.push('\\');
+                            value.push(c);
+                        }
+                        None => {
+                            return Err(LexerError::UnterminatedString { position: start_pos }.into())
+                        }
+                    }
+                }
+                Some((_, ch)) => value.push(ch),
+                None => return Err(LexerError::UnterminatedString { position: start_pos }.into()),
+            }
+        }
+
+        Ok(TokenKind::DoubleQuotedString(value))
+    }
+
+    fn read_single_quoted_string(&mut self, start_pos: Position) -> ParseResult<TokenKind> {
+        let mut value = String::new();
+
+        loop {
+            match self.advance() {
+                Some((_, '\'')) => break,
+                Some((_, '\\')) => {
+                    // Escape sequence
+                    match self.advance() {
+                        Some((_, '\\')) => value.push('\\'),
+                        Some((_, '\'')) => value.push('\''),
+                        Some((_, c)) => {
+                            // For unknown escapes, keep the backslash and char
+                            value.push('\\');
+                            value.push(c);
+                        }
+                        None => {
+                            return Err(LexerError::UnterminatedString { position: start_pos }.into())
+                        }
+                    }
+                }
+                Some((_, ch)) => value.push(ch),
+                None => return Err(LexerError::UnterminatedString { position: start_pos }.into()),
+            }
+        }
+
+        Ok(TokenKind::SingleQuotedString(value))
+    }
+
+    fn read_variable_name(&mut self) -> String {
+        let mut name = String::new();
+
+        // Check for ${var} syntax
+        if self.peek() == Some('{') {
+            self.advance(); // consume '{'
+            while let Some(ch) = self.peek() {
+                if ch == '}' {
+                    self.advance();
+                    break;
+                }
+                name.push(ch);
+                self.advance();
+            }
+        } else {
+            // Regular $var syntax
+            while let Some(ch) = self.peek() {
+                if ch.is_alphanumeric() || ch == '_' {
+                    name.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        name
+    }
+
+    fn read_identifier(&mut self, first: char) -> String {
+        let mut value = String::from(first);
+
+        // Read identifier characters first
+        while let Some(ch) = self.peek() {
+            if is_ident_continue(ch) {
+                value.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        // Continue reading if we have argument characters (like / or .)
+        // This handles cases like "text/plain", "TLSv1.2", etc.
+        while let Some(ch) = self.peek() {
+            if is_argument_char(ch) || is_ident_continue(ch) {
+                value.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        value
+    }
+
+    fn read_argument(&mut self, first: char) -> String {
+        let mut value = String::from(first);
+
+        while let Some(ch) = self.peek() {
+            if is_argument_char(ch) || is_ident_continue(ch) {
+                value.push(ch);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        value
+    }
+
+    /// Tokenize the entire input and return all tokens
+    pub fn tokenize(&mut self) -> ParseResult<Vec<Token>> {
+        let mut tokens = Vec::new();
+        loop {
+            let token = self.next_token()?;
+            let is_eof = matches!(token.kind, TokenKind::Eof);
+            tokens.push(token);
+            if is_eof {
+                break;
+            }
+        }
+        Ok(tokens)
+    }
+}
+
+/// Check if a character can start an identifier
+fn is_ident_start(ch: char) -> bool {
+    ch.is_alphabetic() || ch == '_'
+}
+
+/// Check if a character can continue an identifier
+fn is_ident_continue(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_' || ch == '-'
+}
+
+/// Check if a character is valid in an unquoted argument
+fn is_argument_char(ch: char) -> bool {
+    // Arguments can contain most characters except whitespace and special chars
+    !ch.is_whitespace() && !matches!(ch, ';' | '{' | '}' | '#' | '"' | '\'' | '$')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tokenize(source: &str) -> Vec<TokenKind> {
+        let mut lexer = Lexer::new(source);
+        let tokens = lexer.tokenize().unwrap();
+        tokens.into_iter().map(|t| t.kind).collect()
+    }
+
+    #[test]
+    fn test_simple_directive() {
+        let tokens = tokenize("listen 80;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("listen".to_string()),
+                TokenKind::Argument("80".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_block() {
+        let tokens = tokenize("http { }");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("http".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::CloseBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_double_quoted_string() {
+        let tokens = tokenize(r#"return 200 "hello world";"#);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("return".to_string()),
+                TokenKind::Argument("200".to_string()),
+                TokenKind::DoubleQuotedString("hello world".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_single_quoted_string() {
+        let tokens = tokenize("return 200 'hello world';");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("return".to_string()),
+                TokenKind::Argument("200".to_string()),
+                TokenKind::SingleQuotedString("hello world".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_escape_sequences() {
+        let tokens = tokenize(r#"return 200 "hello\nworld";"#);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("return".to_string()),
+                TokenKind::Argument("200".to_string()),
+                TokenKind::DoubleQuotedString("hello\nworld".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_variable() {
+        let tokens = tokenize("set $var value;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("set".to_string()),
+                TokenKind::Variable("var".to_string()),
+                TokenKind::Ident("value".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_variable_braces() {
+        let tokens = tokenize("return 200 ${request_uri};");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("return".to_string()),
+                TokenKind::Argument("200".to_string()),
+                TokenKind::Variable("request_uri".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_comment() {
+        let tokens = tokenize("# this is a comment\nlisten 80;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Comment("# this is a comment".to_string()),
+                TokenKind::Newline,
+                TokenKind::Ident("listen".to_string()),
+                TokenKind::Argument("80".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_path_argument() {
+        let tokens = tokenize("root /var/www/html;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("root".to_string()),
+                TokenKind::Argument("/var/www/html".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_extension_directive() {
+        let tokens = tokenize(r#"more_set_headers "Server: Custom";"#);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("more_set_headers".to_string()),
+                TokenKind::DoubleQuotedString("Server: Custom".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_glob_pattern() {
+        let tokens = tokenize("include /etc/nginx/conf.d/*.conf;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("include".to_string()),
+                TokenKind::Argument("/etc/nginx/conf.d/*.conf".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_utf8_comment() {
+        let tokens = tokenize("# これは日本語コメント\nlisten 80;");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Comment("# これは日本語コメント".to_string()),
+                TokenKind::Newline,
+                TokenKind::Ident("listen".to_string()),
+                TokenKind::Argument("80".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_utf8_string() {
+        let tokens = tokenize(r#"return 200 "こんにちは";"#);
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("return".to_string()),
+                TokenKind::Argument("200".to_string()),
+                TokenKind::DoubleQuotedString("こんにちは".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_position_tracking() {
+        let mut lexer = Lexer::new("http {\n    listen 80;\n}");
+        let tokens = lexer.tokenize().unwrap();
+
+        // "http" at line 1, column 1
+        assert_eq!(tokens[0].span.start.line, 1);
+        assert_eq!(tokens[0].span.start.column, 1);
+
+        // "{" at line 1, column 6
+        assert_eq!(tokens[1].span.start.line, 1);
+        assert_eq!(tokens[1].span.start.column, 6);
+
+        // newline at end of line 1
+        assert_eq!(tokens[2].span.start.line, 1);
+
+        // "listen" at line 2, column 5
+        assert_eq!(tokens[3].span.start.line, 2);
+        assert_eq!(tokens[3].span.start.column, 5);
+    }
+}

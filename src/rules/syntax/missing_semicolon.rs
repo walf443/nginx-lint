@@ -1,5 +1,5 @@
 use crate::linter::{LintError, LintRule, Severity};
-use nginx_config::ast::Main;
+use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
 
@@ -15,7 +15,7 @@ impl LintRule for MissingSemicolon {
         "Detects missing semicolons at the end of directives"
     }
 
-    fn check(&self, _config: &Main, path: &Path) -> Vec<LintError> {
+    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
         let mut errors = Vec::new();
 
         let content = match fs::read_to_string(path) {
@@ -146,7 +146,12 @@ fn looks_like_directive(line: &str) -> bool {
     let first_word = trimmed.split_whitespace().next().unwrap_or("");
 
     // Must start with a letter or underscore (valid directive name)
-    if !first_word.chars().next().map(|c| c.is_alphabetic() || c == '_').unwrap_or(false) {
+    if !first_word
+        .chars()
+        .next()
+        .map(|c| c.is_alphabetic() || c == '_')
+        .unwrap_or(false)
+    {
         return false;
     }
 
@@ -158,6 +163,7 @@ fn looks_like_directive(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::ast::Config;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -167,7 +173,7 @@ mod tests {
         let path = file.path().to_path_buf();
 
         let rule = MissingSemicolon;
-        let config = nginx_config::parse_main("http {}").unwrap();
+        let config = Config::new();
         rule.check(&config, &path)
     }
 
@@ -273,7 +279,11 @@ worker_processes auto;
 }
 "#;
         let errors = check_content(content);
-        assert_eq!(errors.len(), 1, "Expected 1 error - string ending with ; is not a real semicolon");
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error - string ending with ; is not a real semicolon"
+        );
     }
 
     #[test]
@@ -286,6 +296,10 @@ worker_processes auto;
 }
 "#;
         let errors = check_content(content);
-        assert_eq!(errors.len(), 1, "Expected 1 error - comment ending with ; should not count");
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error - comment ending with ; should not count"
+        );
     }
 }

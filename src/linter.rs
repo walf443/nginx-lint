@@ -1,4 +1,4 @@
-use nginx_config::ast::Main;
+use crate::parser::ast::Config;
 use serde::Serialize;
 use std::path::Path;
 
@@ -49,7 +49,7 @@ impl LintError {
 pub trait LintRule: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
-    fn check(&self, config: &Main, path: &Path) -> Vec<LintError>;
+    fn check(&self, config: &Config, path: &Path) -> Vec<LintError>;
 }
 
 pub struct Linter {
@@ -94,7 +94,7 @@ impl Linter {
         self.rules.push(rule);
     }
 
-    pub fn lint(&self, config: &Main, path: &Path) -> Vec<LintError> {
+    pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
         let mut errors = Vec::new();
         for rule in &self.rules {
             errors.extend(rule.check(config, path));

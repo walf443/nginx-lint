@@ -1,5 +1,5 @@
 use crate::linter::{LintError, LintRule, Severity};
-use nginx_config::ast::Main;
+use crate::parser::ast::Config;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -15,20 +15,16 @@ impl LintRule for DuplicateDirective {
         "Detects duplicate directives that should only appear once in a context"
     }
 
-    fn check(&self, config: &Main, _path: &Path) -> Vec<LintError> {
+    fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
         let mut errors = Vec::new();
 
         // Directives that should only appear once in main context
-        let unique_directives = [
-            "worker_processes",
-            "pid",
-            "error_log",
-        ];
+        let unique_directives = ["worker_processes", "pid", "error_log"];
 
         // Check main context
         let mut seen: HashMap<&str, usize> = HashMap::new();
-        for directive in &config.directives {
-            let name = directive.item.directive_name();
+        for directive in config.directives() {
+            let name = directive.name.as_str();
             if unique_directives.contains(&name) {
                 let count = seen.entry(name).or_insert(0);
                 *count += 1;
@@ -39,7 +35,7 @@ impl LintRule for DuplicateDirective {
                             &format!("Duplicate directive '{}' in main context", name),
                             Severity::Warning,
                         )
-                        .with_location(directive.position.line, directive.position.column),
+                        .with_location(directive.span.start.line, directive.span.start.column),
                     );
                 }
             }
