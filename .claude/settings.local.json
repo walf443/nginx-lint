@@ -15,7 +15,8 @@
       "Bash(ls:*)",
       "Bash(while read f)",
       "Bash(git checkout:*)",
-      "Bash(xxd:*)"
+      "Bash(xxd:*)",
+      "Bash(cargo clean:*)"
     ]
   }
 }
