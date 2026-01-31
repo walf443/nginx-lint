@@ -13,15 +13,19 @@ nginx-lint/
 ├── src/
 │   ├── main.rs          # CLI entry point
 │   ├── lib.rs           # Library root
-│   ├── parser.rs        # Wrapper for nginx-config crate
+│   ├── parser/          # Custom nginx config parser
+│   │   ├── mod.rs       # Parser API (parse_config, parse_string)
+│   │   ├── ast.rs       # AST type definitions
+│   │   ├── lexer.rs     # Tokenizer
+│   │   └── error.rs     # Error types
 │   ├── linter.rs        # Lint engine & LintRule trait definition
 │   ├── reporter.rs      # Output formatting (text/json)
 │   └── rules/           # Lint rule implementations
 │       ├── mod.rs
-│       ├── syntax.rs    # Syntax checks (brace matching, etc.)
-│       ├── style.rs     # Style checks (indentation, etc.)
-│       ├── security.rs  # Security checks
-│       └── best_practices.rs
+│       ├── syntax/      # Syntax checks (brace matching, semicolons, etc.)
+│       ├── style/       # Style checks (indentation, etc.)
+│       ├── security/    # Security checks (server_tokens, ssl_protocols, etc.)
+│       └── best_practices/  # Best practice checks (gzip, error_log, etc.)
 ├── tests/
 │   ├── integration_test.rs
 │   └── fixtures/        # Test nginx configuration files
@@ -36,6 +40,7 @@ nginx-lint/
 cargo build          # Build
 cargo test           # Run tests
 cargo run -- <file>  # Run
+cargo clippy         # Lint
 ```
 
 ### Adding a New Lint Rule
@@ -44,6 +49,10 @@ cargo run -- <file>  # Run
 2. Implement the `LintRule` trait:
 
 ```rust
+use crate::linter::{LintError, LintRule, Severity};
+use crate::parser::ast::Config;
+use std::path::Path;
+
 pub struct MyRule;
 
 impl LintRule for MyRule {
@@ -55,8 +64,23 @@ impl LintRule for MyRule {
         "Description of what this rule checks"
     }
 
-    fn check(&self, config: &Main, path: &Path) -> Vec<LintError> {
-        // Implementation
+    fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        let mut errors = Vec::new();
+
+        for directive in config.all_directives() {
+            if directive.is("some_directive") && directive.first_arg_is("bad_value") {
+                errors.push(
+                    LintError::new(
+                        self.name(),
+                        "Error message",
+                        Severity::Warning,
+                    )
+                    .with_location(directive.span.start.line, directive.span.start.column),
+                );
+            }
+        }
+
+        errors
     }
 }
 ```
@@ -84,16 +108,41 @@ tests/fixtures/
 
 ## Dependencies
 
-- `nginx-config`: nginx configuration file parser (some directives unsupported)
 - `clap`: CLI framework
 - `colored`: Colored output
 - `serde`/`serde_json`: JSON output
 - `thiserror`: Error type definitions
 
+## Parser
+
+The project uses a custom nginx configuration parser (`src/parser/`) that:
+- Accepts any directive name (supports extension modules like ngx_headers_more, lua-nginx-module)
+- Provides position tracking for all AST nodes
+- Supports round-trip source reconstruction for future autofix functionality
+
+### AST Usage
+
+```rust
+// Iterate over all directives recursively
+for directive in config.all_directives() {
+    // Check directive name
+    if directive.is("server_tokens") {
+        // Check argument value
+        if directive.first_arg_is("on") {
+            // Report error
+        }
+    }
+}
+
+// Access directive properties
+directive.name          // Directive name (String)
+directive.args          // Arguments (Vec<Argument>)
+directive.block         // Optional block (Option<Block>)
+directive.span          // Source location (Span)
+```
+
 ## Known Limitations
 
-- The `nginx-config` crate does not support some directives:
-  - `ssl_protocols`, `gzip_types`, `autoindex`, etc.
 - `include` directive file expansion is not implemented
 
 ## Commit Messages
