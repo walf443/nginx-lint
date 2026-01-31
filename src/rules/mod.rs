@@ -6,4 +6,4 @@ pub mod syntax;
 pub use best_practices::{GzipNotEnabled, MissingErrorLog};
 pub use security::{AutoindexEnabled, DeprecatedSslProtocol, ServerTokensEnabled};
 pub use style::InconsistentIndentation;
-pub use syntax::{DuplicateDirective, UnmatchedBraces};
+pub use syntax::{DuplicateDirective, MissingSemicolon, UnmatchedBraces};

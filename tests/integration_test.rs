@@ -244,3 +244,27 @@ fn test_unmatched_braces_config() {
         "Expected parse error for unmatched braces"
     );
 }
+
+#[test]
+fn test_missing_semicolon_config() {
+    let path = fixtures_path("missing_semicolon");
+
+    // Pre-parse checks should detect missing semicolons
+    let errors = pre_parse_checks(&path);
+
+    // Should have missing semicolon errors
+    let semicolon_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "missing-semicolon")
+        .collect();
+
+    assert!(
+        !semicolon_errors.is_empty(),
+        "Expected missing-semicolon errors"
+    );
+
+    // All semicolon issues should be errors
+    for error in &semicolon_errors {
+        assert_eq!(error.severity, Severity::Error);
+    }
+}
