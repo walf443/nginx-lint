@@ -13,7 +13,8 @@
       "Bash(done)",
       "Bash(git add:*)",
       "Bash(ls:*)",
-      "Bash(while read f)"
+      "Bash(while read f)",
+      "Bash(git checkout:*)"
     ]
   }
 }
