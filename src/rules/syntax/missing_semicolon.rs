@@ -73,11 +73,20 @@ impl LintRule for MissingSemicolon {
                 continue;
             }
 
+            // Strip inline comments before checking for semicolon
+            let code_part = strip_inline_comment(trimmed);
+            let code_part = code_part.trim();
+
+            // Skip if the line is empty after stripping comments
+            if code_part.is_empty() {
+                continue;
+            }
+
             // Check if line ends with semicolon
-            if !trimmed.ends_with(';') {
+            if !code_part.ends_with(';') {
                 // This line looks like a directive but doesn't end with semicolon
                 // Make sure it's not just a value continuation or include pattern
-                if looks_like_directive(trimmed) {
+                if looks_like_directive(code_part) {
                     errors.push(
                         LintError::new(
                             self.name(),
@@ -92,6 +101,35 @@ impl LintRule for MissingSemicolon {
 
         errors
     }
+}
+
+/// Strip inline comments from a line, respecting string literals
+fn strip_inline_comment(line: &str) -> &str {
+    let mut in_string = false;
+    let mut string_char: Option<char> = None;
+    let mut prev_char: Option<char> = None;
+
+    for (i, ch) in line.char_indices() {
+        // Handle string quotes (skip if escaped)
+        if (ch == '"' || ch == '\'') && prev_char != Some('\\') {
+            if string_char.is_none() {
+                string_char = Some(ch);
+                in_string = true;
+            } else if string_char == Some(ch) {
+                string_char = None;
+                in_string = false;
+            }
+        }
+
+        // Check for comment start (only if not in a string)
+        if ch == '#' && !in_string {
+            return &line[..i];
+        }
+
+        prev_char = Some(ch);
+    }
+
+    line
 }
 
 /// Check if a line looks like a directive (has a name and potentially arguments)
@@ -236,5 +274,18 @@ worker_processes auto;
 "#;
         let errors = check_content(content);
         assert_eq!(errors.len(), 1, "Expected 1 error - string ending with ; is not a real semicolon");
+    }
+
+    #[test]
+    fn test_comment_ending_with_semicolon() {
+        // Comment ends with semicolon but directive doesn't have one
+        let content = r#"http {
+    server {
+        listen 80  # port number;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error - comment ending with ; should not count");
     }
 }
