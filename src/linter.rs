@@ -66,7 +66,7 @@ impl Linter {
         use crate::rules::{
             AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
             InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
-            UnmatchedBraces,
+            UnclosedQuote, UnmatchedBraces,
         };
 
         let mut linter = Self::new();
@@ -74,6 +74,7 @@ impl Linter {
         // Syntax rules
         linter.add_rule(Box::new(DuplicateDirective));
         linter.add_rule(Box::new(UnmatchedBraces));
+        linter.add_rule(Box::new(UnclosedQuote));
         linter.add_rule(Box::new(MissingSemicolon));
 
         // Security rules

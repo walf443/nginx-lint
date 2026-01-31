@@ -618,6 +618,48 @@ fn test_duplicate_directive_expected() {
     );
 }
 
+// Syntax: unclosed_quote
+#[test]
+fn test_unclosed_quote_error() {
+    use nginx_lint::parse_string;
+
+    let path = rule_error_fixture("syntax", "unclosed_quote");
+    let linter = Linter::with_default_rules();
+
+    // Use a minimal config since unclosed_quote reads from file directly
+    let config = parse_string("").unwrap();
+    let errors = linter.lint(&config, &path);
+
+    let quote_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "unclosed-quote")
+        .collect();
+
+    assert!(
+        !quote_errors.is_empty(),
+        "Expected unclosed-quote errors"
+    );
+}
+
+#[test]
+fn test_unclosed_quote_expected() {
+    let path = rule_expected_fixture("syntax", "unclosed_quote");
+    let config = parse_config(&path).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, &path);
+
+    let quote_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "unclosed-quote")
+        .collect();
+
+    assert!(
+        quote_errors.is_empty(),
+        "Expected no unclosed-quote errors, got: {:?}",
+        quote_errors
+    );
+}
+
 #[test]
 fn test_generated_fixtures_parse_without_errors() {
     use std::fs;
