@@ -347,7 +347,7 @@ impl<'a> Lexer<'a> {
         match chars.next() {
             None => true,                          // End of input
             Some(c) if c.is_whitespace() => true,  // Followed by whitespace
-            Some('{') => true,                     // Followed by block opening brace
+            Some('{') => false,                    // Followed by '{' - this is ${var} syntax, not end anchor
             Some(c) if c.is_alphanumeric() => false, // Followed by variable name
             Some('_') => false,                    // Followed by variable name
             _ => true,                             // Other chars - treat as end anchor

@@ -351,3 +351,72 @@ server {
 
     assert_eq!(autoindex_warnings.len(), 1, "Expected 1 autoindex warning");
 }
+
+#[test]
+fn test_generated_fixtures_parse_without_errors() {
+    use std::fs;
+
+    let test_generated_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("test_generated");
+
+    // Skip if directory doesn't exist
+    if !test_generated_dir.exists() {
+        return;
+    }
+
+    let entries = fs::read_dir(&test_generated_dir).expect("Failed to read test_generated directory");
+
+    let mut tested_count = 0;
+    for entry in entries {
+        let entry = entry.expect("Failed to read directory entry");
+        let path = entry.path();
+
+        // Only test .conf files
+        if path.extension().is_some_and(|ext| ext == "conf") {
+            // First run pre-parse checks
+            let pre_errors = pre_parse_checks(&path);
+            let pre_errors_critical: Vec<_> = pre_errors
+                .iter()
+                .filter(|e| e.severity == Severity::Error)
+                .collect();
+
+            assert!(
+                pre_errors_critical.is_empty(),
+                "Pre-parse errors in {}: {:?}",
+                path.display(),
+                pre_errors_critical
+            );
+
+            // Then parse and lint
+            let config = parse_config(&path).unwrap_or_else(|e| {
+                panic!("Failed to parse {}: {}", path.display(), e)
+            });
+
+            let linter = Linter::with_default_rules();
+            let errors = linter.lint(&config, &path);
+
+            // Should have no errors (warnings and info are OK)
+            let error_count = errors
+                .iter()
+                .filter(|e| e.severity == Severity::Error)
+                .count();
+
+            assert_eq!(
+                error_count, 0,
+                "Expected no errors in {}, got: {:?}",
+                path.display(),
+                errors.iter().filter(|e| e.severity == Severity::Error).collect::<Vec<_>>()
+            );
+
+            tested_count += 1;
+        }
+    }
+
+    // Ensure we actually tested some files
+    assert!(
+        tested_count > 0,
+        "No .conf files found in test_generated directory"
+    );
+}
