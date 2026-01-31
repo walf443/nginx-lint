@@ -32,16 +32,6 @@ fn find_first_case(category: &str, rule: &str) -> Option<String> {
 fn rule_error_fixture(category: &str, rule: &str) -> PathBuf {
     let case = find_first_case(category, rule)
         .unwrap_or_else(|| panic!("No case directory found for {}/{}", category, rule));
-    rule_case_error_fixture(category, rule, &case)
-}
-
-fn rule_expected_fixture(category: &str, rule: &str) -> PathBuf {
-    let case = find_first_case(category, rule)
-        .unwrap_or_else(|| panic!("No case directory found for {}/{}", category, rule));
-    rule_case_expected_fixture(category, rule, &case)
-}
-
-fn rule_case_error_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
     fixtures_base()
         .join("rules")
         .join(category)
@@ -51,21 +41,15 @@ fn rule_case_error_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
         .join("nginx.conf")
 }
 
-fn rule_case_expected_fixture(category: &str, rule: &str, case: &str) -> PathBuf {
-    fixtures_base()
-        .join("rules")
-        .join(category)
-        .join(rule)
-        .join(case)
-        .join("expected")
-        .join("nginx.conf")
-}
-
 fn misc_fixture(name: &str) -> PathBuf {
     fixtures_base()
         .join(name)
         .join("nginx.conf")
 }
+
+// ============================================================================
+// Parser tests - test parsing of various config structures
+// ============================================================================
 
 #[test]
 fn test_valid_config() {
@@ -84,65 +68,6 @@ fn test_valid_config() {
         errors_and_warnings.is_empty(),
         "Expected no errors or warnings, got: {:?}",
         errors_and_warnings
-    );
-}
-
-#[test]
-fn test_server_tokens_enabled_error() {
-    let path = rule_error_fixture("security", "server_tokens_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    // Should have server_tokens warning
-    let server_tokens_warning = errors
-        .iter()
-        .find(|e| e.rule == "server-tokens-enabled");
-
-    assert!(
-        server_tokens_warning.is_some(),
-        "Expected server-tokens-enabled warning"
-    );
-    assert_eq!(server_tokens_warning.unwrap().severity, Severity::Warning);
-}
-
-#[test]
-fn test_server_tokens_enabled_expected() {
-    let path = rule_expected_fixture("security", "server_tokens_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    // Should NOT have server_tokens warning
-    let server_tokens_warning = errors
-        .iter()
-        .find(|e| e.rule == "server-tokens-enabled");
-
-    assert!(
-        server_tokens_warning.is_none(),
-        "Expected no server-tokens-enabled warning, got: {:?}",
-        server_tokens_warning
-    );
-}
-
-#[test]
-fn test_multiple_issues_config() {
-    let path = misc_fixture("multiple_issues");
-    let config = parse_config(&path).expect("Failed to parse multiple_issues config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    // Should have multiple server_tokens warnings
-    let server_tokens_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "server-tokens-enabled")
-        .collect();
-
-    assert_eq!(
-        server_tokens_warnings.len(),
-        2,
-        "Expected 2 server-tokens-enabled warnings, got {}",
-        server_tokens_warnings.len()
     );
 }
 
@@ -220,6 +145,62 @@ fn test_with_nested_include_config() {
 }
 
 #[test]
+fn test_extension_module_directives() {
+    // Test that extension module directives can be parsed
+    use nginx_lint::parse_string;
+
+    let config = parse_string(
+        r#"
+http {
+    server {
+        more_set_headers "Server: Custom";
+        lua_code_cache on;
+        gzip_types text/plain application/json;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        autoindex off;
+    }
+}
+"#,
+    )
+    .expect("Failed to parse extension module directives");
+
+    // Verify all directives were parsed
+    let directives: Vec<_> = config.all_directives().collect();
+    let names: Vec<&str> = directives.iter().map(|d| d.name.as_str()).collect();
+
+    assert!(names.contains(&"more_set_headers"));
+    assert!(names.contains(&"lua_code_cache"));
+    assert!(names.contains(&"gzip_types"));
+    assert!(names.contains(&"ssl_protocols"));
+    assert!(names.contains(&"autoindex"));
+}
+
+// ============================================================================
+// Specific behavior tests - tests that check specific details
+// ============================================================================
+
+#[test]
+fn test_multiple_issues_config() {
+    let path = misc_fixture("multiple_issues");
+    let config = parse_config(&path).expect("Failed to parse multiple_issues config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, &path);
+
+    // Should have multiple server_tokens warnings
+    let server_tokens_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+
+    assert_eq!(
+        server_tokens_warnings.len(),
+        2,
+        "Expected 2 server-tokens-enabled warnings, got {}",
+        server_tokens_warnings.len()
+    );
+}
+
+#[test]
 fn test_error_locations() {
     let path = rule_error_fixture("security", "server_tokens_enabled");
     let config = parse_config(&path).expect("Failed to parse config");
@@ -266,185 +247,6 @@ fn test_severity_counts() {
     assert_eq!(error_count, 0, "Expected 0 errors");
     assert_eq!(warning_count, 2, "Expected 2 warnings");
     assert_eq!(info_count, 2, "Expected 2 infos");
-}
-
-#[test]
-fn test_inconsistent_indentation_error() {
-    let path = rule_error_fixture("style", "inconsistent_indentation");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    // Should have indentation warnings
-    let indentation_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "inconsistent-indentation")
-        .collect();
-
-    assert!(
-        !indentation_warnings.is_empty(),
-        "Expected inconsistent-indentation warnings"
-    );
-
-    // All indentation issues should be warnings
-    for warning in &indentation_warnings {
-        assert_eq!(warning.severity, Severity::Warning);
-    }
-}
-
-#[test]
-fn test_inconsistent_indentation_expected() {
-    let path = rule_expected_fixture("style", "inconsistent_indentation");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    // Should NOT have indentation warnings
-    let indentation_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "inconsistent-indentation")
-        .collect();
-
-    assert!(
-        indentation_warnings.is_empty(),
-        "Expected no inconsistent-indentation warnings, got: {:?}",
-        indentation_warnings
-    );
-}
-
-#[test]
-fn test_unmatched_braces_error() {
-    let path = rule_error_fixture("syntax", "unmatched_braces");
-
-    // Pre-parse checks should detect unmatched braces
-    let errors = pre_parse_checks(&path);
-
-    // Should have unmatched braces errors
-    let brace_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "unmatched-braces")
-        .collect();
-
-    assert!(
-        !brace_errors.is_empty(),
-        "Expected unmatched-braces errors"
-    );
-
-    // All brace issues should be errors (not warnings)
-    for error in &brace_errors {
-        assert_eq!(error.severity, Severity::Error);
-    }
-
-    // Parsing should fail for this file
-    assert!(
-        parse_config(&path).is_err(),
-        "Expected parse error for unmatched braces"
-    );
-}
-
-#[test]
-fn test_unmatched_braces_expected() {
-    let path = rule_expected_fixture("syntax", "unmatched_braces");
-
-    // Pre-parse checks should NOT detect unmatched braces
-    let errors = pre_parse_checks(&path);
-
-    let brace_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "unmatched-braces")
-        .collect();
-
-    assert!(
-        brace_errors.is_empty(),
-        "Expected no unmatched-braces errors, got: {:?}",
-        brace_errors
-    );
-
-    // Parsing should succeed
-    assert!(
-        parse_config(&path).is_ok(),
-        "Expected successful parse"
-    );
-}
-
-#[test]
-fn test_missing_semicolon_error() {
-    let path = rule_error_fixture("syntax", "missing_semicolon");
-
-    // Pre-parse checks should detect missing semicolons
-    let errors = pre_parse_checks(&path);
-
-    // Should have missing semicolon errors
-    let semicolon_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "missing-semicolon")
-        .collect();
-
-    assert!(
-        !semicolon_errors.is_empty(),
-        "Expected missing-semicolon errors"
-    );
-
-    // All semicolon issues should be errors
-    for error in &semicolon_errors {
-        assert_eq!(error.severity, Severity::Error);
-    }
-}
-
-#[test]
-fn test_missing_semicolon_expected() {
-    let path = rule_expected_fixture("syntax", "missing_semicolon");
-
-    // Pre-parse checks should NOT detect missing semicolons
-    let errors = pre_parse_checks(&path);
-
-    let semicolon_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "missing-semicolon")
-        .collect();
-
-    assert!(
-        semicolon_errors.is_empty(),
-        "Expected no missing-semicolon errors, got: {:?}",
-        semicolon_errors
-    );
-
-    // Parsing should succeed
-    assert!(
-        parse_config(&path).is_ok(),
-        "Expected successful parse"
-    );
-}
-
-#[test]
-fn test_extension_module_directives() {
-    // Test that extension module directives can be parsed
-    use nginx_lint::parse_string;
-
-    let config = parse_string(
-        r#"
-http {
-    server {
-        more_set_headers "Server: Custom";
-        lua_code_cache on;
-        gzip_types text/plain application/json;
-        ssl_protocols TLSv1.2 TLSv1.3;
-        autoindex off;
-    }
-}
-"#,
-    )
-    .expect("Failed to parse extension module directives");
-
-    // Verify all directives were parsed
-    let directives: Vec<_> = config.all_directives().collect();
-    let names: Vec<&str> = directives.iter().map(|d| d.name.as_str()).collect();
-
-    assert!(names.contains(&"more_set_headers"));
-    assert!(names.contains(&"lua_code_cache"));
-    assert!(names.contains(&"gzip_types"));
-    assert!(names.contains(&"ssl_protocols"));
-    assert!(names.contains(&"autoindex"));
 }
 
 #[test]
@@ -499,200 +301,8 @@ server {
     assert_eq!(autoindex_warnings.len(), 1, "Expected 1 autoindex warning");
 }
 
-// Best practices: gzip_not_enabled
-#[test]
-fn test_gzip_not_enabled_error() {
-    let path = rule_error_fixture("best_practices", "gzip_not_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let gzip_info = errors.iter().find(|e| e.rule == "gzip-not-enabled");
-    assert!(gzip_info.is_some(), "Expected gzip-not-enabled info");
-    assert_eq!(gzip_info.unwrap().severity, Severity::Info);
-}
-
-#[test]
-fn test_gzip_not_enabled_expected() {
-    let path = rule_expected_fixture("best_practices", "gzip_not_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let gzip_info = errors.iter().find(|e| e.rule == "gzip-not-enabled");
-    assert!(gzip_info.is_none(), "Expected no gzip-not-enabled info");
-}
-
-// Best practices: missing_error_log
-#[test]
-fn test_missing_error_log_error() {
-    let path = rule_error_fixture("best_practices", "missing_error_log");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let error_log_info = errors.iter().find(|e| e.rule == "missing-error-log");
-    assert!(error_log_info.is_some(), "Expected missing-error-log info");
-    assert_eq!(error_log_info.unwrap().severity, Severity::Info);
-}
-
-#[test]
-fn test_missing_error_log_expected() {
-    let path = rule_expected_fixture("best_practices", "missing_error_log");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let error_log_info = errors.iter().find(|e| e.rule == "missing-error-log");
-    assert!(error_log_info.is_none(), "Expected no missing-error-log info");
-}
-
-// Security: autoindex_enabled
-#[test]
-fn test_autoindex_enabled_error() {
-    let path = rule_error_fixture("security", "autoindex_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let autoindex_warning = errors.iter().find(|e| e.rule == "autoindex-enabled");
-    assert!(autoindex_warning.is_some(), "Expected autoindex-enabled warning");
-    assert_eq!(autoindex_warning.unwrap().severity, Severity::Warning);
-}
-
-#[test]
-fn test_autoindex_enabled_expected() {
-    let path = rule_expected_fixture("security", "autoindex_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let autoindex_warning = errors.iter().find(|e| e.rule == "autoindex-enabled");
-    assert!(autoindex_warning.is_none(), "Expected no autoindex-enabled warning");
-}
-
-// Security: deprecated_ssl_protocol
-#[test]
-fn test_deprecated_ssl_protocol_error() {
-    let path = rule_error_fixture("security", "deprecated_ssl_protocol");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let ssl_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "deprecated-ssl-protocol")
-        .collect();
-
-    assert!(
-        !ssl_warnings.is_empty(),
-        "Expected deprecated-ssl-protocol warnings"
-    );
-}
-
-#[test]
-fn test_deprecated_ssl_protocol_expected() {
-    let path = rule_expected_fixture("security", "deprecated_ssl_protocol");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let ssl_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "deprecated-ssl-protocol")
-        .collect();
-
-    assert!(
-        ssl_warnings.is_empty(),
-        "Expected no deprecated-ssl-protocol warnings, got: {:?}",
-        ssl_warnings
-    );
-}
-
-// Syntax: duplicate_directive
-#[test]
-fn test_duplicate_directive_error() {
-    let path = rule_error_fixture("syntax", "duplicate_directive");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let duplicate_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "duplicate-directive")
-        .collect();
-
-    assert!(
-        !duplicate_warnings.is_empty(),
-        "Expected duplicate-directive warnings"
-    );
-}
-
-#[test]
-fn test_duplicate_directive_expected() {
-    let path = rule_expected_fixture("syntax", "duplicate_directive");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let duplicate_warnings: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "duplicate-directive")
-        .collect();
-
-    assert!(
-        duplicate_warnings.is_empty(),
-        "Expected no duplicate-directive warnings, got: {:?}",
-        duplicate_warnings
-    );
-}
-
-// Syntax: unclosed_quote
-#[test]
-fn test_unclosed_quote_error() {
-    use nginx_lint::parse_string;
-
-    let path = rule_error_fixture("syntax", "unclosed_quote");
-    let linter = Linter::with_default_rules();
-
-    // Use a minimal config since unclosed_quote reads from file directly
-    let config = parse_string("").unwrap();
-    let errors = linter.lint(&config, &path);
-
-    let quote_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "unclosed-quote")
-        .collect();
-
-    assert!(
-        !quote_errors.is_empty(),
-        "Expected unclosed-quote errors"
-    );
-}
-
-#[test]
-fn test_unclosed_quote_expected() {
-    let path = rule_expected_fixture("syntax", "unclosed_quote");
-    let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, &path);
-
-    let quote_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| e.rule == "unclosed-quote")
-        .collect();
-
-    assert!(
-        quote_errors.is_empty(),
-        "Expected no unclosed-quote errors, got: {:?}",
-        quote_errors
-    );
-}
-
 #[test]
 fn test_generated_fixtures_parse_without_errors() {
-    use std::fs;
-
     let test_generated_dir = fixtures_base().join("test_generated");
 
     // Skip if directory doesn't exist
@@ -756,147 +366,9 @@ fn test_generated_fixtures_parse_without_errors() {
 }
 
 // ============================================================================
-// Fix tests - verify that applying fixes to error produces expected output
-// ============================================================================
-
-/// Helper function to test that applying fixes to an error fixture produces the expected fixture
-fn test_fix_produces_expected(category: &str, rule: &str) {
-    test_fix_case_produces_expected(category, rule, "001_basic");
-}
-
-fn test_fix_case_produces_expected(category: &str, rule: &str, case: &str) {
-    use std::io::Write;
-
-    let error_path = rule_case_error_fixture(category, rule, case);
-    let expected_path = rule_case_expected_fixture(category, rule, case);
-
-    // Read error content
-    let error_content = fs::read_to_string(&error_path)
-        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}/{}: {}", category, rule, case, e));
-
-    // Create a temp file with error content
-    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-    write!(temp_file, "{}", error_content).expect("Failed to write temp file");
-    let temp_path = temp_file.path();
-
-    // Parse and get errors with fixes
-    let config = parse_config(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to parse error fixture for {}/{}/{}: {}", category, rule, case, e));
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, temp_path);
-
-    // Apply fixes
-    let fix_count = apply_fixes(temp_path, &errors)
-        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}/{}: {}", category, rule, case, e));
-
-    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}/{}", category, rule, case);
-
-    // Read the fixed content
-    let fixed_content = fs::read_to_string(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}/{}: {}", category, rule, case, e));
-
-    // Read expected content
-    let expected_content = fs::read_to_string(&expected_path)
-        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}/{}: {}", category, rule, case, e));
-
-    // Compare
-    assert_eq!(
-        fixed_content.trim(),
-        expected_content.trim(),
-        "Fixed content for {}/{}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
-        category,
-        rule,
-        case,
-        fixed_content,
-        expected_content
-    );
-}
-
-/// Helper function for rules that read from file directly (can't parse normally)
-fn test_fix_produces_expected_with_dummy_config(category: &str, rule: &str) {
-    test_fix_case_produces_expected_with_dummy_config(category, rule, "001_basic");
-}
-
-fn test_fix_case_produces_expected_with_dummy_config(category: &str, rule: &str, case: &str) {
-    use nginx_lint::parse_string;
-    use std::io::Write;
-
-    let error_path = rule_case_error_fixture(category, rule, case);
-    let expected_path = rule_case_expected_fixture(category, rule, case);
-
-    // Read error content
-    let error_content = fs::read_to_string(&error_path)
-        .unwrap_or_else(|e| panic!("Failed to read error fixture for {}/{}/{}: {}", category, rule, case, e));
-
-    // Create a temp file with error content
-    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-    write!(temp_file, "{}", error_content).expect("Failed to write temp file");
-    let temp_path = temp_file.path();
-
-    // Use dummy config since the rule reads from file directly
-    let config = parse_string("").unwrap();
-    let linter = Linter::with_default_rules();
-    let errors = linter.lint(&config, temp_path);
-
-    // Apply fixes
-    let fix_count = apply_fixes(temp_path, &errors)
-        .unwrap_or_else(|e| panic!("Failed to apply fixes for {}/{}/{}: {}", category, rule, case, e));
-
-    assert!(fix_count > 0, "Expected at least one fix to be applied for {}/{}/{}", category, rule, case);
-
-    // Read the fixed content
-    let fixed_content = fs::read_to_string(temp_path)
-        .unwrap_or_else(|e| panic!("Failed to read fixed temp file for {}/{}/{}: {}", category, rule, case, e));
-
-    // Read expected content
-    let expected_content = fs::read_to_string(&expected_path)
-        .unwrap_or_else(|e| panic!("Failed to read expected fixture for {}/{}/{}: {}", category, rule, case, e));
-
-    // Compare
-    assert_eq!(
-        fixed_content.trim(),
-        expected_content.trim(),
-        "Fixed content for {}/{}/{} does not match expected.\n\nFixed:\n{}\n\nExpected:\n{}",
-        category,
-        rule,
-        case,
-        fixed_content,
-        expected_content
-    );
-}
-
-#[test]
-fn test_fix_server_tokens_enabled() {
-    test_fix_produces_expected("security", "server_tokens_enabled");
-}
-
-#[test]
-fn test_fix_autoindex_enabled() {
-    test_fix_produces_expected("security", "autoindex_enabled");
-}
-
-#[test]
-fn test_fix_duplicate_directive() {
-    test_fix_produces_expected("syntax", "duplicate_directive");
-}
-
-#[test]
-fn test_fix_missing_semicolon() {
-    test_fix_produces_expected_with_dummy_config("syntax", "missing_semicolon");
-}
-
-#[test]
-fn test_fix_inconsistent_indentation() {
-    test_fix_produces_expected_with_dummy_config("style", "inconsistent_indentation");
-}
-
-#[test]
-fn test_fix_unmatched_braces() {
-    test_fix_produces_expected_with_dummy_config("syntax", "unmatched_braces");
-}
-
-// ============================================================================
-// Automatic fixture discovery tests
+// Automatic fixture discovery test
+// This single test covers all rule fixtures (error detection, expected passing,
+// and fix verification) by iterating over the fixtures/rules/ directory.
 // ============================================================================
 
 /// Get the rule name from a directory name (e.g., "server_tokens_enabled" -> "server-tokens-enabled")
