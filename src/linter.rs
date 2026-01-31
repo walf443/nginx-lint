@@ -20,6 +20,37 @@ impl std::fmt::Display for Severity {
     }
 }
 
+/// Represents a fix that can be applied to resolve a lint error
+#[derive(Debug, Clone, Serialize)]
+pub struct Fix {
+    /// Line number where the fix should be applied (1-indexed)
+    pub line: usize,
+    /// The original text to replace (if None, insert at the line)
+    pub old_text: Option<String>,
+    /// The new text to insert
+    pub new_text: String,
+}
+
+impl Fix {
+    /// Create a fix that replaces text on a specific line
+    pub fn replace(line: usize, old_text: &str, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: Some(old_text.to_string()),
+            new_text: new_text.to_string(),
+        }
+    }
+
+    /// Create a fix that replaces an entire line
+    pub fn replace_line(line: usize, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: new_text.to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LintError {
     pub rule: String,
@@ -28,6 +59,8 @@ pub struct LintError {
     pub severity: Severity,
     pub line: Option<usize>,
     pub column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<Fix>,
 }
 
 impl LintError {
@@ -39,12 +72,18 @@ impl LintError {
             severity,
             line: None,
             column: None,
+            fix: None,
         }
     }
 
     pub fn with_location(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
+        self
+    }
+
+    pub fn with_fix(mut self, fix: Fix) -> Self {
+        self.fix = Some(fix);
         self
     }
 }

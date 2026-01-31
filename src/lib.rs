@@ -3,10 +3,11 @@ pub mod parser;
 pub mod reporter;
 pub mod rules;
 
-pub use linter::{LintError, Linter, Severity};
+pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 pub use reporter::{OutputFormat, Reporter};
 
+use std::fs;
 use std::path::Path;
 
 /// Run pre-parse checks that can detect errors before parsing
@@ -34,4 +35,43 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
     errors.extend(semicolon_rule.check(&dummy_config, path));
 
     errors
+}
+
+/// Apply fixes to a file
+/// Returns the number of fixes applied
+pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> {
+    let content = fs::read_to_string(path)?;
+    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    // Collect fixes and sort by line number (descending to avoid offset issues)
+    let mut fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
+    fixes.sort_by(|a, b| b.line.cmp(&a.line));
+
+    let mut fix_count = 0;
+
+    for fix in fixes {
+        if fix.line == 0 || fix.line > lines.len() {
+            continue;
+        }
+
+        let line_idx = fix.line - 1;
+
+        if let Some(old_text) = &fix.old_text {
+            // Replace specific text on the line
+            if lines[line_idx].contains(old_text) {
+                lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
+                fix_count += 1;
+            }
+        } else {
+            // Replace the entire line
+            lines[line_idx] = fix.new_text.clone();
+            fix_count += 1;
+        }
+    }
+
+    if fix_count > 0 {
+        fs::write(path, lines.join("\n") + "\n")?;
+    }
+
+    Ok(fix_count)
 }

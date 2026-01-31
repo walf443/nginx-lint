@@ -1,4 +1,4 @@
-use crate::linter::{LintError, LintRule, Severity};
+use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
 
@@ -23,6 +23,11 @@ impl LintRule for ServerTokensEnabled {
 
         for directive in config.all_directives() {
             if directive.is("server_tokens") && directive.first_arg_is("on") {
+                let fix = Fix::replace(
+                    directive.span.start.line,
+                    "server_tokens on",
+                    "server_tokens off",
+                );
                 errors.push(
                     LintError::new(
                         self.name(),
@@ -30,7 +35,8 @@ impl LintRule for ServerTokensEnabled {
                         "server_tokens should be 'off' to hide nginx version",
                         Severity::Warning,
                     )
-                    .with_location(directive.span.start.line, directive.span.start.column),
+                    .with_location(directive.span.start.line, directive.span.start.column)
+                    .with_fix(fix),
                 );
             }
         }

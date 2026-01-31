@@ -1,5 +1,7 @@
 use clap::Parser;
-use nginx_lint::{parse_config, pre_parse_checks, Linter, OutputFormat, Reporter, Severity};
+use nginx_lint::{
+    apply_fixes, parse_config, pre_parse_checks, Linter, OutputFormat, Reporter, Severity,
+};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -12,8 +14,12 @@ struct Cli {
     file: PathBuf,
 
     /// Output format
-    #[arg(short, long, value_enum, default_value = "text")]
+    #[arg(short = 'o', long, value_enum, default_value = "text")]
     format: Format,
+
+    /// Automatically fix problems
+    #[arg(long)]
+    fix: bool,
 
     /// Show verbose output
     #[arg(short, long)]
@@ -79,7 +85,24 @@ fn main() -> ExitCode {
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &file_path);
 
-    reporter.report(&errors, &file_path);
+    if cli.fix {
+        // Apply fixes
+        match apply_fixes(&file_path, &errors) {
+            Ok(count) => {
+                if count > 0 {
+                    eprintln!("Applied {} fix(es) to {}", count, file_path.display());
+                } else {
+                    eprintln!("No automatic fixes available");
+                }
+            }
+            Err(e) => {
+                eprintln!("Error applying fixes: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        reporter.report(&errors, &file_path);
+    }
 
     let has_errors = errors.iter().any(|e| e.severity == Severity::Error);
     if has_errors {
