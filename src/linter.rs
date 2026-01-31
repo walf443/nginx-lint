@@ -1,4 +1,5 @@
 use crate::parser::ast::Config;
+use rayon::prelude::*;
 use serde::Serialize;
 use std::path::Path;
 
@@ -94,12 +95,17 @@ impl Linter {
         self.rules.push(rule);
     }
 
+    /// Run all lint rules in parallel and collect errors
+    ///
+    /// Results are collected in rule order (deterministic output)
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        let mut errors = Vec::new();
-        for rule in &self.rules {
-            errors.extend(rule.check(config, path));
-        }
-        errors
+        self.rules
+            .par_iter()
+            .map(|rule| rule.check(config, path))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .flatten()
+            .collect()
     }
 }
 
