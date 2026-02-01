@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nginx-lint - Online Linter</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #4fc3f7;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 20px;
+        }
+        .editor-container {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .panel {
+            flex: 1;
+            min-width: 400px;
+        }
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .panel-title {
+            font-weight: bold;
+            color: #888;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+        textarea {
+            width: 100%;
+            height: 400px;
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 14px;
+            padding: 15px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+        textarea:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
+        .results {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 15px;
+            height: 400px;
+            overflow-y: auto;
+        }
+        .error-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        .error-item.error {
+            background: rgba(244, 67, 54, 0.2);
+            border-left: 3px solid #f44336;
+        }
+        .error-item.warning {
+            background: rgba(255, 193, 7, 0.2);
+            border-left: 3px solid #ffc107;
+        }
+        .error-item.info {
+            background: rgba(33, 150, 243, 0.2);
+            border-left: 3px solid #2196f3;
+        }
+        .error-location {
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+        .error-rule {
+            color: #4fc3f7;
+            font-size: 11px;
+            float: right;
+        }
+        .error-message {
+            color: #fff;
+        }
+        .summary {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            padding: 10px;
+            background: #252525;
+            border-radius: 4px;
+        }
+        .summary-item {
+            font-size: 13px;
+        }
+        .summary-item.errors { color: #f44336; }
+        .summary-item.warnings { color: #ffc107; }
+        .summary-item.infos { color: #2196f3; }
+        .no-issues {
+            color: #4caf50;
+            text-align: center;
+            padding: 40px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        button {
+            background: #4fc3f7;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #81d4fa;
+        }
+        .version {
+            color: #666;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>nginx-lint</h1>
+        <p class="subtitle">Online nginx configuration linter - <span id="version" class="version">Loading...</span></p>
+
+        <div class="editor-container">
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">nginx.conf</span>
+                    <button onclick="lintConfig()">Lint</button>
+                </div>
+                <textarea id="editor" spellcheck="false"># nginx configuration
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+
+http {
+  server_tokens on;
+  gzip on;
+
+  server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+      root /var/www/html;
+      autoindex on;
+    }
+  }
+}</textarea>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Results</span>
+                </div>
+                <div id="results" class="results">
+                    <div class="loading">Loading WASM module...</div>
+                </div>
+                <div id="summary" class="summary" style="display: none;">
+                    <span id="error-count" class="summary-item errors"></span>
+                    <span id="warning-count" class="summary-item warnings"></span>
+                    <span id="info-count" class="summary-item infos"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, { lint, version, get_rule_names } from '/pkg/nginx_lint.js';
+
+        let wasmReady = false;
+
+        async function initWasm() {
+            try {
+                await init();
+                wasmReady = true;
+                document.getElementById('version').textContent = 'v' + version();
+                document.getElementById('results').innerHTML = '<div class="no-issues">Ready! Click "Lint" or start typing.</div>';
+
+                // Auto-lint on load
+                lintConfig();
+
+                // Auto-lint on input (debounced)
+                let timeout;
+                document.getElementById('editor').addEventListener('input', () => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(lintConfig, 300);
+                });
+            } catch (e) {
+                document.getElementById('results').innerHTML = '<div class="error-item error"><div class="error-message">Failed to load WASM module: ' + e.message + '</div></div>';
+            }
+        }
+
+        window.lintConfig = function() {
+            if (!wasmReady) return;
+
+            const content = document.getElementById('editor').value;
+            const resultsDiv = document.getElementById('results');
+            const summaryDiv = document.getElementById('summary');
+
+            try {
+                const result = lint(content);
+                const errors = JSON.parse(result.errors);
+
+                if (errors.length === 0) {
+                    resultsDiv.innerHTML = '<div class="no-issues">No issues found!</div>';
+                    summaryDiv.style.display = 'none';
+                } else {
+                    let html = '';
+                    errors.forEach(err => {
+                        const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
+                        html += `
+                            <div class="error-item ${err.severity}">
+                                <span class="error-rule">${err.category}/${err.rule}</span>
+                                <div class="error-location">${location}</div>
+                                <div class="error-message">${err.message}</div>
+                            </div>
+                        `;
+                    });
+                    resultsDiv.innerHTML = html;
+
+                    document.getElementById('error-count').textContent = result.error_count > 0 ? result.error_count + ' error(s)' : '';
+                    document.getElementById('warning-count').textContent = result.warning_count > 0 ? result.warning_count + ' warning(s)' : '';
+                    document.getElementById('info-count').textContent = result.info_count > 0 ? result.info_count + ' info(s)' : '';
+                    summaryDiv.style.display = 'flex';
+                }
+            } catch (e) {
+                resultsDiv.innerHTML = '<div class="error-item error"><div class="error-message">Parse error: ' + e.message + '</div></div>';
+                summaryDiv.style.display = 'none';
+            }
+        };
+
+        initWasm();
+    </script>
+</body>
+</html>

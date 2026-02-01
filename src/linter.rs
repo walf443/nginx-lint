@@ -1,5 +1,6 @@
 use crate::config::LintConfig;
 use crate::parser::ast::Config;
+#[cfg(feature = "cli")]
 use rayon::prelude::*;
 use serde::Serialize;
 use std::path::Path;
@@ -223,9 +224,15 @@ impl Linter {
         self.rules.push(rule);
     }
 
-    /// Run all lint rules in parallel and collect errors
+    /// Get a reference to all rules
+    pub fn rules(&self) -> &[Box<dyn LintRule>] {
+        &self.rules
+    }
+
+    /// Run all lint rules and collect errors
     ///
-    /// Results are collected in rule order (deterministic output)
+    /// Uses parallel iteration when the cli feature is enabled (via rayon)
+    #[cfg(feature = "cli")]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
         self.rules
             .par_iter()
@@ -233,6 +240,15 @@ impl Linter {
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
+            .collect()
+    }
+
+    /// Run all lint rules and collect errors (sequential version for WASM)
+    #[cfg(not(feature = "cli"))]
+    pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        self.rules
+            .iter()
+            .flat_map(|rule| rule.check(config, path))
             .collect()
     }
 }

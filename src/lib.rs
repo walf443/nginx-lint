@@ -1,21 +1,35 @@
 pub mod config;
-pub mod include;
 pub mod linter;
 pub mod parser;
-pub mod reporter;
 pub mod rules;
 
+// CLI-only modules (require filesystem access)
+#[cfg(feature = "cli")]
+pub mod include;
+#[cfg(feature = "cli")]
+pub mod reporter;
+
+// WASM module
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
-pub use include::{collect_included_files, IncludedFile};
 pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
+
+#[cfg(feature = "cli")]
+pub use include::{collect_included_files, IncludedFile};
+#[cfg(feature = "cli")]
 pub use reporter::{OutputFormat, Reporter};
 
+#[cfg(feature = "cli")]
 use std::fs;
+#[cfg(feature = "cli")]
 use std::path::Path;
 
 /// Run pre-parse checks that can detect errors before parsing
 /// These checks work on the raw file content and don't require a valid AST
+#[cfg(feature = "cli")]
 pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
     use linter::LintRule;
     use parser::ast::Config;
@@ -43,6 +57,7 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 
 /// Apply fixes to a file
 /// Returns the number of fixes applied
+#[cfg(feature = "cli")]
 pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> {
     let content = fs::read_to_string(path)?;
     let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();

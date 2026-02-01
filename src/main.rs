@@ -56,6 +56,16 @@ enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    /// Start a web server to try nginx-lint in the browser
+    Web {
+        /// Port to listen on
+        #[arg(short, long, default_value = "8080")]
+        port: u16,
+
+        /// Open browser automatically
+        #[arg(long)]
+        open: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -463,6 +473,94 @@ fn main() -> ExitCode {
             ConfigCommands::Init { output, force } => run_init(output.clone(), *force),
             ConfigCommands::Validate { config } => run_validate(config.clone()),
         },
+        Some(Commands::Web { port, open }) => run_web(*port, *open),
         None => run_lint(cli),
     }
+}
+
+#[cfg(feature = "web-server")]
+fn run_web(port: u16, open_browser: bool) -> ExitCode {
+    use tiny_http::{Response, Server};
+
+    // Embedded demo HTML
+    const INDEX_HTML: &str = include_str!("../demo/index.html");
+
+    // Check if pkg directory exists
+    let pkg_dir = std::path::Path::new("pkg");
+    if !pkg_dir.exists() {
+        eprintln!("Error: pkg/ directory not found.");
+        eprintln!();
+        eprintln!("Please build the WASM package first:");
+        eprintln!("  wasm-pack build --target web --no-default-features --features wasm");
+        return ExitCode::from(2);
+    }
+
+    let addr = format!("0.0.0.0:{}", port);
+    let server = match Server::http(&addr) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error starting server: {}", e);
+            return ExitCode::from(2);
+        }
+    };
+
+    let url = format!("http://localhost:{}", port);
+    eprintln!("Starting nginx-lint web demo at {}", url);
+    eprintln!("Press Ctrl+C to stop");
+
+    if open_browser {
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
+    }
+
+    for request in server.incoming_requests() {
+        let url = request.url();
+        let response = match url {
+            "/" | "/index.html" => {
+                Response::from_string(INDEX_HTML)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()
+                    )
+            }
+            path if path.starts_with("/pkg/") => {
+                let file_path = format!(".{}", path);
+                match std::fs::read(&file_path) {
+                    Ok(content) => {
+                        let content_type = if path.ends_with(".js") {
+                            "application/javascript"
+                        } else if path.ends_with(".wasm") {
+                            "application/wasm"
+                        } else if path.ends_with(".d.ts") {
+                            "application/typescript"
+                        } else {
+                            "application/octet-stream"
+                        };
+                        Response::from_data(content)
+                            .with_header(
+                                tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()
+                            )
+                    }
+                    Err(_) => Response::from_string("Not Found").with_status_code(404),
+                }
+            }
+            _ => Response::from_string("Not Found").with_status_code(404),
+        };
+
+        let _ = request.respond(response);
+    }
+
+    ExitCode::SUCCESS
+}
+
+#[cfg(not(feature = "web-server"))]
+fn run_web(_port: u16, _open_browser: bool) -> ExitCode {
+    eprintln!("Error: Web server feature is not enabled.");
+    eprintln!();
+    eprintln!("Rebuild with the web-server feature:");
+    eprintln!("  cargo build --features web-server");
+    ExitCode::from(2)
 }
