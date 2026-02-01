@@ -147,12 +147,65 @@
             color: #666;
             font-size: 12px;
         }
+        .settings {
+            background: #252525;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .settings-title {
+            font-weight: bold;
+            color: #888;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .setting-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .setting-item label {
+            color: #aaa;
+            font-size: 13px;
+        }
+        .setting-item input[type="number"] {
+            width: 60px;
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            color: #d4d4d4;
+            padding: 6px 10px;
+            font-size: 13px;
+        }
+        .setting-item input[type="number"]:focus {
+            outline: none;
+            border-color: #4fc3f7;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>nginx-lint</h1>
         <p class="subtitle">Online nginx configuration linter - <span id="version" class="version">Loading...</span></p>
+
+        <div class="settings">
+            <div class="settings-title">Settings</div>
+            <div class="setting-row">
+                <div class="setting-item">
+                    <label for="indent-size">Indent Size:</label>
+                    <input type="number" id="indent-size" value="2" min="1" max="8">
+                </div>
+            </div>
+        </div>
 
         <div class="editor-container">
             <div class="panel">
@@ -197,7 +250,7 @@ http {
     </div>
 
     <script type="module">
-        import init, { lint, version, get_rule_names } from '/pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
 
@@ -217,6 +270,13 @@ http {
                     clearTimeout(timeout);
                     timeout = setTimeout(lintConfig, 300);
                 });
+
+                // Re-lint when settings change
+                document.getElementById('indent-size').addEventListener('change', lintConfig);
+                document.getElementById('indent-size').addEventListener('input', () => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(lintConfig, 300);
+                });
             } catch (e) {
                 document.getElementById('results').innerHTML = '<div class="error-item error"><div class="error-message">Failed to load WASM module: ' + e.message + '</div></div>';
             }
@@ -226,11 +286,17 @@ http {
             if (!wasmReady) return;
 
             const content = document.getElementById('editor').value;
+            const indentSize = parseInt(document.getElementById('indent-size').value, 10) || 2;
             const resultsDiv = document.getElementById('results');
             const summaryDiv = document.getElementById('summary');
 
+            // Build options
+            const options = JSON.stringify({
+                indent_size: indentSize
+            });
+
             try {
-                const result = lint(content);
+                const result = lint_with_config(content, options);
                 const errors = JSON.parse(result.errors);
 
                 if (errors.length === 0) {

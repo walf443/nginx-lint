@@ -86,7 +86,7 @@ impl From<&LintError> for JsLintError {
     }
 }
 
-/// Lint an nginx configuration string
+/// Lint an nginx configuration string with default settings
 ///
 /// # Arguments
 /// * `content` - The nginx configuration content to lint
@@ -95,11 +95,62 @@ impl From<&LintError> for JsLintError {
 /// A `WasmLintResult` containing the lint errors as JSON
 #[wasm_bindgen]
 pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
+    lint_with_config(content, "")
+}
+
+/// Lint options passed from JavaScript
+#[derive(serde::Deserialize, Default)]
+struct LintOptions {
+    #[serde(default)]
+    indent_size: Option<usize>,
+}
+
+/// Lint an nginx configuration string with custom settings
+///
+/// # Arguments
+/// * `content` - The nginx configuration content to lint
+/// * `options_json` - JSON string with options (e.g., `{"indent_size": 4}`)
+///
+/// # Returns
+/// A `WasmLintResult` containing the lint errors as JSON
+#[wasm_bindgen]
+pub fn lint_with_config(content: &str, options_json: &str) -> Result<WasmLintResult, JsValue> {
+    use crate::config::{LintConfig, RuleConfig};
+    use std::collections::HashMap;
+
+    // Parse options
+    let options: LintOptions = if options_json.is_empty() {
+        LintOptions::default()
+    } else {
+        serde_json::from_str(options_json).map_err(|e| JsValue::from_str(&e.to_string()))?
+    };
+
     // Parse the configuration
     let config = parse_string(content).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    // Create linter with default rules
-    let linter = Linter::with_default_rules();
+    // Build LintConfig from options
+    let lint_config = if options.indent_size.is_some() {
+        let mut rules = HashMap::new();
+        if let Some(indent_size) = options.indent_size {
+            rules.insert(
+                "inconsistent-indentation".to_string(),
+                RuleConfig {
+                    enabled: true,
+                    indent_size: Some(indent_size),
+                    ..Default::default()
+                },
+            );
+        }
+        Some(LintConfig {
+            rules,
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
+    // Create linter with config
+    let linter = Linter::with_config(lint_config.as_ref());
 
     // Lint the configuration (use a dummy path since we're linting a string)
     let errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
