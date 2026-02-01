@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
-    apply_fixes, collect_included_files, parse_config, pre_parse_checks, ColorMode, LintConfig,
-    Linter, OutputFormat, Reporter, Severity,
+    apply_fixes, collect_included_files, parse_config, pre_parse_checks, ColorMode, IncludedFile,
+    LintConfig, LintError, Linter, OutputFormat, Reporter, Severity,
 };
+use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -230,6 +231,60 @@ fn run_validate(config_path: PathBuf) -> ExitCode {
     }
 }
 
+/// Result of linting a single file
+enum FileResult {
+    PreParseErrors {
+        path: PathBuf,
+        errors: Vec<LintError>,
+    },
+    ParseError {
+        path: PathBuf,
+        error: String,
+    },
+    LintErrors {
+        path: PathBuf,
+        errors: Vec<LintError>,
+    },
+}
+
+/// Lint a single included file and return the result
+fn lint_file(included: &IncludedFile, linter: &Linter) -> FileResult {
+    let path = &included.path;
+
+    // Run pre-parse checks first
+    let pre_parse_errors = pre_parse_checks(path);
+
+    // If there are pre-parse errors (like unmatched braces), return them
+    if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
+        return FileResult::PreParseErrors {
+            path: path.clone(),
+            errors: pre_parse_errors,
+        };
+    }
+
+    // Handle parse errors
+    if let Some(ref error) = included.parse_error {
+        return FileResult::ParseError {
+            path: path.clone(),
+            error: error.clone(),
+        };
+    }
+
+    // Lint the parsed config
+    if let Some(ref config) = included.config {
+        let errors = linter.lint(config, path);
+        FileResult::LintErrors {
+            path: path.clone(),
+            errors,
+        }
+    } else {
+        FileResult::LintErrors {
+            path: path.clone(),
+            errors: Vec::new(),
+        }
+    }
+}
+
 fn run_lint(cli: Cli) -> ExitCode {
     let file = match cli.file {
         Some(f) => f,
@@ -318,63 +373,66 @@ fn run_lint(cli: Cli) -> ExitCode {
     }
 
     let linter = Linter::with_config(lint_config.as_ref());
+
+    // Lint files (parallel when not fixing, sequential when fixing)
+    let results: Vec<FileResult> = if cli.fix {
+        // Sequential processing for fix mode (file modifications should not be parallel)
+        included_files
+            .iter()
+            .map(|inc| lint_file(inc, &linter))
+            .collect()
+    } else {
+        // Parallel processing for lint-only mode
+        included_files
+            .par_iter()
+            .map(|inc| lint_file(inc, &linter))
+            .collect()
+    };
+
+    // Process results sequentially (for consistent output ordering)
     let mut all_errors = Vec::new();
     let mut has_fatal_error = false;
 
-    // Lint each file
-    for included in &included_files {
-        let path = &included.path;
-
-        // Run pre-parse checks first
-        let pre_parse_errors = pre_parse_checks(path);
-
-        // If there are pre-parse errors, handle them
-        if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
-            if cli.fix {
-                match apply_fixes(path, &pre_parse_errors) {
-                    Ok(count) => {
-                        if count > 0 {
-                            eprintln!("Applied {} fix(es) to {}", count, path.display());
+    for result in results {
+        match result {
+            FileResult::PreParseErrors { path, errors } => {
+                if cli.fix {
+                    match apply_fixes(&path, &errors) {
+                        Ok(count) => {
+                            if count > 0 {
+                                eprintln!("Applied {} fix(es) to {}", count, path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error applying fixes to {}: {}", path.display(), e);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                    }
+                } else {
+                    reporter.report(&errors, &path);
                 }
-            } else {
-                reporter.report(&pre_parse_errors, path);
+                has_fatal_error = true;
             }
-            has_fatal_error = true;
-            continue;
-        }
-
-        // Handle parse errors
-        if let Some(ref error) = included.parse_error {
-            eprintln!("Error parsing {}: {}", path.display(), error);
-            has_fatal_error = true;
-            continue;
-        }
-
-        // Lint the parsed config
-        if let Some(ref config) = included.config {
-            let errors = linter.lint(config, path);
-
-            if cli.fix {
-                match apply_fixes(path, &errors) {
-                    Ok(count) => {
-                        if count > 0 {
-                            eprintln!("Applied {} fix(es) to {}", count, path.display());
+            FileResult::ParseError { path, error } => {
+                eprintln!("Error parsing {}: {}", path.display(), error);
+                has_fatal_error = true;
+            }
+            FileResult::LintErrors { path, errors } => {
+                if cli.fix {
+                    match apply_fixes(&path, &errors) {
+                        Ok(count) => {
+                            if count > 0 {
+                                eprintln!("Applied {} fix(es) to {}", count, path.display());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error applying fixes to {}: {}", path.display(), e);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                    }
+                } else {
+                    reporter.report(&errors, &path);
                 }
-            } else {
-                reporter.report(&errors, path);
+                all_errors.extend(errors);
             }
-
-            all_errors.extend(errors);
         }
     }
 
