@@ -46,9 +46,7 @@
         .panel-title {
             font-weight: bold;
             color: #888;
-            text-transform: uppercase;
             font-size: 12px;
-            letter-spacing: 1px;
         }
         textarea {
             width: 100%;
@@ -63,10 +61,10 @@
             line-height: 1.5;
         }
         textarea.editor {
-            height: 350px;
+            height: 480px;
         }
         textarea.config {
-            height: 150px;
+            height: 180px;
             font-size: 12px;
         }
         textarea:focus {
@@ -78,7 +76,7 @@
             border: 1px solid #404040;
             border-radius: 4px;
             padding: 15px;
-            height: 400px;
+            height: 250px;
             overflow-y: auto;
         }
         .error-item {
@@ -184,6 +182,20 @@ http {
     }
   }
 }</textarea>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Results</span>
+                </div>
+                <div id="results" class="results">
+                    <div class="loading">Loading WASM module...</div>
+                </div>
+                <div id="summary" class="summary" style="display: none;">
+                    <span id="error-count" class="summary-item errors"></span>
+                    <span id="warning-count" class="summary-item warnings"></span>
+                    <span id="info-count" class="summary-item infos"></span>
+                </div>
 
                 <div class="panel-header" style="margin-top: 15px;">
                     <span class="panel-title">.nginx-lint.toml</span>
@@ -200,20 +212,6 @@ enabled = true
 
 [rules.autoindex-enabled]
 enabled = true</textarea>
-            </div>
-
-            <div class="panel">
-                <div class="panel-header">
-                    <span class="panel-title">Results</span>
-                </div>
-                <div id="results" class="results">
-                    <div class="loading">Loading WASM module...</div>
-                </div>
-                <div id="summary" class="summary" style="display: none;">
-                    <span id="error-count" class="summary-item errors"></span>
-                    <span id="warning-count" class="summary-item warnings"></span>
-                    <span id="info-count" class="summary-item infos"></span>
-                </div>
             </div>
         </div>
     </div>
