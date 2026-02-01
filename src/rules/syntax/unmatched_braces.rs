@@ -560,4 +560,386 @@ mod tests {
         );
         assert!(errors[0].fix.is_some(), "Expected fix to be provided");
     }
+
+    // =========================================================================
+    // Tests with custom block directives
+    // =========================================================================
+
+    fn check_braces_with_extras(content: &str, extras: &[String]) -> Vec<LintError> {
+        let rule = UnmatchedBraces;
+        rule.check_content_with_extras(content, extras)
+    }
+
+    #[test]
+    fn test_custom_block_directive_missing_brace() {
+        // Custom block directive from extension module
+        let content = r#"http {
+    my_custom_block
+        some_directive value;
+    }
+}
+"#;
+        // Without custom directives, no block directive error
+        let errors = check_braces_with_extras(content, &[]);
+        assert!(
+            !errors.iter().any(|e| e.message.contains("my_custom_block")),
+            "Should not detect custom directive without config"
+        );
+
+        // With custom directives, should detect missing brace
+        let extras = vec!["my_custom_block".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(
+            errors[0].message.contains("my_custom_block"),
+            "Expected custom block directive in error, got: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn test_multiple_custom_block_directives() {
+        let content = r#"http {
+    custom_auth
+        auth_type basic;
+    }
+
+    custom_cache
+        cache_size 100m;
+    }
+}
+"#;
+        let extras = vec!["custom_auth".to_string(), "custom_cache".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    // =========================================================================
+    // Tests for various built-in block directives
+    // =========================================================================
+
+    #[test]
+    fn test_if_block_missing_brace() {
+        let content = r#"server {
+    if ($request_uri ~* "\.php$")
+        return 403;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("if"));
+    }
+
+    #[test]
+    fn test_upstream_block_missing_brace() {
+        let content = r#"upstream backend
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
+}
+
+http {
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("upstream"));
+    }
+
+    #[test]
+    fn test_map_block_missing_brace() {
+        let content = r#"map $uri $new_uri
+    /old /new;
+    /legacy /current;
+}
+
+server {
+    listen 80;
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("map"));
+    }
+
+    #[test]
+    fn test_geo_block_missing_brace() {
+        let content = r#"geo $country
+    default unknown;
+    127.0.0.1 local;
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("geo"));
+    }
+
+    #[test]
+    fn test_limit_except_block_missing_brace() {
+        let content = r#"server {
+    location / {
+        limit_except GET POST
+            deny all;
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("limit_except"));
+    }
+
+    #[test]
+    fn test_events_block_missing_brace() {
+        let content = r#"events
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 80;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("events"));
+    }
+
+    // =========================================================================
+    // Tests for raw blocks (lua_block, etc.)
+    // =========================================================================
+
+    #[test]
+    fn test_lua_block_if_not_detected() {
+        // Lua's 'if' should not be detected as nginx block directive
+        let content = r#"http {
+    server {
+        content_by_lua_block {
+            if ngx.var.arg_test then
+                ngx.say("test")
+            end
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_lua_block_nested_braces() {
+        let content = r#"http {
+    server {
+        content_by_lua_block {
+            local t = { a = 1, b = 2 }
+            for k, v in pairs(t) do
+                ngx.say(k .. "=" .. v)
+            end
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_multiple_lua_blocks() {
+        let content = r#"http {
+    init_by_lua_block {
+        local cjson = require "cjson"
+    }
+
+    server {
+        access_by_lua_block {
+            if ngx.var.remote_addr == "127.0.0.1" then
+                return
+            end
+        }
+
+        content_by_lua_block {
+            ngx.say("hello")
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    // =========================================================================
+    // Edge cases and complex scenarios
+    // =========================================================================
+
+    #[test]
+    fn test_nested_blocks_one_missing_brace() {
+        let content = r#"http {
+    server {
+        location /api {
+            if ($request_method = POST)
+                proxy_pass http://backend;
+            }
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("if"));
+    }
+
+    #[test]
+    fn test_block_directive_with_complex_args() {
+        // location with regex
+        let content = r#"http {
+    server {
+        location ~ \.php$
+            fastcgi_pass unix:/var/run/php-fpm.sock;
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("location"));
+    }
+
+    #[test]
+    fn test_block_directive_on_multiple_lines() {
+        // This should not be detected as missing brace since the line ends correctly
+        let content = r#"http {
+    server {
+        listen 80;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_correctly_matched_all_block_types() {
+        let content = r#"events {
+    worker_connections 1024;
+}
+
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    map $uri $new {
+        default 0;
+    }
+
+    geo $country {
+        default unknown;
+    }
+
+    server {
+        listen 80;
+
+        location / {
+            if ($request_method = POST) {
+                return 405;
+            }
+        }
+
+        location /api {
+            limit_except GET {
+                deny all;
+            }
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_fix_adds_opening_brace() {
+        let content = r#"http {
+    server
+        listen 80;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1);
+
+        let fix = errors[0].fix.as_ref().expect("Expected fix");
+        assert!(
+            fix.new_text.contains("server {"),
+            "Fix should add opening brace, got: {}",
+            fix.new_text
+        );
+    }
+
+    #[test]
+    fn test_non_block_directive_not_detected() {
+        // 'listen', 'root', etc. are not block directives
+        let content = r#"http {
+    server {
+        listen
+        root /var/www;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        // Should not detect listen or root as block directives
+        assert!(
+            !errors.iter().any(|e| e.message.contains("listen") || e.message.contains("root")),
+            "Should not detect non-block directives: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_stream_block_missing_brace() {
+        let content = r#"stream
+    server {
+        listen 12345;
+        proxy_pass backend;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("stream"));
+    }
+
+    #[test]
+    fn test_mail_block_missing_brace() {
+        let content = r#"mail
+    server {
+        listen 25;
+        protocol smtp;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("mail"));
+    }
+
+    #[test]
+    fn test_types_block_missing_brace() {
+        let content = r#"http {
+    types
+        text/html html;
+        text/css css;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("types"));
+    }
 }
