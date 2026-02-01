@@ -1,5 +1,6 @@
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
+use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
 
@@ -10,6 +11,8 @@ impl SpaceBeforeSemicolon {
     /// Check space before semicolon on content string directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let mut raw_block_depth = 0; // Track nested braces inside raw blocks
+        let mut in_raw_block = false;
 
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
@@ -17,6 +20,53 @@ impl SpaceBeforeSemicolon {
             // Skip comment-only lines
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Check if this line starts a raw block (like content_by_lua_block {)
+            if !in_raw_block {
+                if let Some(first_word) = trimmed.split_whitespace().next() {
+                    if is_raw_block_directive(first_word) && trimmed.contains('{') {
+                        in_raw_block = true;
+                        raw_block_depth = 1;
+                        // Count additional braces on the same line
+                        for ch in trimmed.chars() {
+                            if ch == '{' {
+                                // Already counted the first one
+                            } else if ch == '}' {
+                                raw_block_depth -= 1;
+                                if raw_block_depth == 0 {
+                                    in_raw_block = false;
+                                    break;
+                                }
+                            }
+                        }
+                        // Skip the opening brace
+                        raw_block_depth = trimmed.chars().filter(|&c| c == '{').count() as i32
+                            - trimmed.chars().filter(|&c| c == '}').count() as i32;
+                        if raw_block_depth <= 0 {
+                            in_raw_block = false;
+                            raw_block_depth = 0;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            // If we're inside a raw block, track braces and skip semicolon checks
+            if in_raw_block {
+                for ch in trimmed.chars() {
+                    if ch == '{' {
+                        raw_block_depth += 1;
+                    } else if ch == '}' {
+                        raw_block_depth -= 1;
+                        if raw_block_depth <= 0 {
+                            in_raw_block = false;
+                            raw_block_depth = 0;
+                            break;
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -233,5 +283,44 @@ mod tests {
         assert_eq!(errors.len(), 1);
         let fix = errors[0].fix.as_ref().unwrap();
         assert_eq!(fix.new_text, "    listen 80;");
+    }
+
+    #[test]
+    fn test_lua_block_ignored() {
+        // Semicolons inside Lua blocks should be ignored
+        let content = r#"location / {
+    content_by_lua_block {
+        local a = 1 ;
+        ngx.say("hello ; world")
+    }
+}"#;
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_lua_block_with_error_after() {
+        // Error after Lua block should be detected
+        let content = r#"location / {
+    content_by_lua_block {
+        local a = 1;
+    }
+    return 200 ;
+}"#;
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].line, Some(5));
+    }
+
+    #[test]
+    fn test_access_by_lua_block_ignored() {
+        let content = r#"access_by_lua_block {
+    local x = 1 ;
+}"#;
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty());
     }
 }
