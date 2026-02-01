@@ -146,7 +146,8 @@ impl Linter {
         use crate::rules::{
             AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
             InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
-            TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote, UnmatchedBraces,
+            WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -210,6 +211,9 @@ impl Linter {
         }
         if is_enabled("trailing-whitespace") {
             linter.add_rule(Box::new(TrailingWhitespace));
+        }
+        if is_enabled("space-before-semicolon") {
+            linter.add_rule(Box::new(SpaceBeforeSemicolon));
         }
 
         // Best practices

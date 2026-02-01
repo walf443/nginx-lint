@@ -354,6 +354,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "weak-ssl-ciphers",
         "inconsistent-indentation",
         "trailing-whitespace",
+        "space-before-semicolon",
         "gzip-not-enabled",
         "missing-error-log",
     ]

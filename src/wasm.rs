@@ -137,8 +137,8 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     use crate::config::LintConfig;
     use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
     use crate::rules::{
-        InconsistentIndentation, MissingSemicolon, TrailingWhitespace, UnclosedQuote,
-        UnmatchedBraces,
+        InconsistentIndentation, MissingSemicolon, SpaceBeforeSemicolon, TrailingWhitespace,
+        UnclosedQuote, UnmatchedBraces,
     };
 
     // Parse TOML configuration
@@ -218,6 +218,12 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     // Run trailing whitespace check directly on content
     if is_enabled("trailing-whitespace") {
         let rule = TrailingWhitespace;
+        errors.extend(rule.check_content(content));
+    }
+
+    // Run space before semicolon check directly on content
+    if is_enabled("space-before-semicolon") {
+        let rule = SpaceBeforeSemicolon;
         errors.extend(rule.check_content(content));
     }
 
