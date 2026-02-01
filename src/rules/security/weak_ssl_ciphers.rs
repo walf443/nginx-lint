@@ -5,13 +5,13 @@ use std::path::Path;
 /// Check for weak SSL/TLS cipher suites
 pub struct WeakSslCiphers {
     /// Cipher patterns that are considered weak
-    pub weak_patterns: Vec<String>,
+    pub weak_ciphers: Vec<String>,
     /// Required exclusion patterns (e.g., !aNULL, !MD5)
     pub required_exclusions: Vec<String>,
 }
 
 /// Default weak cipher patterns
-const DEFAULT_WEAK_PATTERNS: &[&str] = &[
+const DEFAULT_WEAK_CIPHERS: &[&str] = &[
     "NULL",   // No encryption
     "EXPORT", // Export-grade (weak)
     "DES",    // Weak block cipher (includes 3DES)
@@ -32,7 +32,7 @@ const DEFAULT_REQUIRED_EXCLUSIONS: &[&str] = &["!aNULL", "!eNULL", "!EXPORT", "!
 impl Default for WeakSslCiphers {
     fn default() -> Self {
         Self {
-            weak_patterns: DEFAULT_WEAK_PATTERNS
+            weak_ciphers: DEFAULT_WEAK_CIPHERS
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
@@ -136,7 +136,7 @@ impl WeakSslCiphers {
             }
 
             // Check if this spec contains any weak pattern
-            for weak_pattern in &self.weak_patterns {
+            for weak_pattern in &self.weak_ciphers {
                 // Match the pattern in the cipher spec
                 // Handle both direct matches and compound cipher names
                 if spec.eq_ignore_ascii_case(weak_pattern)

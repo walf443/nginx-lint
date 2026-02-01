@@ -184,7 +184,16 @@ impl Linter {
             linter.add_rule(Box::new(AutoindexEnabled));
         }
         if is_enabled("weak-ssl-ciphers") {
-            linter.add_rule(Box::new(WeakSslCiphers::default()));
+            let mut rule = WeakSslCiphers::default();
+            if let Some(cfg) = config.and_then(|c| c.get_rule_config("weak-ssl-ciphers")) {
+                if let Some(weak_ciphers) = cfg.weak_ciphers.clone() {
+                    rule.weak_ciphers = weak_ciphers;
+                }
+                if let Some(required_exclusions) = cfg.required_exclusions.clone() {
+                    rule.required_exclusions = required_exclusions;
+                }
+            }
+            linter.add_rule(Box::new(rule));
         }
 
         // Style rules

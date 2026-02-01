@@ -149,6 +149,10 @@ pub struct RuleConfig {
     pub indent_size: Option<usize>,
     /// For deprecated-ssl-protocol rule: allowed protocols (default: ["TLSv1.2", "TLSv1.3"])
     pub allowed_protocols: Option<Vec<String>>,
+    /// For weak-ssl-ciphers rule: weak cipher patterns to detect
+    pub weak_ciphers: Option<Vec<String>>,
+    /// For weak-ssl-ciphers rule: required exclusion patterns
+    pub required_exclusions: Option<Vec<String>>,
 }
 
 fn default_true() -> bool {
