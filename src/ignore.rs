@@ -87,16 +87,42 @@ impl IgnoreTracker {
         let mut tracker = Self::new();
         let mut warnings = Vec::new();
 
-        for (line_number, line) in content.lines().enumerate() {
-            let line_number = line_number + 1; // Convert to 1-indexed
+        // First pass: parse all disable comments
+        let lines: Vec<&str> = content.lines().collect();
+        let mut parsed_comments: Vec<(usize, Result<ParsedDisableComment, IgnoreWarning>)> =
+            Vec::new();
 
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_number = line_idx + 1; // Convert to 1-indexed
             if let Some(result) = parse_disable_comment(line, line_number) {
-                match result {
-                    Ok(parsed) => {
-                        // Check if rule name is valid
-                        if let Some(valid) = valid_rules
-                            && !valid.contains(&parsed.rule_name)
-                        {
+                parsed_comments.push((line_idx, result));
+            }
+        }
+
+        // Second pass: adjust target lines for consecutive comment-only disables
+        // They should all target the first non-disable-comment line
+        for i in 0..parsed_comments.len() {
+            let (line_idx, ref result) = parsed_comments[i];
+
+            match result {
+                Ok(parsed) if !parsed.is_inline => {
+                    // Find the first non-disable-comment line after this one
+                    let mut target_idx = line_idx + 1;
+                    while target_idx < lines.len() {
+                        // Check if this line is also a disable comment
+                        let is_disable_comment = parsed_comments
+                            .iter()
+                            .any(|(idx, r)| *idx == target_idx && matches!(r, Ok(p) if !p.is_inline));
+                        if !is_disable_comment {
+                            break;
+                        }
+                        target_idx += 1;
+                    }
+                    let actual_target_line = target_idx + 1; // Convert to 1-indexed
+
+                    // Check if rule name is valid
+                    if let Some(valid) = valid_rules {
+                        if !valid.contains(&parsed.rule_name) {
                             warnings.push(IgnoreWarning {
                                 line: parsed.comment_line,
                                 message: format!(
@@ -105,27 +131,56 @@ impl IgnoreTracker {
                                 ),
                                 fix: None,
                             });
-                            // Still register it so we can track it as unused
                         }
-
-                        tracker
-                            .ignored_lines
-                            .entry(parsed.target_line)
-                            .or_default()
-                            .insert(parsed.rule_name.clone());
-
-                        tracker.directives.push(IgnoreDirective {
-                            comment_line: parsed.comment_line,
-                            target_line: parsed.target_line,
-                            rule_name: parsed.rule_name,
-                            used: false,
-                            is_inline: parsed.is_inline,
-                            content_before_comment: parsed.content_before_comment,
-                        });
                     }
-                    Err(warning) => {
-                        warnings.push(warning);
+
+                    tracker
+                        .ignored_lines
+                        .entry(actual_target_line)
+                        .or_default()
+                        .insert(parsed.rule_name.clone());
+
+                    tracker.directives.push(IgnoreDirective {
+                        comment_line: parsed.comment_line,
+                        target_line: actual_target_line,
+                        rule_name: parsed.rule_name.clone(),
+                        used: false,
+                        is_inline: false,
+                        content_before_comment: None,
+                    });
+                }
+                Ok(parsed) => {
+                    // Inline comment - targets current line
+                    if let Some(valid) = valid_rules {
+                        if !valid.contains(&parsed.rule_name) {
+                            warnings.push(IgnoreWarning {
+                                line: parsed.comment_line,
+                                message: format!(
+                                    "unknown rule '{}' in nginx-lint:disable comment",
+                                    parsed.rule_name
+                                ),
+                                fix: None,
+                            });
+                        }
                     }
+
+                    tracker
+                        .ignored_lines
+                        .entry(parsed.target_line)
+                        .or_default()
+                        .insert(parsed.rule_name.clone());
+
+                    tracker.directives.push(IgnoreDirective {
+                        comment_line: parsed.comment_line,
+                        target_line: parsed.target_line,
+                        rule_name: parsed.rule_name.clone(),
+                        used: false,
+                        is_inline: true,
+                        content_before_comment: parsed.content_before_comment.clone(),
+                    });
+                }
+                Err(warning) => {
+                    warnings.push(warning.clone());
                 }
             }
         }
@@ -530,6 +585,40 @@ server_tokens on;
         assert!(warnings.is_empty());
         assert!(tracker.is_ignored("server-tokens-enabled", 3)); // Line after comment
         assert!(!tracker.is_ignored("server-tokens-enabled", 4)); // Second occurrence
+    }
+
+    #[test]
+    fn test_consecutive_disable_comments() {
+        // Multiple consecutive disable comments should all target the same line
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason1
+# nginx-lint:disable autoindex-enabled reason2
+server_tokens on;
+"#;
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        assert!(warnings.is_empty());
+        // Both rules should be ignored on line 4 (the directive line)
+        assert!(tracker.is_ignored("server-tokens-enabled", 4));
+        assert!(tracker.is_ignored("autoindex-enabled", 4));
+        // Should not be ignored on the comment lines themselves
+        assert!(!tracker.is_ignored("server-tokens-enabled", 2));
+        assert!(!tracker.is_ignored("autoindex-enabled", 3));
+    }
+
+    #[test]
+    fn test_three_consecutive_disable_comments() {
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason1
+# nginx-lint:disable autoindex-enabled reason2
+# nginx-lint:disable gzip-not-enabled reason3
+server_tokens on;
+"#;
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        assert!(warnings.is_empty());
+        // All three rules should be ignored on line 5
+        assert!(tracker.is_ignored("server-tokens-enabled", 5));
+        assert!(tracker.is_ignored("autoindex-enabled", 5));
+        assert!(tracker.is_ignored("gzip-not-enabled", 5));
     }
 
     #[test]
