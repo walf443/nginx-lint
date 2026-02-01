@@ -20,13 +20,33 @@ impl SpaceBeforeSemicolon {
                 continue;
             }
 
-            // Find semicolons and check for preceding whitespace
+            // Find the statement-ending semicolon (not in quotes or comments)
             let chars: Vec<char> = line.chars().collect();
+            let mut in_single_quote = false;
+            let mut in_double_quote = false;
+            let mut prev_char = '\0';
+
             for (i, &ch) in chars.iter().enumerate() {
-                if ch == ';' && i > 0 {
-                    // Check if there's whitespace before the semicolon
-                    let prev_char = chars[i - 1];
-                    if prev_char == ' ' || prev_char == '\t' {
+                // Handle escape sequences
+                if prev_char == '\\' {
+                    prev_char = ch;
+                    continue;
+                }
+
+                // Track quote state
+                if ch == '\'' && !in_double_quote {
+                    in_single_quote = !in_single_quote;
+                } else if ch == '"' && !in_single_quote {
+                    in_double_quote = !in_double_quote;
+                }
+                // Stop at comment start (outside quotes)
+                else if ch == '#' && !in_single_quote && !in_double_quote {
+                    break;
+                }
+                // Check semicolon outside quotes
+                else if ch == ';' && !in_single_quote && !in_double_quote && i > 0 {
+                    let prev = chars[i - 1];
+                    if prev == ' ' || prev == '\t' {
                         // Find the start of the whitespace sequence
                         let mut ws_start = i - 1;
                         while ws_start > 0 {
@@ -54,10 +74,12 @@ impl SpaceBeforeSemicolon {
                             .with_fix(Fix::replace_line(line_number, &fixed_line)),
                         );
 
-                        // Only report once per line (first occurrence)
+                        // Only report once per line (first occurrence outside quotes)
                         break;
                     }
                 }
+
+                prev_char = ch;
             }
         }
 
@@ -166,13 +188,41 @@ mod tests {
     }
 
     #[test]
-    fn test_semicolon_in_quoted_string() {
-        // Semicolon in quoted string should still be checked if space before it
-        // This is technically valid in nginx for regex patterns
-        let content = r#"rewrite "^/test" /new ;"#;
+    fn test_semicolon_in_quoted_string_ignored() {
+        // Semicolon inside quoted string should be ignored
+        let content = r#"return 200 "hello ; world";"#;
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_space_before_semicolon_with_quoted_string() {
+        // Space before statement-ending semicolon should be detected
+        let content = r#"return 200 "hello" ;"#;
         let rule = SpaceBeforeSemicolon;
         let errors = rule.check_content(content);
         assert_eq!(errors.len(), 1);
+        let fix = errors[0].fix.as_ref().unwrap();
+        assert_eq!(fix.new_text, r#"return 200 "hello";"#);
+    }
+
+    #[test]
+    fn test_inline_comment_with_semicolon() {
+        // Semicolon in inline comment should be ignored
+        let content = "listen 80; # comment with ; here";
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_single_quoted_string() {
+        // Semicolon inside single-quoted string should be ignored
+        let content = "set $var 'value ; test';";
+        let rule = SpaceBeforeSemicolon;
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty());
     }
 
     #[test]
