@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
     apply_fixes, collect_included_files, parse_config, pre_parse_checks_with_config, ColorMode,
@@ -327,12 +327,8 @@ fn run_lint(cli: Cli) -> ExitCode {
     let file = match cli.file {
         Some(f) => f,
         None => {
-            eprintln!("Error: FILE argument is required");
-            eprintln!("Usage: nginx-lint <FILE>");
-            eprintln!("       nginx-lint config init");
-            eprintln!("       nginx-lint config validate");
-            eprintln!("       nginx-lint why <rule-name>");
-            eprintln!("       nginx-lint why --list");
+            let _ = Cli::command().print_help();
+            eprintln!();
             return ExitCode::from(2);
         }
     };
