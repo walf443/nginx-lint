@@ -14,8 +14,8 @@ pub static DOC: RuleDoc = RuleDoc {
 in version control and hinder code reviews.
 
 Removing trailing whitespace keeps configuration files clean."#,
-    bad_example: "listen 80;   \n# Trailing whitespace at end of line",
-    good_example: "listen 80;\n# No trailing whitespace",
+    bad_example: include_str!("trailing_whitespace/bad.conf"),
+    good_example: include_str!("trailing_whitespace/good.conf"),
     references: &[],
 };
 

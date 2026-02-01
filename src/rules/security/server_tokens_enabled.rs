@@ -14,12 +14,8 @@ in response headers and error pages. Attackers can use this information
 to target known vulnerabilities for that specific version.
 
 Hiding version information raises the difficulty of targeted attacks."#,
-    bad_example: r#"http {
-    server_tokens on;  # Version info exposed
-}"#,
-    good_example: r#"http {
-    server_tokens off;  # Hide version info
-}"#,
+    bad_example: include_str!("server_tokens_enabled/bad.conf"),
+    good_example: include_str!("server_tokens_enabled/good.conf"),
     references: &[
         "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
     ],

@@ -14,19 +14,8 @@ in log files for troubleshooting purposes.
 
 Setting an appropriate log level helps capture necessary information
 while managing disk usage."#,
-    bad_example: r#"# error_log not configured
-http {
-    server {
-        listen 80;
-    }
-}"#,
-    good_example: r#"error_log /var/log/nginx/error.log warn;
-
-http {
-    server {
-        listen 80;
-    }
-}"#,
+    bad_example: include_str!("missing_error_log/bad.conf"),
+    good_example: include_str!("missing_error_log/good.conf"),
     references: &[
         "https://nginx.org/en/docs/ngx_core_module.html#error_log",
     ],

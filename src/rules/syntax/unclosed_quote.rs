@@ -14,12 +14,8 @@ pub static DOC: RuleDoc = RuleDoc {
 correctly and may fail to start or behave unexpectedly.
 
 Strings enclosed in quotes must be closed with the same quote type."#,
-    bad_example: r#"location / {
-    add_header X-Custom "value;  # Missing closing quote
-}"#,
-    good_example: r#"location / {
-    add_header X-Custom "value";
-}"#,
+    bad_example: include_str!("unclosed_quote/bad.conf"),
+    good_example: include_str!("unclosed_quote/good.conf"),
     references: &[],
 };
 

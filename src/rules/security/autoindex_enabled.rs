@@ -14,13 +14,8 @@ This can expose unintended files and directory structures, potentially
 leading to information disclosure and security risks.
 
 Autoindex should be disabled unless explicitly required."#,
-    bad_example: r#"location /files {
-    autoindex on;  # Directory listing exposed
-}"#,
-    good_example: r#"location /files {
-    autoindex off;  # Disable directory listing
-    # Or simply omit the directive (default is off)
-}"#,
+    bad_example: include_str!("autoindex_enabled/bad.conf"),
+    good_example: include_str!("autoindex_enabled/good.conf"),
     references: &[
         "https://nginx.org/en/docs/http/ngx_http_autoindex_module.html",
     ],

@@ -92,3 +92,473 @@ mod tests {
         assert!(names.contains(&"gzip-not-enabled"));
     }
 }
+
+/// Tests that verify example files produce expected lint results
+#[cfg(test)]
+mod example_tests {
+    use super::*;
+    use crate::linter::{Fix, Linter};
+    use crate::parser::parse_string;
+    use std::path::Path;
+
+    /// Apply a single fix to content and return the result
+    fn apply_fix(content: &str, fix: &Fix) -> String {
+        let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+        if fix.line == 0 || fix.line > lines.len() + 1 {
+            return lines.join("\n");
+        }
+
+        if fix.insert_after {
+            let insert_idx = fix.line.min(lines.len());
+            lines.insert(insert_idx, fix.new_text.clone());
+        } else if fix.delete_line {
+            if fix.line <= lines.len() {
+                lines.remove(fix.line - 1);
+            }
+        } else if let Some(old_text) = &fix.old_text {
+            if fix.line <= lines.len() && lines[fix.line - 1].contains(old_text) {
+                lines[fix.line - 1] = lines[fix.line - 1].replace(old_text, &fix.new_text);
+            }
+        } else if fix.line <= lines.len() {
+            lines[fix.line - 1] = fix.new_text.clone();
+        }
+
+        lines.join("\n")
+    }
+
+    /// Apply all fixes to content (in reverse line order to avoid offset issues)
+    fn apply_fixes(content: &str, errors: &[crate::linter::LintError]) -> String {
+        let mut fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
+        // Sort by line descending, and for insert_after at same line, by indent ascending
+        // (process outer blocks first so inner blocks end up on top)
+        fixes.sort_by(|a, b| {
+            match b.line.cmp(&a.line) {
+                std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                    let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                    let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                    a_indent.cmp(&b_indent)
+                }
+                other => other,
+            }
+        });
+
+        let mut result = content.to_string();
+        for fix in fixes {
+            result = apply_fix(&result, fix);
+        }
+        result
+    }
+
+    /// Test that each rule's bad_example produces at least one error from that rule
+    #[test]
+    fn test_bad_examples_produce_errors() {
+        let linter = Linter::with_default_rules();
+        let dummy_path = Path::new("test.conf");
+
+        for doc in all_rule_docs() {
+            // Skip rules that check for file-level issues that can't be tested via parse_string
+            // (e.g., missing-error-log, gzip-not-enabled only check for presence/absence)
+            if doc.name == "missing-error-log" || doc.name == "gzip-not-enabled" {
+                continue;
+            }
+
+            // Skip style rules - they check content directly and are tested in test_style_bad_examples
+            if doc.category == "style" {
+                continue;
+            }
+
+            // Skip syntax rules that check content directly - tested in test_syntax_bad_examples
+            if doc.name == "unclosed-quote"
+                || doc.name == "missing-semicolon"
+                || doc.name == "unmatched-braces"
+            {
+                continue;
+            }
+
+            // Parse bad example and check for errors
+            let config = match parse_string(doc.bad_example) {
+                Ok(c) => c,
+                Err(e) => {
+                    panic!(
+                        "Rule '{}': bad_example failed to parse: {}\nExample:\n{}",
+                        doc.name, e, doc.bad_example
+                    );
+                }
+            };
+
+            let errors = linter.lint(&config, dummy_path);
+            let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == doc.name).collect();
+
+            assert!(
+                !rule_errors.is_empty(),
+                "Rule '{}': bad_example should produce at least one error\nExample:\n{}",
+                doc.name,
+                doc.bad_example
+            );
+        }
+    }
+
+    /// Test that each rule's good_example produces no errors from that rule
+    #[test]
+    fn test_good_examples_produce_no_errors() {
+        let linter = Linter::with_default_rules();
+        let dummy_path = Path::new("test.conf");
+
+        for doc in all_rule_docs() {
+            // Skip style rules - they check content directly and are tested in test_style_good_examples
+            if doc.category == "style" {
+                continue;
+            }
+
+            // Skip syntax rules that check content directly - tested in test_syntax_good_examples
+            if doc.name == "unclosed-quote"
+                || doc.name == "missing-semicolon"
+                || doc.name == "unmatched-braces"
+            {
+                continue;
+            }
+
+            // Parse good example
+            let config = match parse_string(doc.good_example) {
+                Ok(c) => c,
+                Err(e) => {
+                    panic!(
+                        "Rule '{}': good_example failed to parse: {}\nExample:\n{}",
+                        doc.name, e, doc.good_example
+                    );
+                }
+            };
+
+            let errors = linter.lint(&config, dummy_path);
+            let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == doc.name).collect();
+
+            assert!(
+                rule_errors.is_empty(),
+                "Rule '{}': good_example should not produce any errors, but got {:?}\nExample:\n{}",
+                doc.name,
+                rule_errors,
+                doc.good_example
+            );
+        }
+    }
+
+    /// Test bad examples for style rules that work on content directly
+    #[test]
+    fn test_style_bad_examples() {
+        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+
+        // Test indent
+        {
+            let doc = get_rule_doc("indent").unwrap();
+            let rule = Indent::default();
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "indent bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+
+        // Test trailing-whitespace
+        {
+            let doc = get_rule_doc("trailing-whitespace").unwrap();
+            let rule = TrailingWhitespace;
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "trailing-whitespace bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+
+        // Test space-before-semicolon
+        {
+            let doc = get_rule_doc("space-before-semicolon").unwrap();
+            let rule = SpaceBeforeSemicolon;
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "space-before-semicolon bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+    }
+
+    /// Test good examples for style rules that work on content directly
+    #[test]
+    fn test_style_good_examples() {
+        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+
+        // Test indent
+        {
+            let doc = get_rule_doc("indent").unwrap();
+            let rule = Indent::default();
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "indent good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+
+        // Test trailing-whitespace
+        {
+            let doc = get_rule_doc("trailing-whitespace").unwrap();
+            let rule = TrailingWhitespace;
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "trailing-whitespace good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+
+        // Test space-before-semicolon
+        {
+            let doc = get_rule_doc("space-before-semicolon").unwrap();
+            let rule = SpaceBeforeSemicolon;
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "space-before-semicolon good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+    }
+
+    /// Test bad examples for syntax rules that check content directly
+    #[test]
+    fn test_syntax_bad_examples() {
+        use crate::rules::syntax::{
+            missing_semicolon::MissingSemicolon,
+            unclosed_quote::UnclosedQuote,
+            unmatched_braces::UnmatchedBraces,
+        };
+
+        // Test unmatched-braces
+        {
+            let doc = get_rule_doc("unmatched-braces").unwrap();
+            let rule = UnmatchedBraces;
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "unmatched-braces bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+
+        // Test unclosed-quote
+        {
+            let doc = get_rule_doc("unclosed-quote").unwrap();
+            let rule = UnclosedQuote;
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "unclosed-quote bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+
+        // Test missing-semicolon
+        {
+            let doc = get_rule_doc("missing-semicolon").unwrap();
+            let rule = MissingSemicolon;
+            let errors = rule.check_content(doc.bad_example);
+            assert!(
+                !errors.is_empty(),
+                "missing-semicolon bad_example should produce errors:\n{}",
+                doc.bad_example
+            );
+        }
+    }
+
+    /// Test good examples for syntax rules that check content directly
+    #[test]
+    fn test_syntax_good_examples() {
+        use crate::rules::syntax::{
+            missing_semicolon::MissingSemicolon,
+            unclosed_quote::UnclosedQuote,
+            unmatched_braces::UnmatchedBraces,
+        };
+
+        // Test unmatched-braces
+        {
+            let doc = get_rule_doc("unmatched-braces").unwrap();
+            let rule = UnmatchedBraces;
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "unmatched-braces good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+
+        // Test unclosed-quote
+        {
+            let doc = get_rule_doc("unclosed-quote").unwrap();
+            let rule = UnclosedQuote;
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "unclosed-quote good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+
+        // Test missing-semicolon
+        {
+            let doc = get_rule_doc("missing-semicolon").unwrap();
+            let rule = MissingSemicolon;
+            let errors = rule.check_content(doc.good_example);
+            assert!(
+                errors.is_empty(),
+                "missing-semicolon good_example should not produce errors, but got {:?}:\n{}",
+                errors,
+                doc.good_example
+            );
+        }
+    }
+
+    /// Test that applying fixes to style bad examples produces the good example
+    #[test]
+    fn test_style_fixes_produce_good_examples() {
+        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+
+        // Test indent fix
+        {
+            let doc = get_rule_doc("indent").unwrap();
+            let rule = Indent::default();
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "indent: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+
+        // Test trailing-whitespace fix
+        {
+            let doc = get_rule_doc("trailing-whitespace").unwrap();
+            let rule = TrailingWhitespace;
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "trailing-whitespace: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+
+        // Test space-before-semicolon fix
+        {
+            let doc = get_rule_doc("space-before-semicolon").unwrap();
+            let rule = SpaceBeforeSemicolon;
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "space-before-semicolon: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+    }
+
+    /// Test that applying fixes to syntax bad examples produces the good example
+    #[test]
+    fn test_syntax_fixes_produce_good_examples() {
+        use crate::rules::syntax::{
+            missing_semicolon::MissingSemicolon,
+            unclosed_quote::UnclosedQuote,
+            unmatched_braces::UnmatchedBraces,
+        };
+
+        // Test unmatched-braces fix
+        {
+            let doc = get_rule_doc("unmatched-braces").unwrap();
+            let rule = UnmatchedBraces;
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "unmatched-braces: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+
+        // Test unclosed-quote fix
+        // Note: unclosed-quote may not have automatic fixes
+        {
+            let doc = get_rule_doc("unclosed-quote").unwrap();
+            let rule = UnclosedQuote;
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "unclosed-quote: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+
+        // Test missing-semicolon fix
+        {
+            let doc = get_rule_doc("missing-semicolon").unwrap();
+            let rule = MissingSemicolon;
+            let errors = rule.check_content(doc.bad_example);
+            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+                let fixed = apply_fixes(doc.bad_example, &errors);
+                let expected = doc.good_example.trim_end();
+                let actual = fixed.trim_end();
+                assert_eq!(
+                    actual, expected,
+                    "missing-semicolon: applying fixes to bad_example should produce good_example\n\
+                     Bad example:\n{}\n\
+                     Fixed:\n{}\n\
+                     Expected:\n{}",
+                    doc.bad_example, fixed, doc.good_example
+                );
+            }
+        }
+    }
+}

@@ -15,13 +15,8 @@ When duplicated, nginx may use only the last value or throw an error.
 
 Duplicate directives often indicate unintentional configuration mistakes
 and should be reviewed."#,
-    bad_example: r#"server {
-    listen 80;
-    listen 80;  # Duplicate
-}"#,
-    good_example: r#"server {
-    listen 80;
-}"#,
+    bad_example: include_str!("duplicate_directive/bad.conf"),
+    good_example: include_str!("duplicate_directive/good.conf"),
     references: &[],
 };
 

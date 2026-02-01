@@ -16,14 +16,8 @@ Without it, nginx cannot parse the configuration correctly.
 
 Block directives (server, location, etc.) don't need semicolons,
 but regular directives always require them."#,
-    bad_example: r#"server {
-    listen 80
-    server_name example.com
-}"#,
-    good_example: r#"server {
-    listen 80;
-    server_name example.com;
-}"#,
+    bad_example: include_str!("missing_semicolon/bad.conf"),
+    good_example: include_str!("missing_semicolon/good.conf"),
     references: &[],
 };
 

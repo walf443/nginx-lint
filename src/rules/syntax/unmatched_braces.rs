@@ -15,16 +15,8 @@ file correctly and will fail to start.
 
 This rule checks that opening braces '{' and closing braces '}'
 are balanced, and that block directives have their opening brace."#,
-    bad_example: r#"http {
-    server {
-        listen 80;
-    # Missing closing brace
-}"#,
-    good_example: r#"http {
-    server {
-        listen 80;
-    }
-}"#,
+    bad_example: include_str!("unmatched_braces/bad.conf"),
+    good_example: include_str!("unmatched_braces/good.conf"),
     references: &[
         "https://nginx.org/en/docs/beginners_guide.html",
     ],

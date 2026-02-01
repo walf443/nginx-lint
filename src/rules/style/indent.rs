@@ -17,16 +17,8 @@ and easier to understand.
 
 Using spaces instead of tabs ensures consistent appearance
 across different environments."#,
-    bad_example: r#"http {
-server {
-listen 80;
-}
-}"#,
-    good_example: r#"http {
-  server {
-    listen 80;
-  }
-}"#,
+    bad_example: include_str!("indent/bad.conf"),
+    good_example: include_str!("indent/good.conf"),
     references: &[],
 };
 

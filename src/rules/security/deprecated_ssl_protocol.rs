@@ -14,12 +14,8 @@ are deprecated. Using these protocols makes your server vulnerable to
 attacks like POODLE, BEAST, and CRIME.
 
 Only TLSv1.2 and above should be used."#,
-    bad_example: r#"server {
-    ssl_protocols SSLv3 TLSv1 TLSv1.1 TLSv1.2;
-}"#,
-    good_example: r#"server {
-    ssl_protocols TLSv1.2 TLSv1.3;
-}"#,
+    bad_example: include_str!("deprecated_ssl_protocol/bad.conf"),
+    good_example: include_str!("deprecated_ssl_protocol/good.conf"),
     references: &[
         "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_protocols",
         "https://wiki.mozilla.org/Security/Server_Side_TLS",

@@ -15,12 +15,8 @@ pub static DOC: RuleDoc = RuleDoc {
 and reduce readability.
 
 Semicolons should be placed immediately after directive values."#,
-    bad_example: r#"server {
-    listen 80 ;  # Unnecessary space before semicolon
-}"#,
-    good_example: r#"server {
-    listen 80;
-}"#,
+    bad_example: include_str!("space_before_semicolon/bad.conf"),
+    good_example: include_str!("space_before_semicolon/good.conf"),
     references: &[],
 };
 

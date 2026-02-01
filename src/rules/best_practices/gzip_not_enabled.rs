@@ -14,21 +14,8 @@ improves page load times, and saves bandwidth.
 
 It is especially effective for text-based content like HTML, CSS,
 JavaScript, and JSON."#,
-    bad_example: r#"http {
-    # gzip not configured
-    server {
-        listen 80;
-    }
-}"#,
-    good_example: r#"http {
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript;
-    gzip_min_length 1000;
-
-    server {
-        listen 80;
-    }
-}"#,
+    bad_example: include_str!("gzip_not_enabled/bad.conf"),
+    good_example: include_str!("gzip_not_enabled/good.conf"),
     references: &[
         "https://nginx.org/en/docs/http/ngx_http_gzip_module.html",
     ],
