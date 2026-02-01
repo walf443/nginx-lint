@@ -52,7 +52,6 @@
         }
         textarea {
             width: 100%;
-            height: 400px;
             background: #2d2d2d;
             border: 1px solid #404040;
             border-radius: 4px;
@@ -62,6 +61,13 @@
             padding: 15px;
             resize: vertical;
             line-height: 1.5;
+        }
+        textarea.editor {
+            height: 350px;
+        }
+        textarea.config {
+            height: 150px;
+            font-size: 12px;
         }
         textarea:focus {
             outline: none;
@@ -147,49 +153,6 @@
             color: #666;
             font-size: 12px;
         }
-        .settings {
-            background: #252525;
-            border: 1px solid #404040;
-            border-radius: 4px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-        .settings-title {
-            font-weight: bold;
-            color: #888;
-            text-transform: uppercase;
-            font-size: 12px;
-            letter-spacing: 1px;
-            margin-bottom: 10px;
-        }
-        .setting-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        .setting-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .setting-item label {
-            color: #aaa;
-            font-size: 13px;
-        }
-        .setting-item input[type="number"] {
-            width: 60px;
-            background: #2d2d2d;
-            border: 1px solid #404040;
-            border-radius: 4px;
-            color: #d4d4d4;
-            padding: 6px 10px;
-            font-size: 13px;
-        }
-        .setting-item input[type="number"]:focus {
-            outline: none;
-            border-color: #4fc3f7;
-        }
     </style>
 </head>
 <body>
@@ -197,23 +160,13 @@
         <h1>nginx-lint</h1>
         <p class="subtitle">Online nginx configuration linter - <span id="version" class="version">Loading...</span></p>
 
-        <div class="settings">
-            <div class="settings-title">Settings</div>
-            <div class="setting-row">
-                <div class="setting-item">
-                    <label for="indent-size">Indent Size:</label>
-                    <input type="number" id="indent-size" value="2" min="1" max="8">
-                </div>
-            </div>
-        </div>
-
         <div class="editor-container">
             <div class="panel">
                 <div class="panel-header">
                     <span class="panel-title">nginx.conf</span>
                     <button onclick="lintConfig()">Lint</button>
                 </div>
-                <textarea id="editor" spellcheck="false"># nginx configuration
+                <textarea id="editor" class="editor" spellcheck="false"># nginx configuration
 worker_processes auto;
 error_log /var/log/nginx/error.log;
 
@@ -231,6 +184,22 @@ http {
     }
   }
 }</textarea>
+
+                <div class="panel-header" style="margin-top: 15px;">
+                    <span class="panel-title">.nginx-lint.toml</span>
+                </div>
+                <textarea id="config-editor" class="config" spellcheck="false"># Configuration file
+# See: https://github.com/walf443/nginx-lint
+
+[rules.inconsistent-indentation]
+enabled = true
+indent_size = 2
+
+[rules.server-tokens-enabled]
+enabled = true
+
+[rules.autoindex-enabled]
+enabled = true</textarea>
             </div>
 
             <div class="panel">
@@ -271,9 +240,8 @@ http {
                     timeout = setTimeout(lintConfig, 300);
                 });
 
-                // Re-lint when settings change
-                document.getElementById('indent-size').addEventListener('change', lintConfig);
-                document.getElementById('indent-size').addEventListener('input', () => {
+                // Re-lint when config changes
+                document.getElementById('config-editor').addEventListener('input', () => {
                     clearTimeout(timeout);
                     timeout = setTimeout(lintConfig, 300);
                 });
@@ -286,17 +254,12 @@ http {
             if (!wasmReady) return;
 
             const content = document.getElementById('editor').value;
-            const indentSize = parseInt(document.getElementById('indent-size').value, 10) || 2;
+            const configToml = document.getElementById('config-editor').value;
             const resultsDiv = document.getElementById('results');
             const summaryDiv = document.getElementById('summary');
 
-            // Build options
-            const options = JSON.stringify({
-                indent_size: indentSize
-            });
-
             try {
-                const result = lint_with_config(content, options);
+                const result = lint_with_config(content, configToml);
                 const errors = JSON.parse(result.errors);
 
                 if (errors.length === 0) {
@@ -322,7 +285,10 @@ http {
                     summaryDiv.style.display = 'flex';
                 }
             } catch (e) {
-                resultsDiv.innerHTML = '<div class="error-item error"><div class="error-message">Parse error: ' + e.message + '</div></div>';
+                const errorMsg = e.message || e;
+                const isConfigError = errorMsg.includes('TOML') || errorMsg.includes('expected') || errorMsg.includes('invalid');
+                const prefix = isConfigError ? 'Config error' : 'Parse error';
+                resultsDiv.innerHTML = '<div class="error-item error"><div class="error-message">' + prefix + ': ' + errorMsg + '</div></div>';
                 summaryDiv.style.display = 'none';
             }
         };

@@ -98,57 +98,28 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
     lint_with_config(content, "")
 }
 
-/// Lint options passed from JavaScript
-#[derive(serde::Deserialize, Default)]
-struct LintOptions {
-    #[serde(default)]
-    indent_size: Option<usize>,
-}
-
 /// Lint an nginx configuration string with custom settings
 ///
 /// # Arguments
 /// * `content` - The nginx configuration content to lint
-/// * `options_json` - JSON string with options (e.g., `{"indent_size": 4}`)
+/// * `config_toml` - TOML string with .nginx-lint.toml configuration (can be empty)
 ///
 /// # Returns
 /// A `WasmLintResult` containing the lint errors as JSON
 #[wasm_bindgen]
-pub fn lint_with_config(content: &str, options_json: &str) -> Result<WasmLintResult, JsValue> {
-    use crate::config::{LintConfig, RuleConfig};
+pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
+    use crate::config::LintConfig;
     use crate::rules::InconsistentIndentation;
-    use std::collections::HashMap;
 
-    // Parse options
-    let options: LintOptions = if options_json.is_empty() {
-        LintOptions::default()
-    } else {
-        serde_json::from_str(options_json).map_err(|e| JsValue::from_str(&e.to_string()))?
-    };
-
-    // Parse the configuration
-    let config = parse_string(content).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    // Build LintConfig from options
-    let lint_config = if options.indent_size.is_some() {
-        let mut rules = HashMap::new();
-        if let Some(indent_size) = options.indent_size {
-            rules.insert(
-                "inconsistent-indentation".to_string(),
-                RuleConfig {
-                    enabled: true,
-                    indent_size: Some(indent_size),
-                    ..Default::default()
-                },
-            );
-        }
-        Some(LintConfig {
-            rules,
-            ..Default::default()
-        })
-    } else {
+    // Parse TOML configuration
+    let lint_config = if config_toml.is_empty() {
         None
+    } else {
+        Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
+
+    // Parse the nginx configuration
+    let config = parse_string(content).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Create linter with config
     let linter = Linter::with_config(lint_config.as_ref());
@@ -158,10 +129,23 @@ pub fn lint_with_config(content: &str, options_json: &str) -> Result<WasmLintRes
     let mut errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
 
     // Run indentation check directly on content (since file-based check won't work in WASM)
-    let indent_size = options.indent_size.unwrap_or(2);
-    let indent_rule = InconsistentIndentation { indent_size };
-    let indent_errors = indent_rule.check_content(content);
-    errors.extend(indent_errors);
+    let indent_size = lint_config
+        .as_ref()
+        .and_then(|c| c.get_rule_config("inconsistent-indentation"))
+        .and_then(|r| r.indent_size)
+        .unwrap_or(2);
+
+    // Only run if rule is enabled
+    let rule_enabled = lint_config
+        .as_ref()
+        .map(|c| c.is_rule_enabled("inconsistent-indentation"))
+        .unwrap_or(true);
+
+    if rule_enabled {
+        let indent_rule = InconsistentIndentation { indent_size };
+        let indent_errors = indent_rule.check_content(content);
+        errors.extend(indent_errors);
+    }
 
     // Convert errors to JSON
     let js_errors: Vec<JsLintError> = errors.iter().map(JsLintError::from).collect();

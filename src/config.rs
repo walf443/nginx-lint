@@ -173,6 +173,11 @@ impl LintConfig {
         })
     }
 
+    /// Parse configuration from a TOML string
+    pub fn from_str(content: &str) -> Result<Self, String> {
+        toml::from_str(content).map_err(|e| e.to_string())
+    }
+
     /// Find and load .nginx-lint.toml from the given directory or its parents
     pub fn find_and_load(dir: &Path) -> Option<Self> {
         let mut current = dir.to_path_buf();
