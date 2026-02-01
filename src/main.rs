@@ -38,6 +38,10 @@ struct Cli {
     /// Show verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Do not exit with non-zero code on warnings and info (only fail on errors)
+    #[arg(long)]
+    no_fail_on_warnings: bool,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -178,8 +182,15 @@ fn main() -> ExitCode {
         reporter.report(&errors, &file_path);
     }
 
-    let has_errors = errors.iter().any(|e| e.severity == Severity::Error);
-    if has_errors {
+    let has_issues = if cli.no_fail_on_warnings {
+        // Only fail on errors
+        errors.iter().any(|e| e.severity == Severity::Error)
+    } else {
+        // Default: fail on any issue (errors, warnings, or info)
+        !errors.is_empty()
+    };
+
+    if has_issues {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
