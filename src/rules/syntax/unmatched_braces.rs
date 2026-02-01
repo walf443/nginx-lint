@@ -18,10 +18,15 @@ struct BraceInfo {
 impl UnmatchedBraces {
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_content_impl(content)
+        self.check_content_with_extras(content, &[])
     }
 
-    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
+    /// Check content with additional block directives
+    pub fn check_content_with_extras(
+        &self,
+        content: &str,
+        additional_block_directives: &[String],
+    ) -> Vec<LintError> {
         let mut errors = Vec::new();
 
         let lines: Vec<&str> = content.lines().collect();
@@ -253,7 +258,10 @@ impl UnmatchedBraces {
                 {
                     // Get the first word (directive name)
                     if let Some(first_word) = trimmed.split_whitespace().next() {
-                        if crate::parser::is_block_directive(first_word) {
+                        if crate::parser::is_block_directive_with_extras(
+                            first_word,
+                            additional_block_directives,
+                        ) {
                             // This is a block directive missing its opening brace
                             let new_line = format!("{} {{", line.trim_end());
                             let fix = Fix::replace_line(line_number, &new_line);
@@ -389,7 +397,7 @@ impl LintRule for UnmatchedBraces {
             Err(_) => return Vec::new(),
         };
 
-        self.check_content_impl(&content)
+        self.check_content_with_extras(&content, &[])
     }
 }
 

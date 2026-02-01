@@ -147,12 +147,18 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
             .unwrap_or(true)
     };
 
+    // Get additional block directives from config
+    let additional_block_directives: Vec<String> = lint_config
+        .as_ref()
+        .map(|c| c.additional_block_directives().to_vec())
+        .unwrap_or_default();
+
     // Run pre-parse checks first (syntax checks that don't require a valid AST)
     let mut pre_parse_errors = Vec::new();
 
     if is_enabled("unmatched-braces") {
         let rule = UnmatchedBraces;
-        pre_parse_errors.extend(rule.check_content(content));
+        pre_parse_errors.extend(rule.check_content_with_extras(content, &additional_block_directives));
     }
 
     if is_enabled("unclosed-quote") {
@@ -162,7 +168,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     if is_enabled("missing-semicolon") {
         let rule = MissingSemicolon;
-        pre_parse_errors.extend(rule.check_content(content));
+        pre_parse_errors.extend(rule.check_content_with_extras(content, &additional_block_directives));
     }
 
     // If there are pre-parse errors with Severity::Error, return them

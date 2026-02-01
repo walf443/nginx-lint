@@ -31,26 +31,36 @@ use std::path::Path;
 /// These checks work on the raw file content and don't require a valid AST
 #[cfg(feature = "cli")]
 pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
-    use linter::LintRule;
-    use parser::ast::Config;
+    pre_parse_checks_with_config(path, None)
+}
+
+/// Run pre-parse checks with optional LintConfig
+#[cfg(feature = "cli")]
+pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
-    // Create a dummy config for the check (the rule reads from file directly)
-    let dummy_config = Config::new();
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let additional_block_directives: Vec<String> = lint_config
+        .map(|c| c.additional_block_directives().to_vec())
+        .unwrap_or_default();
 
     let mut errors = Vec::new();
 
     // Check for unmatched braces
     let brace_rule = UnmatchedBraces;
-    errors.extend(brace_rule.check(&dummy_config, path));
+    errors.extend(brace_rule.check_content_with_extras(&content, &additional_block_directives));
 
     // Check for unclosed quotes
     let quote_rule = UnclosedQuote;
-    errors.extend(quote_rule.check(&dummy_config, path));
+    errors.extend(quote_rule.check_content(&content));
 
     // Check for missing semicolons
     let semicolon_rule = MissingSemicolon;
-    errors.extend(semicolon_rule.check(&dummy_config, path));
+    errors.extend(semicolon_rule.check_content_with_extras(&content, &additional_block_directives));
 
     errors
 }

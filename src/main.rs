@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
-    apply_fixes, collect_included_files, parse_config, pre_parse_checks, ColorMode, IncludedFile,
-    LintConfig, LintError, Linter, OutputFormat, Reporter, Severity,
+    apply_fixes, collect_included_files, parse_config, pre_parse_checks_with_config, ColorMode,
+    IncludedFile, LintConfig, LintError, Linter, OutputFormat, Reporter, Severity,
 };
 use rayon::prelude::*;
 use std::fs;
@@ -187,6 +187,15 @@ enabled = true
 
 [rules.missing-error-log]
 enabled = true
+
+# =============================================================================
+# Parser Settings
+# =============================================================================
+
+[parser]
+# Additional block directives for extension modules
+# These are added to the built-in list (http, server, location, etc.)
+# block_directives = ["my_custom_block", "another_block"]
 "#
     .to_string()
 }
@@ -258,11 +267,15 @@ enum FileResult {
 }
 
 /// Lint a single included file and return the result
-fn lint_file(included: &IncludedFile, linter: &Linter) -> FileResult {
+fn lint_file(
+    included: &IncludedFile,
+    linter: &Linter,
+    lint_config: Option<&LintConfig>,
+) -> FileResult {
     let path = &included.path;
 
     // Run pre-parse checks first
-    let pre_parse_errors = pre_parse_checks(path);
+    let pre_parse_errors = pre_parse_checks_with_config(path, lint_config);
 
     // If there are pre-parse errors (like unmatched braces), return them
     if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
@@ -389,13 +402,13 @@ fn run_lint(cli: Cli) -> ExitCode {
         // Sequential processing for fix mode (file modifications should not be parallel)
         included_files
             .iter()
-            .map(|inc| lint_file(inc, &linter))
+            .map(|inc| lint_file(inc, &linter, lint_config.as_ref()))
             .collect()
     } else {
         // Parallel processing for lint-only mode
         included_files
             .par_iter()
-            .map(|inc| lint_file(inc, &linter))
+            .map(|inc| lint_file(inc, &linter, lint_config.as_ref()))
             .collect()
     };
 

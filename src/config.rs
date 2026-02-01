@@ -10,6 +10,17 @@ pub struct LintConfig {
     pub rules: HashMap<String, RuleConfig>,
     #[serde(default)]
     pub color: ColorConfig,
+    #[serde(default)]
+    pub parser: ParserConfig,
+}
+
+/// Parser configuration
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ParserConfig {
+    /// Additional block directives (extension modules, etc.)
+    /// These are added to the built-in list of block directives
+    #[serde(default)]
+    pub block_directives: Vec<String>,
 }
 
 /// Color output configuration
@@ -214,6 +225,11 @@ impl LintConfig {
         self.color.ui
     }
 
+    /// Get additional block directives from config
+    pub fn additional_block_directives(&self) -> &[String] {
+        &self.parser.block_directives
+    }
+
     /// Validate a configuration file and return any errors
     pub fn validate_file(path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
         let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError {
@@ -236,7 +252,7 @@ impl LintConfig {
 
         if let toml::Value::Table(root) = value {
             // Known top-level keys
-            let known_top_level: HashSet<&str> = ["rules", "color"].into_iter().collect();
+            let known_top_level: HashSet<&str> = ["rules", "color", "parser"].into_iter().collect();
 
             for key in root.keys() {
                 if !known_top_level.contains(key.as_str()) {
@@ -261,6 +277,23 @@ impl LintConfig {
                             path: format!("color.{}", key),
                             line,
                             suggestion: suggest_field(key, &known_color_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [parser] section
+            if let Some(toml::Value::Table(parser)) = root.get("parser") {
+                let known_parser_keys: HashSet<&str> =
+                    ["block_directives"].into_iter().collect();
+
+                for key in parser.keys() {
+                    if !known_parser_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("parser"), key);
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("parser.{}", key),
+                            line,
+                            suggestion: suggest_field(key, &known_parser_keys),
                         });
                     }
                 }

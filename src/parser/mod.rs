@@ -416,6 +416,23 @@ pub fn is_block_directive(name: &str) -> bool {
     BLOCK_DIRECTIVES.contains(&name) || is_raw_block_directive(name)
 }
 
+/// Check if a directive is a block directive, including custom additions
+///
+/// This function checks the built-in list plus any additional block directives
+/// specified in the configuration.
+///
+/// # Examples
+/// ```
+/// use nginx_lint::parser::is_block_directive_with_extras;
+///
+/// assert!(is_block_directive_with_extras("server", &[]));
+/// assert!(is_block_directive_with_extras("my_custom_block", &["my_custom_block".to_string()]));
+/// assert!(!is_block_directive_with_extras("listen", &[]));
+/// ```
+pub fn is_block_directive_with_extras(name: &str, additional: &[String]) -> bool {
+    is_block_directive(name) || additional.iter().any(|s| s == name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
