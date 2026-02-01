@@ -35,8 +35,24 @@ impl Indent {
             let line_number = line_num + 1;
             let trimmed = line.trim();
 
-            // Skip empty lines and comments
-            if trimmed.is_empty() || trimmed.starts_with('#') {
+            // Skip empty lines
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            // Check indentation for comments but don't adjust depth
+            if trimmed.starts_with('#') {
+                check_line_indentation(
+                    &mut errors,
+                    self.name(),
+                    self.category(),
+                    line,
+                    trimmed,
+                    line_number,
+                    expected_depth,
+                    &mut detected_indent_size,
+                    self.indent_size,
+                );
                 continue;
             }
 
@@ -310,6 +326,37 @@ mod tests {
             .filter(|e| e.message.contains("tabs"))
             .collect();
         assert!(!tab_errors.is_empty(), "Expected tab warning");
+    }
+
+    #[test]
+    fn test_comment_indentation() {
+        // Comment with wrong indentation
+        let content = r#"http {
+  server {
+# This comment has wrong indentation
+    listen 80;
+  }
+}
+"#;
+        let errors = check_content(content);
+        assert!(!errors.is_empty(), "Expected indentation error for comment");
+        assert!(
+            errors.iter().any(|e| e.line == Some(3)),
+            "Expected error on line 3 (comment line)"
+        );
+    }
+
+    #[test]
+    fn test_comment_correct_indentation() {
+        let content = r#"http {
+  server {
+    # This comment has correct indentation
+    listen 80;
+  }
+}
+"#;
+        let errors = check_content(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
     }
 
     #[test]
