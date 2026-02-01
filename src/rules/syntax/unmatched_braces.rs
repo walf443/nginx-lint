@@ -161,15 +161,30 @@ impl UnmatchedBraces {
 
                     if !found_match {
                         // Extra closing brace - no matching opening brace
-                        let fix = if line.trim() == "}" {
-                            Some(Fix::delete(line_number))
+                        // Try to find a block directive above that's missing '{'
+                        let fix = find_missing_open_brace_fix(&lines, line_number, close_indent);
+
+                        let (message, fix) = if let Some(f) = fix {
+                            (
+                                "Missing opening brace '{' for block directive",
+                                Some(f),
+                            )
+                        } else if line.trim() == "}" {
+                            (
+                                "Unexpected closing brace '}' without matching opening brace",
+                                Some(Fix::delete(line_number)),
+                            )
                         } else {
-                            None
+                            (
+                                "Unexpected closing brace '}' without matching opening brace",
+                                None,
+                            )
                         };
+
                         let mut error = LintError::new(
                             self.name(),
                             self.category(),
-                            "Unexpected closing brace '}' without matching opening brace",
+                            message,
                             Severity::Error,
                         )
                         .with_location(line_number, column);
@@ -237,6 +252,48 @@ impl UnmatchedBraces {
     fn category(&self) -> &'static str {
         "syntax"
     }
+}
+
+/// Find a block directive above that's missing an opening brace
+/// Returns a Fix to add ' {' to that line if found
+fn find_missing_open_brace_fix(lines: &[&str], close_line: usize, close_indent: usize) -> Option<Fix> {
+    // Look backwards for a line at the same indent that looks like a block directive
+    // Block directives typically: don't end with ';' or '{', and have content
+    for i in (0..close_line - 1).rev() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        let line_indent = line.len() - line.trim_start().len();
+
+        // Skip empty lines and comments
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // If we find a line with less indent, stop searching
+        if line_indent < close_indent {
+            // Check if this line looks like a block directive missing '{'
+            if !trimmed.ends_with('{') && !trimmed.ends_with(';') && !trimmed.ends_with('}') {
+                // This could be the block directive missing '{'
+                let line_number = i + 1;
+                let new_line = format!("{} {{", line.trim_end());
+                return Some(Fix::replace_line(line_number, &new_line));
+            }
+            break;
+        }
+
+        // If same indent and doesn't end with '{', ';', or '}', it might be the missing block
+        if line_indent == close_indent
+            && !trimmed.ends_with('{')
+            && !trimmed.ends_with(';')
+            && !trimmed.ends_with('}')
+        {
+            let line_number = i + 1;
+            let new_line = format!("{} {{", line.trim_end());
+            return Some(Fix::replace_line(line_number, &new_line));
+        }
+    }
+
+    None
 }
 
 impl LintRule for UnmatchedBraces {
@@ -378,5 +435,24 @@ mod tests {
 "#;
         let errors = check_braces(content);
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_missing_opening_brace() {
+        // Missing opening brace for 'server' block
+        let content = r#"http {
+    server
+        listen 80;
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(
+            errors[0].message.contains("Missing opening brace"),
+            "Expected missing opening brace error, got: {}",
+            errors[0].message
+        );
+        assert!(errors[0].fix.is_some(), "Expected fix to be provided");
     }
 }
