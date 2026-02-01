@@ -24,7 +24,8 @@
       "Bash(if [ -f \"$f\" ])",
       "Bash(then)",
       "Bash(fi)",
-      "Bash(./target/debug/nginx-lint:*)"
+      "Bash(./target/debug/nginx-lint:*)",
+      "Bash(wasm-pack build:*)"
     ]
   }
 }
