@@ -145,7 +145,7 @@ impl Linter {
         use crate::rules::{
             AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
             InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
-            UnclosedQuote, UnmatchedBraces,
+            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -182,6 +182,9 @@ impl Linter {
         }
         if is_enabled("autoindex-enabled") {
             linter.add_rule(Box::new(AutoindexEnabled));
+        }
+        if is_enabled("weak-ssl-ciphers") {
+            linter.add_rule(Box::new(WeakSslCiphers::default()));
         }
 
         // Style rules
