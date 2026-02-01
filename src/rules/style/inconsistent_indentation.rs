@@ -16,27 +16,14 @@ impl Default for InconsistentIndentation {
     }
 }
 
-impl LintRule for InconsistentIndentation {
-    fn name(&self) -> &'static str {
-        "inconsistent-indentation"
+impl InconsistentIndentation {
+    /// Check indentation on content string directly (used by WASM)
+    pub fn check_content(&self, content: &str) -> Vec<LintError> {
+        self.check_content_impl(content)
     }
 
-    fn category(&self) -> &'static str {
-        "style"
-    }
-
-    fn description(&self) -> &'static str {
-        "Detects inconsistent indentation in nginx configuration"
-    }
-
-    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return errors,
-        };
-
         let mut expected_depth: i32 = 0;
         let mut detected_indent_size: Option<usize> = None;
         let mut in_raw_block = false;
@@ -147,6 +134,37 @@ impl LintRule for InconsistentIndentation {
 
         errors
     }
+
+    fn name(&self) -> &'static str {
+        "inconsistent-indentation"
+    }
+
+    fn category(&self) -> &'static str {
+        "style"
+    }
+}
+
+impl LintRule for InconsistentIndentation {
+    fn name(&self) -> &'static str {
+        "inconsistent-indentation"
+    }
+
+    fn category(&self) -> &'static str {
+        "style"
+    }
+
+    fn description(&self) -> &'static str {
+        "Detects inconsistent indentation in nginx configuration"
+    }
+
+    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        self.check_content_impl(&content)
+    }
 }
 
 /// Check if a line starts a raw block directive (like lua_block)
@@ -244,6 +262,11 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn check_content(content: &str) -> Vec<LintError> {
+        let rule = InconsistentIndentation::default();
+        rule.check_content(content)
+    }
+
+    fn check_content_with_file(content: &str) -> Vec<LintError> {
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", content).unwrap();
         let path = file.path().to_path_buf();
@@ -287,5 +310,18 @@ mod tests {
             .filter(|e| e.message.contains("tabs"))
             .collect();
         assert!(!tab_errors.is_empty(), "Expected tab warning");
+    }
+
+    #[test]
+    fn test_file_check_matches_content_check() {
+        let content = r#"http {
+    server {
+        listen 80;
+    }
+}
+"#;
+        let content_errors = check_content(content);
+        let file_errors = check_content_with_file(content);
+        assert_eq!(content_errors.len(), file_errors.len());
     }
 }

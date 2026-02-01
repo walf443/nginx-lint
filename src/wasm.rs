@@ -116,6 +116,7 @@ struct LintOptions {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, options_json: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::{LintConfig, RuleConfig};
+    use crate::rules::InconsistentIndentation;
     use std::collections::HashMap;
 
     // Parse options
@@ -153,7 +154,14 @@ pub fn lint_with_config(content: &str, options_json: &str) -> Result<WasmLintRes
     let linter = Linter::with_config(lint_config.as_ref());
 
     // Lint the configuration (use a dummy path since we're linting a string)
-    let errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
+    // Note: Some rules that read from files won't work, so we handle them separately
+    let mut errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
+
+    // Run indentation check directly on content (since file-based check won't work in WASM)
+    let indent_size = options.indent_size.unwrap_or(2);
+    let indent_rule = InconsistentIndentation { indent_size };
+    let indent_errors = indent_rule.check_content(content);
+    errors.extend(indent_errors);
 
     // Convert errors to JSON
     let js_errors: Vec<JsLintError> = errors.iter().map(JsLintError::from).collect();
