@@ -17,7 +17,14 @@
       "Bash(git checkout:*)",
       "Bash(xxd:*)",
       "Bash(cargo clean:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(find:*)",
+      "Bash(for f in tests/fixtures/rules/**/error/*.conf)",
+      "Bash(do)",
+      "Bash(if [ -f \"$f\" ])",
+      "Bash(then)",
+      "Bash(fi)",
+      "Bash(./target/debug/nginx-lint:*)"
     ]
   }
 }
