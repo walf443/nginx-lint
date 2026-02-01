@@ -69,6 +69,12 @@ enum ConfigCommands {
         #[arg(long)]
         force: bool,
     },
+    /// Validate configuration file for unknown fields
+    Validate {
+        /// Path to the configuration file to validate
+        #[arg(short, long, default_value = ".nginx-lint.toml")]
+        config: PathBuf,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -192,6 +198,33 @@ fn run_init(output: PathBuf, force: bool) -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error writing {}: {}", output.display(), e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run_validate(config_path: PathBuf) -> ExitCode {
+    if !config_path.exists() {
+        eprintln!("Error: {} not found", config_path.display());
+        return ExitCode::from(2);
+    }
+
+    match LintConfig::validate_file(&config_path) {
+        Ok(errors) => {
+            if errors.is_empty() {
+                eprintln!("{}: OK", config_path.display());
+                ExitCode::SUCCESS
+            } else {
+                eprintln!("{}:", config_path.display());
+                for error in &errors {
+                    eprintln!("  - {}", error);
+                }
+                eprintln!("\nFound {} error(s)", errors.len());
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
             ExitCode::from(2)
         }
     }
@@ -349,6 +382,7 @@ fn main() -> ExitCode {
     match &cli.command {
         Some(Commands::Config { command }) => match command {
             ConfigCommands::Init { output, force } => run_init(output.clone(), *force),
+            ConfigCommands::Validate { config } => run_validate(config.clone()),
         },
         None => run_lint(cli),
     }

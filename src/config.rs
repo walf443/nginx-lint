@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -207,6 +207,226 @@ impl LintConfig {
     /// Get the color mode setting
     pub fn color_mode(&self) -> ColorMode {
         self.color.ui
+    }
+
+    /// Validate a configuration file and return any errors
+    pub fn validate_file(path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+        let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        Self::validate_content(&content, path)
+    }
+
+    /// Validate configuration content and return any errors
+    fn validate_content(content: &str, path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+        let value: toml::Value =
+            toml::from_str(content).map_err(|e| ConfigError::ParseError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+
+        let mut errors = Vec::new();
+
+        if let toml::Value::Table(root) = value {
+            // Known top-level keys
+            let known_top_level: HashSet<&str> = ["rules", "color"].into_iter().collect();
+
+            for key in root.keys() {
+                if !known_top_level.contains(key.as_str()) {
+                    errors.push(ValidationError::UnknownField {
+                        path: key.clone(),
+                        suggestion: suggest_field(key, &known_top_level),
+                    });
+                }
+            }
+
+            // Validate [color] section
+            if let Some(toml::Value::Table(color)) = root.get("color") {
+                let known_color_keys: HashSet<&str> =
+                    ["ui", "error", "warning", "info"].into_iter().collect();
+
+                for key in color.keys() {
+                    if !known_color_keys.contains(key.as_str()) {
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("color.{}", key),
+                            suggestion: suggest_field(key, &known_color_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [rules.*] sections
+            if let Some(toml::Value::Table(rules)) = root.get("rules") {
+                let known_rules: HashSet<&str> = [
+                    "duplicate-directive",
+                    "unmatched-braces",
+                    "unclosed-quote",
+                    "missing-semicolon",
+                    "deprecated-ssl-protocol",
+                    "server-tokens-enabled",
+                    "autoindex-enabled",
+                    "weak-ssl-ciphers",
+                    "inconsistent-indentation",
+                    "gzip-not-enabled",
+                    "missing-error-log",
+                ]
+                .into_iter()
+                .collect();
+
+                for (rule_name, rule_value) in rules {
+                    if !known_rules.contains(rule_name.as_str()) {
+                        errors.push(ValidationError::UnknownRule {
+                            name: rule_name.clone(),
+                            suggestion: suggest_field(rule_name, &known_rules),
+                        });
+                        continue;
+                    }
+
+                    // Validate rule options
+                    if let toml::Value::Table(rule_config) = rule_value {
+                        let known_rule_options = get_known_rule_options(rule_name);
+
+                        for key in rule_config.keys() {
+                            if !known_rule_options.contains(key.as_str()) {
+                                errors.push(ValidationError::UnknownRuleOption {
+                                    rule: rule_name.clone(),
+                                    option: key.clone(),
+                                    suggestion: suggest_field(key, &known_rule_options),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(errors)
+    }
+}
+
+/// Get known options for a specific rule
+fn get_known_rule_options(rule_name: &str) -> HashSet<&'static str> {
+    let mut options: HashSet<&str> = ["enabled"].into_iter().collect();
+
+    match rule_name {
+        "inconsistent-indentation" => {
+            options.insert("indent_size");
+        }
+        "deprecated-ssl-protocol" => {
+            options.insert("allowed_protocols");
+        }
+        "weak-ssl-ciphers" => {
+            options.insert("weak_ciphers");
+            options.insert("required_exclusions");
+        }
+        _ => {}
+    }
+
+    options
+}
+
+/// Suggest a similar field name if one exists
+fn suggest_field(input: &str, known: &HashSet<&str>) -> Option<String> {
+    let input_lower = input.to_lowercase();
+
+    // Find the closest match using simple edit distance
+    known
+        .iter()
+        .filter(|&&k| {
+            let k_lower = k.to_lowercase();
+            // Simple heuristic: check if strings are similar
+            k_lower.contains(&input_lower)
+                || input_lower.contains(&k_lower)
+                || levenshtein_distance(&input_lower, &k_lower) <= 2
+        })
+        .min_by_key(|&&k| levenshtein_distance(&input.to_lowercase(), &k.to_lowercase()))
+        .map(|&s| s.to_string())
+}
+
+/// Simple Levenshtein distance implementation
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut matrix = vec![vec![0; b_len + 1]; a_len + 1];
+
+    for (i, row) in matrix.iter_mut().enumerate().take(a_len + 1) {
+        row[0] = i;
+    }
+    for (j, cell) in matrix[0].iter_mut().enumerate().take(b_len + 1) {
+        *cell = j;
+    }
+
+    for i in 1..=a_len {
+        for j in 1..=b_len {
+            let cost = usize::from(a_chars[i - 1] != b_chars[j - 1]);
+            matrix[i][j] = (matrix[i - 1][j] + 1)
+                .min(matrix[i][j - 1] + 1)
+                .min(matrix[i - 1][j - 1] + cost);
+        }
+    }
+
+    matrix[a_len][b_len]
+}
+
+/// Validation error for configuration files
+#[derive(Debug, Clone)]
+pub enum ValidationError {
+    UnknownField {
+        path: String,
+        suggestion: Option<String>,
+    },
+    UnknownRule {
+        name: String,
+        suggestion: Option<String>,
+    },
+    UnknownRuleOption {
+        rule: String,
+        option: String,
+        suggestion: Option<String>,
+    },
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidationError::UnknownField { path, suggestion } => {
+                write!(f, "unknown field '{}'", path)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+            ValidationError::UnknownRule { name, suggestion } => {
+                write!(f, "unknown rule '{}'", name)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+            ValidationError::UnknownRuleOption {
+                rule,
+                option,
+                suggestion,
+            } => {
+                write!(f, "unknown option '{}' for rule '{}'", option, rule)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
