@@ -271,3 +271,63 @@ pub fn get_rule_names() -> String {
     let names: Vec<&str> = linter.rules().iter().map(|r| r.name()).collect();
     serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_wasm_ignore_comment() {
+        let content = r#"http {
+  server {
+    # nginx-lint:disable server-tokens-enabled dev reason
+    server_tokens on;
+  }
+}"#;
+        let result = lint_with_config(content, "").unwrap();
+
+        // Parse the errors JSON
+        let errors: Vec<serde_json::Value> = serde_json::from_str(&result.errors()).unwrap();
+
+        // Should not have server-tokens-enabled error (it's ignored)
+        let server_tokens_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e["rule"] == "server-tokens-enabled")
+            .collect();
+        assert!(
+            server_tokens_errors.is_empty(),
+            "Expected server-tokens-enabled to be ignored, but got: {:?}",
+            server_tokens_errors
+        );
+
+        // Should have 1 ignored
+        assert_eq!(result.ignored_count(), 1, "Expected 1 ignored error");
+    }
+
+    #[test]
+    fn test_wasm_ignore_inline_comment() {
+        let content = r#"http {
+  server {
+    server_tokens on; # nginx-lint:disable server-tokens-enabled dev reason
+  }
+}"#;
+        let result = lint_with_config(content, "").unwrap();
+
+        // Parse the errors JSON
+        let errors: Vec<serde_json::Value> = serde_json::from_str(&result.errors()).unwrap();
+
+        // Should not have server-tokens-enabled error (it's ignored)
+        let server_tokens_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e["rule"] == "server-tokens-enabled")
+            .collect();
+        assert!(
+            server_tokens_errors.is_empty(),
+            "Expected server-tokens-enabled to be ignored, but got: {:?}",
+            server_tokens_errors
+        );
+
+        // Should have 1 ignored
+        assert_eq!(result.ignored_count(), 1, "Expected 1 ignored error");
+    }
+}
