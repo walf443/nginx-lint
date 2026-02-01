@@ -421,7 +421,6 @@ fn run_lint(cli: Cli) -> ExitCode {
     // Process results sequentially (for consistent output ordering)
     let mut all_errors = Vec::new();
     let mut has_fatal_error = false;
-    let mut total_ignored = 0;
 
     for result in results {
         match result {
@@ -438,7 +437,7 @@ fn run_lint(cli: Cli) -> ExitCode {
                         }
                     }
                 } else {
-                    reporter.report(&errors, &path);
+                    reporter.report(&errors, &path, 0);
                 }
                 has_fatal_error = true;
             }
@@ -463,17 +462,11 @@ fn run_lint(cli: Cli) -> ExitCode {
                         }
                     }
                 } else {
-                    reporter.report(&errors, &path);
+                    reporter.report(&errors, &path, ignored_count);
                 }
                 all_errors.extend(errors);
-                total_ignored += ignored_count;
             }
         }
-    }
-
-    // Report ignored count in verbose mode
-    if cli.verbose && total_ignored > 0 {
-        eprintln!("Ignored {} error(s) via inline comments", total_ignored);
     }
 
     if has_fatal_error {

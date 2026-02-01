@@ -28,14 +28,14 @@ impl Reporter {
         Self { format, colors }
     }
 
-    pub fn report(&self, errors: &[LintError], path: &Path) {
+    pub fn report(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         match self.format {
-            OutputFormat::Text => self.report_text(errors, path),
-            OutputFormat::Json => self.report_json(errors, path),
+            OutputFormat::Text => self.report_text(errors, path, ignored_count),
+            OutputFormat::Json => self.report_json(errors, path, ignored_count),
         }
     }
 
-    fn report_text(&self, errors: &[LintError], path: &Path) {
+    fn report_text(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         let path_str = path.display();
 
         for error in errors {
@@ -56,7 +56,7 @@ impl Reporter {
             println!("{} {} {} {}", location, severity_str, rule_str, error.message);
         }
 
-        if !errors.is_empty() {
+        if !errors.is_empty() || ignored_count > 0 {
             println!();
             let error_count = errors.iter().filter(|e| e.severity == Severity::Error).count();
             let warning_count = errors.iter().filter(|e| e.severity == Severity::Warning).count();
@@ -72,12 +72,17 @@ impl Reporter {
             if info_count > 0 {
                 parts.push(format!("{} info(s)", info_count));
             }
+            if ignored_count > 0 {
+                parts.push(format!("{} ignored", ignored_count));
+            }
 
-            println!("Found {}", parts.join(", "));
+            if !parts.is_empty() {
+                println!("Found {}", parts.join(", "));
+            }
         }
     }
 
-    fn report_json(&self, errors: &[LintError], path: &Path) {
+    fn report_json(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         #[derive(serde::Serialize)]
         struct JsonReport<'a> {
             file: String,
@@ -90,6 +95,7 @@ impl Reporter {
             errors: usize,
             warnings: usize,
             infos: usize,
+            ignored: usize,
         }
 
         let report = JsonReport {
@@ -99,6 +105,7 @@ impl Reporter {
                 errors: errors.iter().filter(|e| e.severity == Severity::Error).count(),
                 warnings: errors.iter().filter(|e| e.severity == Severity::Warning).count(),
                 infos: errors.iter().filter(|e| e.severity == Severity::Info).count(),
+                ignored: ignored_count,
             },
         };
 
