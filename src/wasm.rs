@@ -139,16 +139,6 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
 
-    // Parse the nginx configuration
-    let config = parse_string(content).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    // Create linter with config
-    let linter = Linter::with_config(lint_config.as_ref());
-
-    // Lint the configuration (use a dummy path since we're linting a string)
-    // Note: Some rules that read from files won't work, so we handle them separately
-    let mut errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
-
     // Helper to check if a rule is enabled
     let is_enabled = |rule_name: &str| {
         lint_config
@@ -157,23 +147,45 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
             .unwrap_or(true)
     };
 
-    // Run syntax checks directly on content (since file-based check won't work in WASM)
+    // Run pre-parse checks first (syntax checks that don't require a valid AST)
+    let mut pre_parse_errors = Vec::new();
+
     if is_enabled("unmatched-braces") {
         let rule = UnmatchedBraces;
-        errors.extend(rule.check_content(content));
+        pre_parse_errors.extend(rule.check_content(content));
     }
 
     if is_enabled("unclosed-quote") {
         let rule = UnclosedQuote;
-        errors.extend(rule.check_content(content));
+        pre_parse_errors.extend(rule.check_content(content));
     }
 
     if is_enabled("missing-semicolon") {
         let rule = MissingSemicolon;
-        errors.extend(rule.check_content(content));
+        pre_parse_errors.extend(rule.check_content(content));
     }
 
-    // Run indentation check directly on content
+    // If there are pre-parse errors with Severity::Error, return them
+    // (don't try to parse, as it will likely fail)
+    let has_syntax_errors = pre_parse_errors.iter().any(|e| e.severity == Severity::Error);
+
+    let mut errors = pre_parse_errors;
+
+    // Only parse and run AST-based rules if there are no syntax errors
+    if !has_syntax_errors {
+        // Parse the nginx configuration
+        if let Ok(config) = parse_string(content) {
+            // Create linter with config
+            let linter = Linter::with_config(lint_config.as_ref());
+
+            // Lint the configuration (use a dummy path since we're linting a string)
+            let lint_errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
+            errors.extend(lint_errors);
+        }
+        // If parsing fails, we already have pre-parse errors or no errors
+    }
+
+    // Run indentation check directly on content (always, as it doesn't need AST)
     if is_enabled("inconsistent-indentation") {
         let indent_size = lint_config
             .as_ref()
