@@ -40,15 +40,16 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 #[cfg(feature = "cli")]
 pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-    use ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+    use ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
 
-    // Build ignore tracker from content
-    let (tracker, warnings) = IgnoreTracker::from_content(&content);
+    // Build ignore tracker from content with rule name validation
+    let valid_rules = known_rule_names();
+    let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(&content, Some(&valid_rules));
 
     let additional_block_directives: Vec<String> = lint_config
         .map(|c| c.additional_block_directives().to_vec())
@@ -69,11 +70,12 @@ pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig
     errors.extend(semicolon_rule.check_content_with_extras(&content, &additional_block_directives));
 
     // Filter ignored errors
-    let result = filter_errors(errors, &tracker);
+    let result = filter_errors(errors, &mut tracker);
     let mut errors = result.errors;
 
-    // Add warnings from ignore comments
+    // Add warnings from ignore comments (parse warnings + unused warnings)
     errors.extend(warnings_to_errors(warnings));
+    errors.extend(warnings_to_errors(result.unused_warnings));
 
     errors
 }

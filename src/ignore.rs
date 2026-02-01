@@ -32,11 +32,26 @@ pub struct IgnoreWarning {
     pub message: String,
 }
 
+/// Information about a single ignore directive
+#[derive(Debug, Clone)]
+struct IgnoreDirective {
+    /// Line number where the comment is located
+    comment_line: usize,
+    /// Line number that this directive targets
+    target_line: usize,
+    /// Rule name to ignore
+    rule_name: String,
+    /// Whether this directive was used to ignore an error
+    used: bool,
+}
+
 /// Tracks ignored rules per line
 #[derive(Debug, Default)]
 pub struct IgnoreTracker {
-    /// Map from line number to set of ignored rule names
+    /// Map from target line number to set of ignored rule names
     ignored_lines: HashMap<usize, HashSet<String>>,
+    /// All ignore directives for tracking usage
+    directives: Vec<IgnoreDirective>,
 }
 
 impl IgnoreTracker {
@@ -55,6 +70,14 @@ impl IgnoreTracker {
 
     /// Build an ignore tracker from content, returning any warnings
     pub fn from_content(content: &str) -> (Self, Vec<IgnoreWarning>) {
+        Self::from_content_with_rules(content, None)
+    }
+
+    /// Build an ignore tracker from content with optional rule name validation
+    pub fn from_content_with_rules(
+        content: &str,
+        valid_rules: Option<&HashSet<String>>,
+    ) -> (Self, Vec<IgnoreWarning>) {
         let mut tracker = Self::new();
         let mut warnings = Vec::new();
 
@@ -63,12 +86,33 @@ impl IgnoreTracker {
 
             if let Some(result) = parse_disable_comment(line, line_number) {
                 match result {
-                    Ok((rule_name, target_line)) => {
+                    Ok((rule_name, target_line, comment_line)) => {
+                        // Check if rule name is valid
+                        if let Some(valid) = valid_rules {
+                            if !valid.contains(&rule_name) {
+                                warnings.push(IgnoreWarning {
+                                    line: comment_line,
+                                    message: format!(
+                                        "unknown rule '{}' in nginx-lint:disable comment",
+                                        rule_name
+                                    ),
+                                });
+                                // Still register it so we can track it as unused
+                            }
+                        }
+
                         tracker
                             .ignored_lines
                             .entry(target_line)
                             .or_default()
-                            .insert(rule_name);
+                            .insert(rule_name.clone());
+
+                        tracker.directives.push(IgnoreDirective {
+                            comment_line,
+                            target_line,
+                            rule_name,
+                            used: false,
+                        });
                     }
                     Err(warning) => {
                         warnings.push(warning);
@@ -80,6 +124,30 @@ impl IgnoreTracker {
         (tracker, warnings)
     }
 
+    /// Mark a rule as used on a specific line
+    fn mark_used(&mut self, rule: &str, line: usize) {
+        for directive in &mut self.directives {
+            if directive.target_line == line && directive.rule_name == rule {
+                directive.used = true;
+            }
+        }
+    }
+
+    /// Get warnings for unused ignore directives
+    pub fn unused_warnings(&self) -> Vec<IgnoreWarning> {
+        self.directives
+            .iter()
+            .filter(|d| !d.used)
+            .map(|d| IgnoreWarning {
+                line: d.comment_line,
+                message: format!(
+                    "unused nginx-lint:disable comment for rule '{}'",
+                    d.rule_name
+                ),
+            })
+            .collect()
+    }
+
     /// Add an ignore rule for a specific line
     #[cfg(test)]
     pub fn add_ignore(&mut self, rule: &str, line: usize) {
@@ -87,6 +155,12 @@ impl IgnoreTracker {
             .entry(line)
             .or_default()
             .insert(rule.to_string());
+        self.directives.push(IgnoreDirective {
+            comment_line: line.saturating_sub(1).max(1),
+            target_line: line,
+            rule_name: rule.to_string(),
+            used: false,
+        });
     }
 }
 
@@ -98,12 +172,12 @@ impl IgnoreTracker {
 ///
 /// Returns:
 /// - `None` if the line does not contain a disable comment
-/// - `Some(Ok((rule_name, target_line)))` if valid
+/// - `Some(Ok((rule_name, target_line, comment_line)))` if valid
 /// - `Some(Err(warning))` if the comment is malformed
 fn parse_disable_comment(
     line: &str,
     line_number: usize,
-) -> Option<Result<(String, usize), IgnoreWarning>> {
+) -> Option<Result<(String, usize, usize), IgnoreWarning>> {
     const DISABLE_PREFIX: &str = "nginx-lint:disable";
 
     // Find the comment marker
@@ -150,7 +224,8 @@ fn parse_disable_comment(
         line_number + 1
     };
 
-    Some(Ok((rule_name, target_line)))
+    // Return rule_name, target_line, and comment_line
+    Some(Ok((rule_name, target_line, line_number)))
 }
 
 /// Result of filtering errors with ignore tracker
@@ -160,10 +235,12 @@ pub struct FilterResult {
     pub errors: Vec<LintError>,
     /// Number of errors that were ignored
     pub ignored_count: usize,
+    /// Warnings for unused ignore directives
+    pub unused_warnings: Vec<IgnoreWarning>,
 }
 
 /// Filter errors using an ignore tracker, returning remaining errors and ignored count
-pub fn filter_errors(errors: Vec<LintError>, tracker: &IgnoreTracker) -> FilterResult {
+pub fn filter_errors(errors: Vec<LintError>, tracker: &mut IgnoreTracker) -> FilterResult {
     let mut remaining = Vec::new();
     let mut ignored_count = 0;
 
@@ -171,15 +248,19 @@ pub fn filter_errors(errors: Vec<LintError>, tracker: &IgnoreTracker) -> FilterR
         if let Some(line) = error.line
             && tracker.is_ignored(&error.rule, line)
         {
+            tracker.mark_used(&error.rule, line);
             ignored_count += 1;
             continue;
         }
         remaining.push(error);
     }
 
+    let unused_warnings = tracker.unused_warnings();
+
     FilterResult {
         errors: remaining,
         ignored_count,
+        unused_warnings,
     }
 }
 
@@ -189,7 +270,7 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
         .into_iter()
         .map(|warning| {
             LintError::new(
-                "ignore-comment",
+                "invalid-nginx-lint-disable",
                 "ignore",
                 &warning.message,
                 Severity::Warning,
@@ -197,6 +278,27 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
             .with_location(warning.line, 1)
         })
         .collect()
+}
+
+/// Get a set of all known rule names
+pub fn known_rule_names() -> HashSet<String> {
+    // All rule names that can be used with nginx-lint:disable
+    [
+        "duplicate-directive",
+        "unmatched-braces",
+        "unclosed-quote",
+        "missing-semicolon",
+        "deprecated-ssl-protocol",
+        "server-tokens-enabled",
+        "autoindex-enabled",
+        "weak-ssl-ciphers",
+        "inconsistent-indentation",
+        "gzip-not-enabled",
+        "missing-error-log",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 #[cfg(test)]
@@ -210,9 +312,10 @@ mod tests {
             5,
         );
         assert!(result.is_some());
-        let (rule, line) = result.unwrap().unwrap();
+        let (rule, target_line, comment_line) = result.unwrap().unwrap();
         assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(line, 6); // Next line
+        assert_eq!(target_line, 6); // Next line
+        assert_eq!(comment_line, 5);
     }
 
     #[test]
@@ -222,9 +325,10 @@ mod tests {
             5,
         );
         assert!(result.is_some());
-        let (rule, line) = result.unwrap().unwrap();
+        let (rule, target_line, comment_line) = result.unwrap().unwrap();
         assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(line, 6);
+        assert_eq!(target_line, 6);
+        assert_eq!(comment_line, 5);
     }
 
     #[test]
@@ -318,7 +422,7 @@ server_tokens on;
                 .with_location(5, 1),
         ];
 
-        let result = filter_errors(errors, &tracker);
+        let result = filter_errors(errors, &mut tracker);
         assert_eq!(result.errors.len(), 2);
         assert_eq!(result.ignored_count, 1);
         // Line 5 server-tokens-enabled should be filtered out
@@ -326,6 +430,8 @@ server_tokens on;
             .errors
             .iter()
             .all(|e| !(e.rule == "server-tokens-enabled" && e.line == Some(5))));
+        // The used directive should have no unused warnings for that rule
+        assert!(result.unused_warnings.is_empty());
     }
 
     #[test]
@@ -340,9 +446,11 @@ server_tokens on;
             Severity::Warning,
         )];
 
-        let result = filter_errors(errors, &tracker);
+        let result = filter_errors(errors, &mut tracker);
         assert_eq!(result.errors.len(), 1); // Should not be filtered
         assert_eq!(result.ignored_count, 0);
+        // The directive was not used, so there should be an unused warning
+        assert_eq!(result.unused_warnings.len(), 1);
     }
 
     #[test]
@@ -367,7 +475,7 @@ server_tokens on;
 
         let errors = warnings_to_errors(warnings);
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].rule, "ignore-comment");
+        assert_eq!(errors[0].rule, "invalid-nginx-lint-disable");
         assert_eq!(errors[0].category, "ignore");
         assert_eq!(errors[0].message, "test warning");
         assert_eq!(errors[0].severity, Severity::Warning);
@@ -381,9 +489,10 @@ server_tokens on;
             5,
         );
         assert!(result.is_some());
-        let (rule, line) = result.unwrap().unwrap();
+        let (rule, target_line, comment_line) = result.unwrap().unwrap();
         assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(line, 5); // Same line (inline)
+        assert_eq!(target_line, 5); // Same line (inline)
+        assert_eq!(comment_line, 5);
     }
 
     #[test]
@@ -393,9 +502,10 @@ server_tokens on;
             5,
         );
         assert!(result.is_some());
-        let (rule, line) = result.unwrap().unwrap();
+        let (rule, target_line, comment_line) = result.unwrap().unwrap();
         assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(line, 5); // Same line (inline)
+        assert_eq!(target_line, 5); // Same line (inline)
+        assert_eq!(comment_line, 5);
     }
 
     #[test]
@@ -434,5 +544,59 @@ autoindex on; # nginx-lint:disable autoindex-enabled reason for this line
         assert!(tracker.is_ignored("server-tokens-enabled", 3));
         // Inline comment targets same line
         assert!(tracker.is_ignored("autoindex-enabled", 4));
+    }
+
+    #[test]
+    fn test_unknown_rule_name() {
+        let content = r#"
+# nginx-lint:disable unknown-rule-name some reason
+server_tokens on;
+"#;
+        let valid_rules = known_rule_names();
+        let (_, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].message.contains("unknown rule 'unknown-rule-name'"));
+    }
+
+    #[test]
+    fn test_unused_ignore_directive() {
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason
+server_tokens off;
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        // No errors to filter
+        let errors: Vec<LintError> = vec![];
+        let result = filter_errors(errors, &mut tracker);
+
+        // Should have unused warning
+        assert_eq!(result.unused_warnings.len(), 1);
+        assert!(result.unused_warnings[0].message.contains("unused nginx-lint:disable"));
+        assert!(result.unused_warnings[0].message.contains("server-tokens-enabled"));
+    }
+
+    #[test]
+    fn test_used_ignore_directive_no_warning() {
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason
+server_tokens on;
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        // Create an error that will be filtered
+        let errors = vec![LintError::new(
+            "server-tokens-enabled",
+            "security",
+            "test error",
+            Severity::Warning,
+        )
+        .with_location(3, 1)];
+
+        let result = filter_errors(errors, &mut tracker);
+
+        // Should have no unused warnings
+        assert!(result.unused_warnings.is_empty());
+        assert_eq!(result.ignored_count, 1);
     }
 }

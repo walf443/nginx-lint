@@ -263,13 +263,15 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+        use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
 
-        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        let valid_rules = known_rule_names();
+        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
-        let result = filter_errors(errors, &tracker);
+        let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
         errors.extend(warnings_to_errors(warnings));
+        errors.extend(warnings_to_errors(result.unused_warnings));
         (errors, result.ignored_count)
     }
 
@@ -281,13 +283,15 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+        use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
 
-        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        let valid_rules = known_rule_names();
+        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
-        let result = filter_errors(errors, &tracker);
+        let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
         errors.extend(warnings_to_errors(warnings));
+        errors.extend(warnings_to_errors(result.unused_warnings));
         (errors, result.ignored_count)
     }
 }

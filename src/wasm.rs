@@ -135,7 +135,7 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
-    use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+    use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
     use crate::rules::{
         InconsistentIndentation, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
     };
@@ -147,8 +147,9 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
 
-    // Build ignore tracker from content
-    let (tracker, ignore_warnings) = IgnoreTracker::from_content(content);
+    // Build ignore tracker from content with rule name validation
+    let valid_rules = known_rule_names();
+    let (mut tracker, ignore_warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
 
     // Helper to check if a rule is enabled
     let is_enabled = |rule_name: &str| {
@@ -214,12 +215,13 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     }
 
     // Filter ignored errors and track count
-    let result = filter_errors(errors, &tracker);
+    let result = filter_errors(errors, &mut tracker);
     let mut errors = result.errors;
     let ignored_count = result.ignored_count;
 
-    // Add warnings from ignore comments
+    // Add warnings from ignore comments (parse warnings + unused warnings)
     errors.extend(warnings_to_errors(ignore_warnings));
+    errors.extend(warnings_to_errors(result.unused_warnings));
 
     // Convert errors to JSON
     let js_errors: Vec<JsLintError> = errors.iter().map(JsLintError::from).collect();

@@ -788,8 +788,8 @@ http {
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
-    let (tracker, warnings) = IgnoreTracker::from_content(content);
-    let result = filter_errors(errors, &tracker);
+    let (mut tracker, warnings) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &mut tracker);
 
     // Verify no warnings from parsing the ignore comment
     assert!(warnings.is_empty(), "Unexpected warnings: {:?}", warnings);
@@ -827,8 +827,8 @@ http {
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
-    let (tracker, _) = IgnoreTracker::from_content(content);
-    let result = filter_errors(errors, &tracker);
+    let (mut tracker, _) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &mut tracker);
 
     // First server_tokens should be ignored, second should still be reported
     let server_tokens_errors: Vec<_> = result
@@ -902,8 +902,8 @@ http {
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
-    let (tracker, _) = IgnoreTracker::from_content(content);
-    let result = filter_errors(errors, &tracker);
+    let (mut tracker, _) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &mut tracker);
 
     // server-tokens-enabled should be ignored
     let server_tokens_errors: Vec<_> = result
@@ -985,8 +985,8 @@ http {
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
-    let (tracker, warnings) = IgnoreTracker::from_content(content);
-    let result = filter_errors(errors, &tracker);
+    let (mut tracker, warnings) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &mut tracker);
 
     // Verify no warnings from parsing the ignore comment
     assert!(warnings.is_empty(), "Unexpected warnings: {:?}", warnings);
