@@ -58,6 +58,16 @@ impl WasmLintResult {
     }
 }
 
+/// A fix for JavaScript
+#[derive(serde::Serialize)]
+struct JsFix {
+    line: usize,
+    old_text: Option<String>,
+    new_text: String,
+    delete_line: bool,
+    insert_after: bool,
+}
+
 /// A single lint error for JavaScript
 #[derive(serde::Serialize)]
 struct JsLintError {
@@ -67,6 +77,8 @@ struct JsLintError {
     severity: String,
     line: Option<usize>,
     column: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fix: Option<JsFix>,
 }
 
 impl From<&LintError> for JsLintError {
@@ -82,6 +94,13 @@ impl From<&LintError> for JsLintError {
             },
             line: error.line,
             column: error.column,
+            fix: error.fix.as_ref().map(|f| JsFix {
+                line: f.line,
+                old_text: f.old_text.clone(),
+                new_text: f.new_text.clone(),
+                delete_line: f.delete_line,
+                insert_after: f.insert_after,
+            }),
         }
     }
 }

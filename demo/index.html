@@ -147,6 +147,30 @@
         button:hover {
             background: #81d4fa;
         }
+        button.fix-btn {
+            background: #4caf50;
+            padding: 4px 8px;
+            font-size: 11px;
+            margin-left: 8px;
+        }
+        button.fix-btn:hover {
+            background: #66bb6a;
+        }
+        button.fix-all-btn {
+            background: #4caf50;
+        }
+        button.fix-all-btn:hover {
+            background: #66bb6a;
+        }
+        .error-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .error-actions {
+            display: flex;
+            align-items: center;
+        }
         .version {
             color: #666;
             font-size: 12px;
@@ -187,6 +211,7 @@ http {
             <div class="panel">
                 <div class="panel-header">
                     <span class="panel-title">Results</span>
+                    <button id="fix-all-btn" class="fix-all-btn" style="display: none;" onclick="applyAllFixes()">Fix All</button>
                 </div>
                 <div id="results" class="results">
                     <div class="loading">Loading WASM module...</div>
@@ -220,6 +245,7 @@ enabled = true</textarea>
         import init, { lint_with_config, version, get_rule_names } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
+        let currentErrors = [];
 
         async function initWasm() {
             try {
@@ -255,22 +281,33 @@ enabled = true</textarea>
             const configToml = document.getElementById('config-editor').value;
             const resultsDiv = document.getElementById('results');
             const summaryDiv = document.getElementById('summary');
+            const fixAllBtn = document.getElementById('fix-all-btn');
 
             try {
                 const result = lint_with_config(content, configToml);
                 const errors = JSON.parse(result.errors);
+                currentErrors = errors;
+
+                const fixableCount = errors.filter(e => e.fix).length;
+                fixAllBtn.style.display = fixableCount > 0 ? 'block' : 'none';
 
                 if (errors.length === 0) {
                     resultsDiv.innerHTML = '<div class="no-issues">No issues found!</div>';
                     summaryDiv.style.display = 'none';
                 } else {
                     let html = '';
-                    errors.forEach(err => {
+                    errors.forEach((err, index) => {
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
+                        const fixBtn = err.fix ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
                         html += `
                             <div class="error-item ${err.severity}">
-                                <span class="error-rule">${err.category}/${err.rule}</span>
-                                <div class="error-location">${location}</div>
+                                <div class="error-header">
+                                    <div class="error-location">${location}</div>
+                                    <div class="error-actions">
+                                        <span class="error-rule">${err.category}/${err.rule}</span>
+                                        ${fixBtn}
+                                    </div>
+                                </div>
                                 <div class="error-message">${err.message}</div>
                             </div>
                         `;
@@ -288,7 +325,70 @@ enabled = true</textarea>
                 const prefix = isConfigError ? 'Config error' : 'Parse error';
                 resultsDiv.innerHTML = '<div class="error-item error"><div class="error-message">' + prefix + ': ' + errorMsg + '</div></div>';
                 summaryDiv.style.display = 'none';
+                fixAllBtn.style.display = 'none';
             }
+        };
+
+        // Apply a single fix
+        window.applyFix = function(index) {
+            const error = currentErrors[index];
+            if (!error || !error.fix) return;
+
+            const editor = document.getElementById('editor');
+            const content = editor.value;
+            const lines = content.split('\n');
+            const fix = error.fix;
+
+            // Apply the fix
+            const lineIndex = fix.line - 1;
+            if (lineIndex < 0 || lineIndex >= lines.length + 1) return;
+
+            if (fix.delete_line) {
+                // Delete the line
+                lines.splice(lineIndex, 1);
+            } else if (fix.insert_after) {
+                // Insert new line after
+                lines.splice(lineIndex + 1, 0, fix.new_text);
+            } else if (fix.old_text !== null && fix.old_text !== undefined) {
+                // Replace specific text on the line
+                lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
+            } else {
+                // Replace entire line
+                lines[lineIndex] = fix.new_text;
+            }
+
+            editor.value = lines.join('\n');
+            lintConfig();
+        };
+
+        // Apply all fixes (in reverse order to maintain line numbers)
+        window.applyAllFixes = function() {
+            const fixableErrors = currentErrors
+                .map((err, index) => ({ err, index }))
+                .filter(item => item.err.fix)
+                .sort((a, b) => (b.err.fix.line - a.err.fix.line));
+
+            const editor = document.getElementById('editor');
+            let lines = editor.value.split('\n');
+
+            for (const { err } of fixableErrors) {
+                const fix = err.fix;
+                const lineIndex = fix.line - 1;
+                if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;
+
+                if (fix.delete_line) {
+                    lines.splice(lineIndex, 1);
+                } else if (fix.insert_after) {
+                    lines.splice(lineIndex + 1, 0, fix.new_text);
+                } else if (fix.old_text !== null && fix.old_text !== undefined) {
+                    lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
+                } else {
+                    lines[lineIndex] = fix.new_text;
+                }
+            }
+
+            editor.value = lines.join('\n');
+            lintConfig();
         };
 
         initWasm();
