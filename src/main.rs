@@ -1,9 +1,10 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
     apply_fixes, parse_config, pre_parse_checks, ColorMode, LintConfig, Linter, OutputFormat,
     Reporter, Severity,
 };
+use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -11,9 +12,12 @@ use std::process::ExitCode;
 #[command(name = "nginx-lint")]
 #[command(author, version, about = "Lint nginx configuration files", long_about = None)]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+
     /// Path to nginx configuration file
     #[arg(value_name = "FILE")]
-    file: PathBuf,
+    file: Option<PathBuf>,
 
     /// Output format
     #[arg(short = 'o', long, value_enum, default_value = "text")]
@@ -44,6 +48,29 @@ struct Cli {
     no_fail_on_warnings: bool,
 }
 
+#[derive(Subcommand)]
+enum Commands {
+    /// Configuration file management
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Generate a default .nginx-lint.toml configuration file
+    Init {
+        /// Output path for the configuration file
+        #[arg(short, long, default_value = ".nginx-lint.toml")]
+        output: PathBuf,
+
+        /// Overwrite existing file
+        #[arg(long)]
+        force: bool,
+    },
+}
+
 #[derive(Clone, Copy, clap::ValueEnum)]
 enum Format {
     Text,
@@ -59,22 +86,141 @@ impl From<Format> for OutputFormat {
     }
 }
 
-fn main() -> ExitCode {
-    let cli = Cli::parse();
+fn generate_default_config() -> String {
+    r#"# nginx-lint configuration file
+# See https://github.com/walf443/nginx-lint for documentation
+
+# Color output settings
+[color]
+# Color mode: "auto", "always", or "never"
+ui = "auto"
+# Severity colors (available: black, red, green, yellow, blue, magenta, cyan, white,
+#                  bright_black, bright_red, bright_green, bright_yellow, bright_blue,
+#                  bright_magenta, bright_cyan, bright_white)
+error = "red"
+warning = "yellow"
+info = "blue"
+
+# =============================================================================
+# Syntax Rules
+# =============================================================================
+
+[rules.duplicate-directive]
+enabled = true
+
+[rules.unmatched-braces]
+enabled = true
+
+[rules.unclosed-quote]
+enabled = true
+
+[rules.missing-semicolon]
+enabled = true
+
+# =============================================================================
+# Security Rules
+# =============================================================================
+
+[rules.deprecated-ssl-protocol]
+enabled = true
+# Allowed protocols for auto-fix (default: ["TLSv1.2", "TLSv1.3"])
+allowed_protocols = ["TLSv1.2", "TLSv1.3"]
+
+[rules.server-tokens-enabled]
+enabled = true
+
+[rules.autoindex-enabled]
+enabled = true
+
+[rules.weak-ssl-ciphers]
+enabled = true
+# Weak cipher patterns to detect
+weak_ciphers = [
+    "NULL",
+    "EXPORT",
+    "DES",
+    "RC4",
+    "MD5",
+    "aNULL",
+    "eNULL",
+    "ADH",
+    "AECDH",
+    "PSK",
+    "SRP",
+    "CAMELLIA",
+]
+# Required exclusion patterns
+required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
+
+# =============================================================================
+# Style Rules
+# =============================================================================
+
+[rules.inconsistent-indentation]
+enabled = true
+# Indentation size (default: 4)
+indent_size = 4
+
+# =============================================================================
+# Best Practices
+# =============================================================================
+
+[rules.gzip-not-enabled]
+enabled = true
+
+[rules.missing-error-log]
+enabled = true
+"#
+    .to_string()
+}
+
+fn run_init(output: PathBuf, force: bool) -> ExitCode {
+    if output.exists() && !force {
+        eprintln!(
+            "Error: {} already exists. Use --force to overwrite.",
+            output.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    let config_content = generate_default_config();
+
+    match fs::write(&output, config_content) {
+        Ok(()) => {
+            eprintln!("Created {}", output.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error writing {}: {}", output.display(), e);
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn run_lint(cli: Cli) -> ExitCode {
+    let file = match cli.file {
+        Some(f) => f,
+        None => {
+            eprintln!("Error: FILE argument is required");
+            eprintln!("Usage: nginx-lint <FILE>");
+            eprintln!("       nginx-lint init");
+            return ExitCode::from(2);
+        }
+    };
 
     // If a directory is specified, look for nginx.conf inside it
-    let file_path = if cli.file.is_dir() {
-        let nginx_conf = cli.file.join("nginx.conf");
+    let file_path = if file.is_dir() {
+        let nginx_conf = file.join("nginx.conf");
         if !nginx_conf.exists() {
             eprintln!(
                 "Error: nginx.conf not found in directory {}",
-                cli.file.display()
+                file.display()
             );
             return ExitCode::from(2);
         }
         nginx_conf
     } else {
-        cli.file.clone()
+        file.clone()
     };
 
     // Load configuration
@@ -194,5 +340,16 @@ fn main() -> ExitCode {
         ExitCode::from(1)
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Some(Commands::Config { command }) => match command {
+            ConfigCommands::Init { output, force } => run_init(output.clone(), *force),
+        },
+        None => run_lint(cli),
     }
 }
