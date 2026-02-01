@@ -173,7 +173,7 @@ required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 # Style Rules
 # =============================================================================
 
-[rules.inconsistent-indentation]
+[rules.indent]
 enabled = true
 # Indentation size (default: 2)
 indent_size = 2

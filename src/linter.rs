@@ -144,10 +144,9 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
-            InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
-            SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote, UnmatchedBraces,
-            WeakSslCiphers,
+            AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled, Indent,
+            MissingErrorLog, MissingSemicolon, ServerTokensEnabled, SpaceBeforeSemicolon,
+            TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -199,10 +198,10 @@ impl Linter {
         }
 
         // Style rules
-        if is_enabled("inconsistent-indentation") {
-            let mut rule = InconsistentIndentation::default();
+        if is_enabled("indent") {
+            let mut rule = Indent::default();
             if let Some(indent_size) = config
-                .and_then(|c| c.get_rule_config("inconsistent-indentation"))
+                .and_then(|c| c.get_rule_config("indent"))
                 .and_then(|cfg| cfg.indent_size)
             {
                 rule.indent_size = indent_size;

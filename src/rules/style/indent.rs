@@ -5,18 +5,18 @@ use std::fs;
 use std::path::Path;
 
 /// Check for inconsistent indentation
-pub struct InconsistentIndentation {
+pub struct Indent {
     /// Expected spaces per indent level (default: 2)
     pub indent_size: usize,
 }
 
-impl Default for InconsistentIndentation {
+impl Default for Indent {
     fn default() -> Self {
         Self { indent_size: 2 }
     }
 }
 
-impl InconsistentIndentation {
+impl Indent {
     /// Check indentation on content string directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
         self.check_content_impl(content)
@@ -136,7 +136,7 @@ impl InconsistentIndentation {
     }
 
     fn name(&self) -> &'static str {
-        "inconsistent-indentation"
+        "indent"
     }
 
     fn category(&self) -> &'static str {
@@ -144,9 +144,9 @@ impl InconsistentIndentation {
     }
 }
 
-impl LintRule for InconsistentIndentation {
+impl LintRule for Indent {
     fn name(&self) -> &'static str {
-        "inconsistent-indentation"
+        "indent"
     }
 
     fn category(&self) -> &'static str {
@@ -262,7 +262,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn check_content(content: &str) -> Vec<LintError> {
-        let rule = InconsistentIndentation::default();
+        let rule = Indent::default();
         rule.check_content(content)
     }
 
@@ -271,7 +271,7 @@ mod tests {
         write!(file, "{}", content).unwrap();
         let path = file.path().to_path_buf();
 
-        let rule = InconsistentIndentation::default();
+        let rule = Indent::default();
         let config = Config::new();
         rule.check(&config, &path)
     }

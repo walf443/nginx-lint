@@ -5,5 +5,5 @@ pub mod syntax;
 
 pub use best_practices::{GzipNotEnabled, MissingErrorLog};
 pub use security::{AutoindexEnabled, DeprecatedSslProtocol, ServerTokensEnabled, WeakSslCiphers};
-pub use style::{InconsistentIndentation, SpaceBeforeSemicolon, TrailingWhitespace};
+pub use style::{Indent, SpaceBeforeSemicolon, TrailingWhitespace};
 pub use syntax::{DuplicateDirective, MissingSemicolon, UnclosedQuote, UnmatchedBraces};

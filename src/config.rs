@@ -156,7 +156,7 @@ impl<'de> Deserialize<'de> for ColorMode {
 pub struct RuleConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// For inconsistent-indentation rule
+    /// For indent rule
     pub indent_size: Option<usize>,
     /// For deprecated-ssl-protocol rule: allowed protocols (default: ["TLSv1.2", "TLSv1.3"])
     pub allowed_protocols: Option<Vec<String>>,
@@ -310,7 +310,9 @@ impl LintConfig {
                     "server-tokens-enabled",
                     "autoindex-enabled",
                     "weak-ssl-ciphers",
-                    "inconsistent-indentation",
+                    "indent",
+                    "trailing-whitespace",
+                    "space-before-semicolon",
                     "gzip-not-enabled",
                     "missing-error-log",
                 ]
@@ -408,7 +410,7 @@ fn get_known_rule_options(rule_name: &str) -> HashSet<&'static str> {
     let mut options: HashSet<&str> = ["enabled"].into_iter().collect();
 
     match rule_name {
-        "inconsistent-indentation" => {
+        "indent" => {
             options.insert("indent_size");
         }
         "deprecated-ssl-protocol" => {
@@ -597,7 +599,7 @@ mod tests {
     #[test]
     fn test_parse_config() {
         let toml_content = r#"
-[rules.inconsistent-indentation]
+[rules.indent]
 enabled = true
 indent_size = 2
 
@@ -609,11 +611,11 @@ enabled = false
 
         let config = LintConfig::from_file(file.path()).unwrap();
 
-        assert!(config.is_rule_enabled("inconsistent-indentation"));
+        assert!(config.is_rule_enabled("indent"));
         assert!(!config.is_rule_enabled("server-tokens-enabled"));
         assert!(config.is_rule_enabled("unknown-rule"));
 
-        let indent_config = config.get_rule_config("inconsistent-indentation").unwrap();
+        let indent_config = config.get_rule_config("indent").unwrap();
         assert_eq!(indent_config.indent_size, Some(2));
     }
 

@@ -542,7 +542,7 @@ enabled = true
 weak_ciphers = ["RC4"]
 required_exclusions = ["!RC4"]
 
-[rules.inconsistent-indentation]
+[rules.indent]
 enabled = true
 indent_size = 2
 

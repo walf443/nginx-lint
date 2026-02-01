@@ -407,7 +407,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "server-tokens-enabled",
         "autoindex-enabled",
         "weak-ssl-ciphers",
-        "inconsistent-indentation",
+        "indent",
         "trailing-whitespace",
         "space-before-semicolon",
         "gzip-not-enabled",

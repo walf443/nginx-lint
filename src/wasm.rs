@@ -137,8 +137,8 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     use crate::config::LintConfig;
     use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
     use crate::rules::{
-        InconsistentIndentation, MissingSemicolon, SpaceBeforeSemicolon, TrailingWhitespace,
-        UnclosedQuote, UnmatchedBraces,
+        Indent, MissingSemicolon, SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote,
+        UnmatchedBraces,
     };
 
     // Parse TOML configuration
@@ -205,13 +205,13 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     }
 
     // Run indentation check directly on content (always, as it doesn't need AST)
-    if is_enabled("inconsistent-indentation") {
+    if is_enabled("indent") {
         let indent_size = lint_config
             .as_ref()
-            .and_then(|c| c.get_rule_config("inconsistent-indentation"))
+            .and_then(|c| c.get_rule_config("indent"))
             .and_then(|r| r.indent_size)
             .unwrap_or(2);
-        let indent_rule = InconsistentIndentation { indent_size };
+        let indent_rule = Indent { indent_size };
         errors.extend(indent_rule.check_content(content));
     }
 
