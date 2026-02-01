@@ -40,6 +40,40 @@ impl Indent {
                 continue;
             }
 
+            // Track brace depth inside raw_block (must be before comment check)
+            if in_raw_block {
+                for ch in trimmed.chars() {
+                    if ch == '{' {
+                        raw_block_brace_depth += 1;
+                    } else if ch == '}' {
+                        raw_block_brace_depth -= 1;
+                        if raw_block_brace_depth == 0 {
+                            in_raw_block = false;
+                        }
+                    }
+                }
+                // Skip indentation check for lines inside raw_block (including comments)
+                if in_raw_block {
+                    continue;
+                }
+                // Handle the closing brace line of raw_block
+                if trimmed == "}" {
+                    expected_depth -= 1;
+                    check_line_indentation(
+                        &mut errors,
+                        self.name(),
+                        self.category(),
+                        line,
+                        trimmed,
+                        line_number,
+                        expected_depth,
+                        &mut detected_indent_size,
+                        self.indent_size,
+                    );
+                    continue;
+                }
+            }
+
             // Check indentation for comments but don't adjust depth
             if trimmed.starts_with('#') {
                 check_line_indentation(
@@ -74,40 +108,6 @@ impl Indent {
                 );
                 expected_depth += 1;
                 continue;
-            }
-
-            // Track brace depth inside raw_block
-            if in_raw_block {
-                for ch in trimmed.chars() {
-                    if ch == '{' {
-                        raw_block_brace_depth += 1;
-                    } else if ch == '}' {
-                        raw_block_brace_depth -= 1;
-                        if raw_block_brace_depth == 0 {
-                            in_raw_block = false;
-                        }
-                    }
-                }
-                // Skip indentation check for lines inside raw_block
-                if in_raw_block {
-                    continue;
-                }
-                // Handle the closing brace line of raw_block
-                if trimmed == "}" {
-                    expected_depth -= 1;
-                    check_line_indentation(
-                        &mut errors,
-                        self.name(),
-                        self.category(),
-                        line,
-                        trimmed,
-                        line_number,
-                        expected_depth,
-                        &mut detected_indent_size,
-                        self.indent_size,
-                    );
-                    continue;
-                }
             }
 
             // Track multiline strings (for mruby inline code etc.)
@@ -357,6 +357,31 @@ mod tests {
 "#;
         let errors = check_content(content);
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_lua_block_content_not_checked() {
+        // Lua block content should not be checked for indentation
+        let content = r#"http {
+  server {
+    content_by_lua_block {
+-- Lua comment with different indentation
+local x = 1
+        if x > 0 then
+            print("hello")
+        end
+    }
+  }
+}
+"#;
+        let errors = check_content(content);
+        // Only the opening and closing braces should be checked
+        // Content inside lua_block should be skipped
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for Lua block content, got: {:?}",
+            errors
+        );
     }
 
     #[test]
