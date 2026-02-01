@@ -353,6 +353,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "autoindex-enabled",
         "weak-ssl-ciphers",
         "inconsistent-indentation",
+        "trailing-whitespace",
         "gzip-not-enabled",
         "missing-error-log",
     ]

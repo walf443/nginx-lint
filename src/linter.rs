@@ -146,7 +146,7 @@ impl Linter {
         use crate::rules::{
             AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled,
             InconsistentIndentation, MissingErrorLog, MissingSemicolon, ServerTokensEnabled,
-            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -207,6 +207,9 @@ impl Linter {
                 rule.indent_size = indent_size;
             }
             linter.add_rule(Box::new(rule));
+        }
+        if is_enabled("trailing-whitespace") {
+            linter.add_rule(Box::new(TrailingWhitespace));
         }
 
         // Best practices
