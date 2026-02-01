@@ -725,3 +725,43 @@ foo = "bar"
     assert!(error_strs.iter().any(|e| e.contains("fake-rule")));
     assert!(error_strs.iter().any(|e| e.contains("typo_option")));
 }
+
+#[test]
+fn test_config_init_generates_valid_config() {
+    use std::process::Command;
+
+    // Create a temp directory for the test
+    let temp_dir = tempfile::tempdir().unwrap();
+    let config_path = temp_dir.path().join(".nginx-lint.toml");
+
+    // Run `nginx-lint config init -o <path>`
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["config", "init", "-o", config_path.to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint config init");
+
+    assert!(
+        output.status.success(),
+        "config init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify the file was created
+    assert!(config_path.exists(), "Config file was not created");
+
+    // Validate the generated config file
+    let errors = nginx_lint::LintConfig::validate_file(&config_path).unwrap();
+    assert!(
+        errors.is_empty(),
+        "Generated config has validation errors: {:?}",
+        errors
+    );
+
+    // Also verify the config can be loaded
+    let config = nginx_lint::LintConfig::from_file(&config_path);
+    assert!(
+        config.is_ok(),
+        "Generated config failed to load: {:?}",
+        config.err()
+    );
+}
