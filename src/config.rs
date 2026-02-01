@@ -235,8 +235,10 @@ impl LintConfig {
 
             for key in root.keys() {
                 if !known_top_level.contains(key.as_str()) {
+                    let line = find_key_line(content, None, key);
                     errors.push(ValidationError::UnknownField {
                         path: key.clone(),
+                        line,
                         suggestion: suggest_field(key, &known_top_level),
                     });
                 }
@@ -249,8 +251,10 @@ impl LintConfig {
 
                 for key in color.keys() {
                     if !known_color_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("color"), key);
                         errors.push(ValidationError::UnknownField {
                             path: format!("color.{}", key),
+                            line,
                             suggestion: suggest_field(key, &known_color_keys),
                         });
                     }
@@ -277,8 +281,10 @@ impl LintConfig {
 
                 for (rule_name, rule_value) in rules {
                     if !known_rules.contains(rule_name.as_str()) {
+                        let line = find_key_line(content, Some("rules"), rule_name);
                         errors.push(ValidationError::UnknownRule {
                             name: rule_name.clone(),
+                            line,
                             suggestion: suggest_field(rule_name, &known_rules),
                         });
                         continue;
@@ -287,12 +293,15 @@ impl LintConfig {
                     // Validate rule options
                     if let toml::Value::Table(rule_config) = rule_value {
                         let known_rule_options = get_known_rule_options(rule_name);
+                        let section = format!("rules.{}", rule_name);
 
                         for key in rule_config.keys() {
                             if !known_rule_options.contains(key.as_str()) {
+                                let line = find_key_line(content, Some(&section), key);
                                 errors.push(ValidationError::UnknownRuleOption {
                                     rule: rule_name.clone(),
                                     option: key.clone(),
+                                    line,
                                     suggestion: suggest_field(key, &known_rule_options),
                                 });
                             }
@@ -304,6 +313,56 @@ impl LintConfig {
 
         Ok(errors)
     }
+}
+
+/// Find the line number where a key is defined in the TOML content
+fn find_key_line(content: &str, section: Option<&str>, key: &str) -> Option<usize> {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // For top-level sections (section is None), look for [key]
+    if section.is_none() {
+        let section_header = format!("[{}]", key);
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim() == section_header {
+                return Some(i + 1);
+            }
+        }
+        return None;
+    }
+
+    let target_section = section.unwrap();
+    let mut in_section = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Check for section header [section] or [section.subsection]
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section_name = &trimmed[1..trimmed.len() - 1];
+
+            // Check if this is a [rules.rule-name] style section
+            let full_section = format!("{}.{}", target_section, key);
+            if section_name == full_section {
+                return Some(i + 1);
+            }
+
+            in_section = section_name == target_section
+                || section_name.starts_with(&format!("{}.", target_section));
+            continue;
+        }
+
+        // Check for key = value within the section
+        if in_section
+            && let Some((k, _)) = trimmed.split_once('=')
+        {
+            let k = k.trim();
+            if k == key {
+                return Some(i + 1);
+            }
+        }
+    }
+
+    None
 }
 
 /// Get known options for a specific rule
@@ -385,15 +444,18 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
 pub enum ValidationError {
     UnknownField {
         path: String,
+        line: Option<usize>,
         suggestion: Option<String>,
     },
     UnknownRule {
         name: String,
+        line: Option<usize>,
         suggestion: Option<String>,
     },
     UnknownRuleOption {
         rule: String,
         option: String,
+        line: Option<usize>,
         suggestion: Option<String>,
     },
 }
@@ -401,14 +463,28 @@ pub enum ValidationError {
 impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ValidationError::UnknownField { path, suggestion } => {
+            ValidationError::UnknownField {
+                path,
+                line,
+                suggestion,
+            } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
                 write!(f, "unknown field '{}'", path)?;
                 if let Some(s) = suggestion {
                     write!(f, ", did you mean '{}'?", s)?;
                 }
                 Ok(())
             }
-            ValidationError::UnknownRule { name, suggestion } => {
+            ValidationError::UnknownRule {
+                name,
+                line,
+                suggestion,
+            } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
                 write!(f, "unknown rule '{}'", name)?;
                 if let Some(s) = suggestion {
                     write!(f, ", did you mean '{}'?", s)?;
@@ -418,8 +494,12 @@ impl std::fmt::Display for ValidationError {
             ValidationError::UnknownRuleOption {
                 rule,
                 option,
+                line,
                 suggestion,
             } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
                 write!(f, "unknown option '{}' for rule '{}'", option, rule)?;
                 if let Some(s) = suggestion {
                     write!(f, ", did you mean '{}'?", s)?;

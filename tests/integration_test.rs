@@ -541,3 +541,187 @@ fn test_all_rule_fixtures() {
         }
     }
 }
+
+// ============================================================================
+// Config validation tests
+// ============================================================================
+
+#[test]
+fn test_config_validate_valid() {
+    use std::io::Write;
+
+    let config_content = r#"
+[color]
+ui = "auto"
+error = "red"
+warning = "yellow"
+info = "blue"
+
+[rules.weak-ssl-ciphers]
+enabled = true
+weak_ciphers = ["RC4"]
+required_exclusions = ["!RC4"]
+
+[rules.inconsistent-indentation]
+enabled = true
+indent_size = 4
+
+[rules.deprecated-ssl-protocol]
+enabled = false
+allowed_protocols = ["TLSv1.2", "TLSv1.3"]
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert!(
+        errors.is_empty(),
+        "Expected no validation errors, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn test_config_validate_unknown_top_level_section() {
+    use std::io::Write;
+
+    let config_content = r#"
+[color]
+ui = "auto"
+
+[unknown_section]
+foo = "bar"
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 1);
+
+    let error = &errors[0];
+    let error_str = error.to_string();
+    assert!(error_str.contains("unknown field 'unknown_section'"));
+    assert!(error_str.contains("line 5"));
+}
+
+#[test]
+fn test_config_validate_unknown_color_option() {
+    use std::io::Write;
+
+    let config_content = r#"
+[color]
+ui = "auto"
+unknown_option = "value"
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 1);
+
+    let error = &errors[0];
+    let error_str = error.to_string();
+    assert!(error_str.contains("unknown field 'color.unknown_option'"));
+    assert!(error_str.contains("line 4"));
+}
+
+#[test]
+fn test_config_validate_unknown_rule() {
+    use std::io::Write;
+
+    let config_content = r#"
+[rules.nonexistent-rule]
+enabled = true
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 1);
+
+    let error = &errors[0];
+    let error_str = error.to_string();
+    assert!(error_str.contains("unknown rule 'nonexistent-rule'"));
+    assert!(error_str.contains("line 2"));
+}
+
+#[test]
+fn test_config_validate_unknown_rule_option() {
+    use std::io::Write;
+
+    let config_content = r#"
+[rules.weak-ssl-ciphers]
+enabled = true
+unknown_option = "value"
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 1);
+
+    let error = &errors[0];
+    let error_str = error.to_string();
+    assert!(error_str.contains("unknown option 'unknown_option' for rule 'weak-ssl-ciphers'"));
+    assert!(error_str.contains("line 4"));
+}
+
+#[test]
+fn test_config_validate_typo_suggestion() {
+    use std::io::Write;
+
+    let config_content = r#"
+[rules.weak-ssl-ciphers]
+enabled = true
+weak_cipherz = ["RC4"]
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 1);
+
+    let error = &errors[0];
+    let error_str = error.to_string();
+    assert!(error_str.contains("weak_cipherz"));
+    assert!(error_str.contains("did you mean 'weak_ciphers'?"));
+}
+
+#[test]
+fn test_config_validate_multiple_errors() {
+    use std::io::Write;
+
+    let config_content = r#"
+[color]
+ui = "auto"
+bad_color = "red"
+
+[rules.fake-rule]
+enabled = true
+
+[rules.weak-ssl-ciphers]
+typo_option = "value"
+
+[bad_section]
+foo = "bar"
+"#;
+
+    let mut file = NamedTempFile::new().unwrap();
+    write!(file, "{}", config_content).unwrap();
+
+    let errors = nginx_lint::LintConfig::validate_file(file.path()).unwrap();
+    assert_eq!(errors.len(), 4);
+
+    // Check that all error types are present
+    let error_strs: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    assert!(error_strs.iter().any(|e| e.contains("bad_section")));
+    assert!(error_strs.iter().any(|e| e.contains("bad_color")));
+    assert!(error_strs.iter().any(|e| e.contains("fake-rule")));
+    assert!(error_strs.iter().any(|e| e.contains("typo_option")));
+}
