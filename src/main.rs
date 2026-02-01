@@ -263,6 +263,7 @@ enum FileResult {
     LintErrors {
         path: PathBuf,
         errors: Vec<LintError>,
+        ignored_count: usize,
     },
 }
 
@@ -293,17 +294,22 @@ fn lint_file(
         };
     }
 
+    // Read file content for ignore comment support
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+
     // Lint the parsed config
     if let Some(ref config) = included.config {
-        let errors = linter.lint(config, path);
+        let (errors, ignored_count) = linter.lint_with_content(config, path, &content);
         FileResult::LintErrors {
             path: path.clone(),
             errors,
+            ignored_count,
         }
     } else {
         FileResult::LintErrors {
             path: path.clone(),
             errors: Vec::new(),
+            ignored_count: 0,
         }
     }
 }
@@ -415,6 +421,7 @@ fn run_lint(cli: Cli) -> ExitCode {
     // Process results sequentially (for consistent output ordering)
     let mut all_errors = Vec::new();
     let mut has_fatal_error = false;
+    let mut total_ignored = 0;
 
     for result in results {
         match result {
@@ -439,7 +446,11 @@ fn run_lint(cli: Cli) -> ExitCode {
                 eprintln!("Error parsing {}: {}", path.display(), error);
                 has_fatal_error = true;
             }
-            FileResult::LintErrors { path, errors } => {
+            FileResult::LintErrors {
+                path,
+                errors,
+                ignored_count,
+            } => {
                 if cli.fix {
                     match apply_fixes(&path, &errors) {
                         Ok(count) => {
@@ -455,8 +466,14 @@ fn run_lint(cli: Cli) -> ExitCode {
                     reporter.report(&errors, &path);
                 }
                 all_errors.extend(errors);
+                total_ignored += ignored_count;
             }
         }
+    }
+
+    // Report ignored count in verbose mode
+    if cli.verbose && total_ignored > 0 {
+        eprintln!("Ignored {} error(s) via inline comments", total_ignored);
     }
 
     if has_fatal_error {

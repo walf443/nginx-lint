@@ -1,4 +1,4 @@
-use nginx_lint::{apply_fixes, parse_config, pre_parse_checks, Linter, Severity};
+use nginx_lint::{apply_fixes, parse_config, parse_string, pre_parse_checks, Linter, Severity};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::NamedTempFile;
@@ -764,4 +764,206 @@ fn test_config_init_generates_valid_config() {
         "Generated config failed to load: {:?}",
         config.err()
     );
+}
+
+// ============================================================================
+// Ignore comment tests
+// ============================================================================
+
+#[test]
+fn test_ignore_comment_suppresses_error() {
+    use nginx_lint::IgnoreTracker;
+    use nginx_lint::filter_errors;
+
+    let content = r#"
+http {
+    server {
+        # nginx-lint:disable server-tokens-enabled 開発環境用
+        server_tokens on;
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Build tracker and filter errors
+    let (tracker, warnings) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &tracker);
+
+    // Verify no warnings from parsing the ignore comment
+    assert!(warnings.is_empty(), "Unexpected warnings: {:?}", warnings);
+
+    // Verify the error was ignored
+    let server_tokens_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+    assert!(
+        server_tokens_errors.is_empty(),
+        "Expected server-tokens-enabled error to be ignored, but got: {:?}",
+        server_tokens_errors
+    );
+    assert_eq!(result.ignored_count, 1, "Expected 1 error to be ignored");
+}
+
+#[test]
+fn test_ignore_comment_only_affects_next_line() {
+    use nginx_lint::IgnoreTracker;
+    use nginx_lint::filter_errors;
+
+    let content = r#"
+http {
+    server {
+        # nginx-lint:disable server-tokens-enabled reason
+        server_tokens on;
+        server_tokens on;
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Build tracker and filter errors
+    let (tracker, _) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &tracker);
+
+    // First server_tokens should be ignored, second should still be reported
+    let server_tokens_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+    assert_eq!(
+        server_tokens_errors.len(),
+        1,
+        "Expected 1 server-tokens-enabled error (second occurrence), got: {:?}",
+        server_tokens_errors
+    );
+    assert_eq!(result.ignored_count, 1, "Expected 1 error to be ignored");
+}
+
+#[test]
+fn test_ignore_comment_missing_reason_warning() {
+    use nginx_lint::IgnoreTracker;
+
+    let content = r#"
+# nginx-lint:disable server-tokens-enabled
+server_tokens on;
+"#;
+
+    let (_, warnings) = IgnoreTracker::from_content(content);
+
+    assert_eq!(warnings.len(), 1, "Expected 1 warning");
+    assert!(
+        warnings[0].message.contains("requires a reason"),
+        "Expected 'requires a reason' warning, got: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn test_ignore_comment_missing_rule_name_warning() {
+    use nginx_lint::IgnoreTracker;
+
+    let content = r#"
+# nginx-lint:disable
+server_tokens on;
+"#;
+
+    let (_, warnings) = IgnoreTracker::from_content(content);
+
+    assert_eq!(warnings.len(), 1, "Expected 1 warning");
+    assert!(
+        warnings[0].message.contains("requires a rule name"),
+        "Expected 'requires a rule name' warning, got: {}",
+        warnings[0].message
+    );
+}
+
+#[test]
+fn test_ignore_comment_only_ignores_specified_rule() {
+    use nginx_lint::IgnoreTracker;
+    use nginx_lint::filter_errors;
+
+    let content = r#"
+http {
+    server {
+        # nginx-lint:disable server-tokens-enabled reason
+        server_tokens on;
+        autoindex on;
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Build tracker and filter errors
+    let (tracker, _) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &tracker);
+
+    // server-tokens-enabled should be ignored
+    let server_tokens_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+    assert!(
+        server_tokens_errors.is_empty(),
+        "Expected server-tokens-enabled to be ignored"
+    );
+
+    // autoindex-enabled should still be reported
+    let autoindex_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.rule == "autoindex-enabled")
+        .collect();
+    assert_eq!(
+        autoindex_errors.len(),
+        1,
+        "Expected autoindex-enabled error to still be reported"
+    );
+}
+
+#[test]
+fn test_lint_with_content_filters_ignored_errors() {
+    let content = r#"
+http {
+    server {
+        # nginx-lint:disable server-tokens-enabled dev environment
+        server_tokens on;
+        autoindex on;
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let (errors, ignored_count) = linter.lint_with_content(&config, std::path::Path::new("test.conf"), content);
+
+    // server-tokens-enabled should be ignored
+    let server_tokens_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+    assert!(
+        server_tokens_errors.is_empty(),
+        "Expected server-tokens-enabled to be ignored"
+    );
+
+    // autoindex-enabled should still be reported
+    let autoindex_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "autoindex-enabled")
+        .collect();
+    assert_eq!(
+        autoindex_errors.len(),
+        1,
+        "Expected autoindex-enabled error to still be reported"
+    );
+
+    assert_eq!(ignored_count, 1, "Expected 1 error to be ignored");
 }

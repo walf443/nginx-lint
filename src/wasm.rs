@@ -23,6 +23,7 @@ pub struct WasmLintResult {
     error_count: usize,
     warning_count: usize,
     info_count: usize,
+    ignored_count: usize,
 }
 
 #[wasm_bindgen]
@@ -49,6 +50,12 @@ impl WasmLintResult {
     #[wasm_bindgen(getter)]
     pub fn info_count(&self) -> usize {
         self.info_count
+    }
+
+    /// Get the number of ignored errors
+    #[wasm_bindgen(getter)]
+    pub fn ignored_count(&self) -> usize {
+        self.ignored_count
     }
 
     /// Check if there are any issues
@@ -128,6 +135,7 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
+    use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
     use crate::rules::{
         InconsistentIndentation, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
     };
@@ -138,6 +146,9 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     } else {
         Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
+
+    // Build ignore tracker from content
+    let (tracker, ignore_warnings) = IgnoreTracker::from_content(content);
 
     // Helper to check if a rule is enabled
     let is_enabled = |rule_name: &str| {
@@ -202,6 +213,14 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         errors.extend(indent_rule.check_content(content));
     }
 
+    // Filter ignored errors and track count
+    let result = filter_errors(errors, &tracker);
+    let mut errors = result.errors;
+    let ignored_count = result.ignored_count;
+
+    // Add warnings from ignore comments
+    errors.extend(warnings_to_errors(ignore_warnings));
+
     // Convert errors to JSON
     let js_errors: Vec<JsLintError> = errors.iter().map(JsLintError::from).collect();
     let errors_json =
@@ -226,6 +245,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         error_count,
         warning_count,
         info_count,
+        ignored_count,
     })
 }
 

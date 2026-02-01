@@ -251,6 +251,45 @@ impl Linter {
             .flat_map(|rule| rule.check(config, path))
             .collect()
     }
+
+    /// Run all lint rules with ignore comment support
+    ///
+    /// This method takes the file content to parse ignore comments
+    /// and filter out ignored errors. Returns a tuple of (errors, ignored_count).
+    #[cfg(feature = "cli")]
+    pub fn lint_with_content(
+        &self,
+        config: &Config,
+        path: &Path,
+        content: &str,
+    ) -> (Vec<LintError>, usize) {
+        use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        let errors = self.lint(config, path);
+        let result = filter_errors(errors, &tracker);
+        let mut errors = result.errors;
+        errors.extend(warnings_to_errors(warnings));
+        (errors, result.ignored_count)
+    }
+
+    /// Run all lint rules with ignore comment support (sequential version for WASM)
+    #[cfg(not(feature = "cli"))]
+    pub fn lint_with_content(
+        &self,
+        config: &Config,
+        path: &Path,
+        content: &str,
+    ) -> (Vec<LintError>, usize) {
+        use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        let errors = self.lint(config, path);
+        let result = filter_errors(errors, &tracker);
+        let mut errors = result.errors;
+        errors.extend(warnings_to_errors(warnings));
+        (errors, result.ignored_count)
+    }
 }
 
 impl Default for Linter {

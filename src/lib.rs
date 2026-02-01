@@ -1,4 +1,5 @@
 pub mod config;
+pub mod ignore;
 pub mod linter;
 pub mod parser;
 pub mod rules;
@@ -14,6 +15,7 @@ pub mod reporter;
 pub mod wasm;
 
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
+pub use ignore::{filter_errors, FilterResult, IgnoreTracker, IgnoreWarning};
 pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 
@@ -38,11 +40,15 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 #[cfg(feature = "cli")]
 pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
+    use ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
+
+    // Build ignore tracker from content
+    let (tracker, warnings) = IgnoreTracker::from_content(&content);
 
     let additional_block_directives: Vec<String> = lint_config
         .map(|c| c.additional_block_directives().to_vec())
@@ -61,6 +67,13 @@ pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig
     // Check for missing semicolons
     let semicolon_rule = MissingSemicolon;
     errors.extend(semicolon_rule.check_content_with_extras(&content, &additional_block_directives));
+
+    // Filter ignored errors
+    let result = filter_errors(errors, &tracker);
+    let mut errors = result.errors;
+
+    // Add warnings from ignore comments
+    errors.extend(warnings_to_errors(warnings));
 
     errors
 }
