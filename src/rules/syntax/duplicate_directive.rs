@@ -1,7 +1,29 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::collections::HashMap;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "duplicate-directive",
+    category: "syntax",
+    description: "Detects duplicate directives in the same context",
+    severity: "warning",
+    why: r#"Some directives cannot be specified multiple times in the same context.
+When duplicated, nginx may use only the last value or throw an error.
+
+Duplicate directives often indicate unintentional configuration mistakes
+and should be reviewed."#,
+    bad_example: r#"server {
+    listen 80;
+    listen 80;  # Duplicate
+}"#,
+    good_example: r#"server {
+    listen 80;
+}"#,
+    references: &[],
+};
 
 /// Check for duplicate directives that should only appear once
 pub struct DuplicateDirective;

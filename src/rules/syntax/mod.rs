@@ -1,7 +1,7 @@
-mod duplicate_directive;
-mod missing_semicolon;
-mod unclosed_quote;
-mod unmatched_braces;
+pub mod duplicate_directive;
+pub mod missing_semicolon;
+pub mod unclosed_quote;
+pub mod unmatched_braces;
 
 pub use duplicate_directive::DuplicateDirective;
 pub use missing_semicolon::MissingSemicolon;

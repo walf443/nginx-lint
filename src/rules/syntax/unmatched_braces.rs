@@ -1,7 +1,34 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "unmatched-braces",
+    category: "syntax",
+    description: "Detects unmatched opening or closing braces",
+    severity: "error",
+    why: r#"When braces are unmatched, nginx cannot parse the configuration
+file correctly and will fail to start.
+
+This rule checks that opening braces '{' and closing braces '}'
+are balanced, and that block directives have their opening brace."#,
+    bad_example: r#"http {
+    server {
+        listen 80;
+    # Missing closing brace
+}"#,
+    good_example: r#"http {
+    server {
+        listen 80;
+    }
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/beginners_guide.html",
+    ],
+};
 
 /// Check for unmatched braces
 pub struct UnmatchedBraces;

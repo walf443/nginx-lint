@@ -1,7 +1,23 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "trailing-whitespace",
+    category: "style",
+    description: "Detects trailing whitespace at the end of lines",
+    severity: "warning",
+    why: r#"Trailing whitespace is invisible and can cause unnecessary diffs
+in version control and hinder code reviews.
+
+Removing trailing whitespace keeps configuration files clean."#,
+    bad_example: "listen 80;   \n# Trailing whitespace at end of line",
+    good_example: "listen 80;\n# No trailing whitespace",
+    references: &[],
+};
 
 /// Check for trailing whitespace at the end of lines
 pub struct TrailingWhitespace;

@@ -1,6 +1,36 @@
+use crate::docs::RuleDoc;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "missing-error-log",
+    category: "best_practices",
+    description: "Suggests configuring error_log",
+    severity: "info",
+    why: r#"Configuring error_log allows you to record errors and issues
+in log files for troubleshooting purposes.
+
+Setting an appropriate log level helps capture necessary information
+while managing disk usage."#,
+    bad_example: r#"# error_log not configured
+http {
+    server {
+        listen 80;
+    }
+}"#,
+    good_example: r#"error_log /var/log/nginx/error.log warn;
+
+http {
+    server {
+        listen 80;
+    }
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/ngx_core_module.html#error_log",
+    ],
+};
 
 /// Check if error_log is configured
 pub struct MissingErrorLog;

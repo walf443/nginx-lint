@@ -1,8 +1,34 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "indent",
+    category: "style",
+    description: "Detects inconsistent indentation",
+    severity: "warning",
+    why: r#"Consistent indentation improves readability of configuration files.
+Properly indented nested blocks make the structure visually clear
+and easier to understand.
+
+Using spaces instead of tabs ensures consistent appearance
+across different environments."#,
+    bad_example: r#"http {
+server {
+listen 80;
+}
+}"#,
+    good_example: r#"http {
+  server {
+    listen 80;
+  }
+}"#,
+    references: &[],
+};
 
 /// Check for inconsistent indentation
 pub struct Indent {

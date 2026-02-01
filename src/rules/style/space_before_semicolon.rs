@@ -1,8 +1,28 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "space-before-semicolon",
+    category: "style",
+    description: "Detects spaces or tabs before semicolons",
+    severity: "warning",
+    why: r#"Spaces before semicolons violate common coding style conventions
+and reduce readability.
+
+Semicolons should be placed immediately after directive values."#,
+    bad_example: r#"server {
+    listen 80 ;  # Unnecessary space before semicolon
+}"#,
+    good_example: r#"server {
+    listen 80;
+}"#,
+    references: &[],
+};
 
 /// Check for spaces or tabs before semicolons
 pub struct SpaceBeforeSemicolon;

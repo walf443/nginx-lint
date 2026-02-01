@@ -1,6 +1,30 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "deprecated-ssl-protocol",
+    category: "security",
+    description: "Detects deprecated SSL/TLS protocols",
+    severity: "warning",
+    why: r#"SSLv2, SSLv3, TLSv1.0, and TLSv1.1 have known vulnerabilities and
+are deprecated. Using these protocols makes your server vulnerable to
+attacks like POODLE, BEAST, and CRIME.
+
+Only TLSv1.2 and above should be used."#,
+    bad_example: r#"server {
+    ssl_protocols SSLv3 TLSv1 TLSv1.1 TLSv1.2;
+}"#,
+    good_example: r#"server {
+    ssl_protocols TLSv1.2 TLSv1.3;
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_protocols",
+        "https://wiki.mozilla.org/Security/Server_Side_TLS",
+    ],
+};
 
 /// Check for deprecated SSL/TLS protocols
 pub struct DeprecatedSslProtocol {

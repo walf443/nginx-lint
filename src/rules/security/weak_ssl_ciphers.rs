@@ -1,6 +1,32 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "weak-ssl-ciphers",
+    category: "security",
+    description: "Detects weak SSL/TLS cipher suites",
+    severity: "warning",
+    why: r#"Weak cipher suites (NULL, EXPORT, DES, RC4, MD5, etc.) have
+insufficient cryptographic strength or known vulnerabilities.
+
+Using only strong cipher suites and explicitly excluding weak ones
+ensures secure communication."#,
+    bad_example: r#"server {
+    ssl_ciphers ALL;  # Includes weak ciphers
+}"#,
+    good_example: r#"server {
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5;
+    ssl_prefer_server_ciphers on;
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_ciphers",
+        "https://wiki.mozilla.org/Security/Server_Side_TLS",
+        "https://ssl-config.mozilla.org/",
+    ],
+};
 
 /// Check for weak SSL/TLS cipher suites
 pub struct WeakSslCiphers {

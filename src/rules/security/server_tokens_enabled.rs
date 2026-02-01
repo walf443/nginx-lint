@@ -1,6 +1,29 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "server-tokens-enabled",
+    category: "security",
+    description: "Detects when server_tokens is enabled",
+    severity: "warning",
+    why: r#"When server_tokens is set to 'on', nginx exposes version information
+in response headers and error pages. Attackers can use this information
+to target known vulnerabilities for that specific version.
+
+Hiding version information raises the difficulty of targeted attacks."#,
+    bad_example: r#"http {
+    server_tokens on;  # Version info exposed
+}"#,
+    good_example: r#"http {
+    server_tokens off;  # Hide version info
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
+    ],
+};
 
 /// Check if server_tokens is enabled
 pub struct ServerTokensEnabled;

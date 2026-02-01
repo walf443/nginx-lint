@@ -1,7 +1,27 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "unclosed-quote",
+    category: "syntax",
+    description: "Detects unclosed quotes in directive values",
+    severity: "error",
+    why: r#"When quotes are not closed, nginx cannot parse the configuration
+correctly and may fail to start or behave unexpectedly.
+
+Strings enclosed in quotes must be closed with the same quote type."#,
+    bad_example: r#"location / {
+    add_header X-Custom "value;  # Missing closing quote
+}"#,
+    good_example: r#"location / {
+    add_header X-Custom "value";
+}"#,
+    references: &[],
+};
 
 /// Check for unclosed string quotes
 pub struct UnclosedQuote;

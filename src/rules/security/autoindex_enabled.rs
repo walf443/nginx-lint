@@ -1,6 +1,30 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "autoindex-enabled",
+    category: "security",
+    description: "Detects when autoindex is enabled",
+    severity: "warning",
+    why: r#"When autoindex is enabled, directory contents are listed publicly.
+This can expose unintended files and directory structures, potentially
+leading to information disclosure and security risks.
+
+Autoindex should be disabled unless explicitly required."#,
+    bad_example: r#"location /files {
+    autoindex on;  # Directory listing exposed
+}"#,
+    good_example: r#"location /files {
+    autoindex off;  # Disable directory listing
+    # Or simply omit the directive (default is off)
+}"#,
+    references: &[
+        "https://nginx.org/en/docs/http/ngx_http_autoindex_module.html",
+    ],
+};
 
 /// Check if autoindex is enabled (can expose directory contents)
 pub struct AutoindexEnabled;

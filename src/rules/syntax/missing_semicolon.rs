@@ -1,8 +1,31 @@
+use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::is_raw_block_directive;
 use std::fs;
 use std::path::Path;
+
+/// Rule documentation
+pub static DOC: RuleDoc = RuleDoc {
+    name: "missing-semicolon",
+    category: "syntax",
+    description: "Detects missing semicolons at the end of directives",
+    severity: "error",
+    why: r#"In nginx configuration, each directive must end with a semicolon.
+Without it, nginx cannot parse the configuration correctly.
+
+Block directives (server, location, etc.) don't need semicolons,
+but regular directives always require them."#,
+    bad_example: r#"server {
+    listen 80
+    server_name example.com
+}"#,
+    good_example: r#"server {
+    listen 80;
+    server_name example.com;
+}"#,
+    references: &[],
+};
 
 /// Check for missing semicolons at the end of directives
 pub struct MissingSemicolon;
