@@ -6,13 +6,13 @@ use std::path::Path;
 
 /// Check for inconsistent indentation
 pub struct InconsistentIndentation {
-    /// Expected spaces per indent level (default: 4)
+    /// Expected spaces per indent level (default: 2)
     pub indent_size: usize,
 }
 
 impl Default for InconsistentIndentation {
     fn default() -> Self {
-        Self { indent_size: 4 }
+        Self { indent_size: 2 }
     }
 }
 
@@ -256,9 +256,9 @@ mod tests {
     #[test]
     fn test_correct_indentation() {
         let content = r#"http {
-    server {
-        listen 80;
-    }
+  server {
+    listen 80;
+  }
 }
 "#;
         let errors = check_content(content);
@@ -267,11 +267,11 @@ mod tests {
 
     #[test]
     fn test_wrong_indentation() {
-        // Mixed indentation: first level is 4 spaces, but inner content uses 2
+        // Mixed indentation: first level is 2 spaces, but inner content uses 4
         let content = r#"http {
-    server {
-  listen 80;
-    }
+  server {
+      listen 80;
+  }
 }
 "#;
         let errors = check_content(content);

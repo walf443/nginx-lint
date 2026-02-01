@@ -164,8 +164,8 @@ required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 
 [rules.inconsistent-indentation]
 enabled = true
-# Indentation size (default: 4)
-indent_size = 4
+# Indentation size (default: 2)
+indent_size = 2
 
 # =============================================================================
 # Best Practices

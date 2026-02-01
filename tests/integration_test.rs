@@ -564,7 +564,7 @@ required_exclusions = ["!RC4"]
 
 [rules.inconsistent-indentation]
 enabled = true
-indent_size = 4
+indent_size = 2
 
 [rules.deprecated-ssl-protocol]
 enabled = false
