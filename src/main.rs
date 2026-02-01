@@ -66,6 +66,15 @@ enum Commands {
         #[arg(long)]
         open: bool,
     },
+    /// Show detailed documentation for a rule
+    Why {
+        /// Rule name (e.g., "server-tokens-enabled")
+        rule: Option<String>,
+
+        /// List all available rules
+        #[arg(short, long)]
+        list: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -488,6 +497,93 @@ fn run_lint(cli: Cli) -> ExitCode {
     }
 }
 
+fn run_why(rule: Option<String>, list: bool) -> ExitCode {
+    use colored::Colorize;
+    use nginx_lint::docs::{all_rule_docs, get_rule_doc};
+
+    if list {
+        // List all rules
+        eprintln!("{}", "Available rules:".bold());
+        eprintln!();
+
+        let docs = all_rule_docs();
+        let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
+        for doc in docs {
+            by_category.entry(doc.category).or_default().push(doc);
+        }
+
+        let categories = ["security", "syntax", "style", "best_practices"];
+        for category in categories {
+            if let Some(rules) = by_category.get(category) {
+                eprintln!("  {} {}", "▸".cyan(), category.bold());
+                for doc in rules {
+                    eprintln!("    {} - {}", doc.name.yellow(), doc.description);
+                }
+                eprintln!();
+            }
+        }
+
+        eprintln!("Use {} to see detailed documentation.", "nginx-lint why <rule-name>".cyan());
+        return ExitCode::SUCCESS;
+    }
+
+    let rule_name = match rule {
+        Some(name) => name,
+        None => {
+            eprintln!("Usage: nginx-lint why <rule-name>");
+            eprintln!("       nginx-lint why --list");
+            eprintln!();
+            eprintln!("Use {} to see all available rules.", "--list".cyan());
+            return ExitCode::from(1);
+        }
+    };
+
+    match get_rule_doc(&rule_name) {
+        Some(doc) => {
+            eprintln!();
+            eprintln!("{} {}", "Rule:".bold(), doc.name.yellow());
+            eprintln!("{} {}", "Category:".bold(), doc.category);
+            eprintln!("{} {}", "Severity:".bold(), doc.severity);
+            eprintln!();
+            eprintln!("{}", "Why:".bold());
+            for line in doc.why.lines() {
+                eprintln!("  {}", line);
+            }
+            eprintln!();
+            eprintln!("{}", "Bad Example:".bold().red());
+            eprintln!("{}", "─".repeat(60).dimmed());
+            for line in doc.bad_example.lines() {
+                eprintln!("  {}", line);
+            }
+            eprintln!("{}", "─".repeat(60).dimmed());
+            eprintln!();
+            eprintln!("{}", "Good Example:".bold().green());
+            eprintln!("{}", "─".repeat(60).dimmed());
+            for line in doc.good_example.lines() {
+                eprintln!("  {}", line);
+            }
+            eprintln!("{}", "─".repeat(60).dimmed());
+
+            if !doc.references.is_empty() {
+                eprintln!();
+                eprintln!("{}", "References:".bold());
+                for reference in doc.references {
+                    eprintln!("  • {}", reference.cyan());
+                }
+            }
+            eprintln!();
+
+            ExitCode::SUCCESS
+        }
+        None => {
+            eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
+            eprintln!();
+            eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -497,6 +593,7 @@ fn main() -> ExitCode {
             ConfigCommands::Validate { config } => run_validate(config.clone()),
         },
         Some(Commands::Web { port, open }) => run_web(*port, *open),
+        Some(Commands::Why { rule, list }) => run_why(rule.clone(), *list),
         None => run_lint(cli),
     }
 }

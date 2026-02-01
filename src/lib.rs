@@ -1,4 +1,5 @@
 pub mod config;
+pub mod docs;
 pub mod ignore;
 pub mod linter;
 pub mod parser;
