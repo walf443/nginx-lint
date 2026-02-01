@@ -331,6 +331,8 @@ fn run_lint(cli: Cli) -> ExitCode {
             eprintln!("Usage: nginx-lint <FILE>");
             eprintln!("       nginx-lint config init");
             eprintln!("       nginx-lint config validate");
+            eprintln!("       nginx-lint why <rule-name>");
+            eprintln!("       nginx-lint why --list");
             return ExitCode::from(2);
         }
     };
