@@ -3,14 +3,19 @@
 //! This module provides support for inline disable comments that ignore
 //! lint errors on specific lines.
 //!
-//! # Comment Format
+//! # Comment Formats
 //!
+//! ## Comment-only line (targets next line)
 //! ```nginx
 //! # nginx-lint:disable rule-name reason
 //! server_tokens on;
 //! ```
 //!
-//! - `disable`: Ignores the rule on the next line only
+//! ## Inline comment (targets current line)
+//! ```nginx
+//! server_tokens on; # nginx-lint:disable rule-name reason
+//! ```
+//!
 //! - `rule-name`: Required. The name of the rule to ignore
 //! - `reason`: Required. A reason explaining why the rule is ignored
 
@@ -87,27 +92,32 @@ impl IgnoreTracker {
 
 /// Parse a disable comment from a line
 ///
+/// Supports two formats:
+/// 1. Comment-only line: `# nginx-lint:disable rule-name reason` → targets next line
+/// 2. Inline comment: `directive; # nginx-lint:disable rule-name reason` → targets current line
+///
 /// Returns:
-/// - `None` if the line is not a disable comment
+/// - `None` if the line does not contain a disable comment
 /// - `Some(Ok((rule_name, target_line)))` if valid
 /// - `Some(Err(warning))` if the comment is malformed
 fn parse_disable_comment(
     line: &str,
     line_number: usize,
 ) -> Option<Result<(String, usize), IgnoreWarning>> {
-    let trimmed = line.trim();
+    const DISABLE_PREFIX: &str = "nginx-lint:disable";
 
-    // Must start with #
-    if !trimmed.starts_with('#') {
-        return None;
-    }
-
-    // Get the comment content after #
-    let comment = trimmed.trim_start_matches('#').trim();
+    // Find the comment marker
+    let comment_start = line.find('#')?;
+    let comment_part = &line[comment_start..];
+    let comment = comment_part.trim_start_matches('#').trim();
 
     // Check for nginx-lint:disable prefix
-    let rest = comment.strip_prefix("nginx-lint:disable")?;
+    let rest = comment.strip_prefix(DISABLE_PREFIX)?;
     let rest = rest.trim();
+
+    // Determine if this is a comment-only line or inline comment
+    let before_comment = line[..comment_start].trim();
+    let is_inline = !before_comment.is_empty();
 
     // Parse rule name and reason
     let parts: Vec<&str> = rest.splitn(2, |c: char| c.is_whitespace()).collect();
@@ -133,8 +143,14 @@ fn parse_disable_comment(
         }));
     }
 
-    // Return the rule name and the target line (next line)
-    Some(Ok((rule_name, line_number + 1)))
+    // Inline comment targets current line, comment-only line targets next line
+    let target_line = if is_inline {
+        line_number
+    } else {
+        line_number + 1
+    };
+
+    Some(Ok((rule_name, target_line)))
 }
 
 /// Result of filtering errors with ignore tracker
@@ -356,5 +372,67 @@ server_tokens on;
         assert_eq!(errors[0].message, "test warning");
         assert_eq!(errors[0].severity, Severity::Warning);
         assert_eq!(errors[0].line, Some(5));
+    }
+
+    #[test]
+    fn test_parse_inline_comment() {
+        let result = parse_disable_comment(
+            "server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment",
+            5,
+        );
+        assert!(result.is_some());
+        let (rule, line) = result.unwrap().unwrap();
+        assert_eq!(rule, "server-tokens-enabled");
+        assert_eq!(line, 5); // Same line (inline)
+    }
+
+    #[test]
+    fn test_parse_inline_comment_with_japanese_reason() {
+        let result = parse_disable_comment(
+            "server_tokens on; # nginx-lint:disable server-tokens-enabled 開発環境用",
+            5,
+        );
+        assert!(result.is_some());
+        let (rule, line) = result.unwrap().unwrap();
+        assert_eq!(rule, "server-tokens-enabled");
+        assert_eq!(line, 5); // Same line (inline)
+    }
+
+    #[test]
+    fn test_inline_comment_missing_reason() {
+        let result = parse_disable_comment(
+            "server_tokens on; # nginx-lint:disable server-tokens-enabled",
+            5,
+        );
+        assert!(result.is_some());
+        let warning = result.unwrap().unwrap_err();
+        assert_eq!(warning.line, 5);
+        assert!(warning.message.contains("requires a reason"));
+    }
+
+    #[test]
+    fn test_ignore_tracker_inline_comment() {
+        let content = r#"
+server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment
+"#;
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        assert!(warnings.is_empty());
+        assert!(tracker.is_ignored("server-tokens-enabled", 2)); // Same line
+        assert!(!tracker.is_ignored("server-tokens-enabled", 3));
+    }
+
+    #[test]
+    fn test_both_comment_styles() {
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason for next line
+server_tokens on;
+autoindex on; # nginx-lint:disable autoindex-enabled reason for this line
+"#;
+        let (tracker, warnings) = IgnoreTracker::from_content(content);
+        assert!(warnings.is_empty());
+        // Comment-only line targets next line
+        assert!(tracker.is_ignored("server-tokens-enabled", 3));
+        // Inline comment targets same line
+        assert!(tracker.is_ignored("autoindex-enabled", 4));
     }
 }

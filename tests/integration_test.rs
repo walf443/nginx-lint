@@ -967,3 +967,40 @@ http {
 
     assert_eq!(ignored_count, 1, "Expected 1 error to be ignored");
 }
+
+#[test]
+fn test_inline_ignore_comment() {
+    use nginx_lint::IgnoreTracker;
+    use nginx_lint::filter_errors;
+
+    let content = r#"
+http {
+    server {
+        server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Build tracker and filter errors
+    let (tracker, warnings) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &tracker);
+
+    // Verify no warnings from parsing the ignore comment
+    assert!(warnings.is_empty(), "Unexpected warnings: {:?}", warnings);
+
+    // Verify the error was ignored
+    let server_tokens_errors: Vec<_> = result
+        .errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+    assert!(
+        server_tokens_errors.is_empty(),
+        "Expected server-tokens-enabled error to be ignored, but got: {:?}",
+        server_tokens_errors
+    );
+    assert_eq!(result.ignored_count, 1, "Expected 1 error to be ignored");
+}
