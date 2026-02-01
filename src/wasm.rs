@@ -109,7 +109,9 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
-    use crate::rules::InconsistentIndentation;
+    use crate::rules::{
+        InconsistentIndentation, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
+    };
 
     // Parse TOML configuration
     let lint_config = if config_toml.is_empty() {
@@ -128,23 +130,39 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     // Note: Some rules that read from files won't work, so we handle them separately
     let mut errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
 
-    // Run indentation check directly on content (since file-based check won't work in WASM)
-    let indent_size = lint_config
-        .as_ref()
-        .and_then(|c| c.get_rule_config("inconsistent-indentation"))
-        .and_then(|r| r.indent_size)
-        .unwrap_or(2);
+    // Helper to check if a rule is enabled
+    let is_enabled = |rule_name: &str| {
+        lint_config
+            .as_ref()
+            .map(|c| c.is_rule_enabled(rule_name))
+            .unwrap_or(true)
+    };
 
-    // Only run if rule is enabled
-    let rule_enabled = lint_config
-        .as_ref()
-        .map(|c| c.is_rule_enabled("inconsistent-indentation"))
-        .unwrap_or(true);
+    // Run syntax checks directly on content (since file-based check won't work in WASM)
+    if is_enabled("unmatched-braces") {
+        let rule = UnmatchedBraces;
+        errors.extend(rule.check_content(content));
+    }
 
-    if rule_enabled {
+    if is_enabled("unclosed-quote") {
+        let rule = UnclosedQuote;
+        errors.extend(rule.check_content(content));
+    }
+
+    if is_enabled("missing-semicolon") {
+        let rule = MissingSemicolon;
+        errors.extend(rule.check_content(content));
+    }
+
+    // Run indentation check directly on content
+    if is_enabled("inconsistent-indentation") {
+        let indent_size = lint_config
+            .as_ref()
+            .and_then(|c| c.get_rule_config("inconsistent-indentation"))
+            .and_then(|r| r.indent_size)
+            .unwrap_or(2);
         let indent_rule = InconsistentIndentation { indent_size };
-        let indent_errors = indent_rule.check_content(content);
-        errors.extend(indent_errors);
+        errors.extend(indent_rule.check_content(content));
     }
 
     // Convert errors to JSON

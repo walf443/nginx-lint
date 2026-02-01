@@ -7,26 +7,14 @@ use std::path::Path;
 /// Check for missing semicolons at the end of directives
 pub struct MissingSemicolon;
 
-impl LintRule for MissingSemicolon {
-    fn name(&self) -> &'static str {
-        "missing-semicolon"
+impl MissingSemicolon {
+    /// Check content directly (used by WASM)
+    pub fn check_content(&self, content: &str) -> Vec<LintError> {
+        self.check_content_impl(content)
     }
 
-    fn category(&self) -> &'static str {
-        "syntax"
-    }
-
-    fn description(&self) -> &'static str {
-        "Detects missing semicolons at the end of directives"
-    }
-
-    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return errors,
-        };
 
         let mut in_string = false;
         let mut string_char: Option<char> = None;
@@ -152,6 +140,37 @@ impl LintRule for MissingSemicolon {
         }
 
         errors
+    }
+
+    fn name(&self) -> &'static str {
+        "missing-semicolon"
+    }
+
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+}
+
+impl LintRule for MissingSemicolon {
+    fn name(&self) -> &'static str {
+        "missing-semicolon"
+    }
+
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
+    fn description(&self) -> &'static str {
+        "Detects missing semicolons at the end of directives"
+    }
+
+    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        self.check_content_impl(&content)
     }
 }
 

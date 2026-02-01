@@ -14,26 +14,14 @@ struct BraceInfo {
     indent: usize,
 }
 
-impl LintRule for UnmatchedBraces {
-    fn name(&self) -> &'static str {
-        "unmatched-braces"
+impl UnmatchedBraces {
+    /// Check content directly (used by WASM)
+    pub fn check_content(&self, content: &str) -> Vec<LintError> {
+        self.check_content_impl(content)
     }
 
-    fn category(&self) -> &'static str {
-        "syntax"
-    }
-
-    fn description(&self) -> &'static str {
-        "Detects unmatched opening or closing braces"
-    }
-
-    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return errors,
-        };
 
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();
@@ -240,6 +228,37 @@ impl LintRule for UnmatchedBraces {
         }
 
         errors
+    }
+
+    fn name(&self) -> &'static str {
+        "unmatched-braces"
+    }
+
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+}
+
+impl LintRule for UnmatchedBraces {
+    fn name(&self) -> &'static str {
+        "unmatched-braces"
+    }
+
+    fn category(&self) -> &'static str {
+        "syntax"
+    }
+
+    fn description(&self) -> &'static str {
+        "Detects unmatched opening or closing braces"
+    }
+
+    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
+        let content = match fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        self.check_content_impl(&content)
     }
 }
 
