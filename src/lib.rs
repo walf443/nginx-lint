@@ -1,10 +1,12 @@
 pub mod config;
+pub mod include;
 pub mod linter;
 pub mod parser;
 pub mod reporter;
 pub mod rules;
 
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
+pub use include::{collect_included_files, IncludedFile};
 pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 pub use reporter::{OutputFormat, Reporter};

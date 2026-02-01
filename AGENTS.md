@@ -141,9 +141,14 @@ directive.block         // Optional block (Option<Block>)
 directive.span          // Source location (Span)
 ```
 
-## Known Limitations
+## Include Directive Support
 
-- `include` directive file expansion is not implemented
+The linter automatically follows `include` directives and lints all included files:
+
+- Glob patterns (e.g., `include conf.d/*.conf;`) are expanded
+- Nested includes are followed recursively
+- Circular includes are detected and prevented
+- Errors in included files are reported with their correct file paths
 
 ## Commit Messages
 

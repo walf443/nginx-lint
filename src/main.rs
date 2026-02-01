@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
-    apply_fixes, parse_config, pre_parse_checks, ColorMode, LintConfig, Linter, OutputFormat,
-    Reporter, Severity,
+    apply_fixes, collect_included_files, parse_config, pre_parse_checks, ColorMode, LintConfig,
+    Linter, OutputFormat, Reporter, Severity,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -301,73 +301,93 @@ fn run_lint(cli: Cli) -> ExitCode {
         .unwrap_or_default();
     let reporter = Reporter::with_colors(cli.format.into(), color_config);
 
+    // Collect all files to lint (including files referenced by include directives)
+    let included_files = collect_included_files(&file_path, |path| {
+        parse_config(path).map_err(|e| e.to_string())
+    });
+
     if cli.verbose {
-        eprintln!("Linting: {}", file_path.display());
-    }
-
-    // Run pre-parse checks first (these work even if parsing fails)
-    let pre_parse_errors = pre_parse_checks(&file_path);
-
-    // If there are pre-parse errors (like unmatched braces), handle them
-    // This avoids cryptic parser error messages
-    if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
-        if cli.fix {
-            // Apply fixes for pre-parse errors
-            match apply_fixes(&file_path, &pre_parse_errors) {
-                Ok(count) => {
-                    if count > 0 {
-                        eprintln!("Applied {} fix(es) to {}", count, file_path.display());
-                    } else {
-                        eprintln!("No automatic fixes available");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error applying fixes: {}", e);
-                    return ExitCode::from(2);
-                }
-            }
-        } else {
-            reporter.report(&pre_parse_errors, &file_path);
+        eprintln!(
+            "Linting {} file(s): {}",
+            included_files.len(),
+            file_path.display()
+        );
+        for inc in &included_files[1..] {
+            eprintln!("  - {}", inc.path.display());
         }
-        return ExitCode::from(1);
     }
-
-    let config = match parse_config(&file_path) {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            return ExitCode::from(2);
-        }
-    };
 
     let linter = Linter::with_config(lint_config.as_ref());
-    let errors = linter.lint(&config, &file_path);
+    let mut all_errors = Vec::new();
+    let mut has_fatal_error = false;
 
-    if cli.fix {
-        // Apply fixes
-        match apply_fixes(&file_path, &errors) {
-            Ok(count) => {
-                if count > 0 {
-                    eprintln!("Applied {} fix(es) to {}", count, file_path.display());
-                } else {
-                    eprintln!("No automatic fixes available");
+    // Lint each file
+    for included in &included_files {
+        let path = &included.path;
+
+        // Run pre-parse checks first
+        let pre_parse_errors = pre_parse_checks(path);
+
+        // If there are pre-parse errors, handle them
+        if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
+            if cli.fix {
+                match apply_fixes(path, &pre_parse_errors) {
+                    Ok(count) => {
+                        if count > 0 {
+                            eprintln!("Applied {} fix(es) to {}", count, path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error applying fixes to {}: {}", path.display(), e);
+                    }
                 }
+            } else {
+                reporter.report(&pre_parse_errors, path);
             }
-            Err(e) => {
-                eprintln!("Error applying fixes: {}", e);
-                return ExitCode::from(2);
-            }
+            has_fatal_error = true;
+            continue;
         }
-    } else {
-        reporter.report(&errors, &file_path);
+
+        // Handle parse errors
+        if let Some(ref error) = included.parse_error {
+            eprintln!("Error parsing {}: {}", path.display(), error);
+            has_fatal_error = true;
+            continue;
+        }
+
+        // Lint the parsed config
+        if let Some(ref config) = included.config {
+            let errors = linter.lint(config, path);
+
+            if cli.fix {
+                match apply_fixes(path, &errors) {
+                    Ok(count) => {
+                        if count > 0 {
+                            eprintln!("Applied {} fix(es) to {}", count, path.display());
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Error applying fixes to {}: {}", path.display(), e);
+                    }
+                }
+            } else {
+                reporter.report(&errors, path);
+            }
+
+            all_errors.extend(errors);
+        }
+    }
+
+    if has_fatal_error {
+        return ExitCode::from(1);
     }
 
     let has_issues = if cli.no_fail_on_warnings {
         // Only fail on errors
-        errors.iter().any(|e| e.severity == Severity::Error)
+        all_errors.iter().any(|e| e.severity == Severity::Error)
     } else {
         // Default: fail on any issue (errors, warnings, or info)
-        !errors.is_empty()
+        !all_errors.is_empty()
     };
 
     if has_issues {
