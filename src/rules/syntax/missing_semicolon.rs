@@ -107,6 +107,11 @@ impl MissingSemicolon {
 
             // Check if line ends with semicolon
             if !code_part.ends_with(';') {
+                // Skip known block directives (they need '{', not ';')
+                if is_block_directive_line(code_part) {
+                    continue;
+                }
+
                 // This line looks like a directive but doesn't end with semicolon
                 // Make sure it's not just a value continuation or include pattern
                 if looks_like_directive(code_part) {
@@ -287,6 +292,12 @@ fn looks_like_directive(line: &str) -> bool {
     // Must have content (not just a single word that could be something else)
     // Single word directives like "internal" still need semicolons
     true
+}
+
+/// Check if a line starts with a known block directive
+fn is_block_directive_line(line: &str) -> bool {
+    let first_word = line.split_whitespace().next().unwrap_or("");
+    crate::parser::is_block_directive(first_word)
 }
 
 #[cfg(test)]

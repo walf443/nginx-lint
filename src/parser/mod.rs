@@ -382,6 +382,40 @@ pub fn is_raw_block_directive(name: &str) -> bool {
     name.ends_with("_by_lua_block")
 }
 
+/// Known nginx block directive names that require `{` instead of `;`
+const BLOCK_DIRECTIVES: &[&str] = &[
+    // Core
+    "http",
+    "server",
+    "location",
+    "upstream",
+    "events",
+    "stream",
+    "mail",
+    "types",
+    // Conditionals and control
+    "if",
+    "limit_except",
+    "geo",
+    "map",
+    "split_clients",
+    "match",
+];
+
+/// Check if a directive is a known block directive that requires `{` instead of `;`
+///
+/// # Examples
+/// ```
+/// use nginx_lint::parser::is_block_directive;
+///
+/// assert!(is_block_directive("server"));
+/// assert!(is_block_directive("location"));
+/// assert!(!is_block_directive("listen"));
+/// ```
+pub fn is_block_directive(name: &str) -> bool {
+    BLOCK_DIRECTIVES.contains(&name) || is_raw_block_directive(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

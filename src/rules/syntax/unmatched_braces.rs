@@ -14,6 +14,7 @@ struct BraceInfo {
     indent: usize,
 }
 
+
 impl UnmatchedBraces {
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
@@ -30,6 +31,8 @@ impl UnmatchedBraces {
         let mut string_char: Option<char> = None;
         let mut in_comment = false;
         let mut prev_char = ' ';
+        let mut in_raw_block = false;
+        let mut raw_block_depth = 0;
 
         // Track where to insert missing closing braces
         // Maps line number to the indentation needed for closing brace
@@ -39,11 +42,38 @@ impl UnmatchedBraces {
         // (insert_before_line, indent, error_line)
         let mut comment_insertions: Vec<(usize, usize, usize)> = Vec::new();
 
+        // Track lines where we've already detected a block directive missing '{'
+        let mut block_directive_error_lines: Vec<usize> = Vec::new();
+
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
             let chars: Vec<char> = line.chars().collect();
             let line_indent = line.len() - line.trim_start().len();
             let trimmed = line.trim_start();
+
+            // Check if we're entering a raw block (like lua_block)
+            if !in_raw_block {
+                if let Some(first_word) = trimmed.split_whitespace().next() {
+                    if crate::parser::is_raw_block_directive(first_word) && trimmed.contains('{') {
+                        in_raw_block = true;
+                        raw_block_depth = 1;
+                    }
+                }
+            }
+
+            // Track brace depth inside raw blocks
+            if in_raw_block {
+                for ch in trimmed.chars() {
+                    if ch == '{' && raw_block_depth > 0 {
+                        raw_block_depth += 1;
+                    } else if ch == '}' {
+                        raw_block_depth -= 1;
+                        if raw_block_depth == 0 {
+                            in_raw_block = false;
+                        }
+                    }
+                }
+            }
 
             // Check if this is a comment-only line
             if trimmed.starts_with('#') {
@@ -164,34 +194,41 @@ impl UnmatchedBraces {
                         // Try to find a block directive above that's missing '{'
                         let fix = find_missing_open_brace_fix(&lines, line_number, close_indent);
 
-                        let (message, fix) = if let Some(f) = fix {
-                            (
-                                "Missing opening brace '{' for block directive",
-                                Some(f),
-                            )
-                        } else if line.trim() == "}" {
-                            (
-                                "Unexpected closing brace '}' without matching opening brace",
-                                Some(Fix::delete(line_number)),
-                            )
-                        } else {
-                            (
-                                "Unexpected closing brace '}' without matching opening brace",
-                                None,
-                            )
-                        };
+                        // Skip if we already reported this as a block directive missing '{'
+                        let already_reported = fix.as_ref().map_or(false, |f| {
+                            block_directive_error_lines.contains(&f.line)
+                        });
 
-                        let mut error = LintError::new(
-                            self.name(),
-                            self.category(),
-                            message,
-                            Severity::Error,
-                        )
-                        .with_location(line_number, column);
-                        if let Some(f) = fix {
-                            error = error.with_fix(f);
+                        if !already_reported {
+                            let (message, fix) = if let Some(f) = fix {
+                                (
+                                    "Missing opening brace '{' for block directive",
+                                    Some(f),
+                                )
+                            } else if line.trim() == "}" {
+                                (
+                                    "Unexpected closing brace '}' without matching opening brace",
+                                    Some(Fix::delete(line_number)),
+                                )
+                            } else {
+                                (
+                                    "Unexpected closing brace '}' without matching opening brace",
+                                    None,
+                                )
+                            };
+
+                            let mut error = LintError::new(
+                                self.name(),
+                                self.category(),
+                                message,
+                                Severity::Error,
+                            )
+                            .with_location(line_number, column);
+                            if let Some(f) = fix {
+                                error = error.with_fix(f);
+                            }
+                            errors.push(error);
                         }
-                        errors.push(error);
                     }
                 }
 
@@ -201,6 +238,43 @@ impl UnmatchedBraces {
             // Reset comment flag at end of line
             in_comment = false;
             prev_char = ' ';
+
+            // Check for block directives missing opening brace
+            // This catches cases like "location /" without "{"
+            // Skip this check inside raw blocks (like lua_block)
+            if string_char.is_none() && !in_raw_block {
+                let trimmed = line.trim();
+                // Skip empty lines, comments, and lines ending with { ; or }
+                if !trimmed.is_empty()
+                    && !trimmed.starts_with('#')
+                    && !trimmed.ends_with('{')
+                    && !trimmed.ends_with(';')
+                    && !trimmed.ends_with('}')
+                {
+                    // Get the first word (directive name)
+                    if let Some(first_word) = trimmed.split_whitespace().next() {
+                        if crate::parser::is_block_directive(first_word) {
+                            // This is a block directive missing its opening brace
+                            let new_line = format!("{} {{", line.trim_end());
+                            let fix = Fix::replace_line(line_number, &new_line);
+                            errors.push(
+                                LintError::new(
+                                    self.name(),
+                                    self.category(),
+                                    &format!(
+                                        "Block directive '{}' is missing opening brace '{{'",
+                                        first_word
+                                    ),
+                                    Severity::Error,
+                                )
+                                .with_location(line_number, trimmed.len())
+                                .with_fix(fix),
+                            );
+                            block_directive_error_lines.push(line_number);
+                        }
+                    }
+                }
+            }
         }
 
         // Remaining unclosed braces - add closing braces at end of file
@@ -449,8 +523,31 @@ mod tests {
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(
-            errors[0].message.contains("Missing opening brace"),
+            errors[0].message.contains("missing opening brace"),
             "Expected missing opening brace error, got: {}",
+            errors[0].message
+        );
+        assert!(errors[0].fix.is_some(), "Expected fix to be provided");
+    }
+
+    #[test]
+    fn test_block_directive_missing_brace() {
+        // Block directive 'location' missing opening brace
+        let content = r#"http {
+  server {
+    listen 80;
+
+    location /
+      root /var/www/html;
+    }
+  }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(
+            errors[0].message.contains("location"),
+            "Expected location in error message, got: {}",
             errors[0].message
         );
         assert!(errors[0].fix.is_some(), "Expected fix to be provided");
