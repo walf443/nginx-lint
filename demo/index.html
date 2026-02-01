@@ -163,6 +163,15 @@
         button.fix-all-btn:hover {
             background: #66bb6a;
         }
+        button.ignore-btn {
+            background: #9e9e9e;
+            padding: 4px 8px;
+            font-size: 11px;
+            margin-left: 4px;
+        }
+        button.ignore-btn:hover {
+            background: #bdbdbd;
+        }
         .error-header {
             display: flex;
             justify-content: space-between;
@@ -302,6 +311,7 @@ enabled = true</textarea>
                     errors.forEach((err, index) => {
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
                         const fixBtn = err.fix ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
+                        const ignoreBtn = err.line ? `<button class="ignore-btn" onclick="ignoreError(${index})">Ignore</button>` : '';
                         html += `
                             <div class="error-item ${err.severity}">
                                 <div class="error-header">
@@ -309,6 +319,7 @@ enabled = true</textarea>
                                     <div class="error-actions">
                                         <span class="error-rule">${err.category}/${err.rule}</span>
                                         ${fixBtn}
+                                        ${ignoreBtn}
                                     </div>
                                 </div>
                                 <div class="error-message">${err.message}</div>
@@ -390,6 +401,38 @@ enabled = true</textarea>
                     lines[lineIndex] = fix.new_text;
                 }
             }
+
+            editor.value = lines.join('\n');
+            lintConfig();
+        };
+
+        // Ignore an error by inserting a disable comment
+        window.ignoreError = function(index) {
+            const error = currentErrors[index];
+            if (!error || !error.line) return;
+
+            const reason = prompt(`Enter a reason for ignoring "${error.rule}":`);
+            if (reason === null) return; // User cancelled
+            if (reason.trim() === '') {
+                alert('A reason is required for ignore comments.');
+                return;
+            }
+
+            const editor = document.getElementById('editor');
+            const lines = editor.value.split('\n');
+            const lineIndex = error.line - 1;
+
+            if (lineIndex < 0 || lineIndex >= lines.length) return;
+
+            // Get the indentation of the target line
+            const targetLine = lines[lineIndex];
+            const indent = targetLine.match(/^(\s*)/)[1];
+
+            // Create the disable comment
+            const disableComment = `${indent}# nginx-lint:disable ${error.rule} ${reason.trim()}`;
+
+            // Insert the comment before the error line
+            lines.splice(lineIndex, 0, disableComment);
 
             editor.value = lines.join('\n');
             lintConfig();
