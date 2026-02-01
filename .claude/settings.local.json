@@ -26,7 +26,8 @@
       "Bash(fi)",
       "Bash(./target/debug/nginx-lint:*)",
       "Bash(wasm-pack build:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(printf:*)"
     ]
   }
 }
