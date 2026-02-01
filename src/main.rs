@@ -236,7 +236,8 @@ fn run_lint(cli: Cli) -> ExitCode {
         None => {
             eprintln!("Error: FILE argument is required");
             eprintln!("Usage: nginx-lint <FILE>");
-            eprintln!("       nginx-lint init");
+            eprintln!("       nginx-lint config init");
+            eprintln!("       nginx-lint config validate");
             return ExitCode::from(2);
         }
     };
