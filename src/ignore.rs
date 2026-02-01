@@ -47,6 +47,8 @@ struct IgnoreDirective {
     used: bool,
     /// Whether this is an inline comment (vs comment-only line)
     is_inline: bool,
+    /// For inline comments, the content before the comment (for fix)
+    content_before_comment: Option<String>,
 }
 
 /// Tracks ignored rules per line
@@ -90,34 +92,35 @@ impl IgnoreTracker {
 
             if let Some(result) = parse_disable_comment(line, line_number) {
                 match result {
-                    Ok((rule_name, target_line, comment_line, is_inline)) => {
+                    Ok(parsed) => {
                         // Check if rule name is valid
-                        if let Some(valid) = valid_rules {
-                            if !valid.contains(&rule_name) {
-                                warnings.push(IgnoreWarning {
-                                    line: comment_line,
-                                    message: format!(
-                                        "unknown rule '{}' in nginx-lint:disable comment",
-                                        rule_name
-                                    ),
-                                    fix: None,
-                                });
-                                // Still register it so we can track it as unused
-                            }
+                        if let Some(valid) = valid_rules
+                            && !valid.contains(&parsed.rule_name)
+                        {
+                            warnings.push(IgnoreWarning {
+                                line: parsed.comment_line,
+                                message: format!(
+                                    "unknown rule '{}' in nginx-lint:disable comment",
+                                    parsed.rule_name
+                                ),
+                                fix: None,
+                            });
+                            // Still register it so we can track it as unused
                         }
 
                         tracker
                             .ignored_lines
-                            .entry(target_line)
+                            .entry(parsed.target_line)
                             .or_default()
-                            .insert(rule_name.clone());
+                            .insert(parsed.rule_name.clone());
 
                         tracker.directives.push(IgnoreDirective {
-                            comment_line,
-                            target_line,
-                            rule_name,
+                            comment_line: parsed.comment_line,
+                            target_line: parsed.target_line,
+                            rule_name: parsed.rule_name,
                             used: false,
-                            is_inline,
+                            is_inline: parsed.is_inline,
+                            content_before_comment: parsed.content_before_comment,
                         });
                     }
                     Err(warning) => {
@@ -145,10 +148,14 @@ impl IgnoreTracker {
             .iter()
             .filter(|d| !d.used)
             .map(|d| {
-                // Only provide fix for comment-only lines (not inline comments)
+                // Provide fix for both comment-only lines and inline comments
                 let fix = if d.is_inline {
-                    None
+                    // For inline comments, replace line with just the content before the comment
+                    d.content_before_comment
+                        .as_ref()
+                        .map(|content| Fix::replace_line(d.comment_line, content))
                 } else {
+                    // For comment-only lines, delete the entire line
                     Some(Fix::delete(d.comment_line))
                 };
 
@@ -177,8 +184,24 @@ impl IgnoreTracker {
             rule_name: rule.to_string(),
             used: false,
             is_inline: false,
+            content_before_comment: None,
         });
     }
+}
+
+/// Parsed result of a disable comment
+#[derive(Debug)]
+struct ParsedDisableComment {
+    /// Rule name to ignore
+    rule_name: String,
+    /// Target line number (the line to ignore errors on)
+    target_line: usize,
+    /// Comment line number (where the comment is located)
+    comment_line: usize,
+    /// Whether this is an inline comment
+    is_inline: bool,
+    /// For inline comments, the content before the comment (trimmed)
+    content_before_comment: Option<String>,
 }
 
 /// Parse a disable comment from a line
@@ -189,12 +212,12 @@ impl IgnoreTracker {
 ///
 /// Returns:
 /// - `None` if the line does not contain a disable comment
-/// - `Some(Ok((rule_name, target_line, comment_line, is_inline)))` if valid
+/// - `Some(Ok(ParsedDisableComment))` if valid
 /// - `Some(Err(warning))` if the comment is malformed
 fn parse_disable_comment(
     line: &str,
     line_number: usize,
-) -> Option<Result<(String, usize, usize, bool), IgnoreWarning>> {
+) -> Option<Result<ParsedDisableComment, IgnoreWarning>> {
     const DISABLE_PREFIX: &str = "nginx-lint:disable";
 
     // Find the comment marker
@@ -207,8 +230,8 @@ fn parse_disable_comment(
     let rest = rest.trim();
 
     // Determine if this is a comment-only line or inline comment
-    let before_comment = line[..comment_start].trim();
-    let is_inline = !before_comment.is_empty();
+    let before_comment_trimmed = line[..comment_start].trim();
+    let is_inline = !before_comment_trimmed.is_empty();
 
     // Parse rule name and reason
     let parts: Vec<&str> = rest.splitn(2, |c: char| c.is_whitespace()).collect();
@@ -243,8 +266,20 @@ fn parse_disable_comment(
         line_number + 1
     };
 
-    // Return rule_name, target_line, comment_line, and is_inline
-    Some(Ok((rule_name, target_line, line_number, is_inline)))
+    // Content before comment for inline fixes (preserve leading whitespace, trim trailing)
+    let content_before = if is_inline {
+        Some(line[..comment_start].trim_end().to_string())
+    } else {
+        None
+    };
+
+    Some(Ok(ParsedDisableComment {
+        rule_name,
+        target_line,
+        comment_line: line_number,
+        is_inline,
+        content_before_comment: content_before,
+    }))
 }
 
 /// Result of filtering errors with ignore tracker
@@ -337,11 +372,12 @@ mod tests {
             5,
         );
         assert!(result.is_some());
-        let (rule, target_line, comment_line, is_inline) = result.unwrap().unwrap();
-        assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(target_line, 6); // Next line
-        assert_eq!(comment_line, 5);
-        assert!(!is_inline);
+        let parsed = result.unwrap().unwrap();
+        assert_eq!(parsed.rule_name, "server-tokens-enabled");
+        assert_eq!(parsed.target_line, 6); // Next line
+        assert_eq!(parsed.comment_line, 5);
+        assert!(!parsed.is_inline);
+        assert!(parsed.content_before_comment.is_none());
     }
 
     #[test]
@@ -351,11 +387,12 @@ mod tests {
             5,
         );
         assert!(result.is_some());
-        let (rule, target_line, comment_line, is_inline) = result.unwrap().unwrap();
-        assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(target_line, 6);
-        assert_eq!(comment_line, 5);
-        assert!(!is_inline);
+        let parsed = result.unwrap().unwrap();
+        assert_eq!(parsed.rule_name, "server-tokens-enabled");
+        assert_eq!(parsed.target_line, 6);
+        assert_eq!(parsed.comment_line, 5);
+        assert!(!parsed.is_inline);
+        assert!(parsed.content_before_comment.is_none());
     }
 
     #[test]
@@ -534,11 +571,12 @@ server_tokens on;
             5,
         );
         assert!(result.is_some());
-        let (rule, target_line, comment_line, is_inline) = result.unwrap().unwrap();
-        assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(target_line, 5); // Same line (inline)
-        assert_eq!(comment_line, 5);
-        assert!(is_inline);
+        let parsed = result.unwrap().unwrap();
+        assert_eq!(parsed.rule_name, "server-tokens-enabled");
+        assert_eq!(parsed.target_line, 5); // Same line (inline)
+        assert_eq!(parsed.comment_line, 5);
+        assert!(parsed.is_inline);
+        assert_eq!(parsed.content_before_comment, Some("server_tokens on;".to_string()));
     }
 
     #[test]
@@ -548,11 +586,12 @@ server_tokens on;
             5,
         );
         assert!(result.is_some());
-        let (rule, target_line, comment_line, is_inline) = result.unwrap().unwrap();
-        assert_eq!(rule, "server-tokens-enabled");
-        assert_eq!(target_line, 5); // Same line (inline)
-        assert_eq!(comment_line, 5);
-        assert!(is_inline);
+        let parsed = result.unwrap().unwrap();
+        assert_eq!(parsed.rule_name, "server-tokens-enabled");
+        assert_eq!(parsed.target_line, 5); // Same line (inline)
+        assert_eq!(parsed.comment_line, 5);
+        assert!(parsed.is_inline);
+        assert_eq!(parsed.content_before_comment, Some("server_tokens on;".to_string()));
     }
 
     #[test]
@@ -645,5 +684,42 @@ server_tokens on;
         // Should have no unused warnings
         assert!(result.unused_warnings.is_empty());
         assert_eq!(result.ignored_count, 1);
+    }
+
+    #[test]
+    fn test_unused_comment_only_line_fix() {
+        let content = r#"
+# nginx-lint:disable server-tokens-enabled reason
+server_tokens off;
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        let errors: Vec<LintError> = vec![];
+        let result = filter_errors(errors, &mut tracker);
+
+        // Should have unused warning with delete fix
+        assert_eq!(result.unused_warnings.len(), 1);
+        let fix = result.unused_warnings[0].fix.as_ref().unwrap();
+        assert_eq!(fix.line, 2); // Line of comment
+        assert!(fix.delete_line);
+    }
+
+    #[test]
+    fn test_unused_inline_comment_fix() {
+        let content = r#"
+server_tokens off; # nginx-lint:disable server-tokens-enabled reason
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        let errors: Vec<LintError> = vec![];
+        let result = filter_errors(errors, &mut tracker);
+
+        // Should have unused warning with replace_line fix
+        assert_eq!(result.unused_warnings.len(), 1);
+        let fix = result.unused_warnings[0].fix.as_ref().unwrap();
+        assert_eq!(fix.line, 2); // Line of inline comment
+        assert!(!fix.delete_line); // Not deleting entire line
+        assert!(fix.old_text.is_none()); // replace_line uses None for old_text
+        assert_eq!(fix.new_text, "server_tokens off;");
     }
 }

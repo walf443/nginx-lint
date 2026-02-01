@@ -420,70 +420,50 @@ fn test_all_rule_fixtures() {
                     // Try to parse - some syntax error fixtures can't be parsed
                     let can_parse = parse_config(&error_path).is_ok();
 
+                    // Always get pre_parse_checks errors (includes ignore warnings)
+                    let mut errors = pre_parse_checks(&error_path);
+
                     if can_parse {
                         let config = parse_config(&error_path).unwrap();
                         let linter = Linter::with_default_rules();
-                        let errors = linter.lint(&config, &error_path);
-
-                        let rule_errors: Vec<_> = errors
-                            .iter()
-                            .filter(|e| e.rule == rule_name)
-                            .collect();
-
-                        assert!(
-                            !rule_errors.is_empty(),
-                            "Expected {} errors in {}/{}/{}/error/nginx.conf, got none",
-                            rule_name, category, rule_dir_name, case
-                        );
-                    } else {
-                        // For unparseable files, use pre_parse_checks
-                        let errors = pre_parse_checks(&error_path);
-                        let rule_errors: Vec<_> = errors
-                            .iter()
-                            .filter(|e| e.rule == rule_name)
-                            .collect();
-
-                        assert!(
-                            !rule_errors.is_empty(),
-                            "Expected {} errors in {}/{}/{}/error/nginx.conf (pre-parse), got none",
-                            rule_name, category, rule_dir_name, case
-                        );
+                        errors.extend(linter.lint(&config, &error_path));
                     }
+
+                    let rule_errors: Vec<_> = errors
+                        .iter()
+                        .filter(|e| e.rule == rule_name)
+                        .collect();
+
+                    assert!(
+                        !rule_errors.is_empty(),
+                        "Expected {} errors in {}/{}/{}/error/nginx.conf, got none",
+                        rule_name, category, rule_dir_name, case
+                    );
                 }
 
                 // Test expected fixture: should have no errors for this rule
                 if expected_path.exists() {
                     let can_parse = parse_config(&expected_path).is_ok();
 
+                    // Always get pre_parse_checks errors (includes ignore warnings)
+                    let mut errors = pre_parse_checks(&expected_path);
+
                     if can_parse {
                         let config = parse_config(&expected_path).unwrap();
                         let linter = Linter::with_default_rules();
-                        let errors = linter.lint(&config, &expected_path);
-
-                        let rule_errors: Vec<_> = errors
-                            .iter()
-                            .filter(|e| e.rule == rule_name)
-                            .collect();
-
-                        assert!(
-                            rule_errors.is_empty(),
-                            "Expected no {} errors in {}/{}/{}/expected/nginx.conf, got: {:?}",
-                            rule_name, category, rule_dir_name, case, rule_errors
-                        );
-                    } else {
-                        // For unparseable expected files, use pre_parse_checks
-                        let errors = pre_parse_checks(&expected_path);
-                        let rule_errors: Vec<_> = errors
-                            .iter()
-                            .filter(|e| e.rule == rule_name)
-                            .collect();
-
-                        assert!(
-                            rule_errors.is_empty(),
-                            "Expected no {} errors in {}/{}/{}/expected/nginx.conf (pre-parse), got: {:?}",
-                            rule_name, category, rule_dir_name, case, rule_errors
-                        );
+                        errors.extend(linter.lint(&config, &expected_path));
                     }
+
+                    let rule_errors: Vec<_> = errors
+                        .iter()
+                        .filter(|e| e.rule == rule_name)
+                        .collect();
+
+                    assert!(
+                        rule_errors.is_empty(),
+                        "Expected no {} errors in {}/{}/{}/expected/nginx.conf, got: {:?}",
+                        rule_name, category, rule_dir_name, case, rule_errors
+                    );
                 }
 
                 // Test fix: if both error and expected exist, verify fix produces expected
@@ -1003,4 +983,40 @@ http {
         server_tokens_errors
     );
     assert_eq!(result.ignored_count, 1, "Expected 1 error to be ignored");
+}
+
+#[test]
+fn test_unused_inline_ignore_comment_fix() {
+    use nginx_lint::IgnoreTracker;
+    use nginx_lint::filter_errors;
+
+    // Content with unused inline ignore comment (server_tokens off doesn't trigger the rule)
+    let content = r#"
+http {
+    server {
+        server_tokens off; # nginx-lint:disable server-tokens-enabled reason
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    // Build tracker and filter errors
+    let (mut tracker, _) = IgnoreTracker::from_content(content);
+    let result = filter_errors(errors, &mut tracker);
+
+    // Should have an unused warning with a fix
+    assert_eq!(result.unused_warnings.len(), 1, "Expected 1 unused warning");
+    assert!(
+        result.unused_warnings[0].message.contains("unused nginx-lint:disable"),
+        "Expected unused warning, got: {}",
+        result.unused_warnings[0].message
+    );
+
+    // The fix should replace the line with just the directive (preserving indentation)
+    let fix = result.unused_warnings[0].fix.as_ref().expect("Expected a fix");
+    assert_eq!(fix.line, 4, "Fix should be on line 4");
+    assert!(!fix.delete_line, "Should not delete entire line");
+    assert_eq!(fix.new_text, "        server_tokens off;", "Fix should preserve indentation");
 }
