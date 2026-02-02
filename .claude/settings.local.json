@@ -27,7 +27,9 @@
       "Bash(./target/debug/nginx-lint:*)",
       "Bash(wasm-pack build:*)",
       "Bash(cat:*)",
-      "Bash(printf:*)"
+      "Bash(printf:*)",
+      "Bash(make:*)",
+      "Bash(xargs:*)"
     ]
   }
 }
