@@ -39,13 +39,19 @@ impl Plugin for ServerTokensEnabledPlugin {
 
         for directive in config.all_directives() {
             if directive.is("server_tokens") && directive.first_arg_is("on") {
-                errors.push(LintError::warning(
+                let error = LintError::warning(
                     "server-tokens-enabled",
                     "security",
                     "server_tokens should be 'off' to hide nginx version",
                     directive.span.start.line,
                     directive.span.start.column,
+                )
+                .with_fix(Fix::replace(
+                    directive.span.start.line,
+                    "server_tokens on",
+                    "server_tokens off",
                 ));
+                errors.push(error);
             }
         }
 

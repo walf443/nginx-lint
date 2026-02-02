@@ -41,6 +41,31 @@ fn default_api_version() -> String {
     "1.0".to_string()
 }
 
+/// Plugin fix format (matches the SDK Fix struct)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PluginFix {
+    pub line: usize,
+    #[serde(default)]
+    pub old_text: Option<String>,
+    pub new_text: String,
+    #[serde(default)]
+    pub delete_line: bool,
+    #[serde(default)]
+    pub insert_after: bool,
+}
+
+impl PluginFix {
+    fn into_fix(self) -> crate::linter::Fix {
+        crate::linter::Fix {
+            line: self.line,
+            old_text: self.old_text,
+            new_text: self.new_text,
+            delete_line: self.delete_line,
+            insert_after: self.insert_after,
+        }
+    }
+}
+
 /// Plugin lint error format (simplified for JSON transfer)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PluginLintError {
@@ -48,8 +73,12 @@ struct PluginLintError {
     pub category: String,
     pub message: String,
     pub severity: String,
+    #[serde(default)]
     pub line: Option<usize>,
+    #[serde(default)]
     pub column: Option<usize>,
+    #[serde(default)]
+    pub fix: Option<PluginFix>,
 }
 
 impl PluginLintError {
@@ -66,6 +95,10 @@ impl PluginLintError {
             error = error.with_location(line, column);
         } else if let Some(line) = self.line {
             error = error.with_location(line, 1);
+        }
+
+        if let Some(fix) = self.fix {
+            error = error.with_fix(fix.into_fix());
         }
 
         error

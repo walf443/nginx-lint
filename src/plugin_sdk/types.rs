@@ -91,6 +91,70 @@ pub enum Severity {
     Info,
 }
 
+/// Represents a fix that can be applied to resolve a lint error
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Fix {
+    /// Line number where the fix should be applied (1-indexed)
+    pub line: usize,
+    /// The original text to replace (if None and new_text is empty, delete the line)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_text: Option<String>,
+    /// The new text to insert (empty string with old_text=None means delete)
+    pub new_text: String,
+    /// Whether to delete the entire line
+    #[serde(default)]
+    pub delete_line: bool,
+    /// Whether to insert new_text as a new line after the specified line
+    #[serde(default)]
+    pub insert_after: bool,
+}
+
+impl Fix {
+    /// Create a fix that replaces text on a specific line
+    pub fn replace(line: usize, old_text: &str, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: Some(old_text.to_string()),
+            new_text: new_text.to_string(),
+            delete_line: false,
+            insert_after: false,
+        }
+    }
+
+    /// Create a fix that replaces an entire line
+    pub fn replace_line(line: usize, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: new_text.to_string(),
+            delete_line: false,
+            insert_after: false,
+        }
+    }
+
+    /// Create a fix that deletes an entire line
+    pub fn delete(line: usize) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: String::new(),
+            delete_line: true,
+            insert_after: false,
+        }
+    }
+
+    /// Create a fix that inserts a new line after the specified line
+    pub fn insert_after(line: usize, new_text: &str) -> Self {
+        Self {
+            line,
+            old_text: None,
+            new_text: new_text.to_string(),
+            delete_line: false,
+            insert_after: true,
+        }
+    }
+}
+
 /// A lint error reported by a plugin
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintError {
@@ -98,10 +162,12 @@ pub struct LintError {
     pub category: String,
     pub message: String,
     pub severity: Severity,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub column: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fix: Option<Fix>,
 }
 
 impl LintError {
@@ -114,6 +180,7 @@ impl LintError {
             severity: Severity::Error,
             line: if line > 0 { Some(line) } else { None },
             column: if column > 0 { Some(column) } else { None },
+            fix: None,
         }
     }
 
@@ -126,6 +193,7 @@ impl LintError {
             severity: Severity::Warning,
             line: if line > 0 { Some(line) } else { None },
             column: if column > 0 { Some(column) } else { None },
+            fix: None,
         }
     }
 
@@ -138,7 +206,14 @@ impl LintError {
             severity: Severity::Info,
             line: if line > 0 { Some(line) } else { None },
             column: if column > 0 { Some(column) } else { None },
+            fix: None,
         }
+    }
+
+    /// Attach a fix to this error
+    pub fn with_fix(mut self, fix: Fix) -> Self {
+        self.fix = Some(fix);
+        self
     }
 }
 
