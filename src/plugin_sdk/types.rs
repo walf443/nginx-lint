@@ -18,6 +18,21 @@ pub struct PluginInfo {
     pub description: String,
     /// API version the plugin uses for input/output format
     pub api_version: String,
+    /// Severity level (error, warning, info)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// Why this rule exists (detailed explanation)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// Example of bad configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bad_example: Option<String>,
+    /// Example of good configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub good_example: Option<String>,
+    /// References (URLs, documentation links)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<Vec<String>>,
 }
 
 impl PluginInfo {
@@ -28,7 +43,42 @@ impl PluginInfo {
             category: category.into(),
             description: description.into(),
             api_version: API_VERSION.to_string(),
+            severity: None,
+            why: None,
+            bad_example: None,
+            good_example: None,
+            references: None,
         }
+    }
+
+    /// Set the severity level
+    pub fn with_severity(mut self, severity: impl Into<String>) -> Self {
+        self.severity = Some(severity.into());
+        self
+    }
+
+    /// Set the why documentation
+    pub fn with_why(mut self, why: impl Into<String>) -> Self {
+        self.why = Some(why.into());
+        self
+    }
+
+    /// Set the bad example
+    pub fn with_bad_example(mut self, example: impl Into<String>) -> Self {
+        self.bad_example = Some(example.into());
+        self
+    }
+
+    /// Set the good example
+    pub fn with_good_example(mut self, example: impl Into<String>) -> Self {
+        self.good_example = Some(example.into());
+        self
+    }
+
+    /// Set references
+    pub fn with_references(mut self, refs: Vec<String>) -> Self {
+        self.references = Some(refs);
+        self
     }
 }
 

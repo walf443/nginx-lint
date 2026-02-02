@@ -21,6 +21,17 @@ impl Plugin for ServerTokensEnabledPlugin {
             "security",
             "Detects when server_tokens is enabled (exposes nginx version)",
         )
+        .with_severity("warning")
+        .with_why(
+            "When server_tokens is 'on', nginx includes its version number in the Server \
+             response header and on default error pages. This information can help attackers \
+             identify specific vulnerabilities associated with your nginx version.",
+        )
+        .with_bad_example(include_str!("../examples/bad.conf").trim())
+        .with_good_example(include_str!("../examples/good.conf").trim())
+        .with_references(vec![
+            "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens".to_string(),
+        ])
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

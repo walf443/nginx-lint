@@ -3,7 +3,7 @@
 //! This module provides detailed documentation for each lint rule,
 //! explaining why the rule exists and what the recommended configuration is.
 
-/// Documentation for a lint rule
+/// Documentation for a lint rule (static version for native rules)
 pub struct RuleDoc {
     /// Rule name (e.g., "server-tokens-enabled")
     pub name: &'static str,
@@ -23,6 +23,45 @@ pub struct RuleDoc {
     pub references: &'static [&'static str],
 }
 
+/// Documentation for a lint rule (owned version, supports plugins)
+#[derive(Debug, Clone)]
+pub struct RuleDocOwned {
+    /// Rule name (e.g., "server-tokens-enabled")
+    pub name: String,
+    /// Category (e.g., "security")
+    pub category: String,
+    /// Short description
+    pub description: String,
+    /// Severity level
+    pub severity: String,
+    /// Why this rule exists
+    pub why: String,
+    /// Example of bad configuration
+    pub bad_example: String,
+    /// Example of good configuration
+    pub good_example: String,
+    /// References (URLs, documentation links)
+    pub references: Vec<String>,
+    /// Whether this is from a plugin
+    pub is_plugin: bool,
+}
+
+impl From<&RuleDoc> for RuleDocOwned {
+    fn from(doc: &RuleDoc) -> Self {
+        Self {
+            name: doc.name.to_string(),
+            category: doc.category.to_string(),
+            description: doc.description.to_string(),
+            severity: doc.severity.to_string(),
+            why: doc.why.to_string(),
+            bad_example: doc.bad_example.to_string(),
+            good_example: doc.good_example.to_string(),
+            references: doc.references.iter().map(|s| s.to_string()).collect(),
+            is_plugin: false,
+        }
+    }
+}
+
 /// Get documentation for a rule by name
 pub fn get_rule_doc(name: &str) -> Option<&'static RuleDoc> {
     all_rule_docs().iter().find(|doc| doc.name == name).copied()
@@ -31,16 +70,14 @@ pub fn get_rule_doc(name: &str) -> Option<&'static RuleDoc> {
 /// Get all rule documentation
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
     use crate::rules::{
-        best_practices::{gzip_not_enabled, missing_error_log},
-        security::{autoindex_enabled, deprecated_ssl_protocol, server_tokens_enabled, weak_ssl_ciphers},
+        best_practices::missing_error_log,
+        security::{deprecated_ssl_protocol, weak_ssl_ciphers},
         style::{indent, space_before_semicolon, trailing_whitespace},
         syntax::{duplicate_directive, missing_semicolon, unclosed_quote, unmatched_braces},
     };
 
     static DOCS: &[&RuleDoc] = &[
-        // Security
-        &server_tokens_enabled::DOC,
-        &autoindex_enabled::DOC,
+        // Security (builtin plugins: server-tokens-enabled, autoindex-enabled)
         &deprecated_ssl_protocol::DOC,
         &weak_ssl_ciphers::DOC,
         // Syntax
@@ -52,8 +89,7 @@ pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
         &indent::DOC,
         &trailing_whitespace::DOC,
         &space_before_semicolon::DOC,
-        // Best Practices
-        &gzip_not_enabled::DOC,
+        // Best Practices (builtin plugin: gzip-not-enabled)
         &missing_error_log::DOC,
     ];
 
@@ -65,16 +101,65 @@ pub fn all_rule_names() -> Vec<&'static str> {
     all_rule_docs().iter().map(|doc| doc.name).collect()
 }
 
+/// Get all rule documentation including plugins (owned version)
+#[cfg(feature = "builtin-plugins")]
+pub fn all_rule_docs_with_plugins() -> Vec<RuleDocOwned> {
+    let mut docs: Vec<RuleDocOwned> = all_rule_docs().iter().map(|d| (*d).into()).collect();
+    docs.extend(get_builtin_plugin_docs());
+    docs
+}
+
+/// Get documentation for a rule by name, including plugins
+#[cfg(feature = "builtin-plugins")]
+pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
+    // First check native rules
+    if let Some(doc) = get_rule_doc(name) {
+        return Some(doc.into());
+    }
+    // Then check builtin plugins
+    get_builtin_plugin_docs().into_iter().find(|d| d.name == name)
+}
+
+/// Get documentation from builtin plugins
+#[cfg(feature = "builtin-plugins")]
+fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
+    use crate::linter::LintRule;
+    use crate::plugin::builtin::load_builtin_plugins;
+    use crate::plugin::PluginLoader;
+
+    let mut docs = Vec::new();
+
+    if let Ok(loader) = PluginLoader::new() {
+        if let Ok(plugins) = load_builtin_plugins(&loader) {
+            for plugin in plugins {
+                docs.push(RuleDocOwned {
+                    name: plugin.name().to_string(),
+                    category: plugin.category().to_string(),
+                    description: plugin.description().to_string(),
+                    severity: plugin.severity().unwrap_or("warning").to_string(),
+                    why: plugin.why().unwrap_or("").to_string(),
+                    bad_example: plugin.bad_example().unwrap_or("").to_string(),
+                    good_example: plugin.good_example().unwrap_or("").to_string(),
+                    references: plugin.references().unwrap_or_default(),
+                    is_plugin: true,
+                });
+            }
+        }
+    }
+
+    docs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_get_rule_doc() {
-        let doc = get_rule_doc("server-tokens-enabled");
+        let doc = get_rule_doc("deprecated-ssl-protocol");
         assert!(doc.is_some());
         let doc = doc.unwrap();
-        assert_eq!(doc.name, "server-tokens-enabled");
+        assert_eq!(doc.name, "deprecated-ssl-protocol");
         assert_eq!(doc.category, "security");
     }
 
@@ -87,9 +172,9 @@ mod tests {
     #[test]
     fn test_all_rule_names() {
         let names = all_rule_names();
-        assert!(names.contains(&"server-tokens-enabled"));
+        assert!(names.contains(&"deprecated-ssl-protocol"));
         assert!(names.contains(&"indent"));
-        assert!(names.contains(&"gzip-not-enabled"));
+        assert!(names.contains(&"missing-error-log"));
     }
 }
 
@@ -158,8 +243,8 @@ mod example_tests {
 
         for doc in all_rule_docs() {
             // Skip rules that check for file-level issues that can't be tested via parse_string
-            // (e.g., missing-error-log, gzip-not-enabled only check for presence/absence)
-            if doc.name == "missing-error-log" || doc.name == "gzip-not-enabled" {
+            // (e.g., missing-error-log only checks for presence/absence)
+            if doc.name == "missing-error-log" {
                 continue;
             }
 

@@ -22,6 +22,17 @@ impl Plugin for GzipNotEnabledPlugin {
             "best-practices",
             "Suggests enabling gzip compression for better performance",
         )
+        .with_severity("info")
+        .with_why(
+            "Gzip compression can significantly reduce the size of HTTP responses, often by \
+             60-80% for text-based content like HTML, CSS, and JavaScript. This improves page \
+             load times and reduces bandwidth usage.",
+        )
+        .with_bad_example(include_str!("../examples/bad.conf").trim())
+        .with_good_example(include_str!("../examples/good.conf").trim())
+        .with_references(vec![
+            "https://nginx.org/en/docs/http/ngx_http_gzip_module.html".to_string(),
+        ])
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

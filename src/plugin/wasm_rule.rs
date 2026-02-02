@@ -20,6 +20,21 @@ pub struct PluginInfo {
     /// API version the plugin uses (defaults to "1.0" for backward compatibility)
     #[serde(default = "default_api_version")]
     pub api_version: String,
+    /// Severity level (error, warning, info)
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// Why this rule exists (detailed explanation)
+    #[serde(default)]
+    pub why: Option<String>,
+    /// Example of bad configuration
+    #[serde(default)]
+    pub bad_example: Option<String>,
+    /// Example of good configuration
+    #[serde(default)]
+    pub good_example: Option<String>,
+    /// References (URLs, documentation links)
+    #[serde(default)]
+    pub references: Option<Vec<String>>,
 }
 
 fn default_api_version() -> String {
@@ -135,11 +150,11 @@ fn get_serialized_config(config: &Config) -> Result<String, serde_json::Error> {
 }
 
 /// A lint rule implemented as a WASM module
+#[derive(Clone)]
 pub struct WasmLintRule {
     /// Path to the WASM file (for error reporting and cache key)
     path: PathBuf,
-    /// Plugin metadata (kept for potential future use)
-    #[allow(dead_code)]
+    /// Plugin metadata
     info: PluginInfo,
     /// Compiled WASM module (shared across threads)
     module: Arc<Module>,
@@ -457,6 +472,31 @@ impl WasmLintRule {
     /// Get the API version this plugin uses
     pub fn api_version(&self) -> &str {
         &self.api_version
+    }
+
+    /// Get the severity level from plugin info
+    pub fn severity(&self) -> Option<&str> {
+        self.info.severity.as_deref()
+    }
+
+    /// Get the why documentation from plugin info
+    pub fn why(&self) -> Option<&str> {
+        self.info.why.as_deref()
+    }
+
+    /// Get the bad example from plugin info
+    pub fn bad_example(&self) -> Option<&str> {
+        self.info.bad_example.as_deref()
+    }
+
+    /// Get the good example from plugin info
+    pub fn good_example(&self) -> Option<&str> {
+        self.info.good_example.as_deref()
+    }
+
+    /// Get the references from plugin info
+    pub fn references(&self) -> Option<Vec<String>> {
+        self.info.references.clone()
     }
 }
 

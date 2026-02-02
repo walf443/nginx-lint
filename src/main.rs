@@ -417,37 +417,13 @@ fn run_lint(cli: Cli) -> ExitCode {
 
     let mut linter = Linter::with_config(lint_config.as_ref());
 
-    // Load builtin plugins (embedded in binary)
+    // Show builtin plugins in verbose mode
     #[cfg(feature = "builtin-plugins")]
-    {
-        use nginx_lint::plugin::builtin::{is_builtin_plugin, load_builtin_plugins};
-        use nginx_lint::plugin::PluginLoader;
-
-        // Remove native rules that have builtin plugin equivalents
-        linter.remove_rules_by_name(is_builtin_plugin);
-
-        match PluginLoader::new() {
-            Ok(loader) => match load_builtin_plugins(&loader) {
-                Ok(plugins) => {
-                    if cli.verbose {
-                        eprintln!("Loaded {} builtin plugin(s)", plugins.len());
-                    }
-                    for plugin in plugins {
-                        if cli.verbose {
-                            eprintln!("  - {} ({})", plugin.name(), plugin.description());
-                        }
-                        linter.add_rule(Box::new(plugin));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error loading builtin plugins: {}", e);
-                    return ExitCode::from(2);
-                }
-            },
-            Err(e) => {
-                eprintln!("Error initializing plugin loader: {}", e);
-                return ExitCode::from(2);
-            }
+    if cli.verbose {
+        use nginx_lint::plugin::builtin::BUILTIN_PLUGIN_NAMES;
+        eprintln!("Loaded {} builtin plugin(s)", BUILTIN_PLUGIN_NAMES.len());
+        for name in BUILTIN_PLUGIN_NAMES {
+            eprintln!("  - {}", name);
         }
     }
 
@@ -568,27 +544,51 @@ fn run_lint(cli: Cli) -> ExitCode {
 
 fn run_why(rule: Option<String>, list: bool) -> ExitCode {
     use colored::Colorize;
-    use nginx_lint::docs::{all_rule_docs, get_rule_doc};
 
     if list {
         // List all rules
         eprintln!("{}", "Available rules:".bold());
         eprintln!();
 
-        let docs = all_rule_docs();
-        let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
-        for doc in docs {
-            by_category.entry(doc.category).or_default().push(doc);
-        }
+        #[cfg(feature = "builtin-plugins")]
+        {
+            use nginx_lint::docs::all_rule_docs_with_plugins;
+            let docs = all_rule_docs_with_plugins();
+            let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
+            for doc in &docs {
+                by_category.entry(doc.category.as_str()).or_default().push(doc);
+            }
 
-        let categories = ["security", "syntax", "style", "best_practices"];
-        for category in categories {
-            if let Some(rules) = by_category.get(category) {
-                eprintln!("  {} {}", "▸".cyan(), category.bold());
-                for doc in rules {
-                    eprintln!("    {} - {}", doc.name.yellow(), doc.description);
+            let categories = ["security", "syntax", "style", "best_practices", "best-practices"];
+            for category in categories {
+                if let Some(rules) = by_category.get(category) {
+                    eprintln!("  {} {}", "▸".cyan(), category.bold());
+                    for doc in rules {
+                        let suffix = if doc.is_plugin { " (plugin)" } else { "" };
+                        eprintln!("    {} - {}{}", doc.name.yellow(), doc.description, suffix.dimmed());
+                    }
+                    eprintln!();
                 }
-                eprintln!();
+            }
+        }
+        #[cfg(not(feature = "builtin-plugins"))]
+        {
+            use nginx_lint::docs::all_rule_docs;
+            let docs = all_rule_docs();
+            let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
+            for doc in docs {
+                by_category.entry(doc.category).or_default().push(doc);
+            }
+
+            let categories = ["security", "syntax", "style", "best_practices"];
+            for category in categories {
+                if let Some(rules) = by_category.get(category) {
+                    eprintln!("  {} {}", "▸".cyan(), category.bold());
+                    for doc in rules {
+                        eprintln!("    {} - {}", doc.name.yellow(), doc.description);
+                    }
+                    eprintln!();
+                }
             }
         }
 
@@ -607,50 +607,120 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
         }
     };
 
-    match get_rule_doc(&rule_name) {
-        Some(doc) => {
-            eprintln!();
-            eprintln!("{} {}", "Rule:".bold(), doc.name.yellow());
-            eprintln!("{} {}", "Category:".bold(), doc.category);
-            eprintln!("{} {}", "Severity:".bold(), doc.severity);
-            eprintln!();
-            eprintln!("{}", "Why:".bold());
-            for line in doc.why.lines() {
-                eprintln!("  {}", line);
+    #[cfg(feature = "builtin-plugins")]
+    {
+        use nginx_lint::docs::get_rule_doc_with_plugins;
+        match get_rule_doc_with_plugins(&rule_name) {
+            Some(doc) => {
+                print_rule_doc_owned(&doc);
+                ExitCode::SUCCESS
             }
-            eprintln!();
-            eprintln!("{}", "Bad Example:".bold().red());
-            eprintln!("{}", "─".repeat(60).dimmed());
-            for line in doc.bad_example.lines() {
-                eprintln!("  {}", line);
-            }
-            eprintln!("{}", "─".repeat(60).dimmed());
-            eprintln!();
-            eprintln!("{}", "Good Example:".bold().green());
-            eprintln!("{}", "─".repeat(60).dimmed());
-            for line in doc.good_example.lines() {
-                eprintln!("  {}", line);
-            }
-            eprintln!("{}", "─".repeat(60).dimmed());
-
-            if !doc.references.is_empty() {
+            None => {
+                eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
                 eprintln!();
-                eprintln!("{}", "References:".bold());
-                for reference in doc.references {
-                    eprintln!("  • {}", reference.cyan());
-                }
+                eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
+                ExitCode::from(1)
             }
-            eprintln!();
-
-            ExitCode::SUCCESS
-        }
-        None => {
-            eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
-            eprintln!();
-            eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
-            ExitCode::from(1)
         }
     }
+    #[cfg(not(feature = "builtin-plugins"))]
+    {
+        use nginx_lint::docs::get_rule_doc;
+        match get_rule_doc(&rule_name) {
+            Some(doc) => {
+                print_rule_doc(doc);
+                ExitCode::SUCCESS
+            }
+            None => {
+                eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
+                eprintln!();
+                eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
+                ExitCode::from(1)
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "builtin-plugins"))]
+fn print_rule_doc(doc: &nginx_lint::docs::RuleDoc) {
+    use colored::Colorize;
+
+    eprintln!();
+    eprintln!("{} {}", "Rule:".bold(), doc.name.yellow());
+    eprintln!("{} {}", "Category:".bold(), doc.category);
+    eprintln!("{} {}", "Severity:".bold(), doc.severity);
+    eprintln!();
+    eprintln!("{}", "Why:".bold());
+    for line in doc.why.lines() {
+        eprintln!("  {}", line);
+    }
+    eprintln!();
+    eprintln!("{}", "Bad Example:".bold().red());
+    eprintln!("{}", "─".repeat(60).dimmed());
+    for line in doc.bad_example.lines() {
+        eprintln!("  {}", line);
+    }
+    eprintln!("{}", "─".repeat(60).dimmed());
+    eprintln!();
+    eprintln!("{}", "Good Example:".bold().green());
+    eprintln!("{}", "─".repeat(60).dimmed());
+    for line in doc.good_example.lines() {
+        eprintln!("  {}", line);
+    }
+    eprintln!("{}", "─".repeat(60).dimmed());
+
+    if !doc.references.is_empty() {
+        eprintln!();
+        eprintln!("{}", "References:".bold());
+        for reference in doc.references {
+            eprintln!("  • {}", reference.cyan());
+        }
+    }
+    eprintln!();
+}
+
+#[cfg(feature = "builtin-plugins")]
+fn print_rule_doc_owned(doc: &nginx_lint::docs::RuleDocOwned) {
+    use colored::Colorize;
+
+    eprintln!();
+    eprintln!("{} {}{}", "Rule:".bold(), doc.name.yellow(), if doc.is_plugin { " (plugin)".dimmed().to_string() } else { "".to_string() });
+    eprintln!("{} {}", "Category:".bold(), doc.category);
+    eprintln!("{} {}", "Severity:".bold(), doc.severity);
+    eprintln!();
+    if !doc.why.is_empty() {
+        eprintln!("{}", "Why:".bold());
+        for line in doc.why.lines() {
+            eprintln!("  {}", line);
+        }
+        eprintln!();
+    }
+    if !doc.bad_example.is_empty() {
+        eprintln!("{}", "Bad Example:".bold().red());
+        eprintln!("{}", "─".repeat(60).dimmed());
+        for line in doc.bad_example.lines() {
+            eprintln!("  {}", line);
+        }
+        eprintln!("{}", "─".repeat(60).dimmed());
+        eprintln!();
+    }
+    if !doc.good_example.is_empty() {
+        eprintln!("{}", "Good Example:".bold().green());
+        eprintln!("{}", "─".repeat(60).dimmed());
+        for line in doc.good_example.lines() {
+            eprintln!("  {}", line);
+        }
+        eprintln!("{}", "─".repeat(60).dimmed());
+    }
+
+    if !doc.references.is_empty() {
+        eprintln!();
+        eprintln!("{}", "References:".bold());
+        for reference in &doc.references {
+            eprintln!("  • {}", reference.cyan());
+        }
+    }
+    eprintln!();
 }
 
 fn main() -> ExitCode {

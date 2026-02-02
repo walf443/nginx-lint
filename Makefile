@@ -1,4 +1,4 @@
-.PHONY: build build-wasm build-web build-plugins build-with-plugins clean test lint help
+.PHONY: build build-wasm build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help
 
 # Build CLI only
 build:
@@ -66,6 +66,30 @@ test-all: test
 		fi \
 	done
 
+# Lint plugin example files to ensure they are valid nginx configs
+lint-plugin-examples:
+	@echo "Linting plugin examples..."
+	@fail=0; \
+	for dir in plugins/builtin/*/; do \
+		if [ -d "$$dir/examples" ]; then \
+			name=$$(basename "$$dir"); \
+			echo "  Checking $$name examples..."; \
+			for conf in "$$dir"/examples/*.conf; do \
+				if ! cargo run --quiet --features cli -- --no-fail-on-warnings "$$conf" 2>/dev/null; then \
+					echo "    ERROR: $$conf failed to parse"; \
+					fail=1; \
+				else \
+					echo "    OK: $$(basename $$conf)"; \
+				fi \
+			done \
+		fi \
+	done; \
+	if [ $$fail -eq 1 ]; then \
+		echo "Some plugin examples failed validation."; \
+		exit 1; \
+	fi
+	@echo "All plugin examples are valid."
+
 # Run clippy
 lint:
 	cargo clippy
@@ -85,15 +109,16 @@ clean:
 help:
 	@echo "nginx-lint build targets:"
 	@echo ""
-	@echo "  make build             - Build CLI (release)"
-	@echo "  make build-plugins     - Build WASM builtin plugins"
+	@echo "  make build              - Build CLI (release)"
+	@echo "  make build-plugins      - Build WASM builtin plugins"
 	@echo "  make build-with-plugins - Build CLI with embedded builtin plugins"
-	@echo "  make build-wasm        - Build WASM for web demo"
-	@echo "  make build-web         - Build web server with embedded WASM"
-	@echo "  make run-web           - Run web demo (development)"
-	@echo "  make run-web-embed     - Run web demo with embedded WASM"
-	@echo "  make test              - Run tests"
-	@echo "  make test-all          - Run all tests including plugins"
-	@echo "  make lint              - Run clippy"
-	@echo "  make clean             - Clean all build artifacts"
-	@echo "  make help              - Show this help"
+	@echo "  make build-wasm         - Build WASM for web demo"
+	@echo "  make build-web          - Build web server with embedded WASM"
+	@echo "  make run-web            - Run web demo (development)"
+	@echo "  make run-web-embed      - Run web demo with embedded WASM"
+	@echo "  make test               - Run tests"
+	@echo "  make test-all           - Run all tests including plugins"
+	@echo "  make lint               - Run clippy"
+	@echo "  make lint-plugin-examples - Lint plugin example files"
+	@echo "  make clean              - Clean all build artifacts"
+	@echo "  make help               - Show this help"

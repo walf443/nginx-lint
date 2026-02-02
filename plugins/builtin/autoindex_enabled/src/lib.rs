@@ -21,6 +21,17 @@ impl Plugin for AutoindexEnabledPlugin {
             "security",
             "Detects when autoindex is enabled (can expose directory contents)",
         )
+        .with_severity("warning")
+        .with_why(
+            "When autoindex is enabled, nginx will generate a directory listing when a request \
+             is made to a directory without an index file. This can expose sensitive files, \
+             backup files, or other content that should not be publicly accessible.",
+        )
+        .with_bad_example(include_str!("../examples/bad.conf").trim())
+        .with_good_example(include_str!("../examples/good.conf").trim())
+        .with_references(vec![
+            "https://nginx.org/en/docs/http/ngx_http_autoindex_module.html".to_string(),
+        ])
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

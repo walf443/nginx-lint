@@ -312,6 +312,9 @@ fn test_generated_fixtures_parse_without_errors() {
 
     let entries = fs::read_dir(&test_generated_dir).expect("Failed to read test_generated directory");
 
+    // Create linter once outside the loop for better performance
+    let linter = Linter::with_default_rules();
+
     let mut tested_count = 0;
     for entry in entries {
         let entry = entry.expect("Failed to read directory entry");
@@ -338,7 +341,6 @@ fn test_generated_fixtures_parse_without_errors() {
                 panic!("Failed to parse {}: {}", path.display(), e)
             });
 
-            let linter = Linter::with_default_rules();
             let errors = linter.lint(&config, &path);
 
             // Should have no errors (warnings and info are OK)
@@ -384,6 +386,9 @@ fn test_all_rule_fixtures() {
 
     let rules_dir = fixtures_base().join("rules");
 
+    // Create linter once outside all loops for better performance
+    let linter = Linter::with_default_rules();
+
     // Iterate over categories (security, syntax, style, best_practices)
     for category_entry in fs::read_dir(&rules_dir).expect("Failed to read rules directory") {
         let category_entry = category_entry.expect("Failed to read category entry");
@@ -425,7 +430,6 @@ fn test_all_rule_fixtures() {
 
                     if can_parse {
                         let config = parse_config(&error_path).unwrap();
-                        let linter = Linter::with_default_rules();
                         errors.extend(linter.lint(&config, &error_path));
                     }
 
@@ -450,7 +454,6 @@ fn test_all_rule_fixtures() {
 
                     if can_parse {
                         let config = parse_config(&expected_path).unwrap();
-                        let linter = Linter::with_default_rules();
                         errors.extend(linter.lint(&config, &expected_path));
                     }
 
@@ -480,7 +483,6 @@ fn test_all_rule_fixtures() {
                     // Get all errors: combine pre-parse checks and linter errors
                     let mut all_errors = pre_parse_checks(temp_path);
                     if let Ok(config) = parse_config(temp_path) {
-                        let linter = Linter::with_default_rules();
                         all_errors.extend(linter.lint(&config, temp_path));
                     }
 

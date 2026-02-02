@@ -27,9 +27,34 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "gzip-not-enabled",
 ];
 
-/// Load all builtin plugins
+/// Global cache for compiled builtin plugins
+/// This avoids recompiling WASM modules on every Linter creation
+#[cfg(feature = "builtin-plugins")]
+static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<WasmLintRule>> = std::sync::OnceLock::new();
+
+/// Load all builtin plugins (with caching)
+///
+/// The first call compiles all WASM modules and caches them.
+/// Subsequent calls clone from the cache, which is much faster.
 #[cfg(feature = "builtin-plugins")]
 pub fn load_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, PluginError> {
+    // Try to get from cache first
+    if let Some(cached) = BUILTIN_PLUGINS_CACHE.get() {
+        return Ok(cached.clone());
+    }
+
+    // Compile plugins
+    let plugins = compile_builtin_plugins(loader)?;
+
+    // Try to store in cache (ignore if another thread beat us)
+    let _ = BUILTIN_PLUGINS_CACHE.set(plugins.clone());
+
+    Ok(plugins)
+}
+
+/// Compile all builtin plugins from embedded WASM bytes
+#[cfg(feature = "builtin-plugins")]
+fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, PluginError> {
     use std::path::PathBuf;
 
     let mut plugins = Vec::new();

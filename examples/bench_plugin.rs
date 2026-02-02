@@ -11,7 +11,7 @@
 
 use nginx_lint::linter::LintRule;
 use nginx_lint::plugin::PluginLoader;
-use nginx_lint::rules::ServerTokensEnabled;
+use nginx_lint::rules::DeprecatedSslProtocol;
 use nginx_lint::{parse_string, Linter};
 use std::path::Path;
 use std::time::Instant;
@@ -25,11 +25,11 @@ events {
 http {
     server {
         listen 80;
-        server_tokens on;
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
     }
     server {
         listen 8080;
-        server_tokens on;
+        ssl_protocols TLSv1 TLSv1.2;
     }
 }
 "#;
@@ -62,8 +62,8 @@ http {
     );
 
     // Benchmark single built-in rule
-    println!("\n=== Single built-in rule (ServerTokensEnabled) ===");
-    let single_rule = ServerTokensEnabled;
+    println!("\n=== Single built-in rule (DeprecatedSslProtocol) ===");
+    let single_rule = DeprecatedSslProtocol::default();
 
     // Warmup
     for _ in 0..10 {

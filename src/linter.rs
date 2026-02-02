@@ -144,9 +144,8 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            AutoindexEnabled, DeprecatedSslProtocol, DuplicateDirective, GzipNotEnabled, Indent,
-            MissingErrorLog, MissingSemicolon, ServerTokensEnabled, SpaceBeforeSemicolon,
-            TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            DeprecatedSslProtocol, DuplicateDirective, Indent, MissingErrorLog, MissingSemicolon,
+            SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -177,12 +176,6 @@ impl Linter {
                 rule.allowed_protocols = allowed;
             }
             linter.add_rule(Box::new(rule));
-        }
-        if is_enabled("server-tokens-enabled") {
-            linter.add_rule(Box::new(ServerTokensEnabled));
-        }
-        if is_enabled("autoindex-enabled") {
-            linter.add_rule(Box::new(AutoindexEnabled));
         }
         if is_enabled("weak-ssl-ciphers") {
             let mut rule = WeakSslCiphers::default();
@@ -216,11 +209,25 @@ impl Linter {
         }
 
         // Best practices
-        if is_enabled("gzip-not-enabled") {
-            linter.add_rule(Box::new(GzipNotEnabled));
-        }
         if is_enabled("missing-error-log") {
             linter.add_rule(Box::new(MissingErrorLog));
+        }
+
+        // Load builtin plugins when feature is enabled
+        #[cfg(feature = "builtin-plugins")]
+        {
+            use crate::plugin::builtin::load_builtin_plugins;
+            use crate::plugin::PluginLoader;
+
+            if let Ok(loader) = PluginLoader::new() {
+                if let Ok(plugins) = load_builtin_plugins(&loader) {
+                    for plugin in plugins {
+                        if is_enabled(plugin.name()) {
+                            linter.add_rule(Box::new(plugin));
+                        }
+                    }
+                }
+            }
         }
 
         linter
