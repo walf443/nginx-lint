@@ -1,15 +1,19 @@
-.PHONY: build build-wasm build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help
 
 # Build CLI with builtin plugins (release)
 build: collect-plugins
 	cargo build --release --features builtin-plugins
 
-# Build WASM module (for web demo)
+# Build WASM module (for web demo, without builtin plugins)
 build-wasm:
 	wasm-pack build --target web --out-dir demo/pkg --features wasm
 
+# Build WASM module with builtin plugins (for web demo)
+build-wasm-with-plugins: collect-plugins
+	wasm-pack build --target web --out-dir demo/pkg --features wasm,builtin-plugins
+
 # Build web server with embedded WASM (builds WASM first, then embeds it)
-build-web: build-wasm
+build-web: build-wasm-with-plugins
 	cargo build --release --features web-server-embed-wasm
 
 # Run web demo (development mode, reads files from disk)
@@ -109,11 +113,12 @@ clean:
 help:
 	@echo "nginx-lint build targets:"
 	@echo ""
-	@echo "  make build              - Build CLI (release)"
+	@echo "  make build              - Build CLI with builtin plugins (release)"
 	@echo "  make build-plugins      - Build WASM builtin plugins"
 	@echo "  make build-with-plugins - Build CLI with embedded builtin plugins"
-	@echo "  make build-wasm         - Build WASM for web demo"
-	@echo "  make build-web          - Build web server with embedded WASM"
+	@echo "  make build-wasm         - Build WASM for web demo (without plugins)"
+	@echo "  make build-wasm-with-plugins - Build WASM for web demo (with plugins)"
+	@echo "  make build-web          - Build web server with embedded WASM (with plugins)"
 	@echo "  make run-web            - Run web demo (development)"
 	@echo "  make run-web-embed      - Run web demo with embedded WASM"
 	@echo "  make test               - Run tests"
