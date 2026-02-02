@@ -15,12 +15,16 @@ mod embedded {
     /// autoindex-enabled plugin
     pub const AUTOINDEX_ENABLED: &[u8] =
         include_bytes!("../../target/builtin-plugins/autoindex_enabled.wasm");
+    /// gzip-not-enabled plugin
+    pub const GZIP_NOT_ENABLED: &[u8] =
+        include_bytes!("../../target/builtin-plugins/gzip_not_enabled.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
 pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "server-tokens-enabled",
     "autoindex-enabled",
+    "gzip-not-enabled",
 ];
 
 /// Load all builtin plugins
@@ -44,6 +48,15 @@ pub fn load_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, 
         loader.engine(),
         PathBuf::from("builtin:autoindex-enabled"),
         embedded::AUTOINDEX_ENABLED,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load gzip-not-enabled
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:gzip-not-enabled"),
+        embedded::GZIP_NOT_ENABLED,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
