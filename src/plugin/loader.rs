@@ -5,8 +5,8 @@
 use super::error::PluginError;
 use super::wasm_rule::WasmLintRule;
 use std::fs;
-use std::path::{Path, PathBuf};
-use wasmtime::{Config, Engine};
+use std::path::Path;
+use wasmi::{Config, Engine};
 
 /// Memory limit for plugins (256 MB)
 const MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
@@ -22,17 +22,12 @@ pub struct PluginLoader {
 impl PluginLoader {
     /// Create a new plugin loader with security constraints
     pub fn new() -> Result<Self, PluginError> {
-        let mut config = Config::new();
+        let mut config = Config::default();
 
         // Enable fuel-based metering for CPU limits
         config.consume_fuel(true);
 
-        // Limit memory
-        config.max_wasm_stack(1024 * 1024); // 1 MB stack limit
-
-        let engine = Engine::new(&config).map_err(|e| {
-            PluginError::compile_error(PathBuf::new(), format!("Failed to create WASM engine: {}", e))
-        })?;
+        let engine = Engine::new(&config);
 
         Ok(Self { engine })
     }

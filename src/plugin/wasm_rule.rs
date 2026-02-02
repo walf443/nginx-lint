@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wasmtime::{Engine, Instance, Linker, Memory, Module, Store, TypedFunc};
+use wasmi::{Engine, Linker, Memory, Module, Store, TypedFunc};
 
 /// Plugin info returned by the plugin_info export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,16 +96,12 @@ fn parse_plugin_output(json: &str, api_version: &str, path: &Path) -> Result<Vec
 }
 
 /// Store data for WASM execution
-struct StoreData {
-    #[allow(dead_code)]
-    memory_limit: u64,
-}
+#[derive(Default)]
+struct StoreData {}
 
 /// Cached instance data for reuse
 struct CachedInstance {
     store: Store<StoreData>,
-    #[allow(dead_code)]
-    instance: Instance,
     memory: Memory,
     alloc: TypedFunc<u32, u32>,
     dealloc: TypedFunc<(u32, u32), ()>,
@@ -160,8 +156,6 @@ pub struct WasmLintRule {
     module: Arc<Module>,
     /// WASM engine reference (shared across threads)
     engine: Engine,
-    /// Memory limit in bytes
-    memory_limit: u64,
     /// Fuel limit for CPU metering
     fuel_limit: u64,
     /// Leaked static strings for LintRule trait
@@ -178,7 +172,7 @@ impl WasmLintRule {
         engine: &Engine,
         path: PathBuf,
         wasm_bytes: &[u8],
-        memory_limit: u64,
+        _memory_limit: u64,
         fuel_limit: u64,
     ) -> Result<Self, PluginError> {
         // Compile the module
@@ -189,7 +183,7 @@ impl WasmLintRule {
         Self::validate_exports(&module, &path)?;
 
         // Get plugin info by instantiating temporarily
-        let info = Self::get_plugin_info(engine, &module, &path, memory_limit, fuel_limit)?;
+        let info = Self::get_plugin_info(engine, &module, &path, fuel_limit)?;
 
         // Leak strings for 'static lifetime (these live for the program duration)
         let name: &'static str = Box::leak(info.name.clone().into_boxed_str());
@@ -202,7 +196,6 @@ impl WasmLintRule {
             info,
             module: Arc::new(module),
             engine: engine.clone(),
-            memory_limit,
             fuel_limit,
             name,
             category,
@@ -222,8 +215,10 @@ impl WasmLintRule {
             "dealloc",
         ];
 
+        let exports: Vec<_> = module.exports().map(|e| e.name().to_string()).collect();
+
         for export in &required_exports {
-            if module.get_export(export).is_none() {
+            if !exports.iter().any(|e| e == *export) {
                 return Err(PluginError::missing_export(path, *export));
             }
         }
@@ -236,31 +231,30 @@ impl WasmLintRule {
         engine: &Engine,
         module: &Module,
         path: &Path,
-        memory_limit: u64,
         fuel_limit: u64,
     ) -> Result<PluginInfo, PluginError> {
-        let mut store = Store::new(engine, StoreData { memory_limit });
+        let mut store = Store::new(engine, StoreData::default());
         store.set_fuel(fuel_limit).map_err(|e| {
             PluginError::execution_error(path, format!("Failed to set fuel: {}", e))
         })?;
 
-        let linker = Linker::new(engine);
-        let instance = linker.instantiate(&mut store, module).map_err(|e| {
-            PluginError::instantiate_error(path, e.to_string())
-        })?;
+        let linker = Linker::<StoreData>::new(engine);
+        let instance = linker
+            .instantiate_and_start(&mut store, module)
+            .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
 
         // Get memory
         let memory = instance
-            .get_memory(&mut store, "memory")
+            .get_memory(&store, "memory")
             .ok_or_else(|| PluginError::missing_export(path, "memory"))?;
 
         // Get functions
-        let plugin_info_len: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, "plugin_info_len")
+        let plugin_info_len = instance
+            .get_typed_func::<(), u32>(&store, "plugin_info_len")
             .map_err(|e| PluginError::missing_export(path, format!("plugin_info_len: {}", e)))?;
 
-        let plugin_info: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, "plugin_info")
+        let plugin_info = instance
+            .get_typed_func::<(), u32>(&store, "plugin_info")
             .map_err(|e| PluginError::missing_export(path, format!("plugin_info: {}", e)))?;
 
         // Call plugin_info_len to get the length
@@ -313,41 +307,38 @@ impl WasmLintRule {
 
     /// Create a new cached instance
     fn create_instance(&self) -> Result<CachedInstance, PluginError> {
-        let mut store = Store::new(&self.engine, StoreData {
-            memory_limit: self.memory_limit,
-        });
+        let mut store = Store::new(&self.engine, StoreData::default());
         store.set_fuel(self.fuel_limit).map_err(|e| {
             PluginError::execution_error(&self.path, format!("Failed to set fuel: {}", e))
         })?;
 
-        let linker = Linker::new(&self.engine);
-        let instance = linker.instantiate(&mut store, &self.module).map_err(|e| {
-            PluginError::instantiate_error(&self.path, e.to_string())
-        })?;
+        let linker = Linker::<StoreData>::new(&self.engine);
+        let instance = linker
+            .instantiate_and_start(&mut store, &self.module)
+            .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
 
         let memory = instance
-            .get_memory(&mut store, "memory")
+            .get_memory(&store, "memory")
             .ok_or_else(|| PluginError::missing_export(&self.path, "memory"))?;
 
-        let alloc: TypedFunc<u32, u32> = instance
-            .get_typed_func(&mut store, "alloc")
+        let alloc = instance
+            .get_typed_func::<u32, u32>(&store, "alloc")
             .map_err(|e| PluginError::missing_export(&self.path, format!("alloc: {}", e)))?;
 
-        let dealloc: TypedFunc<(u32, u32), ()> = instance
-            .get_typed_func(&mut store, "dealloc")
+        let dealloc = instance
+            .get_typed_func::<(u32, u32), ()>(&store, "dealloc")
             .map_err(|e| PluginError::missing_export(&self.path, format!("dealloc: {}", e)))?;
 
-        let check: TypedFunc<(u32, u32, u32, u32), u32> = instance
-            .get_typed_func(&mut store, "check")
+        let check = instance
+            .get_typed_func::<(u32, u32, u32, u32), u32>(&store, "check")
             .map_err(|e| PluginError::missing_export(&self.path, format!("check: {}", e)))?;
 
-        let check_result_len: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, "check_result_len")
+        let check_result_len = instance
+            .get_typed_func::<(), u32>(&store, "check_result_len")
             .map_err(|e| PluginError::missing_export(&self.path, format!("check_result_len: {}", e)))?;
 
         Ok(CachedInstance {
             store,
-            instance,
             memory,
             alloc,
             dealloc,
@@ -414,7 +405,8 @@ impl WasmLintRule {
                 ),
             )
             .map_err(|e| {
-                if e.to_string().contains("fuel") {
+                let err_str = e.to_string();
+                if err_str.contains("fuel") || err_str.contains("Fuel") {
                     PluginError::timeout(&self.path)
                 } else {
                     PluginError::execution_error(&self.path, format!("check failed: {}", e))

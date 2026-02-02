@@ -1,10 +1,10 @@
 .PHONY: build build-wasm build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help
 
-# Build CLI only
-build:
-	cargo build --release
+# Build CLI with builtin plugins (release)
+build: collect-plugins
+	cargo build --release --features builtin-plugins
 
-# Build WASM module
+# Build WASM module (for web demo)
 build-wasm:
 	wasm-pack build --target web --out-dir demo/pkg --features wasm
 
