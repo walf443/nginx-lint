@@ -288,6 +288,122 @@ impl<P: Plugin> PluginTestRunner<P> {
             result_normalized
         );
     }
+
+    /// Test using bad.conf and good.conf example content
+    ///
+    /// This method verifies:
+    /// 1. bad_conf produces at least one error for this plugin
+    /// 2. good_conf produces no errors for this plugin
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let runner = PluginTestRunner::new(MyPlugin);
+    /// runner.test_examples(
+    ///     include_str!("../examples/bad.conf"),
+    ///     include_str!("../examples/good.conf"),
+    /// );
+    /// ```
+    pub fn test_examples(&self, bad_conf: &str, good_conf: &str) {
+        let plugin_info = self.plugin.info();
+
+        // Test bad.conf - should produce errors
+        let errors = self
+            .check_string(bad_conf)
+            .expect("Failed to parse bad.conf");
+        let rule_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .collect();
+        assert!(
+            !rule_errors.is_empty(),
+            "bad.conf should produce at least one {} error, got none",
+            plugin_info.name
+        );
+
+        // Test good.conf - should not produce errors
+        let errors = self
+            .check_string(good_conf)
+            .expect("Failed to parse good.conf");
+        let rule_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .collect();
+        assert!(
+            rule_errors.is_empty(),
+            "good.conf should not produce {} errors, got: {:?}",
+            plugin_info.name,
+            rule_errors
+        );
+    }
+
+    /// Test using bad.conf and good.conf, and verify fix converts bad to good
+    ///
+    /// This method verifies:
+    /// 1. bad_conf produces at least one error with a fix
+    /// 2. good_conf produces no errors
+    /// 3. Applying fixes to bad_conf produces good_conf
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let runner = PluginTestRunner::new(MyPlugin);
+    /// runner.test_examples_with_fix(
+    ///     include_str!("../examples/bad.conf"),
+    ///     include_str!("../examples/good.conf"),
+    /// );
+    /// ```
+    pub fn test_examples_with_fix(&self, bad_conf: &str, good_conf: &str) {
+        let plugin_info = self.plugin.info();
+
+        // Test bad.conf - should produce errors with fixes
+        let errors = self
+            .check_string(bad_conf)
+            .expect("Failed to parse bad.conf");
+        let rule_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .collect();
+        assert!(
+            !rule_errors.is_empty(),
+            "bad.conf should produce at least one {} error, got none",
+            plugin_info.name
+        );
+
+        let fixes: Vec<_> = rule_errors
+            .iter()
+            .filter_map(|e| e.fix.as_ref())
+            .collect();
+        assert!(
+            !fixes.is_empty(),
+            "bad.conf errors should have fixes, got none"
+        );
+
+        // Test good.conf - should not produce errors
+        let errors = self
+            .check_string(good_conf)
+            .expect("Failed to parse good.conf");
+        let rule_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .collect();
+        assert!(
+            rule_errors.is_empty(),
+            "good.conf should not produce {} errors, got: {:?}",
+            plugin_info.name,
+            rule_errors
+        );
+
+        // Apply fixes to bad.conf and compare with good.conf
+        let fixed = apply_fixes(bad_conf, &fixes);
+        assert_eq!(
+            fixed.trim(),
+            good_conf.trim(),
+            "Applying fixes to bad.conf should produce good.conf.\nExpected:\n{}\n\nGot:\n{}",
+            good_conf.trim(),
+            fixed.trim()
+        );
+    }
 }
 
 /// Test builder for inline tests

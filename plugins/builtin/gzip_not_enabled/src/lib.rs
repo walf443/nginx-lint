@@ -129,4 +129,13 @@ http {
 "#,
         );
     }
+
+    #[test]
+    fn test_examples() {
+        let runner = PluginTestRunner::new(GzipNotEnabledPlugin);
+        runner.test_examples(
+            include_str!("../examples/bad.conf"),
+            include_str!("../examples/good.conf"),
+        );
+    }
 }

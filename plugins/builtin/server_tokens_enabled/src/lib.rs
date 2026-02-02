@@ -149,4 +149,13 @@ http {
             2,
         );
     }
+
+    #[test]
+    fn test_examples_with_fix() {
+        let runner = PluginTestRunner::new(ServerTokensEnabledPlugin);
+        runner.test_examples_with_fix(
+            include_str!("../examples/bad.conf"),
+            include_str!("../examples/good.conf"),
+        );
+    }
 }
