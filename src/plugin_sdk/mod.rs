@@ -2,6 +2,12 @@
 //!
 //! This module provides everything needed to create custom lint rules as WASM plugins.
 //!
+//! # API Versioning
+//!
+//! Plugins declare the API version they use via `PluginInfo::api_version`.
+//! This allows the host to support multiple output formats for backward compatibility.
+//! Use `PluginInfo::new()` to automatically set the current API version.
+//!
 //! # Example
 //!
 //! ```rust,ignore
@@ -11,11 +17,11 @@
 //!
 //! impl Plugin for MyRule {
 //!     fn info(&self) -> PluginInfo {
-//!         PluginInfo {
-//!             name: "my-custom-rule".to_string(),
-//!             category: "custom".to_string(),
-//!             description: "My custom lint rule".to_string(),
-//!         }
+//!         PluginInfo::new(
+//!             "my-custom-rule",
+//!             "custom",
+//!             "My custom lint rule",
+//!         )
 //!     }
 //!
 //!     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -48,6 +54,7 @@ pub use types::*;
 pub mod prelude {
     pub use super::types::*;
     pub use super::export_plugin;
+    pub use super::types::API_VERSION;
 }
 
 /// Macro to export a plugin implementation
@@ -63,11 +70,7 @@ pub mod prelude {
 ///
 /// impl Plugin for MyPlugin {
 ///     fn info(&self) -> PluginInfo {
-///         PluginInfo {
-///             name: "my-plugin".to_string(),
-///             category: "custom".to_string(),
-///             description: "My plugin".to_string(),
-///         }
+///         PluginInfo::new("my-plugin", "custom", "My plugin")
 ///     }
 ///
 ///     fn check(&self, config: &Config, path: &str) -> Vec<LintError> {

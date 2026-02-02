@@ -19,11 +19,11 @@ pub struct DebugConnectionRule;
 
 impl Plugin for DebugConnectionRule {
     fn info(&self) -> PluginInfo {
-        PluginInfo {
-            name: "debug-connection-in-production".to_string(),
-            category: "best_practices".to_string(),
-            description: "Warns about debug_connection directive which should not be used in production".to_string(),
-        }
+        PluginInfo::new(
+            "debug-connection-in-production",
+            "best_practices",
+            "Warns about debug_connection directive which should not be used in production",
+        )
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

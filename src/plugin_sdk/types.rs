@@ -4,6 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Current API version for the plugin SDK
+pub const API_VERSION: &str = "1.0";
+
 /// Plugin metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginInfo {
@@ -13,6 +16,20 @@ pub struct PluginInfo {
     pub category: String,
     /// Human-readable description
     pub description: String,
+    /// API version the plugin uses for input/output format
+    pub api_version: String,
+}
+
+impl PluginInfo {
+    /// Create a new PluginInfo with the current API version
+    pub fn new(name: impl Into<String>, category: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            category: category.into(),
+            description: description.into(),
+            api_version: API_VERSION.to_string(),
+        }
+    }
 }
 
 /// Severity level for lint errors

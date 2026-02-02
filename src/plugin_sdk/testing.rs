@@ -348,11 +348,7 @@ mod tests {
 
     impl Plugin for TestPlugin {
         fn info(&self) -> PluginInfo {
-            PluginInfo {
-                name: "test-plugin".to_string(),
-                category: "test".to_string(),
-                description: "Test plugin".to_string(),
-            }
+            PluginInfo::new("test-plugin", "test", "Test plugin")
         }
 
         fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

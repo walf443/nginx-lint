@@ -17,6 +17,13 @@ pub struct PluginInfo {
     pub name: String,
     pub category: String,
     pub description: String,
+    /// API version the plugin uses (defaults to "1.0" for backward compatibility)
+    #[serde(default = "default_api_version")]
+    pub api_version: String,
+}
+
+fn default_api_version() -> String {
+    "1.0".to_string()
 }
 
 /// Plugin lint error format (simplified for JSON transfer)
@@ -47,6 +54,29 @@ impl PluginLintError {
         }
 
         error
+    }
+}
+
+/// Parse plugin output based on API version
+/// Currently supports version 1.0 only
+fn parse_plugin_output(json: &str, api_version: &str, path: &Path) -> Result<Vec<LintError>, PluginError> {
+    match api_version {
+        "1.0" => {
+            let plugin_errors: Vec<PluginLintError> = serde_json::from_str(json).map_err(|e| {
+                PluginError::result_parse_error(path, format!("Invalid result JSON: {}", e))
+            })?;
+            Ok(plugin_errors.into_iter().map(|e| e.into_lint_error()).collect())
+        }
+        _ => {
+            // Unknown version - try to parse as v1.0 with a warning
+            let plugin_errors: Vec<PluginLintError> = serde_json::from_str(json).map_err(|e| {
+                PluginError::result_parse_error(
+                    path,
+                    format!("Unknown API version '{}', failed to parse as v1.0: {}", api_version, e),
+                )
+            })?;
+            Ok(plugin_errors.into_iter().map(|e| e.into_lint_error()).collect())
+        }
     }
 }
 
@@ -123,6 +153,8 @@ pub struct WasmLintRule {
     name: &'static str,
     category: &'static str,
     description: &'static str,
+    /// API version the plugin uses (for output parsing)
+    api_version: String,
 }
 
 impl WasmLintRule {
@@ -148,6 +180,7 @@ impl WasmLintRule {
         let name: &'static str = Box::leak(info.name.clone().into_boxed_str());
         let category: &'static str = Box::leak(info.category.clone().into_boxed_str());
         let description: &'static str = Box::leak(info.description.clone().into_boxed_str());
+        let api_version = info.api_version.clone();
 
         Ok(Self {
             path,
@@ -159,6 +192,7 @@ impl WasmLintRule {
             name,
             category,
             description,
+            api_version,
         })
     }
 
@@ -396,12 +430,8 @@ impl WasmLintRule {
         let _ = cached.dealloc.call(&mut cached.store, (path_ptr, path_str.len() as u32));
         let _ = cached.dealloc.call(&mut cached.store, (result_ptr, result_len as u32));
 
-        // Parse result
-        let plugin_errors: Vec<PluginLintError> = serde_json::from_str(&result_json).map_err(|e| {
-            PluginError::result_parse_error(&self.path, format!("Invalid result JSON: {}", e))
-        })?;
-
-        Ok(plugin_errors.into_iter().map(|e| e.into_lint_error()).collect())
+        // Parse result based on plugin's API version
+        parse_plugin_output(&result_json, &self.api_version, &self.path)
     }
 
     /// Execute the check function with instance caching
@@ -420,6 +450,13 @@ impl WasmLintRule {
             let cached = cache.get_mut(&cache_key).unwrap();
             self.execute_check_cached(cached, config, file_path)
         })
+    }
+}
+
+impl WasmLintRule {
+    /// Get the API version this plugin uses
+    pub fn api_version(&self) -> &str {
+        &self.api_version
     }
 }
 
