@@ -120,7 +120,17 @@ http {
         .expect_error_count(1)
         .expect_error_on_line(3)
         .expect_message_contains("server_tokens")
+        .expect_has_fix()
         .run(&ServerTokensEnabledPlugin);
+    }
+
+    #[test]
+    fn test_fix_produces_correct_output() {
+        TestCase::new("server_tokens on;")
+            .expect_error_count(1)
+            .expect_fix_on_line(1)
+            .expect_fix_produces("server_tokens off;")
+            .run(&ServerTokensEnabledPlugin);
     }
 
     #[test]

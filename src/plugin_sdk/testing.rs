@@ -35,7 +35,7 @@
 //! }
 //! ```
 
-use super::types::{Config, LintError, Plugin, PluginInfo};
+use super::types::{Config, Fix, LintError, Plugin, PluginInfo};
 use std::path::{Path, PathBuf};
 
 /// Test runner for plugins
@@ -235,6 +235,59 @@ impl<P: Plugin> PluginTestRunner<P> {
             rule_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
         );
     }
+
+    /// Assert that errors have fixes
+    pub fn assert_has_fix(&self, content: &str) {
+        let errors = self
+            .check_string(content)
+            .expect("Failed to check config");
+        let plugin_info = self.plugin.info();
+        let rule_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .collect();
+
+        let has_fix = rule_errors.iter().any(|e| e.fix.is_some());
+
+        assert!(
+            has_fix,
+            "Expected at least one error with fix from {}, got errors: {:?}",
+            plugin_info.name,
+            rule_errors
+        );
+    }
+
+    /// Assert that applying fixes produces the expected output
+    pub fn assert_fix_produces(&self, content: &str, expected: &str) {
+        let errors = self
+            .check_string(content)
+            .expect("Failed to check config");
+        let plugin_info = self.plugin.info();
+
+        let fixes: Vec<_> = errors
+            .iter()
+            .filter(|e| e.rule == plugin_info.name)
+            .filter_map(|e| e.fix.as_ref())
+            .collect();
+
+        assert!(
+            !fixes.is_empty(),
+            "Expected at least one fix from {}, got none",
+            plugin_info.name
+        );
+
+        let result = apply_fixes(content, &fixes);
+        let expected_normalized = expected.trim();
+        let result_normalized = result.trim();
+
+        assert_eq!(
+            result_normalized,
+            expected_normalized,
+            "Fix did not produce expected output.\nExpected:\n{}\n\nGot:\n{}",
+            expected_normalized,
+            result_normalized
+        );
+    }
 }
 
 /// Test builder for inline tests
@@ -247,6 +300,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 /// TestCase::new("server_tokens on;")
 ///     .expect_error_count(1)
 ///     .expect_error_on_line(1)
+///     .expect_fix_produces("server_tokens off;")
 ///     .run(&MyPlugin);
 /// ```
 pub struct TestCase {
@@ -254,6 +308,9 @@ pub struct TestCase {
     expected_error_count: Option<usize>,
     expected_lines: Vec<usize>,
     expected_message_contains: Vec<String>,
+    expect_has_fix: bool,
+    expected_fix_output: Option<String>,
+    expected_fix_on_lines: Vec<usize>,
 }
 
 impl TestCase {
@@ -264,6 +321,9 @@ impl TestCase {
             expected_error_count: None,
             expected_lines: Vec::new(),
             expected_message_contains: Vec::new(),
+            expect_has_fix: false,
+            expected_fix_output: None,
+            expected_fix_on_lines: Vec::new(),
         }
     }
 
@@ -287,6 +347,26 @@ impl TestCase {
     /// Expect error messages to contain the given substring
     pub fn expect_message_contains(mut self, substring: impl Into<String>) -> Self {
         self.expected_message_contains.push(substring.into());
+        self
+    }
+
+    /// Expect at least one error to have a fix
+    pub fn expect_has_fix(mut self) -> Self {
+        self.expect_has_fix = true;
+        self
+    }
+
+    /// Expect a fix on a specific line
+    pub fn expect_fix_on_line(mut self, line: usize) -> Self {
+        self.expected_fix_on_lines.push(line);
+        self.expect_has_fix = true;
+        self
+    }
+
+    /// Expect that applying all fixes produces the given output
+    pub fn expect_fix_produces(mut self, expected: impl Into<String>) -> Self {
+        self.expected_fix_output = Some(expected.into());
+        self.expect_has_fix = true;
         self
     }
 
@@ -335,7 +415,100 @@ impl TestCase {
                 rule_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
             );
         }
+
+        // Check fix presence
+        if self.expect_has_fix {
+            let has_fix = rule_errors.iter().any(|e| e.fix.is_some());
+            assert!(
+                has_fix,
+                "Expected at least one error with fix, got errors: {:?}",
+                rule_errors
+            );
+        }
+
+        // Check fix on specific lines
+        for expected_line in &self.expected_fix_on_lines {
+            let has_fix_on_line = rule_errors
+                .iter()
+                .filter_map(|e| e.fix.as_ref())
+                .any(|f| f.line == *expected_line);
+            assert!(
+                has_fix_on_line,
+                "Expected fix on line {}, got fixes on lines: {:?}",
+                expected_line,
+                rule_errors
+                    .iter()
+                    .filter_map(|e| e.fix.as_ref().map(|f| f.line))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // Check fix output
+        if let Some(expected_output) = &self.expected_fix_output {
+            let fixes: Vec<_> = rule_errors
+                .iter()
+                .filter_map(|e| e.fix.as_ref())
+                .collect();
+
+            assert!(
+                !fixes.is_empty(),
+                "Expected at least one fix to check output, got none"
+            );
+
+            let result = apply_fixes(&self.content, &fixes);
+            let expected_normalized = expected_output.trim();
+            let result_normalized = result.trim();
+
+            assert_eq!(
+                result_normalized,
+                expected_normalized,
+                "Fix did not produce expected output.\nExpected:\n{}\n\nGot:\n{}",
+                expected_normalized,
+                result_normalized
+            );
+        }
     }
+}
+
+/// Apply fixes to content and return the result
+///
+/// This is a simplified implementation for testing purposes.
+/// Fixes are applied in order, from highest line number to lowest
+/// to avoid line number shifts.
+fn apply_fixes(content: &str, fixes: &[&Fix]) -> String {
+    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+
+    // Sort fixes by line number in descending order to avoid index shifts
+    let mut sorted_fixes: Vec<_> = fixes.iter().collect();
+    sorted_fixes.sort_by(|a, b| b.line.cmp(&a.line));
+
+    for fix in sorted_fixes {
+        let line_idx = fix.line.saturating_sub(1);
+
+        if fix.delete_line {
+            // Delete the line
+            if line_idx < lines.len() {
+                lines.remove(line_idx);
+            }
+        } else if fix.insert_after {
+            // Insert after the line
+            if line_idx < lines.len() {
+                lines.insert(line_idx + 1, fix.new_text.clone());
+            }
+        } else if let Some(old_text) = &fix.old_text {
+            // Replace specific text on the line
+            if line_idx < lines.len() {
+                lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
+            }
+        } else {
+            // Replace entire line
+            if line_idx < lines.len() {
+                lines[line_idx] = fix.new_text.clone();
+            }
+        }
+    }
+
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -405,5 +578,103 @@ mod tests {
         TestCase::new("test_directive good;")
             .expect_no_errors()
             .run(&plugin);
+    }
+
+    // Test plugin with fix support
+    #[derive(Default)]
+    struct TestPluginWithFix;
+
+    impl Plugin for TestPluginWithFix {
+        fn info(&self) -> PluginInfo {
+            PluginInfo::new("test-plugin-fix", "test", "Test plugin with fix")
+        }
+
+        fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+            let mut errors = Vec::new();
+            for directive in config.all_directives() {
+                if directive.is("test_directive") && directive.first_arg_is("bad") {
+                    errors.push(
+                        LintError::warning(
+                            "test-plugin-fix",
+                            "test",
+                            "test_directive should not be 'bad'",
+                            directive.span.start.line,
+                            directive.span.start.column,
+                        )
+                        .with_fix(Fix::replace(
+                            directive.span.start.line,
+                            "test_directive bad",
+                            "test_directive good",
+                        )),
+                    );
+                }
+            }
+            errors
+        }
+    }
+
+    #[test]
+    fn test_runner_assert_has_fix() {
+        let runner = PluginTestRunner::new(TestPluginWithFix);
+        runner.assert_has_fix("test_directive bad;");
+    }
+
+    #[test]
+    fn test_runner_assert_fix_produces() {
+        let runner = PluginTestRunner::new(TestPluginWithFix);
+        runner.assert_fix_produces("test_directive bad;", "test_directive good;");
+    }
+
+    #[test]
+    fn test_case_with_fix() {
+        let plugin = TestPluginWithFix;
+
+        TestCase::new("test_directive bad;")
+            .expect_error_count(1)
+            .expect_has_fix()
+            .expect_fix_on_line(1)
+            .expect_fix_produces("test_directive good;")
+            .run(&plugin);
+    }
+
+    #[test]
+    fn test_apply_fixes_replace() {
+        let content = "line1\ntest bad\nline3";
+        let fix = Fix::replace(2, "bad", "good");
+        let result = apply_fixes(content, &[&fix]);
+        assert_eq!(result, "line1\ntest good\nline3");
+    }
+
+    #[test]
+    fn test_apply_fixes_replace_line() {
+        let content = "line1\nold line\nline3";
+        let fix = Fix::replace_line(2, "new line");
+        let result = apply_fixes(content, &[&fix]);
+        assert_eq!(result, "line1\nnew line\nline3");
+    }
+
+    #[test]
+    fn test_apply_fixes_delete() {
+        let content = "line1\nto delete\nline3";
+        let fix = Fix::delete(2);
+        let result = apply_fixes(content, &[&fix]);
+        assert_eq!(result, "line1\nline3");
+    }
+
+    #[test]
+    fn test_apply_fixes_insert_after() {
+        let content = "line1\nline2";
+        let fix = Fix::insert_after(1, "inserted");
+        let result = apply_fixes(content, &[&fix]);
+        assert_eq!(result, "line1\ninserted\nline2");
+    }
+
+    #[test]
+    fn test_apply_fixes_multiple() {
+        let content = "bad1\nbad2\nbad3";
+        let fix1 = Fix::replace(1, "bad1", "good1");
+        let fix3 = Fix::replace(3, "bad3", "good3");
+        let result = apply_fixes(content, &[&fix1, &fix3]);
+        assert_eq!(result, "good1\nbad2\ngood3");
     }
 }

@@ -132,7 +132,17 @@ http {
         .expect_error_count(1)
         .expect_error_on_line(5)
         .expect_message_contains("autoindex")
+        .expect_has_fix()
         .run(&AutoindexEnabledPlugin);
+    }
+
+    #[test]
+    fn test_fix_produces_correct_output() {
+        TestCase::new("autoindex on;")
+            .expect_error_count(1)
+            .expect_fix_on_line(1)
+            .expect_fix_produces("autoindex off;")
+            .run(&AutoindexEnabledPlugin);
     }
 
     #[test]
