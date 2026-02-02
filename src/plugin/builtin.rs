@@ -12,11 +12,15 @@ mod embedded {
     /// server-tokens-enabled plugin
     pub const SERVER_TOKENS_ENABLED: &[u8] =
         include_bytes!("../../target/builtin-plugins/server_tokens_enabled.wasm");
+    /// autoindex-enabled plugin
+    pub const AUTOINDEX_ENABLED: &[u8] =
+        include_bytes!("../../target/builtin-plugins/autoindex_enabled.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
 pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "server-tokens-enabled",
+    "autoindex-enabled",
 ];
 
 /// Load all builtin plugins
@@ -27,14 +31,22 @@ pub fn load_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, 
     let mut plugins = Vec::new();
 
     // Load server-tokens-enabled
-    let rule = WasmLintRule::new(
+    plugins.push(WasmLintRule::new(
         loader.engine(),
         PathBuf::from("builtin:server-tokens-enabled"),
         embedded::SERVER_TOKENS_ENABLED,
         loader.memory_limit(),
         loader.fuel_limit(),
-    )?;
-    plugins.push(rule);
+    )?);
+
+    // Load autoindex-enabled
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:autoindex-enabled"),
+        embedded::AUTOINDEX_ENABLED,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
 
     Ok(plugins)
 }
