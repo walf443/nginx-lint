@@ -39,13 +39,19 @@ impl Plugin for AutoindexEnabledPlugin {
 
         for directive in config.all_directives() {
             if directive.is("autoindex") && directive.first_arg_is("on") {
-                errors.push(LintError::warning(
+                let error = LintError::warning(
                     "autoindex-enabled",
                     "security",
                     "autoindex is enabled, which can expose directory contents",
                     directive.span.start.line,
                     directive.span.start.column,
+                )
+                .with_fix(Fix::replace(
+                    directive.span.start.line,
+                    "autoindex on",
+                    "autoindex off",
                 ));
+                errors.push(error);
             }
         }
 
