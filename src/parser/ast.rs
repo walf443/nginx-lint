@@ -2,8 +2,10 @@
 //!
 //! Designed for round-trip support (source reconstruction) to enable autofix functionality.
 
+use serde::{Deserialize, Serialize};
+
 /// Source position in the file
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
@@ -21,7 +23,7 @@ impl Position {
 }
 
 /// Source range (start and end positions)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Span {
     pub start: Position,
     pub end: Position,
@@ -34,7 +36,7 @@ impl Span {
 }
 
 /// Root of the configuration file
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     pub items: Vec<ConfigItem>,
 }
@@ -68,7 +70,7 @@ impl Config {
 }
 
 /// An item in the configuration (directive, comment, or blank line)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfigItem {
     Directive(Box<Directive>),
     Comment(Comment),
@@ -92,14 +94,14 @@ impl ConfigItem {
 }
 
 /// A comment (# ...)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
     pub text: String, // Includes the '#' character
     pub span: Span,
 }
 
 /// A directive (simple or block)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Directive {
     pub name: String,
     pub name_span: Span,
@@ -156,7 +158,7 @@ impl Directive {
 }
 
 /// A block { ... }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub items: Vec<ConfigItem>,
     pub span: Span,
@@ -180,7 +182,7 @@ impl Block {
 }
 
 /// A directive argument
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Argument {
     pub value: ArgumentValue,
     pub span: Span,
@@ -210,7 +212,7 @@ impl Argument {
 }
 
 /// Type of argument value
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArgumentValue {
     Literal(String),            // on, off, 80, /path/to/file
     QuotedString(String),       // "hello world" -> hello world

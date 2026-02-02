@@ -4,6 +4,8 @@ use nginx_lint::{
     apply_fixes, collect_included_files, parse_config, pre_parse_checks_with_config, ColorMode,
     IncludedFile, LintConfig, LintError, Linter, OutputFormat, Reporter, Severity,
 };
+#[cfg(feature = "plugins")]
+use nginx_lint::linter::LintRule;
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
@@ -47,6 +49,11 @@ struct Cli {
     /// Do not exit with non-zero code on warnings and info (only fail on errors)
     #[arg(long)]
     no_fail_on_warnings: bool,
+
+    /// Directory containing WASM plugins for custom lint rules (requires plugins feature)
+    #[cfg(feature = "plugins")]
+    #[arg(long, value_name = "DIR")]
+    plugins: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -408,7 +415,37 @@ fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
-    let linter = Linter::with_config(lint_config.as_ref());
+    let mut linter = Linter::with_config(lint_config.as_ref());
+
+    // Load plugins if specified
+    #[cfg(feature = "plugins")]
+    if let Some(ref plugins_dir) = cli.plugins {
+        use nginx_lint::plugin::PluginLoader;
+
+        match PluginLoader::new() {
+            Ok(loader) => match loader.load_plugins(plugins_dir) {
+                Ok(plugins) => {
+                    if cli.verbose {
+                        eprintln!("Loaded {} plugin(s) from {}", plugins.len(), plugins_dir.display());
+                    }
+                    for plugin in plugins {
+                        if cli.verbose {
+                            eprintln!("  - {} ({})", plugin.name(), plugin.description());
+                        }
+                        linter.add_rule(Box::new(plugin));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error loading plugins: {}", e);
+                    return ExitCode::from(2);
+                }
+            },
+            Err(e) => {
+                eprintln!("Error initializing plugin loader: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    }
 
     // Lint files (parallel when not fixing, sequential when fixing)
     let results: Vec<FileResult> = if cli.fix {

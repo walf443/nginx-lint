@@ -13,6 +13,8 @@ wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
 # Embed WASM files into the binary (requires demo/pkg/ to exist at build time)
 web-server-embed-wasm = ["web-server"]
+# WASM plugin support for custom lint rules
+plugins = ["wasmtime"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
@@ -28,6 +30,9 @@ toml = "0.8"
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
+
+# Plugin system dependencies
+wasmtime = { version = "29", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
