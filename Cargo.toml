@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["cli"]
+default = ["cli", "builtin-plugins"]
 cli = ["clap", "colored", "glob", "rayon"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
