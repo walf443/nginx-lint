@@ -40,6 +40,7 @@
 //! ```
 
 mod types;
+pub mod testing;
 
 pub use types::*;
 
