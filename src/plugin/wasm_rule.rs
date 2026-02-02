@@ -6,7 +6,9 @@ use super::error::PluginError;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use wasmtime::{Engine, Instance, Linker, Memory, Module, Store, TypedFunc};
 
 /// Plugin info returned by the plugin_info export
@@ -54,16 +56,35 @@ struct StoreData {
     memory_limit: u64,
 }
 
+/// Cached instance data for reuse
+struct CachedInstance {
+    store: Store<StoreData>,
+    #[allow(dead_code)]
+    instance: Instance,
+    memory: Memory,
+    alloc: TypedFunc<u32, u32>,
+    dealloc: TypedFunc<(u32, u32), ()>,
+    check: TypedFunc<(u32, u32, u32, u32), u32>,
+    check_result_len: TypedFunc<(), u32>,
+}
+
+// Thread-local cache for WASM instances
+// Key: plugin path as string
+thread_local! {
+    static INSTANCE_CACHE: RefCell<std::collections::HashMap<String, CachedInstance>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
 /// A lint rule implemented as a WASM module
 pub struct WasmLintRule {
-    /// Path to the WASM file (for error reporting)
+    /// Path to the WASM file (for error reporting and cache key)
     path: PathBuf,
     /// Plugin metadata (kept for potential future use)
     #[allow(dead_code)]
     info: PluginInfo,
-    /// Compiled WASM module
-    module: Module,
-    /// WASM engine reference
+    /// Compiled WASM module (shared across threads)
+    module: Arc<Module>,
+    /// WASM engine reference (shared across threads)
     engine: Engine,
     /// Memory limit in bytes
     memory_limit: u64,
@@ -102,7 +123,7 @@ impl WasmLintRule {
         Ok(Self {
             path,
             info,
-            module,
+            module: Arc::new(module),
             engine: engine.clone(),
             memory_limit,
             fuel_limit,
@@ -212,39 +233,8 @@ impl WasmLintRule {
             .map_err(|e| PluginError::execution_error(path, format!("Invalid UTF-8: {}", e)))
     }
 
-    /// Write data to WASM memory using the alloc function
-    fn write_to_memory(
-        store: &mut Store<StoreData>,
-        instance: &Instance,
-        memory: &Memory,
-        data: &[u8],
-        path: &Path,
-    ) -> Result<u32, PluginError> {
-        let alloc: TypedFunc<u32, u32> = instance
-            .get_typed_func(&mut *store, "alloc")
-            .map_err(|e| PluginError::missing_export(path, format!("alloc: {}", e)))?;
-
-        let ptr = alloc.call(&mut *store, data.len() as u32).map_err(|e| {
-            PluginError::execution_error(path, format!("alloc failed: {}", e))
-        })?;
-
-        let mem_data = memory.data_mut(store);
-        let ptr_usize = ptr as usize;
-
-        if ptr_usize + data.len() > mem_data.len() {
-            return Err(PluginError::execution_error(
-                path,
-                "Allocated memory out of bounds",
-            ));
-        }
-
-        mem_data[ptr_usize..ptr_usize + data.len()].copy_from_slice(data);
-
-        Ok(ptr)
-    }
-
-    /// Execute the check function
-    fn execute_check(&self, config: &Config, file_path: &Path) -> Result<Vec<LintError>, PluginError> {
+    /// Create a new cached instance
+    fn create_instance(&self) -> Result<CachedInstance, PluginError> {
         let mut store = Store::new(&self.engine, StoreData {
             memory_limit: self.memory_limit,
         });
@@ -257,10 +247,48 @@ impl WasmLintRule {
             PluginError::instantiate_error(&self.path, e.to_string())
         })?;
 
-        // Get memory
         let memory = instance
             .get_memory(&mut store, "memory")
             .ok_or_else(|| PluginError::missing_export(&self.path, "memory"))?;
+
+        let alloc: TypedFunc<u32, u32> = instance
+            .get_typed_func(&mut store, "alloc")
+            .map_err(|e| PluginError::missing_export(&self.path, format!("alloc: {}", e)))?;
+
+        let dealloc: TypedFunc<(u32, u32), ()> = instance
+            .get_typed_func(&mut store, "dealloc")
+            .map_err(|e| PluginError::missing_export(&self.path, format!("dealloc: {}", e)))?;
+
+        let check: TypedFunc<(u32, u32, u32, u32), u32> = instance
+            .get_typed_func(&mut store, "check")
+            .map_err(|e| PluginError::missing_export(&self.path, format!("check: {}", e)))?;
+
+        let check_result_len: TypedFunc<(), u32> = instance
+            .get_typed_func(&mut store, "check_result_len")
+            .map_err(|e| PluginError::missing_export(&self.path, format!("check_result_len: {}", e)))?;
+
+        Ok(CachedInstance {
+            store,
+            instance,
+            memory,
+            alloc,
+            dealloc,
+            check,
+            check_result_len,
+        })
+    }
+
+    /// Execute check using cached instance
+    fn execute_check_cached(
+        &self,
+        cached: &mut CachedInstance,
+        config: &Config,
+        file_path: &Path,
+    ) -> Result<Vec<LintError>, PluginError> {
+        // Reset fuel for this check
+        cached.store.set_fuel(self.fuel_limit).map_err(|e| {
+            PluginError::execution_error(&self.path, format!("Failed to reset fuel: {}", e))
+        })?;
 
         // Serialize config to JSON
         let config_json = serde_json::to_string(config).map_err(|e| {
@@ -270,23 +298,36 @@ impl WasmLintRule {
         // Serialize path to string
         let path_str = file_path.to_string_lossy().to_string();
 
-        // Write config and path to memory
-        let config_ptr = Self::write_to_memory(&mut store, &instance, &memory, config_json.as_bytes(), &self.path)?;
-        let path_ptr = Self::write_to_memory(&mut store, &instance, &memory, path_str.as_bytes(), &self.path)?;
+        // Allocate and write config
+        let config_ptr = cached.alloc.call(&mut cached.store, config_json.len() as u32).map_err(|e| {
+            PluginError::execution_error(&self.path, format!("alloc failed: {}", e))
+        })?;
+        {
+            let mem_data = cached.memory.data_mut(&mut cached.store);
+            let ptr = config_ptr as usize;
+            if ptr + config_json.len() > mem_data.len() {
+                return Err(PluginError::execution_error(&self.path, "Memory out of bounds"));
+            }
+            mem_data[ptr..ptr + config_json.len()].copy_from_slice(config_json.as_bytes());
+        }
 
-        // Get the check function
-        let check: TypedFunc<(u32, u32, u32, u32), u32> = instance
-            .get_typed_func(&mut store, "check")
-            .map_err(|e| PluginError::missing_export(&self.path, format!("check: {}", e)))?;
-
-        let check_result_len: TypedFunc<(), u32> = instance
-            .get_typed_func(&mut store, "check_result_len")
-            .map_err(|e| PluginError::missing_export(&self.path, format!("check_result_len: {}", e)))?;
+        // Allocate and write path
+        let path_ptr = cached.alloc.call(&mut cached.store, path_str.len() as u32).map_err(|e| {
+            PluginError::execution_error(&self.path, format!("alloc failed: {}", e))
+        })?;
+        {
+            let mem_data = cached.memory.data_mut(&mut cached.store);
+            let ptr = path_ptr as usize;
+            if ptr + path_str.len() > mem_data.len() {
+                return Err(PluginError::execution_error(&self.path, "Memory out of bounds"));
+            }
+            mem_data[ptr..ptr + path_str.len()].copy_from_slice(path_str.as_bytes());
+        }
 
         // Call check
-        let result_ptr = check
+        let result_ptr = cached.check
             .call(
-                &mut store,
+                &mut cached.store,
                 (
                     config_ptr,
                     config_json.len() as u32,
@@ -295,7 +336,6 @@ impl WasmLintRule {
                 ),
             )
             .map_err(|e| {
-                // Check if it's a fuel exhaustion error
                 if e.to_string().contains("fuel") {
                     PluginError::timeout(&self.path)
                 } else {
@@ -304,21 +344,28 @@ impl WasmLintRule {
             })?;
 
         // Get result length
-        let result_len = check_result_len.call(&mut store, ()).map_err(|e| {
+        let result_len = cached.check_result_len.call(&mut cached.store, ()).map_err(|e| {
             PluginError::execution_error(&self.path, format!("check_result_len failed: {}", e))
         })? as usize;
 
         // Read result from memory
-        let result_json = Self::read_string_from_memory(&store, &memory, result_ptr as usize, result_len, &self.path)?;
+        let result_json = {
+            let data = cached.memory.data(&cached.store);
+            let ptr = result_ptr as usize;
+            if ptr + result_len > data.len() {
+                return Err(PluginError::execution_error(
+                    &self.path,
+                    format!("Memory out of bounds reading result: ptr={}, len={}", ptr, result_len),
+                ));
+            }
+            String::from_utf8(data[ptr..ptr + result_len].to_vec())
+                .map_err(|e| PluginError::execution_error(&self.path, format!("Invalid UTF-8: {}", e)))?
+        };
 
         // Deallocate memory
-        let dealloc: TypedFunc<(u32, u32), ()> = instance
-            .get_typed_func(&mut store, "dealloc")
-            .map_err(|e| PluginError::missing_export(&self.path, format!("dealloc: {}", e)))?;
-
-        let _ = dealloc.call(&mut store, (config_ptr, config_json.len() as u32));
-        let _ = dealloc.call(&mut store, (path_ptr, path_str.len() as u32));
-        let _ = dealloc.call(&mut store, (result_ptr, result_len as u32));
+        let _ = cached.dealloc.call(&mut cached.store, (config_ptr, config_json.len() as u32));
+        let _ = cached.dealloc.call(&mut cached.store, (path_ptr, path_str.len() as u32));
+        let _ = cached.dealloc.call(&mut cached.store, (result_ptr, result_len as u32));
 
         // Parse result
         let plugin_errors: Vec<PluginLintError> = serde_json::from_str(&result_json).map_err(|e| {
@@ -326,6 +373,24 @@ impl WasmLintRule {
         })?;
 
         Ok(plugin_errors.into_iter().map(|e| e.into_lint_error()).collect())
+    }
+
+    /// Execute the check function with instance caching
+    fn execute_check(&self, config: &Config, file_path: &Path) -> Result<Vec<LintError>, PluginError> {
+        let cache_key = self.path.to_string_lossy().to_string();
+
+        INSTANCE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+
+            // Get or create cached instance
+            if !cache.contains_key(&cache_key) {
+                let instance = self.create_instance()?;
+                cache.insert(cache_key.clone(), instance);
+            }
+
+            let cached = cache.get_mut(&cache_key).unwrap();
+            self.execute_check_cached(cached, config, file_path)
+        })
     }
 }
 
@@ -360,7 +425,8 @@ impl LintRule for WasmLintRule {
 
 // WasmLintRule is Send + Sync because:
 // - Engine is Send + Sync
-// - Module is Send + Sync
+// - Module (wrapped in Arc) is Send + Sync
+// - Instance cache is thread-local (no sharing between threads)
 // - All other fields are primitive or owned types
 unsafe impl Send for WasmLintRule {}
 unsafe impl Sync for WasmLintRule {}
