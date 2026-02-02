@@ -1,0 +1,12 @@
+[package]
+name = "example-plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nginx-lint = { path = "../../..", default-features = false, features = ["plugin-sdk"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

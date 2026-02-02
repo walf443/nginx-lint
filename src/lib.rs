@@ -19,6 +19,10 @@ pub mod wasm;
 #[cfg(feature = "plugins")]
 pub mod plugin;
 
+// Plugin SDK (for building custom WASM lint rules)
+#[cfg(feature = "plugin-sdk")]
+pub mod plugin_sdk;
+
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
 pub use ignore::{filter_errors, FilterResult, IgnoreTracker, IgnoreWarning};
 pub use linter::{Fix, LintError, Linter, Severity};
