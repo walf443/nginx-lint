@@ -75,6 +75,35 @@ thread_local! {
         RefCell::new(std::collections::HashMap::new());
 }
 
+// Thread-local cache for serialized configs
+// Caches the last serialized config to avoid re-serialization when multiple plugins
+// check the same config. Uses the Config pointer as a key.
+thread_local! {
+    static SERIALIZED_CONFIG_CACHE: RefCell<Option<(usize, String)>> = const { RefCell::new(None) };
+}
+
+/// Get or create serialized JSON for a Config
+/// Uses the Config's pointer address as a cache key
+fn get_serialized_config(config: &Config) -> Result<String, serde_json::Error> {
+    let config_ptr = config as *const Config as usize;
+
+    SERIALIZED_CONFIG_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+
+        // Check if we have a cached serialization for this exact Config
+        if let Some((cached_ptr, ref json)) = *cache {
+            if cached_ptr == config_ptr {
+                return Ok(json.clone());
+            }
+        }
+
+        // Serialize and cache
+        let json = serde_json::to_string(config)?;
+        *cache = Some((config_ptr, json.clone()));
+        Ok(json)
+    })
+}
+
 /// A lint rule implemented as a WASM module
 pub struct WasmLintRule {
     /// Path to the WASM file (for error reporting and cache key)
@@ -290,8 +319,8 @@ impl WasmLintRule {
             PluginError::execution_error(&self.path, format!("Failed to reset fuel: {}", e))
         })?;
 
-        // Serialize config to JSON
-        let config_json = serde_json::to_string(config).map_err(|e| {
+        // Get serialized config (cached if same Config was serialized recently)
+        let config_json = get_serialized_config(config).map_err(|e| {
             PluginError::execution_error(&self.path, format!("Failed to serialize config: {}", e))
         })?;
 

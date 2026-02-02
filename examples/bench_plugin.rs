@@ -2,6 +2,12 @@
 //!
 //! Run with:
 //!   cargo run --features plugins --release --example bench_plugin
+//!
+//! To test with multiple plugins:
+//!   mkdir test_plugins
+//!   cp examples/plugins/example_plugin/target/wasm32-unknown-unknown/release/example_plugin.wasm test_plugins/plugin1.wasm
+//!   cp examples/plugins/example_plugin/target/wasm32-unknown-unknown/release/example_plugin.wasm test_plugins/plugin2.wasm
+//!   cp examples/plugins/example_plugin/target/wasm32-unknown-unknown/release/example_plugin.wasm test_plugins/plugin3.wasm
 
 use nginx_lint::linter::LintRule;
 use nginx_lint::plugin::PluginLoader;
@@ -77,14 +83,16 @@ http {
     );
 
     // Benchmark WASM plugin
-    println!("\n=== WASM plugin (1 rule) ===");
     let plugins_dir = Path::new("test_plugins");
 
     if !plugins_dir.exists() {
-        println!("test_plugins/ directory not found.");
+        println!("\ntest_plugins/ directory not found.");
         println!("To run WASM benchmark:");
         println!("  mkdir test_plugins");
         println!("  cp examples/plugins/example_plugin/target/wasm32-unknown-unknown/release/example_plugin.wasm test_plugins/");
+        println!("\nTo test serialization cache with multiple plugins:");
+        println!("  cp test_plugins/example_plugin.wasm test_plugins/plugin2.wasm");
+        println!("  cp test_plugins/example_plugin.wasm test_plugins/plugin3.wasm");
         return;
     }
 
@@ -94,9 +102,12 @@ http {
         .expect("Failed to load plugins");
 
     if plugins.is_empty() {
-        println!("No plugins found in test_plugins/");
+        println!("\nNo plugins found in test_plugins/");
         return;
     }
+
+    let plugin_count = plugins.len();
+    println!("\n=== WASM plugins ({} rules) ===", plugin_count);
 
     let mut plugin_linter = Linter::new();
     for plugin in plugins {
