@@ -417,7 +417,41 @@ fn run_lint(cli: Cli) -> ExitCode {
 
     let mut linter = Linter::with_config(lint_config.as_ref());
 
-    // Load plugins if specified
+    // Load builtin plugins (embedded in binary)
+    #[cfg(feature = "builtin-plugins")]
+    {
+        use nginx_lint::plugin::builtin::{is_builtin_plugin, load_builtin_plugins};
+        use nginx_lint::plugin::PluginLoader;
+
+        // Remove native rules that have builtin plugin equivalents
+        linter.remove_rules_by_name(is_builtin_plugin);
+
+        match PluginLoader::new() {
+            Ok(loader) => match load_builtin_plugins(&loader) {
+                Ok(plugins) => {
+                    if cli.verbose {
+                        eprintln!("Loaded {} builtin plugin(s)", plugins.len());
+                    }
+                    for plugin in plugins {
+                        if cli.verbose {
+                            eprintln!("  - {} ({})", plugin.name(), plugin.description());
+                        }
+                        linter.add_rule(Box::new(plugin));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error loading builtin plugins: {}", e);
+                    return ExitCode::from(2);
+                }
+            },
+            Err(e) => {
+                eprintln!("Error initializing plugin loader: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    // Load custom plugins if specified
     #[cfg(feature = "plugins")]
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;

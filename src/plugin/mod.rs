@@ -6,6 +6,7 @@
 mod error;
 mod loader;
 mod wasm_rule;
+pub mod builtin;
 
 pub use error::PluginError;
 pub use loader::PluginLoader;

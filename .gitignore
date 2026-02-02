@@ -2,3 +2,5 @@
 /pkg
 /examples/plugins/*/target
 /examples/plugins/*/Cargo.lock
+/plugins/builtin/*/target
+/plugins/builtin/*/Cargo.lock

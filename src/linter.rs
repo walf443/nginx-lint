@@ -230,6 +230,14 @@ impl Linter {
         self.rules.push(rule);
     }
 
+    /// Remove rules that match the predicate
+    pub fn remove_rules_by_name<F>(&mut self, should_remove: F)
+    where
+        F: Fn(&str) -> bool,
+    {
+        self.rules.retain(|rule| !should_remove(rule.name()));
+    }
+
     /// Get a reference to all rules
     pub fn rules(&self) -> &[Box<dyn LintRule>] {
         &self.rules

@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["cli"]
+default = ["cli", "builtin-plugins"]
 cli = ["clap", "colored", "glob", "rayon"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
@@ -17,6 +17,8 @@ web-server-embed-wasm = ["web-server"]
 plugins = ["wasmtime"]
 # SDK for building custom WASM lint rules
 plugin-sdk = []
+# Embed builtin plugins into the binary (requires make build-plugins first)
+builtin-plugins = ["plugins"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"], optional = true }
