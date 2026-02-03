@@ -27,7 +27,7 @@ run-web-embed: build-web
 # Build all builtin plugins
 build-plugins:
 	@echo "Building builtin plugins..."
-	@for dir in plugins/builtin/*/; do \
+	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			echo "  Building $$(basename $$dir)..."; \
 			(cd "$$dir" && cargo build --target wasm32-unknown-unknown --release); \
@@ -39,7 +39,7 @@ build-plugins:
 collect-plugins: build-plugins
 	@echo "Collecting plugins..."
 	@mkdir -p target/builtin-plugins
-	@for dir in plugins/builtin/*/; do \
+	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			name=$$(basename "$$dir"); \
 			wasm_file="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
@@ -63,7 +63,7 @@ test:
 
 # Run tests including plugin tests
 test-all: test
-	@for dir in plugins/builtin/*/; do \
+	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			echo "Testing $$(basename $$dir)..."; \
 			(cd "$$dir" && cargo test); \
@@ -74,7 +74,7 @@ test-all: test
 lint-plugin-examples:
 	@echo "Linting plugin examples..."
 	@fail=0; \
-	for dir in plugins/builtin/*/; do \
+	for dir in plugins/builtin/*/*/; do \
 		if [ -d "$$dir/examples" ]; then \
 			name=$$(basename "$$dir"); \
 			echo "  Checking $$name examples..."; \
@@ -103,7 +103,7 @@ clean:
 	cargo clean
 	rm -rf demo/pkg
 	rm -rf target/builtin-plugins
-	@for dir in plugins/builtin/*/; do \
+	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			(cd "$$dir" && cargo clean); \
 		fi \
