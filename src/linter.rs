@@ -144,8 +144,8 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon, TrailingWhitespace,
-            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon, UnclosedQuote,
+            UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -198,10 +198,6 @@ impl Linter {
             }
             linter.add_rule(Box::new(rule));
         }
-        if is_enabled("trailing-whitespace") {
-            linter.add_rule(Box::new(TrailingWhitespace));
-        }
-
         // Best practices
         if is_enabled("missing-error-log") {
             linter.add_rule(Box::new(MissingErrorLog));

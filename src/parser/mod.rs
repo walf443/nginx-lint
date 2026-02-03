@@ -87,12 +87,17 @@ impl Parser {
                     }
                 }
                 TokenKind::Comment(text) => {
-                    let comment = Comment {
+                    let mut comment = Comment {
                         text: text.clone(),
                         span: self.current().span,
                         leading_whitespace: self.current().leading_whitespace.clone(),
+                        trailing_whitespace: String::new(),
                     };
                     self.advance();
+                    // Capture trailing whitespace from next newline token
+                    if let TokenKind::Newline = &self.current().kind {
+                        comment.trailing_whitespace = self.current().leading_whitespace.clone();
+                    }
                     items.push(ConfigItem::Comment(comment));
                     consecutive_newlines = 0;
                 }
@@ -154,14 +159,30 @@ impl Parser {
                     let end_pos = self.current().span.end;
                     self.advance();
 
+                    // Capture trailing whitespace (whitespace after ; until newline or comment)
+                    let trailing_whitespace;
+
                     // Check for trailing comment on same line
                     if let TokenKind::Comment(text) = &self.current().kind {
+                        // Trailing whitespace before comment is empty (comment's leading_whitespace handles spacing)
+                        trailing_whitespace = String::new();
                         trailing_comment = Some(Comment {
                             text: text.clone(),
                             span: self.current().span,
                             leading_whitespace: self.current().leading_whitespace.clone(),
+                            trailing_whitespace: String::new(), // Will be captured on newline
                         });
                         self.advance();
+                        // Capture comment's trailing whitespace from next newline token
+                        if let TokenKind::Newline = &self.current().kind {
+                            if let Some(ref mut tc) = trailing_comment {
+                                tc.trailing_whitespace = self.current().leading_whitespace.clone();
+                            }
+                        }
+                    } else if let TokenKind::Newline = &self.current().kind {
+                        trailing_whitespace = self.current().leading_whitespace.clone();
+                    } else {
+                        trailing_whitespace = String::new();
                     }
 
                     return Ok(Directive {
@@ -173,6 +194,7 @@ impl Parser {
                         trailing_comment,
                         leading_whitespace,
                         space_before_terminator,
+                        trailing_whitespace,
                     });
                 }
                 TokenKind::OpenBrace => {
@@ -180,18 +202,29 @@ impl Parser {
                     let block_start = self.current().span.start;
                     self.advance();
 
+                    // Capture trailing whitespace after opening brace
+                    let opening_brace_trailing = if let TokenKind::Newline = &self.current().kind {
+                        self.current().leading_whitespace.clone()
+                    } else {
+                        String::new()
+                    };
+
                     // Check if this is a raw block directive (like *_lua_block)
                     if is_raw_block_directive(&name) {
                         let (raw_content, block_end) = self.read_raw_block(block_start)?;
 
                         // Check for trailing comment
+                        let mut block_trailing_whitespace = String::new();
                         if let TokenKind::Comment(text) = &self.current().kind {
                             trailing_comment = Some(Comment {
                                 text: text.clone(),
                                 span: self.current().span,
                                 leading_whitespace: self.current().leading_whitespace.clone(),
+                                trailing_whitespace: String::new(),
                             });
                             self.advance();
+                        } else if let TokenKind::Newline = &self.current().kind {
+                            block_trailing_whitespace = self.current().leading_whitespace.clone();
                         }
 
                         return Ok(Directive {
@@ -202,11 +235,14 @@ impl Parser {
                                 items: Vec::new(),
                                 span: Span::new(block_start, block_end),
                                 raw_content: Some(raw_content),
+                                closing_brace_leading_whitespace: String::new(),
+                                trailing_whitespace: block_trailing_whitespace,
                             }),
                             span: Span::new(start_pos, block_end),
                             trailing_comment,
                             leading_whitespace,
                             space_before_terminator,
+                            trailing_whitespace: opening_brace_trailing,
                         });
                     }
 
@@ -219,8 +255,12 @@ impl Parser {
                             position: block_start,
                         });
                     }
+                    let closing_brace_leading_whitespace = self.current().leading_whitespace.clone();
                     let block_end = self.current().span.end;
                     self.advance();
+
+                    // Capture trailing whitespace after closing brace
+                    let mut block_trailing_whitespace = String::new();
 
                     // Check for trailing comment
                     if let TokenKind::Comment(text) = &self.current().kind {
@@ -228,8 +268,17 @@ impl Parser {
                             text: text.clone(),
                             span: self.current().span,
                             leading_whitespace: self.current().leading_whitespace.clone(),
+                            trailing_whitespace: String::new(),
                         });
                         self.advance();
+                        // Capture comment's trailing whitespace
+                        if let TokenKind::Newline = &self.current().kind {
+                            if let Some(ref mut tc) = trailing_comment {
+                                tc.trailing_whitespace = self.current().leading_whitespace.clone();
+                            }
+                        }
+                    } else if let TokenKind::Newline = &self.current().kind {
+                        block_trailing_whitespace = self.current().leading_whitespace.clone();
                     }
 
                     return Ok(Directive {
@@ -240,11 +289,14 @@ impl Parser {
                             items: block_items,
                             span: Span::new(block_start, block_end),
                             raw_content: None,
+                            closing_brace_leading_whitespace,
+                            trailing_whitespace: block_trailing_whitespace,
                         }),
                         span: Span::new(start_pos, block_end),
                         trailing_comment,
                         leading_whitespace,
                         space_before_terminator,
+                        trailing_whitespace: opening_brace_trailing,
                     });
                 }
                 TokenKind::Ident(value) => {
@@ -294,8 +346,15 @@ impl Parser {
                         text: text.clone(),
                         span: self.current().span,
                         leading_whitespace: self.current().leading_whitespace.clone(),
+                        trailing_whitespace: String::new(),
                     });
                     self.advance();
+                    // Capture trailing whitespace
+                    if let TokenKind::Newline = &self.current().kind {
+                        if let Some(ref mut tc) = trailing_comment {
+                            tc.trailing_whitespace = self.current().leading_whitespace.clone();
+                        }
+                    }
                     // Skip to next line
                     self.skip_newlines();
                 }

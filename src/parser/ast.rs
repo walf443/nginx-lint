@@ -84,6 +84,7 @@ impl ConfigItem {
             ConfigItem::Comment(c) => {
                 output.push_str(&c.leading_whitespace);
                 output.push_str(&c.text);
+                output.push_str(&c.trailing_whitespace);
                 output.push('\n');
             }
             ConfigItem::BlankLine(b) => {
@@ -111,6 +112,9 @@ pub struct Comment {
     /// Leading whitespace before the comment (for indentation checking)
     #[serde(default)]
     pub leading_whitespace: String,
+    /// Trailing whitespace after the comment text (for trailing-whitespace detection)
+    #[serde(default)]
+    pub trailing_whitespace: String,
 }
 
 /// A directive (simple or block)
@@ -128,6 +132,9 @@ pub struct Directive {
     /// Whitespace before the terminator (; or {)
     #[serde(default)]
     pub space_before_terminator: String,
+    /// Trailing whitespace after the terminator (; or {) to end of line
+    #[serde(default)]
+    pub trailing_whitespace: String,
 }
 
 impl Directive {
@@ -163,21 +170,27 @@ impl Directive {
 
         if let Some(block) = &self.block {
             output.push_str(&self.space_before_terminator);
-            output.push_str("{\n");
+            output.push('{');
+            output.push_str(&self.trailing_whitespace);
+            output.push('\n');
             for item in &block.items {
                 item.write_source(output, indent + 1);
             }
-            // Calculate closing brace indent based on leading whitespace
-            let closing_indent = if !self.leading_whitespace.is_empty() {
+            // Use stored closing brace indent if available, otherwise calculate
+            let closing_indent = if !block.closing_brace_leading_whitespace.is_empty() {
+                block.closing_brace_leading_whitespace.clone()
+            } else if !self.leading_whitespace.is_empty() {
                 self.leading_whitespace.clone()
             } else {
                 "    ".repeat(indent)
             };
             output.push_str(&closing_indent);
             output.push('}');
+            output.push_str(&block.trailing_whitespace);
         } else {
             output.push_str(&self.space_before_terminator);
             output.push(';');
+            output.push_str(&self.trailing_whitespace);
         }
 
         if let Some(comment) = &self.trailing_comment {
@@ -196,6 +209,12 @@ pub struct Block {
     pub span: Span,
     /// Raw content for special blocks like *_by_lua_block (Lua code)
     pub raw_content: Option<String>,
+    /// Leading whitespace before closing brace (for indentation checking)
+    #[serde(default)]
+    pub closing_brace_leading_whitespace: String,
+    /// Trailing whitespace after closing brace (for trailing-whitespace detection)
+    #[serde(default)]
+    pub trailing_whitespace: String,
 }
 
 impl Block {
@@ -309,6 +328,7 @@ mod tests {
                     trailing_comment: None,
                     leading_whitespace: String::new(),
                     space_before_terminator: String::new(),
+                    trailing_whitespace: String::new(),
                 })),
                 ConfigItem::Directive(Box::new(Directive {
                     name: "http".to_string(),
@@ -334,23 +354,30 @@ mod tests {
                                         trailing_comment: None,
                                         leading_whitespace: String::new(),
                                         space_before_terminator: String::new(),
+                                        trailing_whitespace: String::new(),
                                     }))],
                                     span: Span::default(),
                                     raw_content: None,
+                                    closing_brace_leading_whitespace: String::new(),
+                                    trailing_whitespace: String::new(),
                                 }),
                                 span: Span::default(),
                                 trailing_comment: None,
                                 leading_whitespace: String::new(),
                                 space_before_terminator: String::new(),
+                                trailing_whitespace: String::new(),
                             })),
                         ],
                         span: Span::default(),
                         raw_content: None,
+                        closing_brace_leading_whitespace: String::new(),
+                        trailing_whitespace: String::new(),
                     }),
                     span: Span::default(),
                     trailing_comment: None,
                     leading_whitespace: String::new(),
                     space_before_terminator: String::new(),
+                    trailing_whitespace: String::new(),
                 })),
             ],
         };
@@ -374,6 +401,7 @@ mod tests {
             trailing_comment: None,
             leading_whitespace: String::new(),
             space_before_terminator: String::new(),
+            trailing_whitespace: String::new(),
         };
 
         assert!(directive.is("server_tokens"));

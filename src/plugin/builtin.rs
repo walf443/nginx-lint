@@ -24,6 +24,9 @@ mod embedded {
     /// space-before-semicolon plugin
     pub const SPACE_BEFORE_SEMICOLON: &[u8] =
         include_bytes!("../../target/builtin-plugins/space_before_semicolon.wasm");
+    /// trailing-whitespace plugin
+    pub const TRAILING_WHITESPACE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/trailing_whitespace.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -33,6 +36,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "gzip-not-enabled",
     "duplicate-directive",
     "space-before-semicolon",
+    "trailing-whitespace",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -108,6 +112,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:space-before-semicolon"),
         embedded::SPACE_BEFORE_SEMICOLON,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load trailing-whitespace
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:trailing-whitespace"),
+        embedded::TRAILING_WHITESPACE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
