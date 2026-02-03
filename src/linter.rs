@@ -184,7 +184,11 @@ impl Linter {
 
         let mut linter = Self::new();
 
-        let is_enabled = |name: &str| config.is_none_or(|c| c.is_rule_enabled(name));
+        let is_enabled = |name: &str| {
+            config
+                .map(|c| c.is_rule_enabled(name))
+                .unwrap_or_else(|| !LintConfig::DISABLED_BY_DEFAULT.contains(&name))
+        };
 
         // Syntax rules
         if is_enabled("unmatched-braces") {

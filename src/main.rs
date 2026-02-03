@@ -206,7 +206,8 @@ indent_size = 2
 # =============================================================================
 
 [rules.gzip-not-enabled]
-enabled = true
+# Disabled by default: gzip is not always appropriate (CDN, CPU constraints, BREACH attack)
+enabled = false
 
 [rules.missing-error-log]
 enabled = true

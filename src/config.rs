@@ -207,12 +207,17 @@ impl LintConfig {
         None
     }
 
+    /// Rules that are disabled by default
+    pub const DISABLED_BY_DEFAULT: &'static [&'static str] = &[
+        "gzip-not-enabled", // gzip is not always appropriate (CDN, CPU constraints, security)
+    ];
+
     /// Check if a rule is enabled
     pub fn is_rule_enabled(&self, name: &str) -> bool {
         self.rules
             .get(name)
             .map(|r| r.enabled)
-            .unwrap_or(true)
+            .unwrap_or_else(|| !Self::DISABLED_BY_DEFAULT.contains(&name))
     }
 
     /// Get the configuration for a specific rule
@@ -594,6 +599,15 @@ mod tests {
     fn test_default_config() {
         let config = LintConfig::default();
         assert!(config.is_rule_enabled("any-rule"));
+    }
+
+    #[test]
+    fn test_disabled_by_default_rules() {
+        let config = LintConfig::default();
+        // gzip-not-enabled should be disabled by default
+        assert!(!config.is_rule_enabled("gzip-not-enabled"));
+        // Other rules should still be enabled by default
+        assert!(config.is_rule_enabled("server-tokens-enabled"));
     }
 
     #[test]

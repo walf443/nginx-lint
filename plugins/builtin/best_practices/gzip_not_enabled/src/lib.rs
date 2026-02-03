@@ -39,15 +39,15 @@ impl Plugin for GzipNotEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut gzip_on = false;
-        let mut has_http_context = false;
+        let mut has_http_block = false;
 
         // Check if this config is included from within http context
         let in_http_include_context = config.include_context.iter().any(|c| c == "http");
 
         for ctx in config.all_directives_with_context() {
-            // Track if we have an http block
+            // Track if we have an http block in THIS file
             if ctx.directive.is("http") {
-                has_http_context = true;
+                has_http_block = true;
             }
 
             // Only check gzip in http context (http, server, location)
@@ -62,8 +62,9 @@ impl Plugin for GzipNotEnabledPlugin {
             }
         }
 
-        // Only warn if we have http context but no gzip on
-        if (has_http_context || in_http_include_context) && !gzip_on {
+        // Only warn if THIS file has an http block but no gzip on
+        // Don't warn for included files - gzip should be set in the main config
+        if has_http_block && !gzip_on {
             vec![LintError::info(
                 "gzip-not-enabled",
                 "best-practices",
@@ -232,7 +233,8 @@ stream {
 
     #[test]
     fn test_include_context_from_http() {
-        // File included from http context should be checked
+        // File included from http context should NOT warn
+        // because gzip should be set in the parent config's http block
         use nginx_lint::parse_string;
 
         let mut config = parse_string(
@@ -250,8 +252,8 @@ server {
         let plugin = GzipNotEnabledPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        // Should warn because no gzip on
-        assert_eq!(errors.len(), 1);
+        // Should NOT warn - parent config should set gzip
+        assert!(errors.is_empty(), "Expected no errors for included file, got: {:?}", errors);
     }
 
     #[test]

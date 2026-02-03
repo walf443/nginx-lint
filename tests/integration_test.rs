@@ -79,10 +79,9 @@ fn test_minimal_config() {
     let errors = linter.lint(&config, &path);
 
     // Minimal config should have info-level suggestions
-    let gzip_info = errors.iter().find(|e| e.rule == "gzip-not-enabled");
+    // Note: gzip-not-enabled is disabled by default, so we only check for missing-error-log
     let error_log_info = errors.iter().find(|e| e.rule == "missing-error-log");
 
-    assert!(gzip_info.is_some(), "Expected gzip-not-enabled info");
     assert!(error_log_info.is_some(), "Expected missing-error-log info");
 
     // Should have no errors
@@ -482,7 +481,8 @@ fn test_severity_counts() {
 
     assert_eq!(error_count, 0, "Expected 0 errors");
     assert_eq!(warning_count, 2, "Expected 2 warnings");
-    assert_eq!(info_count, 2, "Expected 2 infos");
+    // Note: gzip-not-enabled is disabled by default, so only 1 info (missing-error-log)
+    assert_eq!(info_count, 1, "Expected 1 info");
 }
 
 #[test]
@@ -620,12 +620,18 @@ fn dir_name_to_rule_name(dir_name: &str) -> String {
 /// This test iterates over all fixtures in tests/fixtures/rules/ and runs appropriate tests
 #[test]
 fn test_all_rule_fixtures() {
+    use nginx_lint::LintConfig;
     use std::io::Write;
 
     let rules_dir = fixtures_base().join("rules");
 
-    // Create linter once outside all loops for better performance
-    let linter = Linter::with_default_rules();
+    // Create linter with all rules enabled (including gzip-not-enabled which is disabled by default)
+    let config_toml = r#"
+[rules.gzip-not-enabled]
+enabled = true
+"#;
+    let config: LintConfig = toml::from_str(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config));
 
     // Iterate over categories (security, syntax, style, best_practices)
     for category_entry in fs::read_dir(&rules_dir).expect("Failed to read rules directory") {
