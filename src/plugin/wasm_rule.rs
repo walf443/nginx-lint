@@ -6,7 +6,6 @@ use super::error::PluginError;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use serde::{Deserialize, Serialize};
-use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmi::{Engine, Linker, Memory, Module, Store, TypedFunc};
@@ -138,21 +137,14 @@ fn parse_plugin_output(json: &str, api_version: &str, path: &Path) -> Result<Vec
 #[derive(Default)]
 struct StoreData {}
 
-/// Cached instance data for reuse
-struct CachedInstance {
+/// Instance data for WASM execution
+struct WasmInstance {
     store: Store<StoreData>,
     memory: Memory,
     alloc: TypedFunc<u32, u32>,
     dealloc: TypedFunc<(u32, u32), ()>,
     check: TypedFunc<(u32, u32, u32, u32), u32>,
     check_result_len: TypedFunc<(), u32>,
-}
-
-// Thread-local cache for WASM instances
-// Key: plugin path as string
-thread_local! {
-    static INSTANCE_CACHE: RefCell<std::collections::HashMap<String, CachedInstance>> =
-        RefCell::new(std::collections::HashMap::new());
 }
 
 /// Serialize a Config to JSON
@@ -324,7 +316,7 @@ impl WasmLintRule {
     }
 
     /// Create a new cached instance
-    fn create_instance(&self) -> Result<CachedInstance, PluginError> {
+    fn create_instance(&self) -> Result<WasmInstance, PluginError> {
         let mut store = Store::new(&self.engine, StoreData::default());
         store.set_fuel(self.fuel_limit).map_err(|e| {
             PluginError::execution_error(&self.path, format!("Failed to set fuel: {}", e))
@@ -355,7 +347,7 @@ impl WasmLintRule {
             .get_typed_func::<(), u32>(&store, "check_result_len")
             .map_err(|e| PluginError::missing_export(&self.path, format!("check_result_len: {}", e)))?;
 
-        Ok(CachedInstance {
+        Ok(WasmInstance {
             store,
             memory,
             alloc,
@@ -368,7 +360,7 @@ impl WasmLintRule {
     /// Execute check using cached instance
     fn execute_check_cached(
         &self,
-        cached: &mut CachedInstance,
+        cached: &mut WasmInstance,
         config: &Config,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
@@ -459,22 +451,13 @@ impl WasmLintRule {
         parse_plugin_output(&result_json, &self.api_version, &self.path)
     }
 
-    /// Execute the check function with instance caching
+    /// Execute the check function
+    /// Note: We don't cache WASM instances because they can become corrupted
+    /// after repeated use (leading to "unreachable" errors). The performance
+    /// impact is acceptable since instance creation is fast.
     fn execute_check(&self, config: &Config, file_path: &Path) -> Result<Vec<LintError>, PluginError> {
-        let cache_key = self.path.to_string_lossy().to_string();
-
-        INSTANCE_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-
-            // Get or create cached instance
-            if !cache.contains_key(&cache_key) {
-                let instance = self.create_instance()?;
-                cache.insert(cache_key.clone(), instance);
-            }
-
-            let cached = cache.get_mut(&cache_key).unwrap();
-            self.execute_check_cached(cached, config, file_path)
-        })
+        let mut instance = self.create_instance()?;
+        self.execute_check_cached(&mut instance, config, file_path)
     }
 }
 

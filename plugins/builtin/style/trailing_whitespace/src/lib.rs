@@ -90,6 +90,9 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
             ConfigItem::BlankLine(blank) => {
                 // BlankLine content is just whitespace - if it's not empty, it has trailing whitespace
                 if !blank.content.is_empty() {
+                    // Use range-based fix to remove the whitespace content
+                    let start = blank.span.start.offset;
+                    let end = start + blank.content.len();
                     let error = LintError::warning(
                         "trailing-whitespace",
                         "style",
@@ -97,7 +100,7 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
                         blank.span.start.line,
                         1,
                     )
-                    .with_fix(Fix::replace_line(blank.span.start.line, ""));
+                    .with_fix(Fix::replace_range(start, end, ""));
                     errors.push(error);
                 }
             }
@@ -106,43 +109,38 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
 }
 
 fn create_fix_for_directive(directive: &Directive) -> Fix {
-    // Reconstruct the directive line without trailing whitespace
-    let mut line = String::new();
-    line.push_str(&directive.leading_whitespace);
-    line.push_str(&directive.name);
-
-    for arg in &directive.args {
-        line.push(' ');
-        line.push_str(&arg.raw);
-    }
-
-    line.push_str(&directive.space_before_terminator);
-
-    if directive.block.is_some() {
-        line.push('{');
+    // Use range-based fix to remove only the trailing whitespace
+    // For directives with blocks: trailing whitespace is after the opening '{',
+    //   which is at block.span.start.offset
+    // For directives without blocks: trailing whitespace is after ';',
+    //   which is at span.end.offset
+    let start = if let Some(block) = &directive.block {
+        // Position after the opening '{'
+        block.span.start.offset + 1
     } else {
-        line.push(';');
-    }
-
-    Fix::replace_line(directive.span.start.line, &line)
+        // Position after the ';'
+        directive.span.end.offset
+    };
+    let end = start + directive.trailing_whitespace.len();
+    Fix::replace_range(start, end, "")
 }
 
 fn create_fix_for_closing_brace(block: &Block) -> Fix {
-    // Reconstruct the closing brace line without trailing whitespace
-    let mut line = String::new();
-    line.push_str(&block.closing_brace_leading_whitespace);
-    line.push('}');
-
-    Fix::replace_line(block.span.end.line, &line)
+    // Use range-based fix to remove only the trailing whitespace after }
+    // span.end.offset is right after the closing brace
+    // trailing_whitespace immediately follows
+    let start = block.span.end.offset;
+    let end = start + block.trailing_whitespace.len();
+    Fix::replace_range(start, end, "")
 }
 
 fn create_fix_for_comment(comment: &Comment) -> Fix {
-    // Reconstruct the comment line without trailing whitespace
-    let mut line = String::new();
-    line.push_str(&comment.leading_whitespace);
-    line.push_str(&comment.text);
-
-    Fix::replace_line(comment.span.start.line, &line)
+    // Use range-based fix to remove only the trailing whitespace after comment
+    // span.end.offset is right after the comment text
+    // trailing_whitespace immediately follows
+    let start = comment.span.end.offset;
+    let end = start + comment.trailing_whitespace.len();
+    Fix::replace_range(start, end, "")
 }
 
 // Export the plugin
@@ -151,7 +149,7 @@ nginx_lint::export_plugin!(TrailingWhitespacePlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::{PluginTestRunner, TestCase};
+    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
 
     #[test]
     fn test_no_trailing_whitespace() {
