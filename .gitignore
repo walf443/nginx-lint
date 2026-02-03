@@ -2,5 +2,7 @@
 /pkg
 /examples/plugins/*/target
 /examples/plugins/*/Cargo.lock
-/plugins/builtin/*/target
-/plugins/builtin/*/Cargo.lock
+/plugins/builtin/*/*/target
+/plugins/builtin/*/*/Cargo.lock
+/test_plugins
+/test_builtin_plugins
