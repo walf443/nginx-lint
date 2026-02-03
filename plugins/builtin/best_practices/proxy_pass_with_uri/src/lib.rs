@@ -18,8 +18,22 @@ use nginx_lint::plugin_sdk::prelude::*;
 pub struct ProxyPassWithUriPlugin;
 
 impl ProxyPassWithUriPlugin {
+    /// Check if a string contains a variable reference like $1, $uri, etc.
+    fn contains_variable(s: &str) -> bool {
+        if let Some(dollar_pos) = s.find('$') {
+            // Check if there's at least one alphanumeric or underscore after $
+            let after_dollar = &s[dollar_pos + 1..];
+            after_dollar
+                .chars()
+                .next()
+                .map_or(false, |c| c.is_alphanumeric() || c == '_')
+        } else {
+            false
+        }
+    }
+
     /// Check if a proxy_pass URL has a URI/path component
-    /// Returns Some(path) if it has a path, None otherwise
+    /// Returns Some(path) if it has a static path (no variables), None otherwise
     fn extract_uri_path(url: &str) -> Option<&str> {
         // Handle variable-only URLs (e.g., $upstream)
         if url.starts_with('$') {
@@ -38,8 +52,8 @@ impl ProxyPassWithUriPlugin {
         // This marks the start of the URI path
         if let Some(slash_pos) = after_scheme.find('/') {
             let path = &after_scheme[slash_pos..];
-            // Return the path if it's not empty
-            if !path.is_empty() {
+            // Return the path if it's not empty and doesn't contain variables
+            if !path.is_empty() && !Self::contains_variable(path) {
                 return Some(path);
             }
         }
@@ -47,11 +61,27 @@ impl ProxyPassWithUriPlugin {
         None
     }
 
+    /// Check if any argument is a variable
+    fn has_variable_arg(directive: &Directive) -> bool {
+        directive.args.iter().any(|arg| {
+            matches!(arg.value, ArgumentValue::Variable(_))
+        })
+    }
+
     /// Recursively check for proxy_pass with URI
     fn check_items(&self, items: &[ConfigItem], errors: &mut Vec<LintError>) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
                 if directive.name == "proxy_pass" {
+                    // Skip if any argument is a variable (e.g., http://backend/$1)
+                    // Variables indicate intentional URI manipulation
+                    if Self::has_variable_arg(directive) {
+                        if let Some(block) = &directive.block {
+                            self.check_items(&block.items, errors);
+                        }
+                        continue;
+                    }
+
                     if let Some(url) = directive.first_arg() {
                         if let Some(path) = Self::extract_uri_path(url) {
                             let message = if path == "/" {
@@ -272,6 +302,42 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_proxy_pass_with_capture_group_ok() {
+        let runner = PluginTestRunner::new(ProxyPassWithUriPlugin);
+
+        // Using $1 capture group is intentional
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            proxy_pass http://backend/$1;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_proxy_pass_with_request_uri_ok() {
+        let runner = PluginTestRunner::new(ProxyPassWithUriPlugin);
+
+        // Using $request_uri is intentional
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location /api/ {
+            proxy_pass http://backend$request_uri;
+        }
+    }
+}
+"#,
+        );
     }
 
     #[test]
