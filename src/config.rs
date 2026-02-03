@@ -312,6 +312,7 @@ impl LintConfig {
                     "unmatched-braces",
                     "unclosed-quote",
                     "missing-semicolon",
+                    "invalid-directive-context",
                     "deprecated-ssl-protocol",
                     "server-tokens-enabled",
                     "autoindex-enabled",
@@ -321,6 +322,7 @@ impl LintConfig {
                     "space-before-semicolon",
                     "gzip-not-enabled",
                     "missing-error-log",
+                    "proxy-pass-domain",
                 ]
                 .into_iter()
                 .collect();

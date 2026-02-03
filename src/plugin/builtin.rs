@@ -27,6 +27,9 @@ mod embedded {
     /// trailing-whitespace plugin
     pub const TRAILING_WHITESPACE: &[u8] =
         include_bytes!("../../target/builtin-plugins/trailing_whitespace.wasm");
+    /// proxy-pass-domain plugin
+    pub const PROXY_PASS_DOMAIN: &[u8] =
+        include_bytes!("../../target/builtin-plugins/proxy_pass_domain.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -37,6 +40,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "duplicate-directive",
     "space-before-semicolon",
     "trailing-whitespace",
+    "proxy-pass-domain",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -121,6 +125,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:trailing-whitespace"),
         embedded::TRAILING_WHITESPACE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load proxy-pass-domain
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:proxy-pass-domain"),
+        embedded::PROXY_PASS_DOMAIN,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);

@@ -1493,3 +1493,243 @@ location / {
         context_errors[0].message
     );
 }
+
+// ============================================================================
+// proxy-pass-domain tests
+// ============================================================================
+
+#[test]
+fn test_proxy_pass_domain_detects_domain() {
+    let content = r#"
+http {
+    server {
+        location / {
+            proxy_pass http://api.example.com;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert_eq!(
+        proxy_pass_errors.len(),
+        1,
+        "Expected 1 proxy-pass-domain warning, got: {:?}",
+        proxy_pass_errors
+    );
+    assert!(
+        proxy_pass_errors[0].message.contains("api.example.com"),
+        "Expected warning to mention the domain, got: {}",
+        proxy_pass_errors[0].message
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_detects_localhost() {
+    let content = r#"
+http {
+    server {
+        location / {
+            proxy_pass http://localhost:8080;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert_eq!(
+        proxy_pass_errors.len(),
+        1,
+        "Expected 1 proxy-pass-domain warning for localhost, got: {:?}",
+        proxy_pass_errors
+    );
+    assert!(
+        proxy_pass_errors[0].message.contains("localhost"),
+        "Expected warning to mention localhost, got: {}",
+        proxy_pass_errors[0].message
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_allows_ip_address() {
+    let content = r#"
+http {
+    server {
+        location / {
+            proxy_pass http://127.0.0.1:8080;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert!(
+        proxy_pass_errors.is_empty(),
+        "Expected no proxy-pass-domain warning for IP address, got: {:?}",
+        proxy_pass_errors
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_allows_ipv6_address() {
+    let content = r#"
+http {
+    server {
+        location / {
+            proxy_pass http://[::1]:8080;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert!(
+        proxy_pass_errors.is_empty(),
+        "Expected no proxy-pass-domain warning for IPv6 address, got: {:?}",
+        proxy_pass_errors
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_allows_variable() {
+    let content = r#"
+http {
+    server {
+        location / {
+            set $backend "api.example.com";
+            proxy_pass http://$backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert!(
+        proxy_pass_errors.is_empty(),
+        "Expected no proxy-pass-domain warning for variable, got: {:?}",
+        proxy_pass_errors
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_allows_upstream_name() {
+    let content = r#"
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert!(
+        proxy_pass_errors.is_empty(),
+        "Expected no proxy-pass-domain warning for upstream name, got: {:?}",
+        proxy_pass_errors
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_allows_unix_socket() {
+    let content = r#"
+http {
+    server {
+        location / {
+            proxy_pass http://unix:/var/run/app.sock;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert!(
+        proxy_pass_errors.is_empty(),
+        "Expected no proxy-pass-domain warning for unix socket, got: {:?}",
+        proxy_pass_errors
+    );
+}
+
+#[test]
+fn test_proxy_pass_domain_detects_multiple() {
+    let content = r#"
+http {
+    server {
+        location /api {
+            proxy_pass http://api.example.com;
+        }
+        location /backend {
+            proxy_pass http://backend.internal;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let proxy_pass_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-pass-domain")
+        .collect();
+
+    assert_eq!(
+        proxy_pass_errors.len(),
+        2,
+        "Expected 2 proxy-pass-domain warnings, got: {:?}",
+        proxy_pass_errors
+    );
+}

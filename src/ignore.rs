@@ -413,6 +413,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "space-before-semicolon",
         "gzip-not-enabled",
         "missing-error-log",
+        "proxy-pass-domain",
     ]
     .iter()
     .map(|s| s.to_string())
