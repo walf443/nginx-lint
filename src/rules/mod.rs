@@ -5,5 +5,5 @@ pub mod syntax;
 
 pub use best_practices::MissingErrorLog;
 pub use security::{DeprecatedSslProtocol, WeakSslCiphers};
-pub use style::{Indent, SpaceBeforeSemicolon, TrailingWhitespace};
-pub use syntax::{DuplicateDirective, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
+pub use style::{Indent, TrailingWhitespace};
+pub use syntax::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};

@@ -72,23 +72,21 @@ pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
     use crate::rules::{
         best_practices::missing_error_log,
         security::{deprecated_ssl_protocol, weak_ssl_ciphers},
-        style::{indent, space_before_semicolon, trailing_whitespace},
-        syntax::{duplicate_directive, missing_semicolon, unclosed_quote, unmatched_braces},
+        style::{indent, trailing_whitespace},
+        syntax::{missing_semicolon, unclosed_quote, unmatched_braces},
     };
 
     static DOCS: &[&RuleDoc] = &[
         // Security (builtin plugins: server-tokens-enabled, autoindex-enabled)
         &deprecated_ssl_protocol::DOC,
         &weak_ssl_ciphers::DOC,
-        // Syntax
+        // Syntax (builtin plugin: duplicate-directive)
         &unmatched_braces::DOC,
         &unclosed_quote::DOC,
         &missing_semicolon::DOC,
-        &duplicate_directive::DOC,
-        // Style
+        // Style (builtin plugin: space-before-semicolon)
         &indent::DOC,
         &trailing_whitespace::DOC,
-        &space_before_semicolon::DOC,
         // Best Practices (builtin plugin: gzip-not-enabled)
         &missing_error_log::DOC,
     ];
@@ -261,12 +259,6 @@ mod example_tests {
                 continue;
             }
 
-            // Skip rules provided by builtin plugins (tested via integration tests)
-            #[cfg(feature = "builtin-plugins")]
-            if doc.name == "duplicate-directive" {
-                continue;
-            }
-
             // Parse bad example and check for errors
             let config = match parse_string(doc.bad_example) {
                 Ok(c) => c,
@@ -310,12 +302,6 @@ mod example_tests {
                 continue;
             }
 
-            // Skip rules provided by builtin plugins (tested via integration tests)
-            #[cfg(feature = "builtin-plugins")]
-            if doc.name == "duplicate-directive" {
-                continue;
-            }
-
             // Parse good example
             let config = match parse_string(doc.good_example) {
                 Ok(c) => c,
@@ -343,7 +329,7 @@ mod example_tests {
     /// Test bad examples for style rules that work on content directly
     #[test]
     fn test_style_bad_examples() {
-        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+        use crate::rules::style::{indent::Indent, trailing_whitespace::TrailingWhitespace};
 
         // Test indent
         {
@@ -368,24 +354,12 @@ mod example_tests {
                 doc.bad_example
             );
         }
-
-        // Test space-before-semicolon
-        {
-            let doc = get_rule_doc("space-before-semicolon").unwrap();
-            let rule = SpaceBeforeSemicolon;
-            let errors = rule.check_content(doc.bad_example);
-            assert!(
-                !errors.is_empty(),
-                "space-before-semicolon bad_example should produce errors:\n{}",
-                doc.bad_example
-            );
-        }
     }
 
     /// Test good examples for style rules that work on content directly
     #[test]
     fn test_style_good_examples() {
-        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+        use crate::rules::style::{indent::Indent, trailing_whitespace::TrailingWhitespace};
 
         // Test indent
         {
@@ -408,19 +382,6 @@ mod example_tests {
             assert!(
                 errors.is_empty(),
                 "trailing-whitespace good_example should not produce errors, but got {:?}:\n{}",
-                errors,
-                doc.good_example
-            );
-        }
-
-        // Test space-before-semicolon
-        {
-            let doc = get_rule_doc("space-before-semicolon").unwrap();
-            let rule = SpaceBeforeSemicolon;
-            let errors = rule.check_content(doc.good_example);
-            assert!(
-                errors.is_empty(),
-                "space-before-semicolon good_example should not produce errors, but got {:?}:\n{}",
                 errors,
                 doc.good_example
             );
@@ -525,7 +486,7 @@ mod example_tests {
     /// Test that applying fixes to style bad examples produces the good example
     #[test]
     fn test_style_fixes_produce_good_examples() {
-        use crate::rules::style::{indent::Indent, space_before_semicolon::SpaceBeforeSemicolon, trailing_whitespace::TrailingWhitespace};
+        use crate::rules::style::{indent::Indent, trailing_whitespace::TrailingWhitespace};
 
         // Test indent fix
         {
@@ -559,26 +520,6 @@ mod example_tests {
                 assert_eq!(
                     actual, expected,
                     "trailing-whitespace: applying fixes to bad_example should produce good_example\n\
-                     Bad example:\n{}\n\
-                     Fixed:\n{}\n\
-                     Expected:\n{}",
-                    doc.bad_example, fixed, doc.good_example
-                );
-            }
-        }
-
-        // Test space-before-semicolon fix
-        {
-            let doc = get_rule_doc("space-before-semicolon").unwrap();
-            let rule = SpaceBeforeSemicolon;
-            let errors = rule.check_content(doc.bad_example);
-            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
-                let fixed = apply_fixes(doc.bad_example, &errors);
-                let expected = doc.good_example.trim_end();
-                let actual = fixed.trim_end();
-                assert_eq!(
-                    actual, expected,
-                    "space-before-semicolon: applying fixes to bad_example should produce good_example\n\
                      Bad example:\n{}\n\
                      Fixed:\n{}\n\
                      Expected:\n{}",

@@ -143,10 +143,6 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
-        #[cfg(not(feature = "builtin-plugins"))]
-        use crate::rules::DuplicateDirective;
-        #[cfg(not(feature = "builtin-plugins"))]
-        use crate::rules::SpaceBeforeSemicolon;
         use crate::rules::{
             DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon, TrailingWhitespace,
             UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
@@ -157,11 +153,6 @@ impl Linter {
         let is_enabled = |name: &str| config.is_none_or(|c| c.is_rule_enabled(name));
 
         // Syntax rules
-        // duplicate-directive is provided by builtin plugin when the feature is enabled
-        #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("duplicate-directive") {
-            linter.add_rule(Box::new(DuplicateDirective));
-        }
         if is_enabled("unmatched-braces") {
             linter.add_rule(Box::new(UnmatchedBraces));
         }
@@ -209,11 +200,6 @@ impl Linter {
         }
         if is_enabled("trailing-whitespace") {
             linter.add_rule(Box::new(TrailingWhitespace));
-        }
-        // space-before-semicolon is provided by builtin plugin when the feature is enabled
-        #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("space-before-semicolon") {
-            linter.add_rule(Box::new(SpaceBeforeSemicolon));
         }
 
         // Best practices
