@@ -107,6 +107,12 @@ pub struct Fix {
     /// Whether to insert new_text as a new line after the specified line
     #[serde(default)]
     pub insert_after: bool,
+    /// Start byte offset for range-based fix (0-indexed, inclusive)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_offset: Option<usize>,
+    /// End byte offset for range-based fix (0-indexed, exclusive)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_offset: Option<usize>,
 }
 
 impl Fix {
@@ -118,6 +124,8 @@ impl Fix {
             new_text: new_text.to_string(),
             delete_line: false,
             insert_after: false,
+            start_offset: None,
+            end_offset: None,
         }
     }
 
@@ -129,6 +137,8 @@ impl Fix {
             new_text: new_text.to_string(),
             delete_line: false,
             insert_after: false,
+            start_offset: None,
+            end_offset: None,
         }
     }
 
@@ -140,6 +150,8 @@ impl Fix {
             new_text: String::new(),
             delete_line: true,
             insert_after: false,
+            start_offset: None,
+            end_offset: None,
         }
     }
 
@@ -151,7 +163,29 @@ impl Fix {
             new_text: new_text.to_string(),
             delete_line: false,
             insert_after: true,
+            start_offset: None,
+            end_offset: None,
         }
+    }
+
+    /// Create a range-based fix that replaces bytes from start to end offset
+    ///
+    /// This allows multiple fixes on the same line as long as their ranges don't overlap.
+    pub fn replace_range(start_offset: usize, end_offset: usize, new_text: &str) -> Self {
+        Self {
+            line: 0, // Not used for range-based fixes
+            old_text: None,
+            new_text: new_text.to_string(),
+            delete_line: false,
+            insert_after: false,
+            start_offset: Some(start_offset),
+            end_offset: Some(end_offset),
+        }
+    }
+
+    /// Check if this is a range-based fix
+    pub fn is_range_based(&self) -> bool {
+        self.start_offset.is_some() && self.end_offset.is_some()
     }
 }
 

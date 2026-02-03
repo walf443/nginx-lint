@@ -588,43 +588,71 @@ impl TestCase {
 
 /// Apply fixes to content and return the result
 ///
-/// This is a simplified implementation for testing purposes.
-/// Fixes are applied in order, from highest line number to lowest
-/// to avoid line number shifts.
+/// Supports both range-based and line-based fixes.
+/// Range-based fixes are applied first, then line-based fixes.
 fn apply_fixes(content: &str, fixes: &[&Fix]) -> String {
-    let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
+    // Separate range-based and line-based fixes
+    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
+        fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
 
-    // Sort fixes by line number in descending order to avoid index shifts
-    let mut sorted_fixes: Vec<_> = fixes.iter().collect();
-    sorted_fixes.sort_by(|a, b| b.line.cmp(&a.line));
+    let mut result = content.to_string();
 
-    for fix in sorted_fixes {
-        let line_idx = fix.line.saturating_sub(1);
+    // Apply range-based fixes first (sort by start_offset descending)
+    if !range_fixes.is_empty() {
+        let mut sorted_range_fixes = range_fixes;
+        sorted_range_fixes.sort_by(|a, b| {
+            b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
+        });
 
-        if fix.delete_line {
-            // Delete the line
-            if line_idx < lines.len() {
-                lines.remove(line_idx);
+        let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
+
+        for fix in sorted_range_fixes {
+            let start = fix.start_offset.unwrap();
+            let end = fix.end_offset.unwrap();
+
+            let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
+            if overlaps {
+                continue;
             }
-        } else if fix.insert_after {
-            // Insert after the line
-            if line_idx < lines.len() {
-                lines.insert(line_idx + 1, fix.new_text.clone());
-            }
-        } else if let Some(old_text) = &fix.old_text {
-            // Replace specific text on the line
-            if line_idx < lines.len() {
-                lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
-            }
-        } else {
-            // Replace entire line
-            if line_idx < lines.len() {
-                lines[line_idx] = fix.new_text.clone();
+
+            if start <= result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, &fix.new_text);
+                applied_ranges.push((start, start + fix.new_text.len()));
             }
         }
     }
 
-    lines.join("\n")
+    // Apply line-based fixes
+    if !line_fixes.is_empty() {
+        let mut lines: Vec<String> = result.lines().map(|l| l.to_string()).collect();
+
+        let mut sorted_line_fixes = line_fixes;
+        sorted_line_fixes.sort_by(|a, b| b.line.cmp(&a.line));
+
+        for fix in sorted_line_fixes {
+            let line_idx = fix.line.saturating_sub(1);
+
+            if fix.delete_line {
+                if line_idx < lines.len() {
+                    lines.remove(line_idx);
+                }
+            } else if fix.insert_after {
+                if line_idx < lines.len() {
+                    lines.insert(line_idx + 1, fix.new_text.clone());
+                }
+            } else if let Some(old_text) = &fix.old_text {
+                if line_idx < lines.len() {
+                    lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
+                }
+            } else if line_idx < lines.len() {
+                lines[line_idx] = fix.new_text.clone();
+            }
+        }
+
+        result = lines.join("\n");
+    }
+
+    result
 }
 
 #[cfg(test)]

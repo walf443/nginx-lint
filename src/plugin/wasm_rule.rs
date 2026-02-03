@@ -52,6 +52,10 @@ struct PluginFix {
     pub delete_line: bool,
     #[serde(default)]
     pub insert_after: bool,
+    #[serde(default)]
+    pub start_offset: Option<usize>,
+    #[serde(default)]
+    pub end_offset: Option<usize>,
 }
 
 impl PluginFix {
@@ -62,6 +66,8 @@ impl PluginFix {
             new_text: self.new_text,
             delete_line: self.delete_line,
             insert_after: self.insert_after,
+            start_offset: self.start_offset,
+            end_offset: self.end_offset,
         }
     }
 }

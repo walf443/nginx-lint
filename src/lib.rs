@@ -94,65 +94,116 @@ pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig
 #[cfg(feature = "cli")]
 pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> {
     let content = fs::read_to_string(path)?;
-    let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
 
-    // Collect fixes and sort by line number (descending to avoid offset issues)
-    // For insert_after fixes at the same line, sort by indent ascending
-    // (process outer blocks first so inner blocks end up on top)
-    let mut fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
-    fixes.sort_by(|a, b| {
-        match b.line.cmp(&a.line) {
-            std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
-                // For insert_after at same line, sort by indent ascending
-                let a_indent = a.new_text.len() - a.new_text.trim_start().len();
-                let b_indent = b.new_text.len() - b.new_text.trim_start().len();
-                a_indent.cmp(&b_indent)
-            }
-            other => other,
-        }
-    });
-
-    let mut fix_count = 0;
-
-    for fix in fixes {
-        if fix.line == 0 {
-            continue;
-        }
-
-        if fix.insert_after {
-            // Insert a new line after the specified line
-            let insert_idx = fix.line.min(lines.len());
-            lines.insert(insert_idx, fix.new_text.clone());
-            fix_count += 1;
-            continue;
-        }
-
-        if fix.line > lines.len() {
-            continue;
-        }
-
-        let line_idx = fix.line - 1;
-
-        if fix.delete_line {
-            // Delete the entire line
-            lines.remove(line_idx);
-            fix_count += 1;
-        } else if let Some(old_text) = &fix.old_text {
-            // Replace specific text on the line
-            if lines[line_idx].contains(old_text) {
-                lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
-                fix_count += 1;
-            }
-        } else {
-            // Replace the entire line
-            lines[line_idx] = fix.new_text.clone();
-            fix_count += 1;
-        }
-    }
+    let (result, fix_count) = apply_fixes_to_content(&content, &fixes);
 
     if fix_count > 0 {
-        fs::write(path, lines.join("\n") + "\n")?;
+        fs::write(path, result)?;
     }
 
     Ok(fix_count)
+}
+
+/// Apply fixes to content string
+/// Returns (modified content, number of fixes applied)
+#[cfg(feature = "cli")]
+pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) {
+    // Separate range-based and line-based fixes
+    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
+        fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
+
+    let mut fix_count = 0;
+    let mut result = content.to_string();
+
+    // Apply range-based fixes first (sort by start_offset descending to avoid shifts)
+    if !range_fixes.is_empty() {
+        let mut sorted_range_fixes = range_fixes;
+        sorted_range_fixes.sort_by(|a, b| {
+            b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
+        });
+
+        // Check for overlapping ranges and skip overlapping fixes
+        let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
+
+        for fix in sorted_range_fixes {
+            let start = fix.start_offset.unwrap();
+            let end = fix.end_offset.unwrap();
+
+            // Check if this range overlaps with any already applied range
+            let overlaps = applied_ranges.iter().any(|(s, e)| {
+                // Ranges overlap if one starts before the other ends
+                start < *e && end > *s
+            });
+
+            if overlaps {
+                continue; // Skip overlapping fix
+            }
+
+            if start <= result.len() && end <= result.len() && start <= end {
+                result.replace_range(start..end, &fix.new_text);
+                applied_ranges.push((start, start + fix.new_text.len()));
+                fix_count += 1;
+            }
+        }
+    }
+
+    // Apply line-based fixes
+    if !line_fixes.is_empty() {
+        let mut lines: Vec<String> = result.lines().map(|s| s.to_string()).collect();
+
+        // Sort by line number descending, with special handling for insert_after
+        let mut sorted_line_fixes = line_fixes;
+        sorted_line_fixes.sort_by(|a, b| {
+            match b.line.cmp(&a.line) {
+                std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                    let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                    let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                    a_indent.cmp(&b_indent)
+                }
+                other => other,
+            }
+        });
+
+        for fix in sorted_line_fixes {
+            if fix.line == 0 {
+                continue;
+            }
+
+            if fix.insert_after {
+                let insert_idx = fix.line.min(lines.len());
+                lines.insert(insert_idx, fix.new_text.clone());
+                fix_count += 1;
+                continue;
+            }
+
+            if fix.line > lines.len() {
+                continue;
+            }
+
+            let line_idx = fix.line - 1;
+
+            if fix.delete_line {
+                lines.remove(line_idx);
+                fix_count += 1;
+            } else if let Some(ref old_text) = fix.old_text {
+                if lines[line_idx].contains(old_text.as_str()) {
+                    lines[line_idx] = lines[line_idx].replace(old_text.as_str(), &fix.new_text);
+                    fix_count += 1;
+                }
+            } else {
+                lines[line_idx] = fix.new_text.clone();
+                fix_count += 1;
+            }
+        }
+
+        result = lines.join("\n");
+    }
+
+    // Ensure trailing newline
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+
+    (result, fix_count)
 }

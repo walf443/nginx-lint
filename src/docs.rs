@@ -183,8 +183,8 @@ mod example_tests {
     use crate::parser::parse_string;
     use std::path::Path;
 
-    /// Apply a single fix to content and return the result
-    fn apply_fix(content: &str, fix: &Fix) -> String {
+    /// Apply a single line-based fix to content and return the result
+    fn apply_line_fix(content: &str, fix: &Fix) -> String {
         let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         if fix.line == 0 || fix.line > lines.len() + 1 {
@@ -209,26 +209,60 @@ mod example_tests {
         lines.join("\n")
     }
 
-    /// Apply all fixes to content (in reverse line order to avoid offset issues)
+    /// Apply all fixes to content (supports both range-based and line-based fixes)
     fn apply_fixes(content: &str, errors: &[crate::linter::LintError]) -> String {
-        let mut fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
-        // Sort by line descending, and for insert_after at same line, by indent ascending
-        // (process outer blocks first so inner blocks end up on top)
-        fixes.sort_by(|a, b| {
-            match b.line.cmp(&a.line) {
-                std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
-                    let a_indent = a.new_text.len() - a.new_text.trim_start().len();
-                    let b_indent = b.new_text.len() - b.new_text.trim_start().len();
-                    a_indent.cmp(&b_indent)
-                }
-                other => other,
-            }
-        });
+        let fixes: Vec<&Fix> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
+
+        // Separate range-based and line-based fixes
+        let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
+            fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
 
         let mut result = content.to_string();
-        for fix in fixes {
-            result = apply_fix(&result, fix);
+
+        // Apply range-based fixes first (sort by start_offset descending)
+        if !range_fixes.is_empty() {
+            let mut sorted_range_fixes = range_fixes;
+            sorted_range_fixes.sort_by(|a, b| {
+                b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
+            });
+
+            let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
+
+            for fix in sorted_range_fixes {
+                let start = fix.start_offset.unwrap();
+                let end = fix.end_offset.unwrap();
+
+                let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
+                if overlaps {
+                    continue;
+                }
+
+                if start <= result.len() && end <= result.len() && start <= end {
+                    result.replace_range(start..end, &fix.new_text);
+                    applied_ranges.push((start, start + fix.new_text.len()));
+                }
+            }
         }
+
+        // Apply line-based fixes
+        if !line_fixes.is_empty() {
+            let mut sorted_line_fixes = line_fixes;
+            sorted_line_fixes.sort_by(|a, b| {
+                match b.line.cmp(&a.line) {
+                    std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                        let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                        let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                        a_indent.cmp(&b_indent)
+                    }
+                    other => other,
+                }
+            });
+
+            for fix in sorted_line_fixes {
+                result = apply_line_fix(&result, fix);
+            }
+        }
+
         result
     }
 
