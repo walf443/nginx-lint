@@ -415,6 +415,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "missing-error-log",
         "proxy-pass-domain",
         "upstream-server-no-resolve",
+        "proxy-set-header-inheritance",
     ]
     .iter()
     .map(|s| s.to_string())

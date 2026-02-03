@@ -324,6 +324,7 @@ impl LintConfig {
                     "missing-error-log",
                     "proxy-pass-domain",
                     "upstream-server-no-resolve",
+                    "proxy-set-header-inheritance",
                 ]
                 .into_iter()
                 .collect();

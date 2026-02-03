@@ -1871,3 +1871,103 @@ http {
         upstream_errors
     );
 }
+
+#[test]
+fn test_proxy_set_header_inheritance_missing_parent_headers() {
+    let content = r#"
+http {
+    server {
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        location / {
+            proxy_set_header X-Custom "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let inheritance_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .collect();
+
+    assert_eq!(
+        inheritance_errors.len(),
+        1,
+        "Expected 1 proxy-set-header-inheritance warning, got: {:?}",
+        inheritance_errors
+    );
+    assert!(
+        inheritance_errors[0].message.contains("host"),
+        "Expected warning to mention 'host', got: {}",
+        inheritance_errors[0].message
+    );
+}
+
+#[test]
+fn test_proxy_set_header_inheritance_all_headers_included() {
+    let content = r#"
+http {
+    server {
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        location / {
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Custom "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let inheritance_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .collect();
+
+    assert!(
+        inheritance_errors.is_empty(),
+        "Expected no proxy-set-header-inheritance warning when all headers included, got: {:?}",
+        inheritance_errors
+    );
+}
+
+#[test]
+fn test_proxy_set_header_inheritance_no_child_headers() {
+    let content = r#"
+http {
+    server {
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let inheritance_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .collect();
+
+    assert!(
+        inheritance_errors.is_empty(),
+        "Expected no warning when child has no proxy_set_header, got: {:?}",
+        inheritance_errors
+    );
+}

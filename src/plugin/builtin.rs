@@ -33,6 +33,9 @@ mod embedded {
     /// upstream-server-no-resolve plugin
     pub const UPSTREAM_SERVER_NO_RESOLVE: &[u8] =
         include_bytes!("../../target/builtin-plugins/upstream_server_no_resolve.wasm");
+    /// proxy-set-header-inheritance plugin
+    pub const PROXY_SET_HEADER_INHERITANCE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/proxy_set_header_inheritance.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -45,6 +48,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "trailing-whitespace",
     "proxy-pass-domain",
     "upstream-server-no-resolve",
+    "proxy-set-header-inheritance",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -147,6 +151,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:upstream-server-no-resolve"),
         embedded::UPSTREAM_SERVER_NO_RESOLVE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load proxy-set-header-inheritance
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:proxy-set-header-inheritance"),
+        embedded::PROXY_SET_HEADER_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
