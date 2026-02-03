@@ -39,6 +39,9 @@ mod embedded {
     /// root-in-location plugin
     pub const ROOT_IN_LOCATION: &[u8] =
         include_bytes!("../../target/builtin-plugins/root_in_location.wasm");
+    /// alias-trailing-slash plugin
+    pub const ALIAS_TRAILING_SLASH: &[u8] =
+        include_bytes!("../../target/builtin-plugins/alias_trailing_slash.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -53,6 +56,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "upstream-server-no-resolve",
     "proxy-set-header-inheritance",
     "root-in-location",
+    "alias-trailing-slash",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -173,6 +177,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:root-in-location"),
         embedded::ROOT_IN_LOCATION,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load alias-trailing-slash
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:alias-trailing-slash"),
+        embedded::ALIAS_TRAILING_SLASH,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);

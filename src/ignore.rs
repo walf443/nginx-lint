@@ -417,6 +417,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "upstream-server-no-resolve",
         "proxy-set-header-inheritance",
         "root-in-location",
+        "alias-trailing-slash",
     ]
     .iter()
     .map(|s| s.to_string())

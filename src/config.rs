@@ -326,6 +326,7 @@ impl LintConfig {
                     "upstream-server-no-resolve",
                     "proxy-set-header-inheritance",
                     "root-in-location",
+                    "alias-trailing-slash",
                 ]
                 .into_iter()
                 .collect();
