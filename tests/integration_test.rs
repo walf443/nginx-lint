@@ -1733,3 +1733,141 @@ http {
         proxy_pass_errors
     );
 }
+
+#[test]
+fn test_upstream_server_domain_without_resolve() {
+    let content = r#"
+http {
+    upstream backend {
+        server api.example.com:80;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let upstream_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "upstream-server-no-resolve")
+        .collect();
+
+    assert_eq!(
+        upstream_errors.len(),
+        1,
+        "Expected 1 upstream-server-no-resolve warning for upstream without resolve, got: {:?}",
+        upstream_errors
+    );
+    assert!(
+        upstream_errors[0].message.contains("upstream server"),
+        "Expected warning about upstream server, got: {}",
+        upstream_errors[0].message
+    );
+    assert!(
+        upstream_errors[0].message.contains("api.example.com"),
+        "Expected warning to mention the domain, got: {}",
+        upstream_errors[0].message
+    );
+}
+
+#[test]
+fn test_upstream_server_domain_with_resolve_and_zone() {
+    let content = r#"
+http {
+    upstream backend {
+        zone backend_zone 64k;
+        server api.example.com:80 resolve;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let upstream_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "upstream-server-no-resolve")
+        .collect();
+
+    assert!(
+        upstream_errors.is_empty(),
+        "Expected no upstream-server-no-resolve warning for upstream with resolve and zone, got: {:?}",
+        upstream_errors
+    );
+}
+
+#[test]
+fn test_upstream_server_domain_with_resolve_but_no_zone() {
+    let content = r#"
+http {
+    upstream backend {
+        server api.example.com:80 resolve;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let upstream_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "upstream-server-no-resolve")
+        .collect();
+
+    assert_eq!(
+        upstream_errors.len(),
+        1,
+        "Expected 1 upstream-server-no-resolve warning for resolve without zone, got: {:?}",
+        upstream_errors
+    );
+    assert!(
+        upstream_errors[0].message.contains("zone"),
+        "Expected warning about missing zone, got: {}",
+        upstream_errors[0].message
+    );
+}
+
+#[test]
+fn test_upstream_server_ip_address() {
+    let content = r#"
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let upstream_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "upstream-server-no-resolve")
+        .collect();
+
+    assert!(
+        upstream_errors.is_empty(),
+        "Expected no upstream-server-no-resolve warning for upstream with IP address, got: {:?}",
+        upstream_errors
+    );
+}

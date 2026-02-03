@@ -414,6 +414,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "gzip-not-enabled",
         "missing-error-log",
         "proxy-pass-domain",
+        "upstream-server-no-resolve",
     ]
     .iter()
     .map(|s| s.to_string())

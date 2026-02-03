@@ -46,6 +46,7 @@
 //! ```
 
 mod types;
+pub mod helpers;
 pub mod testing;
 
 pub use types::*;
@@ -55,6 +56,7 @@ pub mod prelude {
     pub use super::types::*;
     pub use super::export_plugin;
     pub use super::types::API_VERSION;
+    pub use super::helpers;
 }
 
 /// Macro to export a plugin implementation

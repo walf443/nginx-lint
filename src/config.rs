@@ -323,6 +323,7 @@ impl LintConfig {
                     "gzip-not-enabled",
                     "missing-error-log",
                     "proxy-pass-domain",
+                    "upstream-server-no-resolve",
                 ]
                 .into_iter()
                 .collect();

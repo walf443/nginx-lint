@@ -30,6 +30,9 @@ mod embedded {
     /// proxy-pass-domain plugin
     pub const PROXY_PASS_DOMAIN: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_pass_domain.wasm");
+    /// upstream-server-no-resolve plugin
+    pub const UPSTREAM_SERVER_NO_RESOLVE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/upstream_server_no_resolve.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -41,6 +44,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "space-before-semicolon",
     "trailing-whitespace",
     "proxy-pass-domain",
+    "upstream-server-no-resolve",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -134,6 +138,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-pass-domain"),
         embedded::PROXY_PASS_DOMAIN,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load upstream-server-no-resolve
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:upstream-server-no-resolve"),
+        embedded::UPSTREAM_SERVER_NO_RESOLVE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
