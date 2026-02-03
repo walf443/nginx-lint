@@ -547,14 +547,30 @@ impl TestCase {
             let has_fix_on_line = rule_errors
                 .iter()
                 .filter_map(|e| e.fix.as_ref())
-                .any(|f| f.line == *expected_line);
+                .any(|f| {
+                    if f.is_range_based() {
+                        // For range-based fixes, calculate line from offset
+                        let start = f.start_offset.unwrap_or(0);
+                        let line = offset_to_line(&self.content, start);
+                        line == *expected_line
+                    } else {
+                        f.line == *expected_line
+                    }
+                });
             assert!(
                 has_fix_on_line,
                 "Expected fix on line {}, got fixes on lines: {:?}",
                 expected_line,
                 rule_errors
                     .iter()
-                    .filter_map(|e| e.fix.as_ref().map(|f| f.line))
+                    .filter_map(|e| e.fix.as_ref().map(|f| {
+                        if f.is_range_based() {
+                            let start = f.start_offset.unwrap_or(0);
+                            offset_to_line(&self.content, start)
+                        } else {
+                            f.line
+                        }
+                    }))
                     .collect::<Vec<_>>()
             );
         }
@@ -584,6 +600,12 @@ impl TestCase {
             );
         }
     }
+}
+
+/// Convert a byte offset to a 1-based line number
+fn offset_to_line(content: &str, offset: usize) -> usize {
+    let offset = offset.min(content.len());
+    content[..offset].chars().filter(|&c| c == '\n').count() + 1
 }
 
 /// Apply fixes to content and return the result

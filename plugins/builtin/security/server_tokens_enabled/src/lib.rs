@@ -39,6 +39,11 @@ impl Plugin for ServerTokensEnabledPlugin {
 
         for directive in config.all_directives() {
             if directive.is("server_tokens") && directive.first_arg_is("on") {
+                // Calculate byte offsets for range-based fix
+                let start = directive.span.start.offset - directive.leading_whitespace.len();
+                let end = directive.span.end.offset;
+                let fixed = format!("{}server_tokens off;", directive.leading_whitespace);
+
                 let error = LintError::warning(
                     "server-tokens-enabled",
                     "security",
@@ -46,11 +51,7 @@ impl Plugin for ServerTokensEnabledPlugin {
                     directive.span.start.line,
                     directive.span.start.column,
                 )
-                .with_fix(Fix::replace(
-                    directive.span.start.line,
-                    "server_tokens on",
-                    "server_tokens off",
-                ));
+                .with_fix(Fix::replace_range(start, end, &fixed));
                 errors.push(error);
             }
         }
