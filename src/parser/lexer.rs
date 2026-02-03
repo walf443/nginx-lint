@@ -53,6 +53,7 @@ pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
     pub raw: String, // Original source text
+    pub leading_whitespace: String, // Whitespace before this token (on same line)
 }
 
 /// Lexer for tokenizing nginx configuration files
@@ -98,18 +99,21 @@ impl<'a> Lexer<'a> {
         self.chars.peek().map(|(_, ch)| *ch)
     }
 
-    fn skip_whitespace_same_line(&mut self) {
+    fn skip_whitespace_same_line(&mut self) -> String {
+        let mut whitespace = String::new();
         while let Some(ch) = self.peek() {
             if ch == ' ' || ch == '\t' {
+                whitespace.push(ch);
                 self.advance();
             } else {
                 break;
             }
         }
+        whitespace
     }
 
     pub fn next_token(&mut self) -> ParseResult<Token> {
-        self.skip_whitespace_same_line();
+        let leading_whitespace = self.skip_whitespace_same_line();
 
         let start_pos = self.position();
         let start_offset = self.offset;
@@ -119,6 +123,7 @@ impl<'a> Lexer<'a> {
                 kind: TokenKind::Eof,
                 span: Span::new(start_pos, start_pos),
                 raw: String::new(),
+                leading_whitespace,
             });
         };
 
@@ -172,6 +177,7 @@ impl<'a> Lexer<'a> {
             kind,
             span: Span::new(start_pos, end_pos),
             raw,
+            leading_whitespace,
         })
     }
 

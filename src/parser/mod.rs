@@ -8,7 +8,7 @@ pub mod ast;
 pub mod error;
 pub mod lexer;
 
-use ast::{Argument, ArgumentValue, Block, Comment, Config, ConfigItem, Directive, Position, Span};
+use ast::{Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Position, Span};
 use error::{ParseError, ParseResult};
 use lexer::{Lexer, Token, TokenKind};
 use std::fs;
@@ -78,17 +78,19 @@ impl Parser {
             match &self.current().kind {
                 TokenKind::Newline => {
                     let span = self.current().span;
+                    let content = self.current().leading_whitespace.clone();
                     self.advance();
                     consecutive_newlines += 1;
                     // Only add blank line if we've seen content and have multiple newlines
                     if consecutive_newlines > 1 && !items.is_empty() {
-                        items.push(ConfigItem::BlankLine(span));
+                        items.push(ConfigItem::BlankLine(BlankLine { span, content }));
                     }
                 }
                 TokenKind::Comment(text) => {
                     let comment = Comment {
                         text: text.clone(),
                         span: self.current().span,
+                        leading_whitespace: self.current().leading_whitespace.clone(),
                     };
                     self.advance();
                     items.push(ConfigItem::Comment(comment));
@@ -122,6 +124,7 @@ impl Parser {
 
     fn parse_directive(&mut self) -> ParseResult<Directive> {
         let start_pos = self.current().span.start;
+        let leading_whitespace = self.current().leading_whitespace.clone();
 
         // Get directive name (can be identifier, argument, or quoted string for map blocks)
         let (name, name_span, name_raw) = match &self.current().kind {
@@ -147,6 +150,7 @@ impl Parser {
 
             match &self.current().kind {
                 TokenKind::Semicolon => {
+                    let space_before_terminator = self.current().leading_whitespace.clone();
                     let end_pos = self.current().span.end;
                     self.advance();
 
@@ -155,6 +159,7 @@ impl Parser {
                         trailing_comment = Some(Comment {
                             text: text.clone(),
                             span: self.current().span,
+                            leading_whitespace: self.current().leading_whitespace.clone(),
                         });
                         self.advance();
                     }
@@ -166,9 +171,12 @@ impl Parser {
                         block: None,
                         span: Span::new(start_pos, end_pos),
                         trailing_comment,
+                        leading_whitespace,
+                        space_before_terminator,
                     });
                 }
                 TokenKind::OpenBrace => {
+                    let space_before_terminator = self.current().leading_whitespace.clone();
                     let block_start = self.current().span.start;
                     self.advance();
 
@@ -181,6 +189,7 @@ impl Parser {
                             trailing_comment = Some(Comment {
                                 text: text.clone(),
                                 span: self.current().span,
+                                leading_whitespace: self.current().leading_whitespace.clone(),
                             });
                             self.advance();
                         }
@@ -196,6 +205,8 @@ impl Parser {
                             }),
                             span: Span::new(start_pos, block_end),
                             trailing_comment,
+                            leading_whitespace,
+                            space_before_terminator,
                         });
                     }
 
@@ -216,6 +227,7 @@ impl Parser {
                         trailing_comment = Some(Comment {
                             text: text.clone(),
                             span: self.current().span,
+                            leading_whitespace: self.current().leading_whitespace.clone(),
                         });
                         self.advance();
                     }
@@ -231,6 +243,8 @@ impl Parser {
                         }),
                         span: Span::new(start_pos, block_end),
                         trailing_comment,
+                        leading_whitespace,
+                        space_before_terminator,
                     });
                 }
                 TokenKind::Ident(value) => {
@@ -279,6 +293,7 @@ impl Parser {
                     trailing_comment = Some(Comment {
                         text: text.clone(),
                         span: self.current().span,
+                        leading_whitespace: self.current().leading_whitespace.clone(),
                     });
                     self.advance();
                     // Skip to next line
@@ -672,5 +687,52 @@ http {
 
         let content = block.raw_content.as_ref().unwrap();
         assert!(content.contains("require \"resty.core\""));
+    }
+
+    #[test]
+    fn test_whitespace_capture() {
+        let config = parse_string("http {\n    listen 80;\n}").unwrap();
+        let all_directives: Vec<_> = config.all_directives().collect();
+
+        // "http" has no leading whitespace
+        assert_eq!(all_directives[0].leading_whitespace, "");
+        // "http" has space before the opening brace
+        assert_eq!(all_directives[0].space_before_terminator, " ");
+
+        // "listen" has 4 spaces of leading whitespace
+        assert_eq!(all_directives[1].leading_whitespace, "    ");
+        // "listen" has no space before the semicolon
+        assert_eq!(all_directives[1].space_before_terminator, "");
+    }
+
+    #[test]
+    fn test_comment_whitespace_capture() {
+        let config = parse_string("    # test comment\nlisten 80;").unwrap();
+
+        // Find the comment
+        if let ConfigItem::Comment(comment) = &config.items[0] {
+            assert_eq!(comment.leading_whitespace, "    ");
+        } else {
+            panic!("Expected comment");
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_preserves_whitespace() {
+        // Test that round-trip preserves original indentation
+        let source = "http {\n    server {\n        listen 80;\n    }\n}\n";
+        let config = parse_string(source).unwrap();
+        let output = config.to_source();
+
+        // Parse the output and check the indentation is preserved
+        let reparsed = parse_string(&output).unwrap();
+        let all_directives: Vec<_> = reparsed.all_directives().collect();
+
+        // "http" has no leading whitespace
+        assert_eq!(all_directives[0].leading_whitespace, "");
+        // "server" has 4 spaces
+        assert_eq!(all_directives[1].leading_whitespace, "    ");
+        // "listen" has 8 spaces
+        assert_eq!(all_directives[2].leading_whitespace, "        ");
     }
 }
