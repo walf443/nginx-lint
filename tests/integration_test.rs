@@ -280,9 +280,11 @@ fn test_autoindex_enabled_detection() {
 
     let config = parse_string(
         r#"
-server {
-    location /files {
-        autoindex on;
+http {
+    server {
+        location /files {
+            autoindex on;
+        }
     }
 }
 "#,

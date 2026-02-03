@@ -40,15 +40,16 @@ impl Plugin for ServerTokensEnabledPlugin {
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let mut has_server_tokens_off = false;
-        let mut has_http_context = false;
+        let mut has_server_tokens_on = false;
+        let mut http_block_line: Option<usize> = None;
 
         // Check if this config is included from within http context
         let in_http_include_context = config.include_context.iter().any(|c| c == "http");
 
         for ctx in config.all_directives_with_context() {
-            // Track if we have an http block
+            // Track if we have an http block and remember its line
             if ctx.directive.is("http") {
-                has_http_context = true;
+                http_block_line = Some(ctx.directive.span.start.line);
             }
 
             // Only check server_tokens in http context (http, server, location)
@@ -62,6 +63,7 @@ impl Plugin for ServerTokensEnabledPlugin {
                 if ctx.directive.first_arg_is("off") || ctx.directive.first_arg_is("build") {
                     has_server_tokens_off = true;
                 } else if ctx.directive.first_arg_is("on") {
+                    has_server_tokens_on = true;
                     // Explicit 'on' - warn with fix
                     let directive = ctx.directive;
                     let start = directive.span.start.offset - directive.leading_whitespace.len();
@@ -81,14 +83,18 @@ impl Plugin for ServerTokensEnabledPlugin {
             }
         }
 
-        // If we have http context but no server_tokens off, warn about the default
-        if (has_http_context || in_http_include_context) && !has_server_tokens_off {
+        // If we have http context but no server_tokens directive at all, warn about the default
+        // Don't warn if we already warned about explicit 'on' - that's redundant
+        let has_http_context = http_block_line.is_some();
+        if (has_http_context || in_http_include_context) && !has_server_tokens_off && !has_server_tokens_on {
+            // Use http block line if available, otherwise line 1 for included files
+            let line = http_block_line.unwrap_or(1);
             errors.push(LintError::warning(
                 "server-tokens-enabled",
                 "security",
                 "server_tokens defaults to 'on', consider adding 'server_tokens off;' in http context",
-                0,
-                0,
+                line,
+                1,
             ));
         }
 
@@ -155,8 +161,7 @@ http {
 }
 "#,
         )
-        // 2 errors: explicit 'on' + no 'off' found
-        .expect_error_count(2)
+        .expect_error_count(1)
         .expect_error_on_line(3)
         .expect_message_contains("server_tokens")
         .expect_has_fix()
@@ -167,7 +172,7 @@ http {
     fn test_multiple_occurrences() {
         let runner = PluginTestRunner::new(ServerTokensEnabledPlugin);
 
-        // 3 errors: 2 explicit 'on' + 1 warning for no 'off'
+        // 2 explicit 'on' = 2 errors
         runner.assert_errors(
             r#"
 http {
@@ -177,7 +182,7 @@ http {
     }
 }
 "#,
-            3,
+            2,
         );
     }
 

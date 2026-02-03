@@ -4,6 +4,8 @@
 //! Gzip compression significantly reduces response sizes and improves
 //! page load times.
 //!
+//! gzip is only valid in http, server, and location contexts.
+//!
 //! Build with:
 //! ```sh
 //! cargo build --target wasm32-unknown-unknown --release
@@ -37,15 +39,31 @@ impl Plugin for GzipNotEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut gzip_on = false;
+        let mut has_http_context = false;
 
-        for directive in config.all_directives() {
-            if directive.is("gzip") && directive.first_arg_is("on") {
+        // Check if this config is included from within http context
+        let in_http_include_context = config.include_context.iter().any(|c| c == "http");
+
+        for ctx in config.all_directives_with_context() {
+            // Track if we have an http block
+            if ctx.directive.is("http") {
+                has_http_context = true;
+            }
+
+            // Only check gzip in http context (http, server, location)
+            let in_http_context = ctx.is_inside("http") || in_http_include_context;
+            if !in_http_context {
+                continue;
+            }
+
+            if ctx.directive.is("gzip") && ctx.directive.first_arg_is("on") {
                 gzip_on = true;
                 break;
             }
         }
 
-        if !gzip_on {
+        // Only warn if we have http context but no gzip on
+        if (has_http_context || in_http_include_context) && !gzip_on {
             vec![LintError::info(
                 "gzip-not-enabled",
                 "best-practices",
@@ -137,5 +155,149 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    #[test]
+    fn test_no_http_context_no_warning() {
+        // Config without http block should not warn about gzip
+        let runner = PluginTestRunner::new(GzipNotEnabledPlugin);
+
+        runner.assert_no_errors(
+            r#"
+events {
+    worker_connections 1024;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_stream_context_no_warning() {
+        // stream context doesn't support gzip, so no warning
+        let runner = PluginTestRunner::new(GzipNotEnabledPlugin);
+
+        runner.assert_no_errors(
+            r#"
+stream {
+    server {
+        listen 12345;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_http_and_stream_mixed() {
+        // Only http context should be checked
+        let runner = PluginTestRunner::new(GzipNotEnabledPlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    gzip on;
+    server {
+        listen 80;
+    }
+}
+stream {
+    server {
+        listen 12345;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_http_and_stream_mixed_warns_for_http() {
+        // Should warn only about http context, not stream
+        let runner = PluginTestRunner::new(GzipNotEnabledPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        listen 80;
+    }
+}
+stream {
+    server {
+        listen 12345;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_include_context_from_http() {
+        // File included from http context should be checked
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+server {
+    listen 80;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http context
+        config.include_context = vec!["http".to_string()];
+
+        let plugin = GzipNotEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        // Should warn because no gzip on
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn test_include_context_from_http_with_gzip() {
+        // File included from http context with gzip on should be OK
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+gzip on;
+server {
+    listen 80;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http context
+        config.include_context = vec!["http".to_string()];
+
+        let plugin = GzipNotEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_not_from_http() {
+        // File included from non-http context should not be checked
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+server {
+    listen 12345;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from stream context
+        config.include_context = vec!["stream".to_string()];
+
+        let plugin = GzipNotEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
     }
 }

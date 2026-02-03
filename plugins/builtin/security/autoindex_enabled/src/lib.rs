@@ -3,6 +3,8 @@
 //! This plugin detects when autoindex is enabled, which can expose
 //! directory contents and lead to information disclosure.
 //!
+//! autoindex is only valid in http, server, and location contexts.
+//!
 //! Build with:
 //! ```sh
 //! cargo build --target wasm32-unknown-unknown --release
@@ -37,8 +39,18 @@ impl Plugin for AutoindexEnabledPlugin {
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 
-        for directive in config.all_directives() {
-            if directive.is("autoindex") && directive.first_arg_is("on") {
+        // Check if this config is included from within http context
+        let in_http_include_context = config.include_context.iter().any(|c| c == "http");
+
+        for ctx in config.all_directives_with_context() {
+            // Only check autoindex in http context (http, server, location)
+            let in_http_context = ctx.is_inside("http") || in_http_include_context;
+            if !in_http_context {
+                continue;
+            }
+
+            if ctx.directive.is("autoindex") && ctx.directive.first_arg_is("on") {
+                let directive = ctx.directive;
                 // Calculate byte offsets for range-based fix
                 let start = directive.span.start.offset - directive.leading_whitespace.len();
                 let end = directive.span.end.offset;
@@ -138,15 +150,6 @@ http {
     }
 
     #[test]
-    fn test_fix_produces_correct_output() {
-        TestCase::new("autoindex on;")
-            .expect_error_count(1)
-            .expect_fix_on_line(1)
-            .expect_fix_produces("autoindex off;")
-            .run(&AutoindexEnabledPlugin);
-    }
-
-    #[test]
     fn test_multiple_locations() {
         let runner = PluginTestRunner::new(AutoindexEnabledPlugin);
 
@@ -174,5 +177,102 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    #[test]
+    fn test_ignores_stream_context() {
+        // autoindex is not valid in stream context, so we should ignore it
+        let runner = PluginTestRunner::new(AutoindexEnabledPlugin);
+
+        runner.assert_no_errors(
+            r#"
+stream {
+    server {
+        listen 12345;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_ignores_autoindex_in_stream_context() {
+        // Even if someone mistakenly puts autoindex in stream,
+        // we don't warn about it (nginx will reject it anyway)
+        let runner = PluginTestRunner::new(AutoindexEnabledPlugin);
+
+        runner.assert_no_errors(
+            r#"
+stream {
+    autoindex on;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_include_context_from_http() {
+        // File included from http context should be checked
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+autoindex on;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http context
+        config.include_context = vec!["http".to_string()];
+
+        let plugin = AutoindexEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("autoindex"));
+    }
+
+    #[test]
+    fn test_include_context_from_server() {
+        // File included from server context should be checked
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+location / {
+    autoindex on;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = AutoindexEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1);
+    }
+
+    #[test]
+    fn test_include_context_not_from_http() {
+        // File included from non-http context should not be checked
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+autoindex on;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from stream context
+        config.include_context = vec!["stream".to_string()];
+
+        let plugin = AutoindexEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
     }
 }

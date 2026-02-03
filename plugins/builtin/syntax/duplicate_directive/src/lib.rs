@@ -1,7 +1,8 @@
 //! duplicate-directive plugin
 //!
 //! This plugin detects duplicate directives that should only appear once
-//! in a given context.
+//! in a given context. It now uses context awareness to detect duplicates
+//! within each block, not just at the main level.
 //!
 //! Build with:
 //! ```sh
@@ -9,13 +10,14 @@
 //! ```
 
 use nginx_lint::plugin_sdk::prelude::*;
+use std::collections::HashMap;
 
 /// Check for duplicate directives
 #[derive(Default)]
 pub struct DuplicateDirectivePlugin;
 
 /// Directives that should only appear once in main context
-const UNIQUE_DIRECTIVES: &[&str] = &[
+const MAIN_UNIQUE_DIRECTIVES: &[&str] = &[
     "worker_processes",
     "pid",
     "error_log",
@@ -27,6 +29,110 @@ const UNIQUE_DIRECTIVES: &[&str] = &[
     "pcre_jit",
     "thread_pool",
 ];
+
+/// Directives that should only appear once per http context
+const HTTP_UNIQUE_DIRECTIVES: &[&str] = &[
+    "default_type",
+    "sendfile",
+    "tcp_nopush",
+    "tcp_nodelay",
+    "keepalive_timeout",
+    "types_hash_max_size",
+    "server_names_hash_bucket_size",
+    "server_names_hash_max_size",
+    "variables_hash_max_size",
+    "variables_hash_bucket_size",
+];
+
+/// Directives that should only appear once per server context
+const SERVER_UNIQUE_DIRECTIVES: &[&str] = &[
+    "root",
+    "index",
+    "server_tokens",
+    "client_max_body_size",
+    "access_log",
+    "error_log",
+];
+
+/// Directives that should only appear once per location context
+const LOCATION_UNIQUE_DIRECTIVES: &[&str] = &[
+    "root",
+    "alias",
+    "index",
+    "try_files",
+    "internal",
+    "autoindex",
+    "client_max_body_size",
+];
+
+/// Directives that should only appear once per upstream context
+const UPSTREAM_UNIQUE_DIRECTIVES: &[&str] = &[
+    "hash",
+    "ip_hash",
+    "least_conn",
+    "random",
+    "keepalive",
+    "keepalive_requests",
+    "keepalive_timeout",
+    "zone",
+];
+
+fn get_unique_directives_for_context(context: Option<&str>) -> &'static [&'static str] {
+    match context {
+        None => MAIN_UNIQUE_DIRECTIVES,
+        Some("http") => HTTP_UNIQUE_DIRECTIVES,
+        Some("server") => SERVER_UNIQUE_DIRECTIVES,
+        Some("location") => LOCATION_UNIQUE_DIRECTIVES,
+        Some("upstream") => UPSTREAM_UNIQUE_DIRECTIVES,
+        _ => &[],
+    }
+}
+
+impl DuplicateDirectivePlugin {
+    /// Check for duplicates within a single block's direct children
+    fn check_block(
+        &self,
+        items: &[ConfigItem],
+        parent_context: Option<&str>,
+        errors: &mut Vec<LintError>,
+    ) {
+        let unique_directives = get_unique_directives_for_context(parent_context);
+        let mut seen: HashMap<&str, usize> = HashMap::new();
+
+        for item in items {
+            if let ConfigItem::Directive(directive) = item {
+                // Check if this directive should be unique in its context
+                if unique_directives.contains(&directive.name.as_str()) {
+                    if let Some(&first_line) = seen.get(directive.name.as_str()) {
+                        // This is a duplicate
+                        let context_name = parent_context.unwrap_or("main");
+                        let message = format!(
+                            "Duplicate '{}' directive in {} context (first defined on line {})",
+                            directive.name, context_name, first_line
+                        );
+
+                        let error = LintError::warning(
+                            "duplicate-directive",
+                            "syntax",
+                            &message,
+                            directive.span.start.line,
+                            directive.span.start.column,
+                        )
+                        .with_fix(Fix::delete(directive.span.start.line));
+                        errors.push(error);
+                    } else {
+                        seen.insert(&directive.name, directive.span.start.line);
+                    }
+                }
+
+                // Recursively check nested blocks
+                if let Some(block) = &directive.block {
+                    self.check_block(&block.items, Some(&directive.name), errors);
+                }
+            }
+        }
+    }
+}
 
 impl Plugin for DuplicateDirectivePlugin {
     fn info(&self) -> PluginInfo {
@@ -49,29 +155,10 @@ impl Plugin for DuplicateDirectivePlugin {
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 
-        // Count occurrences of each unique directive
-        for unique_name in UNIQUE_DIRECTIVES {
-            let mut count = 0usize;
-            for item in &config.items {
-                if let ConfigItem::Directive(directive) = item {
-                    if directive.name.as_str() == *unique_name {
-                        count += 1;
-                        if count > 1 {
-                            // Create error for the duplicate
-                            let error = LintError::warning(
-                                "duplicate-directive",
-                                "syntax",
-                                "Duplicate directive in main context",
-                                directive.span.start.line,
-                                directive.span.start.column,
-                            )
-                            .with_fix(Fix::delete(directive.span.start.line));
-                            errors.push(error);
-                        }
-                    }
-                }
-            }
-        }
+        // Determine the parent context from include_context
+        let parent_context = config.include_context.last().map(|s| s.as_str());
+
+        self.check_block(&config.items, parent_context, &mut errors);
 
         errors
     }
@@ -130,7 +217,7 @@ worker_processes 8;
         )
         .expect_error_count(1)
         .expect_error_on_line(3)
-        .expect_message_contains("Duplicate directive")
+        .expect_message_contains("Duplicate")
         .expect_has_fix()
         .run(&DuplicateDirectivePlugin);
     }
@@ -154,5 +241,155 @@ worker_processes 8;
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    // New context-aware tests
+
+    #[test]
+    fn test_duplicate_root_in_location() {
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location / {
+            root /var/www;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_root_in_different_locations_is_ok() {
+        // root in different location blocks is fine
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location / {
+            root /var/www;
+        }
+        location /static {
+            root /var/static;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_duplicate_in_http_context() {
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    sendfile on;
+    sendfile off;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_duplicate_in_server_context() {
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        server_tokens off;
+        server_tokens on;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_same_directive_different_servers_is_ok() {
+        // Same directive in different server blocks is fine
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        server_tokens off;
+    }
+    server {
+        server_tokens on;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_duplicate_in_upstream() {
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    upstream backend {
+        ip_hash;
+        ip_hash;
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_include_context_main() {
+        // Test with include context from main
+        use nginx_lint::parse_string;
+
+        let config = parse_string(
+            r#"
+worker_processes 4;
+worker_processes 8;
+"#,
+        )
+        .unwrap();
+
+        let plugin = DuplicateDirectivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Duplicate 'worker_processes'"));
+    }
+
+    #[test]
+    fn test_include_context_from_server() {
+        // Test with include context from server
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+root /var/www;
+root /var/www/html;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = DuplicateDirectivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Duplicate 'root'"));
+        assert!(errors[0].message.contains("server context"));
     }
 }
