@@ -45,6 +45,9 @@ mod embedded {
     /// proxy-pass-with-uri plugin
     pub const PROXY_PASS_WITH_URI: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_pass_with_uri.wasm");
+    /// add-header-inheritance plugin
+    pub const ADD_HEADER_INHERITANCE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/add_header_inheritance.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -61,6 +64,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "root-in-location",
     "alias-location-slash-mismatch",
     "proxy-pass-with-uri",
+    "add-header-inheritance",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -199,6 +203,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-pass-with-uri"),
         embedded::PROXY_PASS_WITH_URI,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load add-header-inheritance
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:add-header-inheritance"),
+        embedded::ADD_HEADER_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
