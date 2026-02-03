@@ -155,33 +155,12 @@ thread_local! {
         RefCell::new(std::collections::HashMap::new());
 }
 
-// Thread-local cache for serialized configs
-// Caches the last serialized config to avoid re-serialization when multiple plugins
-// check the same config. Uses the Config pointer as a key.
-thread_local! {
-    static SERIALIZED_CONFIG_CACHE: RefCell<Option<(usize, String)>> = const { RefCell::new(None) };
-}
-
-/// Get or create serialized JSON for a Config
-/// Uses the Config's pointer address as a cache key
+/// Serialize a Config to JSON
+/// Note: Previously this used a pointer-based cache, but that caused issues when
+/// memory addresses were reused for different Config objects. Now we just serialize
+/// directly. The performance impact is minimal since serialization is fast.
 fn get_serialized_config(config: &Config) -> Result<String, serde_json::Error> {
-    let config_ptr = config as *const Config as usize;
-
-    SERIALIZED_CONFIG_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-
-        // Check if we have a cached serialization for this exact Config
-        if let Some((cached_ptr, ref json)) = *cache {
-            if cached_ptr == config_ptr {
-                return Ok(json.clone());
-            }
-        }
-
-        // Serialize and cache
-        let json = serde_json::to_string(config)?;
-        *cache = Some((config_ptr, json.clone()));
-        Ok(json)
-    })
+    serde_json::to_string(config)
 }
 
 /// A lint rule implemented as a WASM module

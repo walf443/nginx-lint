@@ -66,7 +66,7 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
                             closing_line,
                             1,
                         )
-                        .with_fix(create_fix_for_closing_brace(block, closing_line));
+                        .with_fix(create_fix_for_closing_brace(block));
                         errors.push(error);
                     }
 
@@ -124,19 +124,16 @@ fn create_fix_for_directive(directive: &Directive) -> Fix {
         line.push(';');
     }
 
-    // Don't include trailing_whitespace
-
     Fix::replace_line(directive.span.start.line, &line)
 }
 
-fn create_fix_for_closing_brace(block: &Block, line: usize) -> Fix {
+fn create_fix_for_closing_brace(block: &Block) -> Fix {
     // Reconstruct the closing brace line without trailing whitespace
-    let mut fixed_line = String::new();
-    fixed_line.push_str(&block.closing_brace_leading_whitespace);
-    fixed_line.push('}');
-    // Don't include trailing_whitespace
+    let mut line = String::new();
+    line.push_str(&block.closing_brace_leading_whitespace);
+    line.push('}');
 
-    Fix::replace_line(line, &fixed_line)
+    Fix::replace_line(block.span.end.line, &line)
 }
 
 fn create_fix_for_comment(comment: &Comment) -> Fix {
@@ -144,7 +141,6 @@ fn create_fix_for_comment(comment: &Comment) -> Fix {
     let mut line = String::new();
     line.push_str(&comment.leading_whitespace);
     line.push_str(&comment.text);
-    // Don't include trailing_whitespace
 
     Fix::replace_line(comment.span.start.line, &line)
 }
