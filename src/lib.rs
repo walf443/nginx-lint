@@ -24,7 +24,7 @@ pub mod plugin;
 pub mod plugin_sdk;
 
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
-pub use ignore::{filter_errors, FilterResult, IgnoreTracker, IgnoreWarning};
+pub use ignore::{filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning};
 pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 

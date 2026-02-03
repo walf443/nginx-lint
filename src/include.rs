@@ -96,11 +96,24 @@ fn collect_recursive<F>(
     }
     visited.insert(canonical.clone());
 
+    // Determine the effective context:
+    // 1. If include_context is provided (from parent or CLI), use it
+    // 2. Otherwise, check for # nginx-lint:context comment in the file
+    let effective_context = if !include_context.is_empty() {
+        include_context.clone()
+    } else {
+        // Try to read file and parse context comment
+        std::fs::read_to_string(path)
+            .ok()
+            .and_then(|content| crate::ignore::parse_context_comment(&content))
+            .unwrap_or_default()
+    };
+
     // Parse the file
     match parse_fn(path) {
         Ok(mut config) => {
             // Set the include context on the config
-            config.include_context = include_context.clone();
+            config.include_context = effective_context.clone();
 
             // Find include directives with their contexts and resolve them
             let includes = find_include_paths_with_context(&config, path);
@@ -110,7 +123,7 @@ fn collect_recursive<F>(
                 path: path.to_path_buf(),
                 config: Some(config),
                 parse_error: None,
-                include_context: include_context.clone(),
+                include_context: effective_context.clone(),
             });
 
             // Recursively process includes with their contexts
@@ -123,7 +136,7 @@ fn collect_recursive<F>(
                 path: path.to_path_buf(),
                 config: None,
                 parse_error: Some(e),
-                include_context: include_context.clone(),
+                include_context: effective_context,
             });
         }
     }

@@ -419,6 +419,64 @@ pub fn known_rule_names() -> HashSet<String> {
     .collect()
 }
 
+/// Prefix for context comments
+const CONTEXT_PREFIX: &str = "nginx-lint:context";
+
+/// Parse context comment from file content
+///
+/// Looks for `# nginx-lint:context http,server` in the first few lines of the file.
+/// Returns the context as a vector of block names, or None if no context comment found.
+///
+/// # Example
+/// ```
+/// use nginx_lint::ignore::parse_context_comment;
+///
+/// let content = "# nginx-lint:context http,server\nserver { listen 80; }";
+/// let context = parse_context_comment(content);
+/// assert_eq!(context, Some(vec!["http".to_string(), "server".to_string()]));
+/// ```
+pub fn parse_context_comment(content: &str) -> Option<Vec<String>> {
+    // Only check first 10 lines for context comment
+    for line in content.lines().take(10) {
+        let trimmed = line.trim();
+
+        // Skip empty lines
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Must be a comment
+        if !trimmed.starts_with('#') {
+            // If we hit a non-comment, non-empty line, stop looking
+            break;
+        }
+
+        let comment = trimmed.trim_start_matches('#').trim();
+
+        // Check for nginx-lint:context prefix
+        if let Some(rest) = comment.strip_prefix(CONTEXT_PREFIX) {
+            let context_str = rest.trim();
+            if context_str.is_empty() {
+                return None;
+            }
+
+            let context: Vec<String> = context_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            if context.is_empty() {
+                return None;
+            }
+
+            return Some(context);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,5 +871,64 @@ server_tokens off; # nginx-lint:disable server-tokens-enabled reason
         assert!(!fix.delete_line); // Not deleting entire line
         assert!(fix.old_text.is_none()); // replace_line uses None for old_text
         assert_eq!(fix.new_text, "server_tokens off;");
+    }
+
+    // Context comment tests
+
+    #[test]
+    fn test_parse_context_comment_simple() {
+        let content = "# nginx-lint:context http\nserver { listen 80; }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, Some(vec!["http".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_context_comment_multiple() {
+        let content = "# nginx-lint:context http,server\nlocation / { }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, Some(vec!["http".to_string(), "server".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_context_comment_with_spaces() {
+        let content = "# nginx-lint:context http, server\nlocation / { }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, Some(vec!["http".to_string(), "server".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_context_comment_after_empty_lines() {
+        let content = "\n\n# nginx-lint:context http\nserver { }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, Some(vec!["http".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_context_comment_after_other_comments() {
+        let content = "# Some description\n# nginx-lint:context http\nserver { }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, Some(vec!["http".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_context_comment_not_found() {
+        let content = "server { listen 80; }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, None);
+    }
+
+    #[test]
+    fn test_parse_context_comment_after_directive() {
+        // Context comment after a directive should not be found
+        let content = "server { }\n# nginx-lint:context http";
+        let context = parse_context_comment(content);
+        assert_eq!(context, None);
+    }
+
+    #[test]
+    fn test_parse_context_comment_empty_value() {
+        let content = "# nginx-lint:context\nserver { }";
+        let context = parse_context_comment(content);
+        assert_eq!(context, None);
     }
 }

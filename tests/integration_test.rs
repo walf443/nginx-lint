@@ -364,6 +364,102 @@ location / {
     );
 }
 
+// ============================================================================
+// Context comment tests
+// ============================================================================
+
+#[test]
+fn test_context_comment_sets_include_context() {
+    use nginx_lint::parse_context_comment;
+
+    let content = "# nginx-lint:context http,server\nlocation / { root /var/www; }";
+    let context = parse_context_comment(content);
+
+    assert_eq!(
+        context,
+        Some(vec!["http".to_string(), "server".to_string()]),
+        "Expected context to be parsed from comment"
+    );
+}
+
+#[test]
+fn test_context_comment_prevents_invalid_context_error() {
+    use nginx_lint::collect_included_files;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // Create a temp file with context comment
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "# nginx-lint:context http,server").unwrap();
+    writeln!(file, "location / {{ root /var/www; }}").unwrap();
+    file.flush().unwrap();
+
+    // Collect files (this should pick up the context comment)
+    let included_files = collect_included_files(file.path(), |path| {
+        parse_config(path).map_err(|e| e.to_string())
+    });
+
+    assert_eq!(included_files.len(), 1);
+
+    let config = included_files[0].config.as_ref().unwrap();
+    assert_eq!(
+        config.include_context,
+        vec!["http".to_string(), "server".to_string()],
+        "Expected include_context to be set from comment"
+    );
+
+    // Lint the file - should NOT have invalid-directive-context error
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(config, file.path());
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert!(
+        context_errors.is_empty(),
+        "Expected no invalid-directive-context error with context comment, got: {:?}",
+        context_errors
+    );
+}
+
+#[test]
+fn test_no_context_comment_causes_invalid_context_error() {
+    use nginx_lint::collect_included_files;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    // Create a temp file WITHOUT context comment
+    let mut file = NamedTempFile::new().unwrap();
+    writeln!(file, "location / {{ root /var/www; }}").unwrap();
+    file.flush().unwrap();
+
+    // Collect files
+    let included_files = collect_included_files(file.path(), |path| {
+        parse_config(path).map_err(|e| e.to_string())
+    });
+
+    assert_eq!(included_files.len(), 1);
+
+    let config = included_files[0].config.as_ref().unwrap();
+
+    // Lint the file - SHOULD have invalid-directive-context error
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(config, file.path());
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert_eq!(
+        context_errors.len(),
+        1,
+        "Expected invalid-directive-context error without context comment"
+    );
+}
+
 #[test]
 fn test_severity_counts() {
     let path = misc_fixture("multiple_issues");
