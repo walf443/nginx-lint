@@ -1,5 +1,5 @@
 [package]
-name = "alias-trailing-slash-plugin"
+name = "alias-location-slash-mismatch-plugin"
 version = "0.1.0"
 edition = "2024"
 

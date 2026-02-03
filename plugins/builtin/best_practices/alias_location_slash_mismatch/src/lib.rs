@@ -1,4 +1,4 @@
-//! alias-trailing-slash plugin
+//! alias-location-slash-mismatch plugin
 //!
 //! This plugin warns when the `alias` directive path doesn't end with a trailing slash,
 //! but only when the parent `location` directive ends with a trailing slash.
@@ -15,9 +15,9 @@ use nginx_lint::plugin_sdk::prelude::*;
 
 /// Check for alias directive without trailing slash
 #[derive(Default)]
-pub struct AliasTrailingSlashPlugin;
+pub struct AliasLocationSlashMismatchPlugin;
 
-impl AliasTrailingSlashPlugin {
+impl AliasLocationSlashMismatchPlugin {
     /// Check if a string ends with a variable reference like $1, $2, $uri, etc.
     fn ends_with_variable(s: &str) -> bool {
         // Find the last $ in the string
@@ -100,7 +100,7 @@ impl AliasTrailingSlashPlugin {
                         }
 
                         let mut error = LintError::warning(
-                            "alias-trailing-slash",
+                            "alias-location-slash-mismatch",
                             "best-practices",
                             &format!(
                                 "alias path '{}' should end with a trailing slash when location ends with '/'",
@@ -152,10 +152,10 @@ impl AliasTrailingSlashPlugin {
     }
 }
 
-impl Plugin for AliasTrailingSlashPlugin {
+impl Plugin for AliasLocationSlashMismatchPlugin {
     fn info(&self) -> PluginInfo {
         PluginInfo::new(
-            "alias-trailing-slash",
+            "alias-location-slash-mismatch",
             "best-practices",
             "Warns when alias path doesn't end with '/' when location ends with '/'",
         )
@@ -188,7 +188,7 @@ impl Plugin for AliasTrailingSlashPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(AliasTrailingSlashPlugin);
+nginx_lint::export_plugin!(AliasLocationSlashMismatchPlugin);
 
 #[cfg(test)]
 mod tests {
@@ -213,7 +213,7 @@ http {
         )
         .unwrap();
 
-        let plugin = AliasTrailingSlashPlugin;
+        let plugin = AliasLocationSlashMismatchPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -222,7 +222,7 @@ http {
 
     #[test]
     fn test_alias_with_trailing_slash_ok() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -256,7 +256,7 @@ http {
         )
         .unwrap();
 
-        let plugin = AliasTrailingSlashPlugin;
+        let plugin = AliasLocationSlashMismatchPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -264,7 +264,7 @@ http {
 
     #[test]
     fn test_alias_quoted_with_trailing_slash_ok() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -302,7 +302,7 @@ http {
         )
         .unwrap();
 
-        let plugin = AliasTrailingSlashPlugin;
+        let plugin = AliasLocationSlashMismatchPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
@@ -323,7 +323,7 @@ http {
         )
         .unwrap();
 
-        let plugin = AliasTrailingSlashPlugin;
+        let plugin = AliasLocationSlashMismatchPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -332,7 +332,7 @@ http {
 
     #[test]
     fn test_location_without_trailing_slash_no_warn() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
 
         // When location doesn't end with /, alias doesn't need to end with /
         runner.assert_no_errors(
@@ -352,7 +352,7 @@ http {
 
     #[test]
     fn test_regex_location_with_capture_group_no_warn() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
 
         // Regex location with $1 should not warn
         runner.assert_no_errors(
@@ -372,7 +372,7 @@ http {
 
     #[test]
     fn test_regex_location_case_insensitive_with_variable_no_warn() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
 
         // ~* is case-insensitive regex
         runner.assert_no_errors(
@@ -392,7 +392,7 @@ http {
 
     #[test]
     fn test_examples() {
-        let runner = PluginTestRunner::new(AliasTrailingSlashPlugin);
+        let runner = PluginTestRunner::new(AliasLocationSlashMismatchPlugin);
         runner.test_examples(
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
