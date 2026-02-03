@@ -1,5 +1,5 @@
 [package]
-name = "duplicate-directive-plugin"
+name = "space-before-semicolon-plugin"
 version = "0.1.0"
 edition = "2021"
 

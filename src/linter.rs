@@ -145,9 +145,11 @@ impl Linter {
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         #[cfg(not(feature = "builtin-plugins"))]
         use crate::rules::DuplicateDirective;
+        #[cfg(not(feature = "builtin-plugins"))]
+        use crate::rules::SpaceBeforeSemicolon;
         use crate::rules::{
-            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon,
-            SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon, TrailingWhitespace,
+            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -208,6 +210,8 @@ impl Linter {
         if is_enabled("trailing-whitespace") {
             linter.add_rule(Box::new(TrailingWhitespace));
         }
+        // space-before-semicolon is provided by builtin plugin when the feature is enabled
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("space-before-semicolon") {
             linter.add_rule(Box::new(SpaceBeforeSemicolon));
         }

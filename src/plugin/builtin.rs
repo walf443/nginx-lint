@@ -21,6 +21,9 @@ mod embedded {
     /// duplicate-directive plugin
     pub const DUPLICATE_DIRECTIVE: &[u8] =
         include_bytes!("../../target/builtin-plugins/duplicate_directive.wasm");
+    /// space-before-semicolon plugin
+    pub const SPACE_BEFORE_SEMICOLON: &[u8] =
+        include_bytes!("../../target/builtin-plugins/space_before_semicolon.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -29,6 +32,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "autoindex-enabled",
     "gzip-not-enabled",
     "duplicate-directive",
+    "space-before-semicolon",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -95,6 +99,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:duplicate-directive"),
         embedded::DUPLICATE_DIRECTIVE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load space-before-semicolon
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:space-before-semicolon"),
+        embedded::SPACE_BEFORE_SEMICOLON,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
