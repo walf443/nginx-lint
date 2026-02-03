@@ -209,7 +209,8 @@ impl LintConfig {
 
     /// Rules that are disabled by default
     pub const DISABLED_BY_DEFAULT: &'static [&'static str] = &[
-        "gzip-not-enabled", // gzip is not always appropriate (CDN, CPU constraints, security)
+        "gzip-not-enabled",   // gzip is not always appropriate (CDN, CPU constraints, security)
+        "missing-error-log",  // error_log is typically set at top level in main config
     ];
 
     /// Check if a rule is enabled
@@ -604,8 +605,9 @@ mod tests {
     #[test]
     fn test_disabled_by_default_rules() {
         let config = LintConfig::default();
-        // gzip-not-enabled should be disabled by default
+        // These rules should be disabled by default
         assert!(!config.is_rule_enabled("gzip-not-enabled"));
+        assert!(!config.is_rule_enabled("missing-error-log"));
         // Other rules should still be enabled by default
         assert!(config.is_rule_enabled("server-tokens-enabled"));
     }

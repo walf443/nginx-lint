@@ -78,13 +78,8 @@ fn test_minimal_config() {
     let linter = Linter::with_default_rules();
     let errors = linter.lint(&config, &path);
 
-    // Minimal config should have info-level suggestions
-    // Note: gzip-not-enabled is disabled by default, so we only check for missing-error-log
-    let error_log_info = errors.iter().find(|e| e.rule == "missing-error-log");
-
-    assert!(error_log_info.is_some(), "Expected missing-error-log info");
-
-    // Should have no errors
+    // Should have no errors (info-level rules like gzip-not-enabled and missing-error-log
+    // are disabled by default)
     let error_count = errors
         .iter()
         .filter(|e| e.severity == Severity::Error)
@@ -481,8 +476,8 @@ fn test_severity_counts() {
 
     assert_eq!(error_count, 0, "Expected 0 errors");
     assert_eq!(warning_count, 2, "Expected 2 warnings");
-    // Note: gzip-not-enabled is disabled by default, so only 1 info (missing-error-log)
-    assert_eq!(info_count, 1, "Expected 1 info");
+    // Note: gzip-not-enabled and missing-error-log are disabled by default
+    assert_eq!(info_count, 0, "Expected 0 infos");
 }
 
 #[test]
@@ -625,9 +620,12 @@ fn test_all_rule_fixtures() {
 
     let rules_dir = fixtures_base().join("rules");
 
-    // Create linter with all rules enabled (including gzip-not-enabled which is disabled by default)
+    // Create linter with all rules enabled (including rules disabled by default)
     let config_toml = r#"
 [rules.gzip-not-enabled]
+enabled = true
+
+[rules.missing-error-log]
 enabled = true
 "#;
     let config: LintConfig = toml::from_str(config_toml).unwrap();

@@ -210,7 +210,8 @@ indent_size = 2
 enabled = false
 
 [rules.missing-error-log]
-enabled = true
+# Disabled by default: error_log is typically set at top level in main config
+enabled = false
 
 # =============================================================================
 # Parser Settings
