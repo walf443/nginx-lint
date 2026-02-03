@@ -1,6 +1,6 @@
 use nginx_lint::{apply_fixes, parse_config, parse_string, pre_parse_checks, Linter, Severity};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 fn fixtures_base() -> PathBuf {
@@ -221,6 +221,146 @@ fn test_error_locations() {
         server_tokens_warning.line.unwrap(),
         5,
         "Expected warning on line 5"
+    );
+}
+
+// ============================================================================
+// server_tokens include context tests
+// ============================================================================
+
+#[test]
+fn test_server_tokens_warns_for_http_block_without_directive() {
+    // File with http block but no server_tokens should warn
+    use nginx_lint::parse_string;
+
+    let config = parse_string(
+        r#"
+http {
+    server {
+        listen 80;
+    }
+}
+"#,
+    )
+    .unwrap();
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, Path::new("test.conf"));
+
+    let server_tokens_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+
+    assert_eq!(
+        server_tokens_warnings.len(),
+        1,
+        "Expected 1 server-tokens-enabled warning for http block without server_tokens"
+    );
+    assert!(
+        server_tokens_warnings[0].message.contains("defaults to 'on'"),
+        "Expected 'defaults to on' message"
+    );
+}
+
+#[test]
+fn test_server_tokens_no_warning_for_included_file() {
+    // File included from http context (via include_context) should NOT warn
+    use nginx_lint::parse_string;
+
+    let mut config = parse_string(
+        r#"
+server {
+    listen 80;
+}
+"#,
+    )
+    .unwrap();
+
+    // Simulate being included from http context
+    config.include_context = vec!["http".to_string()];
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, Path::new("sites-available/example.conf"));
+
+    let server_tokens_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+
+    assert!(
+        server_tokens_warnings.is_empty(),
+        "Expected no server-tokens-enabled warning for included file, got: {:?}",
+        server_tokens_warnings
+    );
+}
+
+#[test]
+fn test_server_tokens_warns_for_explicit_on_in_included_file() {
+    // Explicit server_tokens on should always warn, even in included files
+    use nginx_lint::parse_string;
+
+    let mut config = parse_string(
+        r#"
+server {
+    server_tokens on;
+    listen 80;
+}
+"#,
+    )
+    .unwrap();
+
+    // Simulate being included from http context
+    config.include_context = vec!["http".to_string()];
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, Path::new("sites-available/example.conf"));
+
+    let server_tokens_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+
+    assert_eq!(
+        server_tokens_warnings.len(),
+        1,
+        "Expected 1 server-tokens-enabled warning for explicit 'on'"
+    );
+    assert!(
+        server_tokens_warnings[0].message.contains("should be 'off'"),
+        "Expected 'should be off' message for explicit on"
+    );
+}
+
+#[test]
+fn test_server_tokens_no_warning_for_nested_include_context() {
+    // File included from http > server context should NOT warn
+    use nginx_lint::parse_string;
+
+    let mut config = parse_string(
+        r#"
+location / {
+    root /var/www;
+}
+"#,
+    )
+    .unwrap();
+
+    // Simulate being included from http > server context
+    config.include_context = vec!["http".to_string(), "server".to_string()];
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, Path::new("snippets/location.conf"));
+
+    let server_tokens_warnings: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "server-tokens-enabled")
+        .collect();
+
+    assert!(
+        server_tokens_warnings.is_empty(),
+        "Expected no server-tokens-enabled warning for nested include context, got: {:?}",
+        server_tokens_warnings
     );
 }
 
