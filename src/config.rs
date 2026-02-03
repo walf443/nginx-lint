@@ -327,6 +327,7 @@ impl LintConfig {
                     "proxy-set-header-inheritance",
                     "root-in-location",
                     "alias-location-slash-mismatch",
+                    "proxy-pass-with-uri",
                 ]
                 .into_iter()
                 .collect();

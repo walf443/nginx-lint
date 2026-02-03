@@ -42,6 +42,9 @@ mod embedded {
     /// alias-location-slash-mismatch plugin
     pub const ALIAS_LOCATION_SLASH_MISMATCH: &[u8] =
         include_bytes!("../../target/builtin-plugins/alias_location_slash_mismatch.wasm");
+    /// proxy-pass-with-uri plugin
+    pub const PROXY_PASS_WITH_URI: &[u8] =
+        include_bytes!("../../target/builtin-plugins/proxy_pass_with_uri.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -57,6 +60,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-set-header-inheritance",
     "root-in-location",
     "alias-location-slash-mismatch",
+    "proxy-pass-with-uri",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -186,6 +190,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:alias-location-slash-mismatch"),
         embedded::ALIAS_LOCATION_SLASH_MISMATCH,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load proxy-pass-with-uri
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:proxy-pass-with-uri"),
+        embedded::PROXY_PASS_WITH_URI,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);

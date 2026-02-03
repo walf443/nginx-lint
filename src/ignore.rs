@@ -418,6 +418,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "proxy-set-header-inheritance",
         "root-in-location",
         "alias-location-slash-mismatch",
+        "proxy-pass-with-uri",
     ]
     .iter()
     .map(|s| s.to_string())
