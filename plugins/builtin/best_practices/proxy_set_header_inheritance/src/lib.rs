@@ -13,21 +13,52 @@
 //! ```
 
 use nginx_lint::plugin_sdk::prelude::*;
-use std::collections::HashSet;
+use std::collections::HashMap;
+
+/// Information about a proxy_set_header directive
+#[derive(Clone, Debug)]
+struct HeaderInfo {
+    /// The header name (lowercase for comparison)
+    name_lower: String,
+    /// The original directive text (e.g., "proxy_set_header Host $host;")
+    directive_text: String,
+    /// The line number where this header was defined (for preserving order)
+    line: usize,
+}
 
 /// Check if proxy_set_header in child blocks includes all parent headers
 #[derive(Default)]
 pub struct ProxySetHeaderInheritancePlugin;
 
 impl ProxySetHeaderInheritancePlugin {
+    /// Reconstruct the directive text from a Directive
+    fn directive_to_text(directive: &Directive) -> String {
+        let mut parts = vec![directive.name.clone()];
+        for arg in &directive.args {
+            let arg_text = match &arg.value {
+                ArgumentValue::Literal(s) => s.clone(),
+                ArgumentValue::QuotedString(s) => format!("\"{}\"", s),
+                ArgumentValue::SingleQuotedString(s) => format!("'{}'", s),
+                ArgumentValue::Variable(s) => format!("${}", s),
+            };
+            parts.push(arg_text);
+        }
+        format!("{};", parts.join(" "))
+    }
+
     /// Collect proxy_set_header headers from a block's direct children (not nested)
-    fn collect_headers_from_block(block: &Block) -> HashSet<String> {
-        let mut headers = HashSet::new();
+    fn collect_headers_from_block(block: &Block) -> HashMap<String, HeaderInfo> {
+        let mut headers = HashMap::new();
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item {
                 if directive.name == "proxy_set_header" {
                     if let Some(header_name) = directive.first_arg() {
-                        headers.insert(header_name.to_lowercase());
+                        let info = HeaderInfo {
+                            name_lower: header_name.to_lowercase(),
+                            directive_text: Self::directive_to_text(directive),
+                            line: directive.span.start.line,
+                        };
+                        headers.insert(header_name.to_lowercase(), info);
                     }
                 }
             }
@@ -35,11 +66,16 @@ impl ProxySetHeaderInheritancePlugin {
         headers
     }
 
+    /// Get the indentation string for a given column (1-indexed)
+    fn get_indent(column: usize) -> String {
+        " ".repeat(column.saturating_sub(1))
+    }
+
     /// Check a block for proxy_set_header inheritance issues
     fn check_block(
         &self,
         items: &[ConfigItem],
-        parent_headers: &HashSet<String>,
+        parent_headers: &HashMap<String, HeaderInfo>,
         errors: &mut Vec<LintError>,
     ) {
         for item in items {
@@ -60,31 +96,52 @@ impl ProxySetHeaderInheritancePlugin {
                         if !current_headers.is_empty() && !parent_headers.is_empty() {
                             let missing: Vec<_> = parent_headers
                                 .iter()
-                                .filter(|h| !current_headers.contains(*h))
-                                .cloned()
+                                .filter(|(name, _)| !current_headers.contains_key(*name))
+                                .map(|(_, info)| info.clone())
                                 .collect();
 
                             if !missing.is_empty() {
-                                // Sort for consistent output
-                                let mut missing_sorted: Vec<_> = missing.iter().collect();
-                                missing_sorted.sort();
+                                // Sort by original line number to preserve parent block order
+                                let mut missing_sorted = missing.clone();
+                                missing_sorted.sort_by_key(|h| h.line);
 
-                                // Find the first proxy_set_header in this block for error location
-                                let first_header_line = block
+                                // Find the first proxy_set_header in this block for error location and indentation
+                                let first_header_info = block
                                     .items
                                     .iter()
                                     .filter_map(|item| {
                                         if let ConfigItem::Directive(d) = item {
                                             if d.name == "proxy_set_header" {
-                                                return Some((d.span.start.line, d.span.start.column));
+                                                return Some((
+                                                    d.span.start.line,
+                                                    d.span.start.column,
+                                                    d.span.start.offset,
+                                                ));
                                             }
                                         }
                                         None
                                     })
                                     .next()
-                                    .unwrap_or((directive.span.start.line, directive.span.start.column));
+                                    .unwrap_or((
+                                        directive.span.start.line,
+                                        directive.span.start.column,
+                                        directive.span.start.offset,
+                                    ));
 
-                                errors.push(LintError::warning(
+                                let (line, column, offset) = first_header_info;
+                                let indent = Self::get_indent(column);
+
+                                // Calculate offset at the beginning of the line (before indentation)
+                                // offset points to 'p' in proxy_set_header, so subtract (column - 1) to get line start
+                                let line_start_offset = offset - (column - 1);
+
+                                // Build the fix text: insert missing headers before the first proxy_set_header
+                                let fix_text: String = missing_sorted
+                                    .iter()
+                                    .map(|h| format!("{}{}\n", indent, h.directive_text))
+                                    .collect();
+
+                                let mut error = LintError::warning(
                                     "proxy-set-header-inheritance",
                                     "best-practices",
                                     &format!(
@@ -93,21 +150,26 @@ impl ProxySetHeaderInheritancePlugin {
                                          all headers must be explicitly repeated in child blocks",
                                         missing_sorted
                                             .iter()
-                                            .map(|s| format!("'{}'", s))
+                                            .map(|h| format!("'{}'", h.name_lower))
                                             .collect::<Vec<_>>()
                                             .join(", ")
                                     ),
-                                    first_header_line.0,
-                                    first_header_line.1,
-                                ));
+                                    line,
+                                    column,
+                                );
+
+                                // Add fix: insert missing headers before the first proxy_set_header
+                                error = error.with_fix(Fix::replace_range(line_start_offset, line_start_offset, &fix_text));
+
+                                errors.push(error);
                             }
                         }
 
                         // Merge parent and current headers for nested blocks
-                        let merged_headers: HashSet<String> = parent_headers
-                            .union(&current_headers)
-                            .cloned()
-                            .collect();
+                        let mut merged_headers = parent_headers.clone();
+                        for (name, info) in current_headers {
+                            merged_headers.insert(name, info);
+                        }
 
                         // Recursively check nested blocks
                         self.check_block(&block.items, &merged_headers, errors);
@@ -152,7 +214,7 @@ impl Plugin for ProxySetHeaderInheritancePlugin {
         let mut errors = Vec::new();
 
         // Start with empty parent headers at root level
-        self.check_block(&config.items, &HashSet::new(), &mut errors);
+        self.check_block(&config.items, &HashMap::new(), &mut errors);
 
         errors
     }
@@ -192,6 +254,45 @@ http {
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("host"));
         assert!(errors[0].message.contains("x-real-ip"));
+    }
+
+    #[test]
+    fn test_missing_parent_headers_with_fix() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        location / {
+            proxy_set_header X-Custom "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = ProxySetHeaderInheritancePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].fix.is_some(), "Expected fix to be present");
+
+        let fix = errors[0].fix.as_ref().unwrap();
+        // Check that both headers are present in the fix
+        assert!(
+            fix.new_text.contains("proxy_set_header Host"),
+            "Fix should contain Host header: {}",
+            fix.new_text
+        );
+        assert!(
+            fix.new_text.contains("proxy_set_header X-Real-IP"),
+            "Fix should contain X-Real-IP header: {}",
+            fix.new_text
+        );
     }
 
     #[test]
@@ -388,6 +489,39 @@ http {
 
         // Both servers have location blocks missing parent headers
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_quoted_value_in_fix() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_header X-Custom-Header "custom value";
+
+        location / {
+            proxy_set_header X-Other "other";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = ProxySetHeaderInheritancePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].fix.is_some());
+
+        let fix = errors[0].fix.as_ref().unwrap();
+        // Check that quoted value is preserved in fix
+        assert!(
+            fix.new_text.contains("\"custom value\""),
+            "Fix should preserve quoted value: {}",
+            fix.new_text
+        );
     }
 
     #[test]
