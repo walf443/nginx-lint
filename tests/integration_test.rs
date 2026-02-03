@@ -475,8 +475,9 @@ fn test_severity_counts() {
         .count();
 
     assert_eq!(error_count, 0, "Expected 0 errors");
-    assert_eq!(warning_count, 2, "Expected 2 warnings");
+    assert_eq!(warning_count, 4, "Expected 4 warnings");
     // Note: gzip-not-enabled and missing-error-log are disabled by default
+    // Warnings: server-tokens-enabled x2, root-in-location x2
     assert_eq!(info_count, 0, "Expected 0 infos");
 }
 

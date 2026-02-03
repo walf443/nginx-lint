@@ -36,6 +36,9 @@ mod embedded {
     /// proxy-set-header-inheritance plugin
     pub const PROXY_SET_HEADER_INHERITANCE: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_set_header_inheritance.wasm");
+    /// root-in-location plugin
+    pub const ROOT_IN_LOCATION: &[u8] =
+        include_bytes!("../../target/builtin-plugins/root_in_location.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -49,6 +52,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-pass-domain",
     "upstream-server-no-resolve",
     "proxy-set-header-inheritance",
+    "root-in-location",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -160,6 +164,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-set-header-inheritance"),
         embedded::PROXY_SET_HEADER_INHERITANCE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load root-in-location
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:root-in-location"),
+        embedded::ROOT_IN_LOCATION,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);

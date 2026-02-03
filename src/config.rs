@@ -325,6 +325,7 @@ impl LintConfig {
                     "proxy-pass-domain",
                     "upstream-server-no-resolve",
                     "proxy-set-header-inheritance",
+                    "root-in-location",
                 ]
                 .into_iter()
                 .collect();

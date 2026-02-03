@@ -416,6 +416,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "proxy-pass-domain",
         "upstream-server-no-resolve",
         "proxy-set-header-inheritance",
+        "root-in-location",
     ]
     .iter()
     .map(|s| s.to_string())

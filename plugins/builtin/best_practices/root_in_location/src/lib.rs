@@ -1,0 +1,235 @@
+//! root-in-location plugin
+//!
+//! This plugin warns when the `root` directive is used inside a `location` block.
+//!
+//! The recommended practice is to define `root` at the server level and use
+//! `alias` inside location blocks when a different path is needed.
+//!
+//! Build with:
+//! ```sh
+//! cargo build --target wasm32-unknown-unknown --release
+//! ```
+
+use nginx_lint::plugin_sdk::prelude::*;
+
+/// Check for root directive inside location blocks
+#[derive(Default)]
+pub struct RootInLocationPlugin;
+
+impl RootInLocationPlugin {
+    /// Recursively check for root directives inside location blocks
+    fn check_items(&self, items: &[ConfigItem], in_location: bool, errors: &mut Vec<LintError>) {
+        for item in items {
+            if let ConfigItem::Directive(directive) = item {
+                // Check if we're in a location block and found a root directive
+                if in_location && directive.name == "root" {
+                    errors.push(LintError::warning(
+                        "root-in-location",
+                        "best-practices",
+                        "root directive inside location block; consider defining root at server level and using alias in location blocks",
+                        directive.span.start.line,
+                        directive.span.start.column,
+                    ));
+                }
+
+                // Recurse into blocks
+                if let Some(block) = &directive.block {
+                    let is_location = directive.name == "location";
+                    // Once we're in a location, stay in_location for nested blocks
+                    self.check_items(&block.items, in_location || is_location, errors);
+                }
+            }
+        }
+    }
+}
+
+impl Plugin for RootInLocationPlugin {
+    fn info(&self) -> PluginInfo {
+        PluginInfo::new(
+            "root-in-location",
+            "best-practices",
+            "Warns when root directive is used inside location blocks",
+        )
+        .with_severity("warning")
+        .with_why(
+            "Defining `root` inside location blocks can lead to confusion and maintenance issues. \
+             The recommended practice is to define `root` at the server level, which applies to \
+             all locations by default. When a location needs a different document root, use the \
+             `alias` directive instead, which is more explicit about its purpose.\n\n\
+             Using `root` at server level also helps avoid the common pitfall of forgetting to \
+             define `root` in some location blocks.",
+        )
+        .with_bad_example(include_str!("../examples/bad.conf").trim())
+        .with_good_example(include_str!("../examples/good.conf").trim())
+        .with_references(vec![
+            "https://nginx.org/en/docs/http/ngx_http_core_module.html#root".to_string(),
+            "https://nginx.org/en/docs/http/ngx_http_core_module.html#alias".to_string(),
+        ])
+    }
+
+    fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+        let mut errors = Vec::new();
+        self.check_items(&config.items, false, &mut errors);
+        errors
+    }
+}
+
+// Export the plugin
+nginx_lint::export_plugin!(RootInLocationPlugin);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint::parse_string;
+
+    #[test]
+    fn test_root_in_location_warns() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        listen 80;
+
+        location / {
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("root directive inside location"));
+    }
+
+    #[test]
+    fn test_root_at_server_level_ok() {
+        let runner = PluginTestRunner::new(RootInLocationPlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        listen 80;
+        root /var/www/html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_alias_in_location_ok() {
+        let runner = PluginTestRunner::new(RootInLocationPlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        listen 80;
+        root /var/www/html;
+
+        location /images/ {
+            alias /data/images/;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_root_in_nested_location_warns() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        listen 80;
+
+        location /api {
+            location /api/v1 {
+                root /var/www/api;
+            }
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_root_in_if_inside_location_warns() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        listen 80;
+
+        location / {
+            if ($host = "example.com") {
+                root /var/www/example;
+            }
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_multiple_locations_with_root() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        listen 80;
+
+        location / {
+            root /var/www/main;
+        }
+
+        location /api {
+            root /var/www/api;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_examples() {
+        let runner = PluginTestRunner::new(RootInLocationPlugin);
+        runner.test_examples(
+            include_str!("../examples/bad.conf"),
+            include_str!("../examples/good.conf"),
+        );
+    }
+}
