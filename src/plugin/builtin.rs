@@ -18,6 +18,9 @@ mod embedded {
     /// gzip-not-enabled plugin
     pub const GZIP_NOT_ENABLED: &[u8] =
         include_bytes!("../../target/builtin-plugins/gzip_not_enabled.wasm");
+    /// duplicate-directive plugin
+    pub const DUPLICATE_DIRECTIVE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/duplicate_directive.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -25,6 +28,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "server-tokens-enabled",
     "autoindex-enabled",
     "gzip-not-enabled",
+    "duplicate-directive",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -82,6 +86,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:gzip-not-enabled"),
         embedded::GZIP_NOT_ENABLED,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load duplicate-directive
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:duplicate-directive"),
+        embedded::DUPLICATE_DIRECTIVE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);

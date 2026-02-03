@@ -143,8 +143,10 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
+        #[cfg(not(feature = "builtin-plugins"))]
+        use crate::rules::DuplicateDirective;
         use crate::rules::{
-            DeprecatedSslProtocol, DuplicateDirective, Indent, MissingErrorLog, MissingSemicolon,
+            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon,
             SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
@@ -153,6 +155,8 @@ impl Linter {
         let is_enabled = |name: &str| config.is_none_or(|c| c.is_rule_enabled(name));
 
         // Syntax rules
+        // duplicate-directive is provided by builtin plugin when the feature is enabled
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("duplicate-directive") {
             linter.add_rule(Box::new(DuplicateDirective));
         }

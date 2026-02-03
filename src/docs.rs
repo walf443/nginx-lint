@@ -261,6 +261,12 @@ mod example_tests {
                 continue;
             }
 
+            // Skip rules provided by builtin plugins (tested via integration tests)
+            #[cfg(feature = "builtin-plugins")]
+            if doc.name == "duplicate-directive" {
+                continue;
+            }
+
             // Parse bad example and check for errors
             let config = match parse_string(doc.bad_example) {
                 Ok(c) => c,
@@ -301,6 +307,12 @@ mod example_tests {
                 || doc.name == "missing-semicolon"
                 || doc.name == "unmatched-braces"
             {
+                continue;
+            }
+
+            // Skip rules provided by builtin plugins (tested via integration tests)
+            #[cfg(feature = "builtin-plugins")]
+            if doc.name == "duplicate-directive" {
                 continue;
             }
 

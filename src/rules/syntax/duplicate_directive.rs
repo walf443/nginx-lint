@@ -40,7 +40,18 @@ impl LintRule for DuplicateDirective {
         let mut errors = Vec::new();
 
         // Directives that should only appear once in main context
-        let unique_directives = ["worker_processes", "pid", "error_log"];
+        let unique_directives = [
+            "worker_processes",
+            "pid",
+            "error_log",
+            "user",
+            "daemon",
+            "master_process",
+            "timer_resolution",
+            "lock_file",
+            "pcre_jit",
+            "thread_pool",
+        ];
 
         // Check main context
         let mut seen: HashMap<&str, usize> = HashMap::new();
