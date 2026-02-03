@@ -116,32 +116,6 @@ pub struct Fix {
 }
 
 impl Fix {
-    /// Create a fix that replaces text on a specific line
-    pub fn replace(line: usize, old_text: &str, new_text: &str) -> Self {
-        Self {
-            line,
-            old_text: Some(old_text.to_string()),
-            new_text: new_text.to_string(),
-            delete_line: false,
-            insert_after: false,
-            start_offset: None,
-            end_offset: None,
-        }
-    }
-
-    /// Create a fix that replaces an entire line
-    pub fn replace_line(line: usize, new_text: &str) -> Self {
-        Self {
-            line,
-            old_text: None,
-            new_text: new_text.to_string(),
-            delete_line: false,
-            insert_after: false,
-            start_offset: None,
-            end_offset: None,
-        }
-    }
-
     /// Create a fix that deletes an entire line
     pub fn delete(line: usize) -> Self {
         Self {

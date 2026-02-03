@@ -737,6 +737,10 @@ mod tests {
             let mut errors = Vec::new();
             for directive in config.all_directives() {
                 if directive.is("test_directive") && directive.first_arg_is("bad") {
+                    // Use range-based fix: replace from directive start to end
+                    let start = directive.span.start.offset - directive.leading_whitespace.len();
+                    let end = directive.span.end.offset;
+                    let fixed = format!("{}test_directive good;", directive.leading_whitespace);
                     errors.push(
                         LintError::warning(
                             "test-plugin-fix",
@@ -745,11 +749,7 @@ mod tests {
                             directive.span.start.line,
                             directive.span.start.column,
                         )
-                        .with_fix(Fix::replace(
-                            directive.span.start.line,
-                            "test_directive bad",
-                            "test_directive good",
-                        )),
+                        .with_fix(Fix::replace_range(start, end, &fixed)),
                     );
                 }
             }
@@ -782,17 +782,21 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_fixes_replace() {
+    fn test_apply_fixes_replace_range() {
+        // content = "line1\ntest bad\nline3"
+        // "bad" starts at offset 11 (6 + 5), length 3
         let content = "line1\ntest bad\nline3";
-        let fix = Fix::replace(2, "bad", "good");
+        let fix = Fix::replace_range(11, 14, "good");
         let result = apply_fixes(content, &[&fix]);
         assert_eq!(result, "line1\ntest good\nline3");
     }
 
     #[test]
-    fn test_apply_fixes_replace_line() {
+    fn test_apply_fixes_replace_range_line() {
+        // content = "line1\nold line\nline3"
+        // line 2 starts at offset 6, "old line" is 8 chars
         let content = "line1\nold line\nline3";
-        let fix = Fix::replace_line(2, "new line");
+        let fix = Fix::replace_range(6, 14, "new line");
         let result = apply_fixes(content, &[&fix]);
         assert_eq!(result, "line1\nnew line\nline3");
     }
@@ -814,10 +818,12 @@ mod tests {
     }
 
     #[test]
-    fn test_apply_fixes_multiple() {
+    fn test_apply_fixes_multiple_range() {
+        // content = "bad1\nbad2\nbad3"
+        // "bad1" at offset 0..4, "bad3" at offset 10..14
         let content = "bad1\nbad2\nbad3";
-        let fix1 = Fix::replace(1, "bad1", "good1");
-        let fix3 = Fix::replace(3, "bad3", "good3");
+        let fix1 = Fix::replace_range(0, 4, "good1");
+        let fix3 = Fix::replace_range(10, 14, "good3");
         let result = apply_fixes(content, &[&fix1, &fix3]);
         assert_eq!(result, "good1\nbad2\ngood3");
     }
