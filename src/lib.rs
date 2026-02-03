@@ -29,7 +29,7 @@ pub use linter::{Fix, LintError, Linter, Severity};
 pub use parser::{parse_config, parse_string};
 
 #[cfg(feature = "cli")]
-pub use include::{collect_included_files, IncludedFile};
+pub use include::{collect_included_files, collect_included_files_with_context, IncludedFile};
 #[cfg(feature = "cli")]
 pub use reporter::{OutputFormat, Reporter};
 

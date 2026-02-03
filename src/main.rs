@@ -1,8 +1,9 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::control;
 use nginx_lint::{
-    apply_fixes, collect_included_files, parse_config, pre_parse_checks_with_config, ColorMode,
-    IncludedFile, LintConfig, LintError, Linter, OutputFormat, Reporter, Severity,
+    apply_fixes, collect_included_files, collect_included_files_with_context, parse_config,
+    pre_parse_checks_with_config, ColorMode, IncludedFile, LintConfig, LintError, Linter,
+    OutputFormat, Reporter, Severity,
 };
 #[cfg(feature = "plugins")]
 use nginx_lint::linter::LintRule;
@@ -49,6 +50,12 @@ struct Cli {
     /// Do not exit with non-zero code on warnings and info (only fail on errors)
     #[arg(long)]
     no_fail_on_warnings: bool,
+
+    /// Specify parent context for files not included from a parent config.
+    /// Comma-separated list of block names (e.g., "http,server" for sites-available files).
+    /// This enables context-aware rules like server_tokens detection.
+    #[arg(long, value_name = "CONTEXT")]
+    context: Option<String>,
 
     /// Directory containing WASM plugins for custom lint rules (requires plugins feature)
     #[cfg(feature = "plugins")]
@@ -399,10 +406,26 @@ fn run_lint(cli: Cli) -> ExitCode {
         .unwrap_or_default();
     let reporter = Reporter::with_colors(cli.format.into(), color_config);
 
+    // Parse context option if specified (comma-separated list of block names)
+    let initial_context: Vec<String> = cli
+        .context
+        .as_ref()
+        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+        .unwrap_or_default();
+
     // Collect all files to lint (including files referenced by include directives)
-    let included_files = collect_included_files(&file_path, |path| {
-        parse_config(path).map_err(|e| e.to_string())
-    });
+    let included_files = if initial_context.is_empty() {
+        collect_included_files(&file_path, |path| {
+            parse_config(path).map_err(|e| e.to_string())
+        })
+    } else {
+        if cli.verbose {
+            eprintln!("Using context: {}", initial_context.join(" > "));
+        }
+        collect_included_files_with_context(&file_path, |path| {
+            parse_config(path).map_err(|e| e.to_string())
+        }, initial_context)
+    };
 
     if cli.verbose {
         eprintln!(

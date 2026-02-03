@@ -34,11 +34,34 @@ pub fn collect_included_files<F>(root_path: &Path, parse_fn: F) -> Vec<IncludedF
 where
     F: Fn(&Path) -> Result<Config, String> + Copy,
 {
+    collect_included_files_with_context(root_path, parse_fn, Vec::new())
+}
+
+/// Collect all files to lint with a specified initial context.
+///
+/// This is useful for linting standalone files (like sites-available/*.conf)
+/// that are normally included from a parent config. By specifying the context,
+/// context-aware rules can properly detect issues.
+///
+/// # Arguments
+/// * `root_path` - The root configuration file to start from
+/// * `parse_fn` - A function to parse a config file
+/// * `initial_context` - The parent context (e.g., ["http", "server"])
+///
+/// # Returns
+/// A vector of `IncludedFile` containing all files to lint
+pub fn collect_included_files_with_context<F>(
+    root_path: &Path,
+    parse_fn: F,
+    initial_context: Vec<String>,
+) -> Vec<IncludedFile>
+where
+    F: Fn(&Path) -> Result<Config, String> + Copy,
+{
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut result: Vec<IncludedFile> = Vec::new();
 
-    // Root file has no parent context
-    collect_recursive(root_path, &mut visited, &mut result, parse_fn, Vec::new());
+    collect_recursive(root_path, &mut visited, &mut result, parse_fn, initial_context);
 
     result
 }
