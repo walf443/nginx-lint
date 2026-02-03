@@ -19,9 +19,9 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Path to nginx configuration file
+    /// Path to nginx configuration file(s)
     #[arg(value_name = "FILE")]
-    file: Option<PathBuf>,
+    files: Vec<PathBuf>,
 
     /// Output format
     #[arg(short = 'o', long, value_enum, default_value = "text")]
@@ -338,29 +338,29 @@ fn lint_file(
 }
 
 fn run_lint(cli: Cli) -> ExitCode {
-    let file = match cli.file {
-        Some(f) => f,
-        None => {
-            let _ = Cli::command().print_help();
-            eprintln!();
-            return ExitCode::from(2);
-        }
-    };
+    if cli.files.is_empty() {
+        let _ = Cli::command().print_help();
+        eprintln!();
+        return ExitCode::from(2);
+    }
 
-    // If a directory is specified, look for nginx.conf inside it
-    let file_path = if file.is_dir() {
-        let nginx_conf = file.join("nginx.conf");
-        if !nginx_conf.exists() {
-            eprintln!(
-                "Error: nginx.conf not found in directory {}",
-                file.display()
-            );
-            return ExitCode::from(2);
+    // Resolve file paths (handle directories by looking for nginx.conf inside)
+    let mut file_paths: Vec<PathBuf> = Vec::new();
+    for file in &cli.files {
+        if file.is_dir() {
+            let nginx_conf = file.join("nginx.conf");
+            if !nginx_conf.exists() {
+                eprintln!(
+                    "Error: nginx.conf not found in directory {}",
+                    file.display()
+                );
+                return ExitCode::from(2);
+            }
+            file_paths.push(nginx_conf);
+        } else {
+            file_paths.push(file.clone());
         }
-        nginx_conf
-    } else {
-        file.clone()
-    };
+    }
 
     // Load configuration
     let lint_config = if let Some(config_path) = &cli.config {
@@ -377,8 +377,11 @@ fn run_lint(cli: Cli) -> ExitCode {
             }
         }
     } else {
-        // Try to find .nginx-lint.toml in file's directory or current directory
-        let search_dir = file_path.parent().unwrap_or(std::path::Path::new("."));
+        // Try to find .nginx-lint.toml in first file's directory or current directory
+        let search_dir = file_paths
+            .first()
+            .and_then(|p| p.parent())
+            .unwrap_or(std::path::Path::new("."));
         let config = LintConfig::find_and_load(search_dir);
         if cli.verbose && config.is_some() {
             eprintln!("Found .nginx-lint.toml");
@@ -413,27 +416,39 @@ fn run_lint(cli: Cli) -> ExitCode {
         .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
         .unwrap_or_default();
 
+    if cli.verbose && !initial_context.is_empty() {
+        eprintln!("Using context: {}", initial_context.join(" > "));
+    }
+
     // Collect all files to lint (including files referenced by include directives)
-    let included_files = if initial_context.is_empty() {
-        collect_included_files(&file_path, |path| {
-            parse_config(path).map_err(|e| e.to_string())
-        })
-    } else {
-        if cli.verbose {
-            eprintln!("Using context: {}", initial_context.join(" > "));
+    // Use a set to avoid processing the same file multiple times
+    let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut included_files: Vec<IncludedFile> = Vec::new();
+
+    for file_path in &file_paths {
+        let files_for_path = if initial_context.is_empty() {
+            collect_included_files(file_path, |path| {
+                parse_config(path).map_err(|e| e.to_string())
+            })
+        } else {
+            collect_included_files_with_context(file_path, |path| {
+                parse_config(path).map_err(|e| e.to_string())
+            }, initial_context.clone())
+        };
+
+        for inc in files_for_path {
+            // Canonicalize path to detect duplicates
+            let canonical = inc.path.canonicalize().unwrap_or_else(|_| inc.path.clone());
+            if !seen_paths.contains(&canonical) {
+                seen_paths.insert(canonical);
+                included_files.push(inc);
+            }
         }
-        collect_included_files_with_context(&file_path, |path| {
-            parse_config(path).map_err(|e| e.to_string())
-        }, initial_context)
-    };
+    }
 
     if cli.verbose {
-        eprintln!(
-            "Linting {} file(s): {}",
-            included_files.len(),
-            file_path.display()
-        );
-        for inc in &included_files[1..] {
+        eprintln!("Linting {} file(s)", included_files.len());
+        for inc in &included_files {
             eprintln!("  - {}", inc.path.display());
         }
     }
