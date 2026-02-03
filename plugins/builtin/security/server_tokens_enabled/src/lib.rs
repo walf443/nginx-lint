@@ -85,8 +85,11 @@ impl Plugin for ServerTokensEnabledPlugin {
 
         // If we have http context but no server_tokens directive at all, warn about the default
         // Don't warn if we already warned about explicit 'on' - that's redundant
+        // Also don't warn if we're inside server/location context (via --context http,server)
+        // because server_tokens is typically set at the http level in the parent config
         let has_http_context = http_block_line.is_some();
-        if (has_http_context || in_http_include_context) && !has_server_tokens_off && !has_server_tokens_on {
+        let is_nested_include = config.include_context.iter().any(|c| c == "server" || c == "location");
+        if (has_http_context || in_http_include_context) && !has_server_tokens_off && !has_server_tokens_on && !is_nested_include {
             // Use http block line if available, otherwise line 1 for included files
             let line = http_block_line.unwrap_or(1);
             errors.push(LintError::warning(
@@ -364,7 +367,8 @@ server {
 
     #[test]
     fn test_include_context_from_server() {
-        // File included from server context (within http) should be checked
+        // File included from server context (within http) should NOT warn about default
+        // because server_tokens is typically set at the http level in parent config
         use nginx_lint::parse_string;
 
         let mut config = parse_string(
@@ -382,9 +386,31 @@ location / {
         let plugin = ServerTokensEnabledPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        // Should warn because no server_tokens off
+        // Should NOT warn - server_tokens is expected to be set at http level in parent
+        assert!(errors.is_empty(), "Expected no errors for nested include context, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_from_server_with_explicit_on() {
+        // Explicit 'on' should still warn even in nested context
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+server_tokens on;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = ServerTokensEnabledPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        // Should warn because explicit 'on' is always wrong
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].message.contains("defaults to 'on'"));
+        assert!(errors[0].message.contains("should be 'off'"));
     }
 
     #[test]
