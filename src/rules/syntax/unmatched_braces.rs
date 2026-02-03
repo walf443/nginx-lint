@@ -51,6 +51,14 @@ impl UnmatchedBraces {
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len();
 
+        // Pre-calculate line start offsets for range-based fixes
+        let mut line_offsets: Vec<usize> = Vec::with_capacity(lines.len());
+        let mut offset = 0;
+        for line in &lines {
+            line_offsets.push(offset);
+            offset += line.len() + 1; // +1 for '\n'
+        }
+
         let mut brace_stack: Vec<BraceInfo> = Vec::new();
         let mut string_char: Option<char> = None;
         let mut in_comment = false;
@@ -216,15 +224,15 @@ impl UnmatchedBraces {
                     if !found_match {
                         // Extra closing brace - no matching opening brace
                         // Try to find a block directive above that's missing '{'
-                        let fix = find_missing_open_brace_fix(&lines, line_number, close_indent);
+                        let fix_result = find_missing_open_brace_fix(&lines, &line_offsets, line_number, close_indent);
 
                         // Skip if we already reported this as a block directive missing '{'
-                        let already_reported = fix.as_ref().map_or(false, |f| {
-                            block_directive_error_lines.contains(&f.line)
+                        let already_reported = fix_result.as_ref().map_or(false, |(_, fix_line)| {
+                            block_directive_error_lines.contains(fix_line)
                         });
 
                         if !already_reported {
-                            let (message, fix) = if let Some(f) = fix {
+                            let (message, fix) = if let Some((f, _)) = fix_result {
                                 (
                                     "Missing opening brace '{' for block directive",
                                     Some(f),
@@ -282,8 +290,12 @@ impl UnmatchedBraces {
                             additional_block_directives,
                         ) {
                             // This is a block directive missing its opening brace
-                            let new_line = format!("{} {{", line.trim_end());
-                            let fix = Fix::replace_line(line_number, &new_line);
+                            // Use range-based fix: replace trailing whitespace with " {"
+                            let line_start = line_offsets[line_num];
+                            let content_end = line_start + line.trim_end().len();
+                            let line_end = line_start + line.len();
+                            // Replace from end of content to end of line with " {"
+                            let fix = Fix::replace_range(content_end, line_end, " {");
                             errors.push(
                                 LintError::new(
                                     self.name(),
@@ -356,8 +368,13 @@ impl UnmatchedBraces {
 }
 
 /// Find a block directive above that's missing an opening brace
-/// Returns a Fix to add ' {' to that line if found
-fn find_missing_open_brace_fix(lines: &[&str], close_line: usize, close_indent: usize) -> Option<Fix> {
+/// Returns a tuple of (Fix, line_number) if found
+fn find_missing_open_brace_fix(
+    lines: &[&str],
+    line_offsets: &[usize],
+    close_line: usize,
+    close_indent: usize,
+) -> Option<(Fix, usize)> {
     // Look backwards for a line at the same indent that looks like a block directive
     // Block directives typically: don't end with ';' or '{', and have content
     for i in (0..close_line - 1).rev() {
@@ -375,9 +392,12 @@ fn find_missing_open_brace_fix(lines: &[&str], close_line: usize, close_indent: 
             // Check if this line looks like a block directive missing '{'
             if !trimmed.ends_with('{') && !trimmed.ends_with(';') && !trimmed.ends_with('}') {
                 // This could be the block directive missing '{'
+                // Use range-based fix: replace trailing whitespace with " {"
                 let line_number = i + 1;
-                let new_line = format!("{} {{", line.trim_end());
-                return Some(Fix::replace_line(line_number, &new_line));
+                let line_start = line_offsets[i];
+                let content_end = line_start + line.trim_end().len();
+                let line_end = line_start + line.len();
+                return Some((Fix::replace_range(content_end, line_end, " {"), line_number));
             }
             break;
         }
@@ -388,9 +408,12 @@ fn find_missing_open_brace_fix(lines: &[&str], close_line: usize, close_indent: 
             && !trimmed.ends_with(';')
             && !trimmed.ends_with('}')
         {
+            // Use range-based fix: replace trailing whitespace with " {"
             let line_number = i + 1;
-            let new_line = format!("{} {{", line.trim_end());
-            return Some(Fix::replace_line(line_number, &new_line));
+            let line_start = line_offsets[i];
+            let content_end = line_start + line.trim_end().len();
+            let line_end = line_start + line.len();
+            return Some((Fix::replace_range(content_end, line_end, " {"), line_number));
         }
     }
 
@@ -894,10 +917,16 @@ http {
         assert_eq!(errors.len(), 1);
 
         let fix = errors[0].fix.as_ref().expect("Expected fix");
+        // Range-based fix appends " {" to the line
         assert!(
-            fix.new_text.contains("server {"),
+            fix.new_text.contains("{"),
             "Fix should add opening brace, got: {}",
             fix.new_text
+        );
+        // Verify it's a range-based fix
+        assert!(
+            fix.start_offset.is_some() && fix.end_offset.is_some(),
+            "Expected range-based fix"
         );
     }
 

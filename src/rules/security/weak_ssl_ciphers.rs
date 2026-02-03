@@ -103,7 +103,6 @@ impl LintRule for WeakSslCiphers {
                     // Generate fix with required exclusions added
                     let fixed_cipher_string =
                         self.generate_fixed_cipher_string(cipher_string, &missing_exclusions);
-                    let indent = " ".repeat(directive.span.start.column.saturating_sub(1));
 
                     // Determine if original uses quotes (check raw value for quotes)
                     let quote_char = if cipher_arg.raw.starts_with('\'') {
@@ -114,11 +113,17 @@ impl LintRule for WeakSslCiphers {
                         ""
                     };
 
-                    let fixed_line = format!(
+                    // Use range-based fix to replace the directive content
+                    let fixed_content = format!(
                         "{}ssl_ciphers {}{}{};",
-                        indent, quote_char, fixed_cipher_string, quote_char
+                        directive.leading_whitespace,
+                        quote_char,
+                        fixed_cipher_string,
+                        quote_char
                     );
-                    let fix = Fix::replace_line(directive.span.start.line, &fixed_line);
+                    let start = directive.span.start.offset - directive.leading_whitespace.len();
+                    let end = directive.span.end.offset;
+                    let fix = Fix::replace_range(start, end, &fixed_content);
 
                     let message = format!(
                         "Missing cipher exclusions: {}",

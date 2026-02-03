@@ -72,10 +72,16 @@ impl LintRule for DeprecatedSslProtocol {
                 let fixed_protocols =
                     generate_fixed_protocols(&current_protocols, &self.allowed_protocols);
 
-                // Calculate indentation from the directive's position
-                let indent = " ".repeat(directive.span.start.column.saturating_sub(1));
-                let fixed_line = format!("{}ssl_protocols {};", indent, fixed_protocols);
-                let fix = Fix::replace_line(directive.span.start.line, &fixed_line);
+                // Use range-based fix to replace the directive content
+                // Include leading whitespace for proper indentation
+                let fixed_content = format!(
+                    "{}ssl_protocols {};",
+                    directive.leading_whitespace,
+                    fixed_protocols
+                );
+                let start = directive.span.start.offset - directive.leading_whitespace.len();
+                let end = directive.span.end.offset;
+                let fix = Fix::replace_range(start, end, &fixed_content);
 
                 // Report each deprecated protocol but attach fix only to the first one
                 for (i, arg) in deprecated_args.iter().enumerate() {

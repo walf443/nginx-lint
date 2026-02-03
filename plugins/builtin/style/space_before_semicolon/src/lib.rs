@@ -63,19 +63,15 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
 }
 
 fn create_fix(directive: &Directive) -> Fix {
-    // Reconstruct the directive line without the space before semicolon
-    let mut line = String::new();
-    line.push_str(&directive.leading_whitespace);
-    line.push_str(&directive.name);
-
-    for arg in &directive.args {
-        line.push(' ');
-        line.push_str(&arg.raw);
-    }
-
-    line.push(';');
-
-    Fix::replace_line(directive.span.start.line, &line)
+    // Use range-based fix to remove only the space before semicolon
+    // span.end.offset is right after the ';'
+    // The space is before the ';', so:
+    //   semicolon is at span.end.offset - 1
+    //   space starts at span.end.offset - 1 - space_before_terminator.len()
+    let semicolon_offset = directive.span.end.offset - 1;
+    let start = semicolon_offset - directive.space_before_terminator.len();
+    let end = semicolon_offset;
+    Fix::replace_range(start, end, "")
 }
 
 // Export the plugin

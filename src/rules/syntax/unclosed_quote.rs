@@ -32,7 +32,13 @@ impl UnclosedQuote {
 
     /// Try to create a fix for an unclosed quote
     /// Analyzes the line to find the best position to insert the closing quote
-    fn create_fix(quote: char, line_number: usize, line_content: &str, quote_start_col: usize) -> Option<Fix> {
+    /// line_start_offset is the byte offset where the line starts in the content
+    fn create_fix(
+        quote: char,
+        line_content: &str,
+        line_start_offset: usize,
+        quote_start_col: usize,
+    ) -> Option<Fix> {
         let trimmed = line_content.trim_end();
 
         // If the line doesn't end with semicolon, we can't auto-fix
@@ -40,7 +46,6 @@ impl UnclosedQuote {
             return None;
         }
 
-        let indent = line_content.len() - line_content.trim_start().len();
         let semicolon_pos = trimmed.rfind(';').unwrap();
         let before_semicolon = &trimmed[..semicolon_pos];
 
@@ -61,20 +66,16 @@ impl UnclosedQuote {
             if after_quote.ends_with(&pattern) {
                 // Insert quote before the space preceding the keyword
                 let keyword_start = before_semicolon.len() - keyword.len() - 1;
-                let fixed_part = format!(
-                    "{}{}{}",
-                    &before_semicolon[..keyword_start],
-                    quote,
-                    &before_semicolon[keyword_start..]
-                );
-                let fixed_line = format!("{}{};", " ".repeat(indent), fixed_part.trim_start());
-                return Some(Fix::replace_line(line_number, &fixed_line));
+                // Use range-based fix: insert quote at the keyword_start position
+                let insert_offset = line_start_offset + keyword_start;
+                return Some(Fix::replace_range(insert_offset, insert_offset, &quote.to_string()));
             }
         }
 
         // Default: insert quote before semicolon
-        let fixed_line = format!("{}{}{};", " ".repeat(indent), before_semicolon.trim_start(), quote);
-        Some(Fix::replace_line(line_number, &fixed_line))
+        // Use range-based fix: insert quote right before the semicolon
+        let insert_offset = line_start_offset + semicolon_pos;
+        Some(Fix::replace_range(insert_offset, insert_offset, &quote.to_string()))
     }
 }
 
@@ -88,12 +89,18 @@ impl UnclosedQuote {
         let mut errors = Vec::new();
 
         let mut in_comment = false;
-        let mut string_start: Option<(char, usize, usize, String)> = None; // (quote_char, line, column, line_content)
+        let mut string_start: Option<(char, usize, usize, String, usize)> = None; // (quote_char, line, column, line_content, line_start_offset)
         let mut prev_char = ' ';
         let lines_vec: Vec<&str> = content.lines().collect();
 
+        // Track byte offsets for each line
+        let mut line_start_offset: usize = 0;
+
         for (line_num, line) in lines_vec.iter().enumerate() {
             let line_number = line_num + 1;
+            let current_line_offset = line_start_offset;
+            // Update offset for next line
+            line_start_offset += line.len() + 1; // +1 for '\n'
             let chars: Vec<char> = line.chars().collect();
 
             for (col, &ch) in chars.iter().enumerate() {
@@ -111,13 +118,13 @@ impl UnclosedQuote {
 
                 // Start of string
                 if (ch == '"' || ch == '\'') && string_start.is_none() {
-                    string_start = Some((ch, line_number, column, line.to_string()));
+                    string_start = Some((ch, line_number, column, line.to_string(), current_line_offset));
                     prev_char = ch;
                     continue;
                 }
 
                 // End string only with matching quote (and not escaped)
-                if let Some((quote, _, _, _)) = string_start {
+                if let Some((quote, _, _, _, _)) = string_start {
                     if ch == quote && prev_char != '\\' {
                         string_start = None;
                     }
@@ -131,7 +138,7 @@ impl UnclosedQuote {
             // At end of line, check if there's an unclosed string that started on this line
             // and the line ends with semicolon (indicating a directive that should be complete)
             let trimmed = line.trim_end();
-            if let Some((quote, start_line, start_col, ref start_line_content)) = string_start {
+            if let Some((quote, start_line, start_col, ref start_line_content, start_line_offset)) = string_start {
                 // If the string started on this line and the line ends with semicolon,
                 // it's likely an unclosed quote error (not a multi-line string)
                 if start_line == line_number && trimmed.ends_with(';') {
@@ -142,7 +149,7 @@ impl UnclosedQuote {
                     };
                     let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
 
-                    let fix = Self::create_fix(quote, start_line, start_line_content, start_col);
+                    let fix = Self::create_fix(quote, start_line_content, start_line_offset, start_col);
 
                     let mut error =
                         LintError::new(self.name(), self.category(), &message, Severity::Error)
@@ -164,7 +171,7 @@ impl UnclosedQuote {
         }
 
         // Report unclosed strings at end of file (for multi-line strings that never closed)
-        if let Some((quote, start_line, start_col, start_line_content)) = string_start {
+        if let Some((quote, start_line, start_col, start_line_content, start_line_offset)) = string_start {
             let quote_name = if quote == '"' {
                 "double quote"
             } else {
@@ -173,7 +180,7 @@ impl UnclosedQuote {
             let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
 
             // Try to create a fix: if the line ends with semicolon, insert quote before it
-            let fix = Self::create_fix(quote, start_line, &start_line_content, start_col);
+            let fix = Self::create_fix(quote, &start_line_content, start_line_offset, start_col);
 
             let mut error =
                 LintError::new(self.name(), self.category(), &message, Severity::Error)

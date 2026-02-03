@@ -48,10 +48,15 @@ impl Indent {
         let mut raw_block_brace_depth = 0;
         let mut in_multiline_string = false;
         let mut string_char: Option<char> = None;
+        let mut line_start_offset: usize = 0;
 
         for (line_num, line) in content.lines().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
+            let current_line_offset = line_start_offset;
+
+            // Update offset for next line (line length + newline character)
+            line_start_offset += line.len() + 1; // +1 for '\n'
 
             // Skip empty lines
             if trimmed.is_empty() {
@@ -84,6 +89,7 @@ impl Indent {
                         line,
                         trimmed,
                         line_number,
+                        current_line_offset,
                         expected_depth,
                         &mut detected_indent_size,
                         self.indent_size,
@@ -101,6 +107,7 @@ impl Indent {
                     line,
                     trimmed,
                     line_number,
+                    current_line_offset,
                     expected_depth,
                     &mut detected_indent_size,
                     self.indent_size,
@@ -120,6 +127,7 @@ impl Indent {
                     line,
                     trimmed,
                     line_number,
+                    current_line_offset,
                     expected_depth,
                     &mut detected_indent_size,
                     self.indent_size,
@@ -155,6 +163,7 @@ impl Indent {
                 line,
                 trimmed,
                 line_number,
+                current_line_offset,
                 expected_depth,
                 &mut detected_indent_size,
                 self.indent_size,
@@ -241,8 +250,9 @@ fn check_line_indentation(
     rule_name: &'static str,
     category: &'static str,
     line: &str,
-    trimmed: &str,
+    _trimmed: &str,
     line_number: usize,
+    line_start_offset: usize,
     expected_depth: i32,
     _detected_indent_size: &mut Option<usize>,
     default_indent_size: usize,
@@ -256,8 +266,8 @@ fn check_line_indentation(
     // Detect if line uses tabs
     if line.starts_with('\t') {
         let correct_indent = " ".repeat(expected_spaces);
-        let fixed_line = format!("{}{}", correct_indent, trimmed);
-        let fix = Fix::replace_line(line_number, &fixed_line);
+        // Use range-based fix to replace only the leading whitespace
+        let fix = Fix::replace_range(line_start_offset, line_start_offset + leading_spaces, &correct_indent);
         errors.push(
             LintError::new(
                 rule_name,
@@ -278,8 +288,8 @@ fn check_line_indentation(
             expected_spaces, leading_spaces
         );
         let correct_indent = " ".repeat(expected_spaces);
-        let fixed_line = format!("{}{}", correct_indent, trimmed);
-        let fix = Fix::replace_line(line_number, &fixed_line);
+        // Use range-based fix to replace only the leading whitespace
+        let fix = Fix::replace_range(line_start_offset, line_start_offset + leading_spaces, &correct_indent);
         errors.push(
             LintError::new(rule_name, category, &message, Severity::Warning)
                 .with_location(line_number, 1)
