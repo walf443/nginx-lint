@@ -178,8 +178,8 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            DeprecatedSslProtocol, Indent, MissingErrorLog, MissingSemicolon, UnclosedQuote,
-            UnmatchedBraces, WeakSslCiphers,
+            DeprecatedSslProtocol, Indent, InvalidDirectiveContext, MissingErrorLog,
+            MissingSemicolon, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
 
         let mut linter = Self::new();
@@ -195,6 +195,9 @@ impl Linter {
         }
         if is_enabled("missing-semicolon") {
             linter.add_rule(Box::new(MissingSemicolon));
+        }
+        if is_enabled("invalid-directive-context") {
+            linter.add_rule(Box::new(InvalidDirectiveContext));
         }
 
         // Security rules

@@ -1022,3 +1022,232 @@ http {
     assert!(!fix.delete_line, "Should not delete entire line");
     assert_eq!(fix.new_text, "        server_tokens off;", "Fix should preserve indentation");
 }
+
+// ============================================================================
+// Invalid directive context tests
+// ============================================================================
+
+#[test]
+fn test_invalid_directive_context_server_in_server() {
+    let content = r#"
+http {
+    server {
+        server {
+            listen 80;
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert_eq!(
+        context_errors.len(),
+        1,
+        "Expected 1 invalid-directive-context error, got: {:?}",
+        context_errors
+    );
+    assert!(
+        context_errors[0].message.contains("'server' directive cannot be inside 'server'"),
+        "Expected server in server error, got: {}",
+        context_errors[0].message
+    );
+}
+
+#[test]
+fn test_invalid_directive_context_location_in_http() {
+    let content = r#"
+http {
+    location / {
+        root /var/www;
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert_eq!(
+        context_errors.len(),
+        1,
+        "Expected 1 invalid-directive-context error, got: {:?}",
+        context_errors
+    );
+    assert!(
+        context_errors[0].message.contains("'location' directive cannot be inside 'http'"),
+        "Expected location in http error, got: {}",
+        context_errors[0].message
+    );
+}
+
+#[test]
+fn test_invalid_directive_context_http_not_at_root() {
+    let content = r#"
+http {
+    server {
+        http {
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert!(
+        context_errors.iter().any(|e| e.message.contains("'http' directive must be in main context")),
+        "Expected http not at root error, got: {:?}",
+        context_errors
+    );
+}
+
+#[test]
+fn test_invalid_directive_context_server_at_root() {
+    let content = r#"
+server {
+    listen 80;
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert_eq!(
+        context_errors.len(),
+        1,
+        "Expected 1 invalid-directive-context error, got: {:?}",
+        context_errors
+    );
+    assert!(
+        context_errors[0].message.contains("'server' directive must be inside one of:"),
+        "Expected server at root error, got: {}",
+        context_errors[0].message
+    );
+    assert!(
+        context_errors[0].message.contains("not in main context"),
+        "Expected 'not in main context' in error, got: {}",
+        context_errors[0].message
+    );
+}
+
+#[test]
+fn test_valid_directive_context() {
+    let content = r#"
+events {
+    worker_connections 1024;
+}
+
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+
+        location / {
+            root /var/www;
+
+            if ($request_method = POST) {
+                return 405;
+            }
+        }
+    }
+}
+"#;
+    let config = parse_string(content).expect("Failed to parse config");
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert!(
+        context_errors.is_empty(),
+        "Expected no invalid-directive-context errors, got: {:?}",
+        context_errors
+    );
+}
+
+#[test]
+fn test_include_context_propagation() {
+    // Simulate a config included from server context - location should be valid
+    let mut config = parse_string(r#"
+location / {
+    root /var/www;
+}
+"#).expect("Failed to parse config");
+
+    // Set include context as if this file was included from http { server { ... } }
+    config.include_context = vec!["http".to_string(), "server".to_string()];
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert!(
+        context_errors.is_empty(),
+        "Expected no invalid-directive-context errors when included from server context, got: {:?}",
+        context_errors
+    );
+}
+
+#[test]
+fn test_include_context_error() {
+    // Simulate a config included from http context (not inside server) - location should error
+    let mut config = parse_string(r#"
+location / {
+    root /var/www;
+}
+"#).expect("Failed to parse config");
+
+    // Set include context as if this file was included from http { ... } (no server)
+    config.include_context = vec!["http".to_string()];
+
+    let linter = Linter::with_default_rules();
+    let errors = linter.lint(&config, std::path::Path::new("test.conf"));
+
+    let context_errors: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-directive-context")
+        .collect();
+
+    assert_eq!(
+        context_errors.len(),
+        1,
+        "Expected 1 invalid-directive-context error when included from http context, got: {:?}",
+        context_errors
+    );
+    assert!(
+        context_errors[0].message.contains("'location' directive cannot be inside 'http'"),
+        "Expected location in http error, got: {}",
+        context_errors[0].message
+    );
+}

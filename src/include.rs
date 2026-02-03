@@ -14,6 +14,9 @@ pub struct IncludedFile {
     pub path: PathBuf,
     pub config: Option<Config>,
     pub parse_error: Option<String>,
+    /// The context (parent directive stack) where this file was included
+    /// Empty for root file, e.g., ["http", "server"] for a file included in server block
+    pub include_context: Vec<String>,
 }
 
 /// Collect all files to lint, including those referenced by `include` directives.
@@ -34,7 +37,8 @@ where
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut result: Vec<IncludedFile> = Vec::new();
 
-    collect_recursive(root_path, &mut visited, &mut result, parse_fn);
+    // Root file has no parent context
+    collect_recursive(root_path, &mut visited, &mut result, parse_fn, Vec::new());
 
     result
 }
@@ -44,6 +48,7 @@ fn collect_recursive<F>(
     visited: &mut HashSet<PathBuf>,
     result: &mut Vec<IncludedFile>,
     parse_fn: F,
+    include_context: Vec<String>,
 ) where
     F: Fn(&Path) -> Result<Config, String> + Copy,
 {
@@ -56,6 +61,7 @@ fn collect_recursive<F>(
                 path: path.to_path_buf(),
                 config: None,
                 parse_error: Some(format!("File not found: {}", path.display())),
+                include_context: include_context.clone(),
             });
             return;
         }
@@ -69,20 +75,24 @@ fn collect_recursive<F>(
 
     // Parse the file
     match parse_fn(path) {
-        Ok(config) => {
-            // Find include directives and resolve them
-            let includes = find_include_paths(&config, path);
+        Ok(mut config) => {
+            // Set the include context on the config
+            config.include_context = include_context.clone();
+
+            // Find include directives with their contexts and resolve them
+            let includes = find_include_paths_with_context(&config, path);
 
             // Add this file to results
             result.push(IncludedFile {
                 path: path.to_path_buf(),
                 config: Some(config),
                 parse_error: None,
+                include_context: include_context.clone(),
             });
 
-            // Recursively process includes
-            for include_path in includes {
-                collect_recursive(&include_path, visited, result, parse_fn);
+            // Recursively process includes with their contexts
+            for (include_path, child_context) in includes {
+                collect_recursive(&include_path, visited, result, parse_fn, child_context);
             }
         }
         Err(e) => {
@@ -90,24 +100,57 @@ fn collect_recursive<F>(
                 path: path.to_path_buf(),
                 config: None,
                 parse_error: Some(e),
+                include_context: include_context.clone(),
             });
         }
     }
 }
 
-/// Find all include directives in a config and resolve their paths
-fn find_include_paths(config: &Config, parent_path: &Path) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+/// Find all include directives in a config and resolve their paths with context
+fn find_include_paths_with_context(
+    config: &Config,
+    parent_path: &Path,
+) -> Vec<(PathBuf, Vec<String>)> {
+    let mut results = Vec::new();
     let parent_dir = parent_path.parent().unwrap_or(Path::new("."));
 
-    for directive in config.all_directives() {
-        if directive.is("include") && let Some(pattern) = directive.first_arg() {
-            let resolved = resolve_include_pattern(pattern, parent_dir);
-            paths.extend(resolved);
+    // Start with the include context from the config (from parent file)
+    let base_context = config.include_context.clone();
+
+    // Recursively find includes and track their context
+    find_includes_recursive(&config.items, parent_dir, &base_context, &mut results);
+
+    results
+}
+
+/// Recursively find include directives while tracking the context stack
+fn find_includes_recursive(
+    items: &[crate::parser::ast::ConfigItem],
+    parent_dir: &Path,
+    context: &[String],
+    results: &mut Vec<(PathBuf, Vec<String>)>,
+) {
+    use crate::parser::ast::ConfigItem;
+
+    for item in items {
+        if let ConfigItem::Directive(directive) = item {
+            if directive.is("include") {
+                if let Some(pattern) = directive.first_arg() {
+                    let resolved = resolve_include_pattern(pattern, parent_dir);
+                    for path in resolved {
+                        results.push((path, context.to_vec()));
+                    }
+                }
+            }
+
+            // Recurse into blocks with updated context
+            if let Some(block) = &directive.block {
+                let mut new_context = context.to_vec();
+                new_context.push(directive.name.clone());
+                find_includes_recursive(&block.items, parent_dir, &new_context, results);
+            }
         }
     }
-
-    paths
 }
 
 /// Resolve an include pattern (which may contain glob wildcards) to actual file paths

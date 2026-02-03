@@ -243,6 +243,22 @@ pub use crate::parser::ast::{
 pub trait ConfigExt {
     /// Iterate over all directives recursively
     fn all_directives(&self) -> AllDirectivesIter<'_>;
+
+    /// Iterate over all directives recursively with parent context information
+    ///
+    /// This is useful for rules that need to know the parent context of each directive.
+    /// The `include_context` from the Config is used as the initial parent stack.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// for ctx in config.all_directives_with_context() {
+    ///     if ctx.directive.is("proxy_pass") && !ctx.parent_stack.contains(&"location") {
+    ///         // proxy_pass outside of location
+    ///     }
+    /// }
+    /// ```
+    fn all_directives_with_context(&self) -> AllDirectivesWithContextIter<'_>;
 }
 
 impl ConfigExt for Config {
@@ -250,6 +266,12 @@ impl ConfigExt for Config {
         AllDirectivesIter {
             stack: vec![self.items.iter()],
         }
+    }
+
+    fn all_directives_with_context(&self) -> AllDirectivesWithContextIter<'_> {
+        // Use include_context as the initial parent stack
+        let initial_context: Vec<String> = self.include_context.clone();
+        AllDirectivesWithContextIter::new(&self.items, initial_context)
     }
 }
 
@@ -272,6 +294,95 @@ impl<'a> Iterator for AllDirectivesIter<'a> {
                 }
             } else {
                 self.stack.pop();
+            }
+        }
+        None
+    }
+}
+
+/// A directive with its parent context information
+#[derive(Debug, Clone)]
+pub struct DirectiveWithContext<'a> {
+    /// The directive itself
+    pub directive: &'a Directive,
+    /// Stack of parent directive names (e.g., ["http", "server", "location"])
+    /// This includes the include_context from the Config if the file was included
+    pub parent_stack: Vec<String>,
+    /// Nesting depth (0 = root level, 1 = inside one block, etc.)
+    pub depth: usize,
+}
+
+impl<'a> DirectiveWithContext<'a> {
+    /// Get the immediate parent directive name, if any
+    pub fn parent(&self) -> Option<&str> {
+        self.parent_stack.last().map(|s| s.as_str())
+    }
+
+    /// Check if this directive is inside a specific parent context
+    pub fn is_inside(&self, parent_name: &str) -> bool {
+        self.parent_stack.iter().any(|p| p == parent_name)
+    }
+
+    /// Check if the immediate parent is a specific directive
+    pub fn parent_is(&self, parent_name: &str) -> bool {
+        self.parent() == Some(parent_name)
+    }
+
+    /// Check if this directive is at root level (no parent directives)
+    /// Note: This checks the actual parent_stack, which may include include_context
+    pub fn is_at_root(&self) -> bool {
+        self.parent_stack.is_empty()
+    }
+}
+
+/// Iterator over all directives with their parent context
+pub struct AllDirectivesWithContextIter<'a> {
+    /// Stack of (iterator, parent_name) pairs
+    /// parent_name is the name of the directive that contains this iterator's items
+    stack: Vec<(std::slice::Iter<'a, ConfigItem>, Option<String>)>,
+    /// Current parent stack (built up as we descend)
+    current_parents: Vec<String>,
+}
+
+impl<'a> AllDirectivesWithContextIter<'a> {
+    fn new(items: &'a [ConfigItem], initial_context: Vec<String>) -> Self {
+        Self {
+            stack: vec![(items.iter(), None)],
+            current_parents: initial_context,
+        }
+    }
+}
+
+impl<'a> Iterator for AllDirectivesWithContextIter<'a> {
+    type Item = DirectiveWithContext<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some((iter, _)) = self.stack.last_mut() {
+            if let Some(item) = iter.next() {
+                if let ConfigItem::Directive(directive) = item {
+                    // Capture current context before potentially pushing
+                    let context = DirectiveWithContext {
+                        directive: directive.as_ref(),
+                        parent_stack: self.current_parents.clone(),
+                        depth: self.current_parents.len(),
+                    };
+
+                    // If this directive has a block, push it for later traversal
+                    if let Some(block) = &directive.block {
+                        self.current_parents.push(directive.name.clone());
+                        self.stack
+                            .push((block.items.iter(), Some(directive.name.clone())));
+                    }
+
+                    return Some(context);
+                }
+            } else {
+                // Current iterator exhausted, pop it
+                let (_, parent_name) = self.stack.pop().unwrap();
+                // If we're leaving a block, pop the parent from current_parents
+                if parent_name.is_some() {
+                    self.current_parents.pop();
+                }
             }
         }
         None
@@ -332,5 +443,164 @@ impl ArgumentExt for Argument {
 
     fn is_off(&self) -> bool {
         self.as_str() == "off"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_string;
+
+    #[test]
+    fn test_all_directives_with_context_basic() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        listen 80;
+        location / {
+            root /var/www;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let contexts: Vec<_> = config.all_directives_with_context().collect();
+
+        // http - no parent
+        assert_eq!(contexts[0].directive.name, "http");
+        assert!(contexts[0].parent_stack.is_empty());
+        assert_eq!(contexts[0].depth, 0);
+        assert!(contexts[0].is_at_root());
+
+        // server - parent is http
+        assert_eq!(contexts[1].directive.name, "server");
+        assert_eq!(contexts[1].parent_stack, vec!["http"]);
+        assert_eq!(contexts[1].depth, 1);
+        assert!(contexts[1].is_inside("http"));
+        assert!(contexts[1].parent_is("http"));
+
+        // listen - parent is server
+        assert_eq!(contexts[2].directive.name, "listen");
+        assert_eq!(contexts[2].parent_stack, vec!["http", "server"]);
+        assert_eq!(contexts[2].depth, 2);
+        assert!(contexts[2].is_inside("http"));
+        assert!(contexts[2].is_inside("server"));
+        assert!(contexts[2].parent_is("server"));
+
+        // location - parent is server
+        assert_eq!(contexts[3].directive.name, "location");
+        assert_eq!(contexts[3].parent_stack, vec!["http", "server"]);
+        assert_eq!(contexts[3].depth, 2);
+
+        // root - parent is location
+        assert_eq!(contexts[4].directive.name, "root");
+        assert_eq!(contexts[4].parent_stack, vec!["http", "server", "location"]);
+        assert_eq!(contexts[4].depth, 3);
+        assert!(contexts[4].is_inside("location"));
+        assert!(contexts[4].parent_is("location"));
+    }
+
+    #[test]
+    fn test_all_directives_with_context_include_context() {
+        // Simulate a file included from server context
+        let mut config = parse_string(
+            r#"
+location / {
+    root /var/www;
+}
+"#,
+        )
+        .unwrap();
+
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let contexts: Vec<_> = config.all_directives_with_context().collect();
+
+        // location - parent is server (from include_context)
+        assert_eq!(contexts[0].directive.name, "location");
+        assert_eq!(contexts[0].parent_stack, vec!["http", "server"]);
+        assert_eq!(contexts[0].depth, 2);
+        assert!(contexts[0].is_inside("server"));
+        assert!(contexts[0].parent_is("server"));
+
+        // root - parent is location
+        assert_eq!(contexts[1].directive.name, "root");
+        assert_eq!(
+            contexts[1].parent_stack,
+            vec!["http", "server", "location"]
+        );
+        assert_eq!(contexts[1].depth, 3);
+    }
+
+    #[test]
+    fn test_all_directives_with_context_helper_methods() {
+        let config = parse_string(
+            r#"
+http {
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+    server {
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let contexts: Vec<_> = config.all_directives_with_context().collect();
+
+        // Find proxy_pass
+        let proxy_pass = contexts
+            .iter()
+            .find(|c| c.directive.name == "proxy_pass")
+            .unwrap();
+
+        assert!(proxy_pass.is_inside("location"));
+        assert!(proxy_pass.is_inside("server"));
+        assert!(proxy_pass.is_inside("http"));
+        assert!(!proxy_pass.is_inside("upstream"));
+        assert!(proxy_pass.parent_is("location"));
+        assert!(!proxy_pass.parent_is("server"));
+
+        // Find server inside upstream
+        let upstream_server = contexts
+            .iter()
+            .find(|c| c.directive.name == "server" && c.parent_is("upstream"))
+            .unwrap();
+
+        assert!(upstream_server.is_inside("upstream"));
+        assert!(!upstream_server.is_inside("server"));
+    }
+
+    #[test]
+    fn test_all_directives_with_context_empty_config() {
+        let config = parse_string("").unwrap();
+        let contexts: Vec<_> = config.all_directives_with_context().collect();
+        assert!(contexts.is_empty());
+    }
+
+    #[test]
+    fn test_all_directives_with_context_flat_config() {
+        let config = parse_string(
+            r#"
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+"#,
+        )
+        .unwrap();
+
+        let contexts: Vec<_> = config.all_directives_with_context().collect();
+
+        assert_eq!(contexts.len(), 2);
+        assert!(contexts[0].is_at_root());
+        assert!(contexts[1].is_at_root());
+        assert_eq!(contexts[0].depth, 0);
+        assert_eq!(contexts[1].depth, 0);
     }
 }

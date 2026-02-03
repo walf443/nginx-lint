@@ -39,11 +39,18 @@ impl Span {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     pub items: Vec<ConfigItem>,
+    /// Context from parent file when this config was included
+    /// Empty for root file, e.g., ["http", "server"] for a file included in server block
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub include_context: Vec<String>,
 }
 
 impl Config {
     pub fn new() -> Self {
-        Self { items: Vec::new() }
+        Self {
+            items: Vec::new(),
+            include_context: Vec::new(),
+        }
     }
 
     /// Returns an iterator over top-level directives (excludes comments and blank lines)
@@ -380,6 +387,7 @@ mod tests {
                     trailing_whitespace: String::new(),
                 })),
             ],
+            include_context: Vec::new(),
         };
 
         let names: Vec<&str> = config.all_directives().map(|d| d.name.as_str()).collect();

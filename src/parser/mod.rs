@@ -59,7 +59,10 @@ impl Parser {
 
     fn parse(&mut self) -> ParseResult<Config> {
         let items = self.parse_items(false)?;
-        Ok(Config { items })
+        Ok(Config {
+            items,
+            include_context: Vec::new(),
+        })
     }
 
     fn parse_items(&mut self, in_block: bool) -> ParseResult<Vec<ConfigItem>> {

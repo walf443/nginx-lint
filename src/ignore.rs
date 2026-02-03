@@ -403,6 +403,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "unmatched-braces",
         "unclosed-quote",
         "missing-semicolon",
+        "invalid-directive-context",
         "deprecated-ssl-protocol",
         "server-tokens-enabled",
         "autoindex-enabled",
