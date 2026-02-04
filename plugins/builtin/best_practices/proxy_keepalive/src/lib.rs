@@ -19,12 +19,9 @@ use nginx_lint::plugin_sdk::prelude::*;
 pub struct ProxyKeepalivePlugin;
 
 impl ProxyKeepalivePlugin {
-    /// Check if a version string is 1.1 or higher
+    /// Check if a version string is not 1.0 (i.e., requires Connection header for keepalive)
     fn is_http_11_or_higher(version: &str) -> bool {
-        match version {
-            "1.1" | "2.0" | "2" | "3.0" | "3" => true,
-            _ => false,
-        }
+        version != "1.0"
     }
 
     /// Check if a block has proxy_set_header Connection
