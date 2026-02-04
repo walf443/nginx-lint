@@ -267,6 +267,24 @@ pub fn get_rule_names() -> String {
     serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Debug function to check plugin loading status
+#[wasm_bindgen]
+pub fn debug_plugin_status() -> String {
+    #[cfg(feature = "builtin-plugins")]
+    {
+        use crate::linter::LintRule;
+        use crate::plugin::builtin::load_builtin_plugins;
+        match load_builtin_plugins() {
+            Ok(plugins) => format!("Loaded {} plugins: {:?}", plugins.len(), plugins.iter().map(|p| p.name()).collect::<Vec<_>>()),
+            Err(e) => format!("Failed to load plugins: {}", e),
+        }
+    }
+    #[cfg(not(feature = "builtin-plugins"))]
+    {
+        "builtin-plugins feature not enabled".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

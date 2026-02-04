@@ -11,7 +11,7 @@ default = ["cli", "builtin-plugins"]
 cli = ["clap", "colored", "glob", "rayon"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
-# Embed WASM files into the binary (requires demo/pkg/ to exist at build time)
+# Embed WASM files into the binary (requires web/pkg/ to exist at build time)
 web-server-embed-wasm = ["web-server"]
 # WASM plugin support for custom lint rules
 plugins = ["wasmi"]

@@ -253,7 +253,7 @@ enabled = true</textarea>
     </div>
 
     <script type="module">
-        import init, { lint_with_config, version, get_rule_names } from '/pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names, debug_plugin_status } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
         let currentErrors = [];
@@ -263,6 +263,13 @@ enabled = true</textarea>
                 await init();
                 wasmReady = true;
                 document.getElementById('version').textContent = 'v' + version();
+
+                // Log available rules for debugging
+                const ruleNames = JSON.parse(get_rule_names());
+                console.log('Available rules:', ruleNames);
+                console.log('Rule count:', ruleNames.length);
+                console.log('Plugin status:', debug_plugin_status());
+
                 document.getElementById('results').innerHTML = '<div class="no-issues">Ready! Click "Lint" or start typing.</div>';
 
                 // Auto-lint on load

@@ -4,23 +4,23 @@
 build: collect-plugins
 	cargo build --release --features builtin-plugins
 
-# Build WASM module (for web demo, without builtin plugins)
+# Build WASM module (for web, without builtin plugins)
 build-wasm:
-	wasm-pack build --target web --out-dir demo/pkg --features wasm
+	wasm-pack build --target web --out-dir web/pkg --features wasm
 
-# Build WASM module with builtin plugins (for web demo)
+# Build WASM module with builtin plugins (for web)
 build-wasm-with-plugins: collect-plugins
-	wasm-pack build --target web --out-dir demo/pkg --features wasm,builtin-plugins
+	wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
 
 # Build web server with embedded WASM (builds WASM first, then embeds it)
 build-web: build-wasm-with-plugins
 	cargo build --release --features web-server-embed-wasm
 
-# Run web demo (development mode, reads files from disk)
+# Run web server (development mode, reads files from disk)
 run-web:
 	cargo run --features web-server -- web
 
-# Run web demo with embedded WASM
+# Run web server with embedded WASM
 run-web-embed: build-web
 	cargo run --release --features web-server-embed-wasm -- web
 
@@ -101,7 +101,7 @@ lint:
 # Clean build artifacts
 clean:
 	cargo clean
-	rm -rf demo/pkg
+	rm -rf web/pkg
 	rm -rf target/builtin-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
@@ -116,11 +116,11 @@ help:
 	@echo "  make build              - Build CLI with builtin plugins (release)"
 	@echo "  make build-plugins      - Build WASM builtin plugins"
 	@echo "  make build-with-plugins - Build CLI with embedded builtin plugins"
-	@echo "  make build-wasm         - Build WASM for web demo (without plugins)"
-	@echo "  make build-wasm-with-plugins - Build WASM for web demo (with plugins)"
+	@echo "  make build-wasm         - Build WASM for web (without plugins)"
+	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"
 	@echo "  make build-web          - Build web server with embedded WASM (with plugins)"
-	@echo "  make run-web            - Run web demo (development)"
-	@echo "  make run-web-embed      - Run web demo with embedded WASM"
+	@echo "  make run-web            - Run web server (development)"
+	@echo "  make run-web-embed      - Run web server with embedded WASM"
 	@echo "  make test               - Run tests"
 	@echo "  make test-all           - Run all tests including plugins"
 	@echo "  make lint               - Run clippy"

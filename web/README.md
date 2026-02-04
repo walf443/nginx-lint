@@ -1,6 +1,6 @@
-# nginx-lint WASM Demo
+# nginx-lint Web
 
-This demo allows you to try nginx-lint in your browser.
+This allows you to try nginx-lint in your browser.
 
 ## Quick Start
 
@@ -31,7 +31,7 @@ python3 -m http.server 8080
 npx serve .
 ```
 
-Then open http://localhost:8080/demo/ in your browser.
+Then open http://localhost:8080/web/ in your browser.
 
 ## Features
 

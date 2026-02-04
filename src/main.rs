@@ -901,14 +901,14 @@ fn main() -> ExitCode {
 fn run_web(port: u16, open_browser: bool) -> ExitCode {
     use tiny_http::{Response, Server};
 
-    // Embedded demo HTML
-    const INDEX_HTML: &str = include_str!("../demo/index.html");
+    // Embedded web HTML
+    const INDEX_HTML: &str = include_str!("../web/index.html");
 
     // When web-server-embed-wasm feature is enabled, embed the WASM files
     #[cfg(feature = "web-server-embed-wasm")]
-    const NGINX_LINT_JS: &str = include_str!("../demo/pkg/nginx_lint.js");
+    const NGINX_LINT_JS: &str = include_str!("../web/pkg/nginx_lint.js");
     #[cfg(feature = "web-server-embed-wasm")]
-    const NGINX_LINT_WASM: &[u8] = include_bytes!("../demo/pkg/nginx_lint_bg.wasm");
+    const NGINX_LINT_WASM: &[u8] = include_bytes!("../web/pkg/nginx_lint_bg.wasm");
 
     // Check if pkg directory exists (only when not embedding)
     #[cfg(not(feature = "web-server-embed-wasm"))]
@@ -921,7 +921,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
             eprintln!("  wasm-pack build --target web --out-dir pkg --no-default-features --features wasm");
             eprintln!();
             eprintln!("Or rebuild with embedded WASM:");
-            eprintln!("  wasm-pack build --target web --out-dir demo/pkg --no-default-features --features wasm");
+            eprintln!("  wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm");
             eprintln!("  cargo build --features web-server-embed-wasm");
             return ExitCode::from(2);
         }
@@ -937,7 +937,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
     };
 
     let url = format!("http://localhost:{}", port);
-    eprintln!("Starting nginx-lint web demo at {}", url);
+    eprintln!("Starting nginx-lint web server at {}", url);
     #[cfg(feature = "web-server-embed-wasm")]
     eprintln!("(WASM embedded in binary)");
     eprintln!("Press Ctrl+C to stop");
@@ -970,7 +970,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
                 }
                 #[cfg(not(feature = "web-server-embed-wasm"))]
                 {
-                    serve_file_from_disk("./pkg/nginx_lint.js", "application/javascript")
+                    serve_file_from_disk("./web/pkg/nginx_lint.js", "application/javascript")
                 }
             }
             "/pkg/nginx_lint_bg.wasm" => {
@@ -983,7 +983,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
                 }
                 #[cfg(not(feature = "web-server-embed-wasm"))]
                 {
-                    serve_file_from_disk("./pkg/nginx_lint_bg.wasm", "application/wasm")
+                    serve_file_from_disk("./web/pkg/nginx_lint_bg.wasm", "application/wasm")
                 }
             }
             path if path.starts_with("/pkg/") => {
@@ -994,7 +994,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
                 }
                 #[cfg(not(feature = "web-server-embed-wasm"))]
                 {
-                    let file_path = format!(".{}", path);
+                    let file_path = format!("./web{}", path);
                     let content_type = if path.ends_with(".js") {
                         "application/javascript"
                     } else if path.ends_with(".wasm") {

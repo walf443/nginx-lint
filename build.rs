@@ -17,16 +17,16 @@ fn main() {
     println!("cargo:rerun-if-changed=src/parser/mod.rs");
     println!("cargo:rerun-if-changed=src/ignore.rs");
     println!("cargo:rerun-if-changed=src/rules/mod.rs");
-    println!("cargo:rerun-if-changed=demo/pkg/nginx_lint_bg.wasm");
+    println!("cargo:rerun-if-changed=web/pkg/nginx_lint_bg.wasm");
 
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set");
-    let wasm_path = Path::new(&manifest_dir).join("demo/pkg/nginx_lint_bg.wasm");
+    let wasm_path = Path::new(&manifest_dir).join("web/pkg/nginx_lint_bg.wasm");
 
     // Check if WASM already exists and has a reasonable size (> 10KB means it's not a stub)
     if let Ok(metadata) = wasm_path.metadata() {
         if metadata.len() > 10_000 {
             eprintln!("WASM file already exists ({}KB), skipping build", metadata.len() / 1024);
-            eprintln!("To rebuild, run: wasm-pack build --target web --out-dir demo/pkg --features wasm");
+            eprintln!("To rebuild, run: wasm-pack build --target web --out-dir web/pkg --features wasm");
             return;
         }
     }
@@ -36,9 +36,9 @@ fn main() {
 
     if wasm_pack_check.is_err() {
         panic!(
-            "wasm-pack not found and demo/pkg/nginx_lint_bg.wasm does not exist.\n\
+            "wasm-pack not found and web/pkg/nginx_lint_bg.wasm does not exist.\n\
              Please install wasm-pack: cargo install wasm-pack\n\
-             Then run: wasm-pack build --target web --out-dir demo/pkg --features wasm"
+             Then run: wasm-pack build --target web --out-dir web/pkg --features wasm"
         );
     }
 
@@ -56,7 +56,7 @@ fn main() {
             "--target",
             "web",
             "--out-dir",
-            "demo/pkg",
+            "web/pkg",
             "--features",
             "wasm",
         ])
@@ -70,7 +70,7 @@ fn main() {
             panic!(
                 "wasm-pack failed with exit code: {:?}\n\
                  If this is a lock conflict, try building WASM first:\n\
-                 wasm-pack build --target web --out-dir demo/pkg --features wasm\n\
+                 wasm-pack build --target web --out-dir web/pkg --features wasm\n\
                  Then rebuild:\n\
                  cargo build --features web-server-embed-wasm",
                 s.code()
