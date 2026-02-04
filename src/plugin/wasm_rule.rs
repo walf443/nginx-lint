@@ -158,7 +158,7 @@ fn get_serialized_config(config: &Config) -> Result<String, serde_json::Error> {
 /// A lint rule implemented as a WASM module
 #[derive(Clone)]
 pub struct WasmLintRule {
-    /// Path to the WASM file (for error reporting and cache key)
+    /// Path to the WASM file (for error reporting)
     path: PathBuf,
     /// Plugin metadata
     info: PluginInfo,
@@ -166,8 +166,10 @@ pub struct WasmLintRule {
     module: Arc<Module>,
     /// WASM engine reference (shared across threads)
     engine: Engine,
-    /// Fuel limit for CPU metering
+    /// Fuel limit for CPU metering (0 = unlimited)
     fuel_limit: u64,
+    /// Whether fuel metering is enabled
+    fuel_enabled: bool,
     /// Leaked static strings for LintRule trait
     name: &'static str,
     category: &'static str,
@@ -184,6 +186,7 @@ impl WasmLintRule {
         wasm_bytes: &[u8],
         _memory_limit: u64,
         fuel_limit: u64,
+        fuel_enabled: bool,
     ) -> Result<Self, PluginError> {
         // Compile the module
         let module = Module::new(engine, wasm_bytes)
@@ -193,7 +196,7 @@ impl WasmLintRule {
         Self::validate_exports(&module, &path)?;
 
         // Get plugin info by instantiating temporarily
-        let info = Self::get_plugin_info(engine, &module, &path, fuel_limit)?;
+        let info = Self::get_plugin_info(engine, &module, &path, fuel_limit, fuel_enabled)?;
 
         // Leak strings for 'static lifetime (these live for the program duration)
         let name: &'static str = Box::leak(info.name.clone().into_boxed_str());
@@ -207,6 +210,7 @@ impl WasmLintRule {
             module: Arc::new(module),
             engine: engine.clone(),
             fuel_limit,
+            fuel_enabled,
             name,
             category,
             description,
@@ -242,11 +246,14 @@ impl WasmLintRule {
         module: &Module,
         path: &Path,
         fuel_limit: u64,
+        fuel_enabled: bool,
     ) -> Result<PluginInfo, PluginError> {
         let mut store = Store::new(engine, StoreData::default());
-        store.set_fuel(fuel_limit).map_err(|e| {
-            PluginError::execution_error(path, format!("Failed to set fuel: {}", e))
-        })?;
+        if fuel_enabled {
+            store.set_fuel(fuel_limit).map_err(|e| {
+                PluginError::execution_error(path, format!("Failed to set fuel: {}", e))
+            })?;
+        }
 
         let linker = Linker::<StoreData>::new(engine);
         let instance = linker
@@ -315,12 +322,14 @@ impl WasmLintRule {
             .map_err(|e| PluginError::execution_error(path, format!("Invalid UTF-8: {}", e)))
     }
 
-    /// Create a new cached instance
+    /// Create a new instance
     fn create_instance(&self) -> Result<WasmInstance, PluginError> {
         let mut store = Store::new(&self.engine, StoreData::default());
-        store.set_fuel(self.fuel_limit).map_err(|e| {
-            PluginError::execution_error(&self.path, format!("Failed to set fuel: {}", e))
-        })?;
+        if self.fuel_enabled {
+            store.set_fuel(self.fuel_limit).map_err(|e| {
+                PluginError::execution_error(&self.path, format!("Failed to set fuel: {}", e))
+            })?;
+        }
 
         let linker = Linker::<StoreData>::new(&self.engine);
         let instance = linker
@@ -357,17 +366,19 @@ impl WasmLintRule {
         })
     }
 
-    /// Execute check using cached instance
-    fn execute_check_cached(
+    /// Execute check using instance
+    fn execute_check_with_instance(
         &self,
-        cached: &mut WasmInstance,
+        instance: &mut WasmInstance,
         config: &Config,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        // Reset fuel for this check
-        cached.store.set_fuel(self.fuel_limit).map_err(|e| {
-            PluginError::execution_error(&self.path, format!("Failed to reset fuel: {}", e))
-        })?;
+        // Reset fuel for this check (only if fuel metering is enabled)
+        if self.fuel_enabled {
+            instance.store.set_fuel(self.fuel_limit).map_err(|e| {
+                PluginError::execution_error(&self.path, format!("Failed to reset fuel: {}", e))
+            })?;
+        }
 
         // Get serialized config (cached if same Config was serialized recently)
         let config_json = get_serialized_config(config).map_err(|e| {
@@ -378,11 +389,11 @@ impl WasmLintRule {
         let path_str = file_path.to_string_lossy().to_string();
 
         // Allocate and write config
-        let config_ptr = cached.alloc.call(&mut cached.store, config_json.len() as u32).map_err(|e| {
+        let config_ptr = instance.alloc.call(&mut instance.store, config_json.len() as u32).map_err(|e| {
             PluginError::execution_error(&self.path, format!("alloc failed: {}", e))
         })?;
         {
-            let mem_data = cached.memory.data_mut(&mut cached.store);
+            let mem_data = instance.memory.data_mut(&mut instance.store);
             let ptr = config_ptr as usize;
             if ptr + config_json.len() > mem_data.len() {
                 return Err(PluginError::execution_error(&self.path, "Memory out of bounds"));
@@ -391,11 +402,11 @@ impl WasmLintRule {
         }
 
         // Allocate and write path
-        let path_ptr = cached.alloc.call(&mut cached.store, path_str.len() as u32).map_err(|e| {
+        let path_ptr = instance.alloc.call(&mut instance.store, path_str.len() as u32).map_err(|e| {
             PluginError::execution_error(&self.path, format!("alloc failed: {}", e))
         })?;
         {
-            let mem_data = cached.memory.data_mut(&mut cached.store);
+            let mem_data = instance.memory.data_mut(&mut instance.store);
             let ptr = path_ptr as usize;
             if ptr + path_str.len() > mem_data.len() {
                 return Err(PluginError::execution_error(&self.path, "Memory out of bounds"));
@@ -404,9 +415,9 @@ impl WasmLintRule {
         }
 
         // Call check
-        let result_ptr = cached.check
+        let result_ptr = instance.check
             .call(
-                &mut cached.store,
+                &mut instance.store,
                 (
                     config_ptr,
                     config_json.len() as u32,
@@ -424,13 +435,13 @@ impl WasmLintRule {
             })?;
 
         // Get result length
-        let result_len = cached.check_result_len.call(&mut cached.store, ()).map_err(|e| {
+        let result_len = instance.check_result_len.call(&mut instance.store, ()).map_err(|e| {
             PluginError::execution_error(&self.path, format!("check_result_len failed: {}", e))
         })? as usize;
 
         // Read result from memory
         let result_json = {
-            let data = cached.memory.data(&cached.store);
+            let data = instance.memory.data(&instance.store);
             let ptr = result_ptr as usize;
             if ptr + result_len > data.len() {
                 return Err(PluginError::execution_error(
@@ -443,9 +454,9 @@ impl WasmLintRule {
         };
 
         // Deallocate memory
-        let _ = cached.dealloc.call(&mut cached.store, (config_ptr, config_json.len() as u32));
-        let _ = cached.dealloc.call(&mut cached.store, (path_ptr, path_str.len() as u32));
-        let _ = cached.dealloc.call(&mut cached.store, (result_ptr, result_len as u32));
+        let _ = instance.dealloc.call(&mut instance.store, (config_ptr, config_json.len() as u32));
+        let _ = instance.dealloc.call(&mut instance.store, (path_ptr, path_str.len() as u32));
+        let _ = instance.dealloc.call(&mut instance.store, (result_ptr, result_len as u32));
 
         // Parse result based on plugin's API version
         parse_plugin_output(&result_json, &self.api_version, &self.path)
@@ -457,7 +468,7 @@ impl WasmLintRule {
     /// impact is acceptable since instance creation is fast.
     fn execute_check(&self, config: &Config, file_path: &Path) -> Result<Vec<LintError>, PluginError> {
         let mut instance = self.create_instance()?;
-        self.execute_check_cached(&mut instance, config, file_path)
+        self.execute_check_with_instance(&mut instance, config, file_path)
     }
 }
 

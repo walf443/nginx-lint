@@ -84,6 +84,8 @@ static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<WasmLintRule>> = std::sync
 ///
 /// The first call compiles all WASM modules and caches them.
 /// Subsequent calls clone from the cache, which is much faster.
+///
+/// Builtin plugins use a trusted loader with fuel metering disabled for better performance.
 #[cfg(feature = "builtin-plugins")]
 pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
     // Try to get from cache first
@@ -91,9 +93,9 @@ pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
         return Ok(cached.clone());
     }
 
-    // Get or create the loader
+    // Get or create the loader (use trusted mode for builtin plugins - no fuel metering)
     let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
-        PluginLoader::new().expect("Failed to create PluginLoader")
+        PluginLoader::new_trusted().expect("Failed to create PluginLoader")
     });
 
     // Compile plugins
@@ -111,6 +113,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
     use std::path::PathBuf;
 
     let mut plugins = Vec::new();
+    let fuel_enabled = loader.fuel_enabled();
 
     // Load server-tokens-enabled
     plugins.push(WasmLintRule::new(
@@ -119,6 +122,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::SERVER_TOKENS_ENABLED,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load autoindex-enabled
@@ -128,6 +132,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::AUTOINDEX_ENABLED,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load gzip-not-enabled
@@ -137,6 +142,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::GZIP_NOT_ENABLED,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load duplicate-directive
@@ -146,6 +152,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::DUPLICATE_DIRECTIVE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load space-before-semicolon
@@ -155,6 +162,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::SPACE_BEFORE_SEMICOLON,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load trailing-whitespace
@@ -164,6 +172,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::TRAILING_WHITESPACE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load proxy-pass-domain
@@ -173,6 +182,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::PROXY_PASS_DOMAIN,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load upstream-server-no-resolve
@@ -182,6 +192,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::UPSTREAM_SERVER_NO_RESOLVE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load proxy-set-header-inheritance
@@ -191,6 +202,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::PROXY_SET_HEADER_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load root-in-location
@@ -200,6 +212,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::ROOT_IN_LOCATION,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load alias-location-slash-mismatch
@@ -209,6 +222,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::ALIAS_LOCATION_SLASH_MISMATCH,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load proxy-pass-with-uri
@@ -218,6 +232,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::PROXY_PASS_WITH_URI,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load add-header-inheritance
@@ -227,6 +242,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::ADD_HEADER_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     // Load proxy-keepalive
@@ -236,6 +252,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         embedded::PROXY_KEEPALIVE,
         loader.memory_limit(),
         loader.fuel_limit(),
+        fuel_enabled,
     )?);
 
     Ok(plugins)

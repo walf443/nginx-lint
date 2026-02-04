@@ -17,19 +17,36 @@ const FUEL_LIMIT: u64 = 10_000_000_000;
 /// Plugin loader that discovers and loads WASM plugins from a directory
 pub struct PluginLoader {
     engine: Engine,
+    /// Whether fuel metering is enabled (for untrusted plugins)
+    fuel_enabled: bool,
 }
 
 impl PluginLoader {
-    /// Create a new plugin loader with security constraints
+    /// Create a new plugin loader with security constraints (fuel metering enabled)
     pub fn new() -> Result<Self, PluginError> {
+        Self::with_options(true)
+    }
+
+    /// Create a new plugin loader for trusted plugins (fuel metering disabled for performance)
+    ///
+    /// WARNING: Only use this for trusted, builtin plugins. External plugins should use `new()`
+    /// to enable fuel metering and prevent infinite loops.
+    pub fn new_trusted() -> Result<Self, PluginError> {
+        Self::with_options(false)
+    }
+
+    fn with_options(enable_fuel: bool) -> Result<Self, PluginError> {
         let mut config = Config::default();
 
-        // Enable fuel-based metering for CPU limits
-        config.consume_fuel(true);
+        // Enable fuel-based metering only for untrusted plugins
+        config.consume_fuel(enable_fuel);
 
         let engine = Engine::new(&config);
 
-        Ok(Self { engine })
+        Ok(Self {
+            engine,
+            fuel_enabled: enable_fuel,
+        })
     }
 
     /// Get the WASM engine
@@ -44,7 +61,16 @@ impl PluginLoader {
 
     /// Get the fuel limit for CPU metering
     pub fn fuel_limit(&self) -> u64 {
-        FUEL_LIMIT
+        if self.fuel_enabled {
+            FUEL_LIMIT
+        } else {
+            0
+        }
+    }
+
+    /// Check if fuel metering is enabled
+    pub fn fuel_enabled(&self) -> bool {
+        self.fuel_enabled
     }
 
     /// Load all WASM plugins from a directory
@@ -91,7 +117,19 @@ impl PluginLoader {
         }
 
         // Create the WASM lint rule
-        WasmLintRule::new(&self.engine, path.to_path_buf(), &wasm_bytes, self.memory_limit(), self.fuel_limit())
+        let fuel_limit = if self.fuel_enabled {
+            self.fuel_limit()
+        } else {
+            0 // No fuel limit for trusted plugins
+        };
+        WasmLintRule::new(
+            &self.engine,
+            path.to_path_buf(),
+            &wasm_bytes,
+            self.memory_limit(),
+            fuel_limit,
+            self.fuel_enabled,
+        )
     }
 }
 
