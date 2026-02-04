@@ -136,10 +136,7 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
     use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
-    use crate::rules::{
-        Indent, MissingSemicolon, SpaceBeforeSemicolon, TrailingWhitespace, UnclosedQuote,
-        UnmatchedBraces,
-    };
+    use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
     // Parse TOML configuration
     let lint_config = if config_toml.is_empty() {
@@ -215,17 +212,9 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         errors.extend(indent_rule.check_content(content));
     }
 
-    // Run trailing whitespace check directly on content
-    if is_enabled("trailing-whitespace") {
-        let rule = TrailingWhitespace;
-        errors.extend(rule.check_content(content));
-    }
-
-    // Run space before semicolon check directly on content
-    if is_enabled("space-before-semicolon") {
-        let rule = SpaceBeforeSemicolon;
-        errors.extend(rule.check_content(content));
-    }
+    // Note: trailing-whitespace and space-before-semicolon are now WASM plugins.
+    // They are loaded through Linter::with_config() above when builtin-plugins feature is enabled,
+    // and executed via wasmi interpreter (which works inside browser WASM).
 
     // Filter ignored errors and track count
     let result = filter_errors(errors, &mut tracker);
