@@ -563,7 +563,7 @@ http {
             const indent = targetLine.match(/^(\s*)/)[1];
 
             // Create the disable comment
-            const disableComment = `${indent}# nginx-lint:disable ${error.rule} ${reason.trim()}`;
+            const disableComment = `${indent}# nginx-lint:ignore ${error.rule} ${reason.trim()}`;
 
             // Insert the comment before the error line
             lines.splice(lineIndex, 0, disableComment);

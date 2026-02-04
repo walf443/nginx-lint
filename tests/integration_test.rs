@@ -1060,7 +1060,7 @@ fn test_ignore_comment_suppresses_error() {
     let content = r#"
 http {
     server {
-        # nginx-lint:disable server-tokens-enabled 開発環境用
+        # nginx-lint:ignore server-tokens-enabled 開発環境用
         server_tokens on;
     }
 }
@@ -1098,7 +1098,7 @@ fn test_ignore_comment_only_affects_next_line() {
     let content = r#"
 http {
     server {
-        # nginx-lint:disable server-tokens-enabled reason
+        # nginx-lint:ignore server-tokens-enabled reason
         server_tokens on;
         server_tokens on;
     }
@@ -1132,7 +1132,7 @@ fn test_ignore_comment_missing_reason_warning() {
     use nginx_lint::IgnoreTracker;
 
     let content = r#"
-# nginx-lint:disable server-tokens-enabled
+# nginx-lint:ignore server-tokens-enabled
 server_tokens on;
 "#;
 
@@ -1151,7 +1151,7 @@ fn test_ignore_comment_missing_rule_name_warning() {
     use nginx_lint::IgnoreTracker;
 
     let content = r#"
-# nginx-lint:disable
+# nginx-lint:ignore
 server_tokens on;
 "#;
 
@@ -1173,7 +1173,7 @@ fn test_ignore_comment_only_ignores_specified_rule() {
     let content = r#"
 http {
     server {
-        # nginx-lint:disable server-tokens-enabled reason
+        # nginx-lint:ignore server-tokens-enabled reason
         server_tokens on;
         autoindex on;
     }
@@ -1216,7 +1216,7 @@ fn test_lint_with_content_filters_ignored_errors() {
     let content = r#"
 http {
     server {
-        # nginx-lint:disable server-tokens-enabled dev environment
+        # nginx-lint:ignore server-tokens-enabled dev environment
         server_tokens on;
         autoindex on;
     }
@@ -1258,7 +1258,7 @@ fn test_inline_ignore_comment() {
     let content = r#"
 http {
     server {
-        server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment
+        server_tokens on; # nginx-lint:ignore server-tokens-enabled dev environment
     }
 }
 "#;
@@ -1296,7 +1296,7 @@ fn test_unused_inline_ignore_comment_fix() {
     let content = r#"
 http {
     server {
-        server_tokens off; # nginx-lint:disable server-tokens-enabled reason
+        server_tokens off; # nginx-lint:ignore server-tokens-enabled reason
     }
 }
 "#;
@@ -1311,7 +1311,7 @@ http {
     // Should have an unused warning with a fix
     assert_eq!(result.unused_warnings.len(), 1, "Expected 1 unused warning");
     assert!(
-        result.unused_warnings[0].message.contains("unused nginx-lint:disable"),
+        result.unused_warnings[0].message.contains("unused nginx-lint:ignore"),
         "Expected unused warning, got: {}",
         result.unused_warnings[0].message
     );

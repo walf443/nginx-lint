@@ -343,7 +343,7 @@ mod tests {
     fn test_wasm_ignore_comment() {
         let content = r#"http {
   server {
-    # nginx-lint:disable server-tokens-enabled dev reason
+    # nginx-lint:ignore server-tokens-enabled dev reason
     server_tokens on;
   }
 }"#;
@@ -371,7 +371,7 @@ mod tests {
     fn test_wasm_ignore_inline_comment() {
         let content = r#"http {
   server {
-    server_tokens on; # nginx-lint:disable server-tokens-enabled dev reason
+    server_tokens on; # nginx-lint:ignore server-tokens-enabled dev reason
   }
 }"#;
         let result = lint_with_config(content, "").unwrap();

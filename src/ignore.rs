@@ -7,13 +7,13 @@
 //!
 //! ## Comment-only line (targets next line)
 //! ```nginx
-//! # nginx-lint:disable rule-name reason
+//! # nginx-lint:ignore rule-name reason
 //! server_tokens on;
 //! ```
 //!
 //! ## Inline comment (targets current line)
 //! ```nginx
-//! server_tokens on; # nginx-lint:disable rule-name reason
+//! server_tokens on; # nginx-lint:ignore rule-name reason
 //! ```
 //!
 //! - `rule-name`: Required. The name of the rule to ignore
@@ -126,7 +126,7 @@ impl IgnoreTracker {
                             warnings.push(IgnoreWarning {
                                 line: parsed.comment_line,
                                 message: format!(
-                                    "unknown rule '{}' in nginx-lint:disable comment",
+                                    "unknown rule '{}' in nginx-lint:ignore comment",
                                     parsed.rule_name
                                 ),
                                 fix: None,
@@ -156,7 +156,7 @@ impl IgnoreTracker {
                             warnings.push(IgnoreWarning {
                                 line: parsed.comment_line,
                                 message: format!(
-                                    "unknown rule '{}' in nginx-lint:disable comment",
+                                    "unknown rule '{}' in nginx-lint:ignore comment",
                                     parsed.rule_name
                                 ),
                                 fix: None,
@@ -217,7 +217,7 @@ impl IgnoreTracker {
                 IgnoreWarning {
                     line: d.comment_line,
                     message: format!(
-                        "unused nginx-lint:disable comment for rule '{}'",
+                        "unused nginx-lint:ignore comment for rule '{}'",
                         d.rule_name
                     ),
                     fix,
@@ -262,8 +262,8 @@ struct ParsedDisableComment {
 /// Parse a disable comment from a line
 ///
 /// Supports two formats:
-/// 1. Comment-only line: `# nginx-lint:disable rule-name reason` → targets next line
-/// 2. Inline comment: `directive; # nginx-lint:disable rule-name reason` → targets current line
+/// 1. Comment-only line: `# nginx-lint:ignore rule-name reason` → targets next line
+/// 2. Inline comment: `directive; # nginx-lint:ignore rule-name reason` → targets current line
 ///
 /// Returns:
 /// - `None` if the line does not contain a disable comment
@@ -273,15 +273,15 @@ fn parse_disable_comment(
     line: &str,
     line_number: usize,
 ) -> Option<Result<ParsedDisableComment, IgnoreWarning>> {
-    const DISABLE_PREFIX: &str = "nginx-lint:disable";
+    const IGNORE_PREFIX: &str = "nginx-lint:ignore";
 
     // Find the comment marker
     let comment_start = line.find('#')?;
     let comment_part = &line[comment_start..];
     let comment = comment_part.trim_start_matches('#').trim();
 
-    // Check for nginx-lint:disable prefix
-    let rest = comment.strip_prefix(DISABLE_PREFIX)?;
+    // Check for nginx-lint:ignore prefix
+    let rest = comment.strip_prefix(IGNORE_PREFIX)?;
     let rest = rest.trim();
 
     // Determine if this is a comment-only line or inline comment
@@ -295,7 +295,7 @@ fn parse_disable_comment(
     if parts.is_empty() || parts[0].is_empty() {
         return Some(Err(IgnoreWarning {
             line: line_number,
-            message: "nginx-lint:disable requires a rule name".to_string(),
+            message: "nginx-lint:ignore requires a rule name".to_string(),
             fix: None,
         }));
     }
@@ -307,7 +307,7 @@ fn parse_disable_comment(
         return Some(Err(IgnoreWarning {
             line: line_number,
             message: format!(
-                "nginx-lint:disable {} requires a reason",
+                "nginx-lint:ignore {} requires a reason",
                 rule_name
             ),
             fix: None,
@@ -379,7 +379,7 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
         .into_iter()
         .map(|warning| {
             let mut error = LintError::new(
-                "invalid-nginx-lint-disable",
+                "invalid-nginx-lint-ignore",
                 "ignore",
                 &warning.message,
                 Severity::Warning,
@@ -397,7 +397,7 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
 
 /// Get a set of all known rule names
 pub fn known_rule_names() -> HashSet<String> {
-    // All rule names that can be used with nginx-lint:disable
+    // All rule names that can be used with nginx-lint:ignore
     [
         "duplicate-directive",
         "unmatched-braces",
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn test_parse_valid_disable_comment() {
         let result = parse_disable_comment(
-            "# nginx-lint:disable server-tokens-enabled for dev environment",
+            "# nginx-lint:ignore server-tokens-enabled for dev environment",
             5,
         );
         assert!(result.is_some());
@@ -507,7 +507,7 @@ mod tests {
     #[test]
     fn test_parse_disable_comment_with_japanese_reason() {
         let result = parse_disable_comment(
-            "# nginx-lint:disable server-tokens-enabled 開発環境用",
+            "# nginx-lint:ignore server-tokens-enabled 開発環境用",
             5,
         );
         assert!(result.is_some());
@@ -521,24 +521,24 @@ mod tests {
 
     #[test]
     fn test_parse_missing_rule_name() {
-        let result = parse_disable_comment("# nginx-lint:disable", 5);
+        let result = parse_disable_comment("# nginx-lint:ignore", 5);
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
         assert!(warning
             .message
-            .contains("nginx-lint:disable requires a rule name"));
+            .contains("nginx-lint:ignore requires a rule name"));
     }
 
     #[test]
     fn test_parse_missing_reason() {
-        let result = parse_disable_comment("# nginx-lint:disable server-tokens-enabled", 5);
+        let result = parse_disable_comment("# nginx-lint:ignore server-tokens-enabled", 5);
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
         assert!(warning
             .message
-            .contains("nginx-lint:disable server-tokens-enabled requires a reason"));
+            .contains("nginx-lint:ignore server-tokens-enabled requires a reason"));
     }
 
     #[test]
@@ -566,7 +566,7 @@ mod tests {
     #[test]
     fn test_ignore_tracker_from_content() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled dev environment
+# nginx-lint:ignore server-tokens-enabled dev environment
 server_tokens on;
 "#;
         let (tracker, warnings) = IgnoreTracker::from_content(content);
@@ -578,7 +578,7 @@ server_tokens on;
     #[test]
     fn test_ignore_tracker_from_content_with_warnings() {
         let content = r#"
-# nginx-lint:disable
+# nginx-lint:ignore
 server_tokens on;
 "#;
         let (_, warnings) = IgnoreTracker::from_content(content);
@@ -644,7 +644,7 @@ server_tokens on;
     #[test]
     fn test_only_affects_next_line() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason
+# nginx-lint:ignore server-tokens-enabled reason
 server_tokens on;
 server_tokens on;
 "#;
@@ -658,8 +658,8 @@ server_tokens on;
     fn test_consecutive_disable_comments() {
         // Multiple consecutive disable comments should all target the same line
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason1
-# nginx-lint:disable autoindex-enabled reason2
+# nginx-lint:ignore server-tokens-enabled reason1
+# nginx-lint:ignore autoindex-enabled reason2
 server_tokens on;
 "#;
         let (tracker, warnings) = IgnoreTracker::from_content(content);
@@ -675,9 +675,9 @@ server_tokens on;
     #[test]
     fn test_three_consecutive_disable_comments() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason1
-# nginx-lint:disable autoindex-enabled reason2
-# nginx-lint:disable gzip-not-enabled reason3
+# nginx-lint:ignore server-tokens-enabled reason1
+# nginx-lint:ignore autoindex-enabled reason2
+# nginx-lint:ignore gzip-not-enabled reason3
 server_tokens on;
 "#;
         let (tracker, warnings) = IgnoreTracker::from_content(content);
@@ -698,7 +698,7 @@ server_tokens on;
 
         let errors = warnings_to_errors(warnings);
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].rule, "invalid-nginx-lint-disable");
+        assert_eq!(errors[0].rule, "invalid-nginx-lint-ignore");
         assert_eq!(errors[0].category, "ignore");
         assert_eq!(errors[0].message, "test warning");
         assert_eq!(errors[0].severity, Severity::Warning);
@@ -725,7 +725,7 @@ server_tokens on;
     #[test]
     fn test_parse_inline_comment() {
         let result = parse_disable_comment(
-            "server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment",
+            "server_tokens on; # nginx-lint:ignore server-tokens-enabled dev environment",
             5,
         );
         assert!(result.is_some());
@@ -740,7 +740,7 @@ server_tokens on;
     #[test]
     fn test_parse_inline_comment_with_japanese_reason() {
         let result = parse_disable_comment(
-            "server_tokens on; # nginx-lint:disable server-tokens-enabled 開発環境用",
+            "server_tokens on; # nginx-lint:ignore server-tokens-enabled 開発環境用",
             5,
         );
         assert!(result.is_some());
@@ -755,7 +755,7 @@ server_tokens on;
     #[test]
     fn test_inline_comment_missing_reason() {
         let result = parse_disable_comment(
-            "server_tokens on; # nginx-lint:disable server-tokens-enabled",
+            "server_tokens on; # nginx-lint:ignore server-tokens-enabled",
             5,
         );
         assert!(result.is_some());
@@ -767,7 +767,7 @@ server_tokens on;
     #[test]
     fn test_ignore_tracker_inline_comment() {
         let content = r#"
-server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment
+server_tokens on; # nginx-lint:ignore server-tokens-enabled dev environment
 "#;
         let (tracker, warnings) = IgnoreTracker::from_content(content);
         assert!(warnings.is_empty());
@@ -778,9 +778,9 @@ server_tokens on; # nginx-lint:disable server-tokens-enabled dev environment
     #[test]
     fn test_both_comment_styles() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason for next line
+# nginx-lint:ignore server-tokens-enabled reason for next line
 server_tokens on;
-autoindex on; # nginx-lint:disable autoindex-enabled reason for this line
+autoindex on; # nginx-lint:ignore autoindex-enabled reason for this line
 "#;
         let (tracker, warnings) = IgnoreTracker::from_content(content);
         assert!(warnings.is_empty());
@@ -793,7 +793,7 @@ autoindex on; # nginx-lint:disable autoindex-enabled reason for this line
     #[test]
     fn test_unknown_rule_name() {
         let content = r#"
-# nginx-lint:disable unknown-rule-name some reason
+# nginx-lint:ignore unknown-rule-name some reason
 server_tokens on;
 "#;
         let valid_rules = known_rule_names();
@@ -805,7 +805,7 @@ server_tokens on;
     #[test]
     fn test_unused_ignore_directive() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason
+# nginx-lint:ignore server-tokens-enabled reason
 server_tokens off;
 "#;
         let (mut tracker, _) = IgnoreTracker::from_content(content);
@@ -816,14 +816,14 @@ server_tokens off;
 
         // Should have unused warning
         assert_eq!(result.unused_warnings.len(), 1);
-        assert!(result.unused_warnings[0].message.contains("unused nginx-lint:disable"));
+        assert!(result.unused_warnings[0].message.contains("unused nginx-lint:ignore"));
         assert!(result.unused_warnings[0].message.contains("server-tokens-enabled"));
     }
 
     #[test]
     fn test_used_ignore_directive_no_warning() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason
+# nginx-lint:ignore server-tokens-enabled reason
 server_tokens on;
 "#;
         let (mut tracker, _) = IgnoreTracker::from_content(content);
@@ -847,7 +847,7 @@ server_tokens on;
     #[test]
     fn test_unused_comment_only_line_fix() {
         let content = r#"
-# nginx-lint:disable server-tokens-enabled reason
+# nginx-lint:ignore server-tokens-enabled reason
 server_tokens off;
 "#;
         let (mut tracker, _) = IgnoreTracker::from_content(content);
@@ -865,7 +865,7 @@ server_tokens off;
     #[test]
     fn test_unused_inline_comment_fix() {
         let content = r#"
-server_tokens off; # nginx-lint:disable server-tokens-enabled reason
+server_tokens off; # nginx-lint:ignore server-tokens-enabled reason
 "#;
         let (mut tracker, _) = IgnoreTracker::from_content(content);
 
