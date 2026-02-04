@@ -3,10 +3,11 @@ use colored::control;
 use nginx_lint::{
     apply_fixes, collect_included_files, collect_included_files_with_context, parse_config,
     pre_parse_checks_with_config, ColorMode, IncludedFile, LintConfig, LintError, Linter,
-    OutputFormat, Reporter, Severity,
+    OutputFormat, Reporter, RuleProfile, Severity,
 };
 #[cfg(feature = "plugins")]
 use nginx_lint::linter::LintRule;
+use std::collections::HashMap;
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
@@ -61,6 +62,10 @@ struct Cli {
     #[cfg(feature = "plugins")]
     #[arg(long, value_name = "DIR")]
     plugins: Option<PathBuf>,
+
+    /// Show profiling information (time spent per rule)
+    #[arg(long)]
+    profile: bool,
 }
 
 #[derive(Subcommand)]
@@ -289,7 +294,97 @@ enum FileResult {
         path: PathBuf,
         errors: Vec<LintError>,
         ignored_count: usize,
+        profiles: Option<Vec<RuleProfile>>,
     },
+}
+
+/// Display profiling results
+fn display_profile(profiles: &[RuleProfile]) {
+    use colored::Colorize;
+    use std::time::Duration;
+
+    // Aggregate profiles by rule name (sum durations across files)
+    let mut aggregated: HashMap<String, (Duration, String, usize)> = HashMap::new();
+    for p in profiles {
+        let entry = aggregated
+            .entry(p.name.clone())
+            .or_insert((Duration::ZERO, p.category.clone(), 0));
+        entry.0 += p.duration;
+        entry.2 += p.error_count;
+    }
+
+    // Convert to vec and sort by duration (descending)
+    let mut sorted: Vec<_> = aggregated.into_iter().collect();
+    sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+
+    // Calculate total time
+    let total_time: Duration = sorted.iter().map(|(_, (d, _, _))| *d).sum();
+
+    eprintln!();
+    eprintln!("{}", "Profile Results".bold().underline());
+    eprintln!();
+
+    // Header
+    eprintln!(
+        "{:>10}  {:>6}  {:>6}  {:<30}  {}",
+        "Time".bold(),
+        "%".bold(),
+        "Errors".bold(),
+        "Rule".bold(),
+        "Category".bold()
+    );
+    eprintln!("{}", "-".repeat(70));
+
+    for (name, (duration, category, error_count)) in &sorted {
+        let percentage = if total_time.as_nanos() > 0 {
+            (duration.as_nanos() as f64 / total_time.as_nanos() as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let time_str = format_duration(*duration);
+        let pct_str = format!("{:.1}%", percentage);
+
+        // Highlight slow rules (>10% of total time)
+        let time_display = if percentage > 10.0 {
+            time_str.red().to_string()
+        } else if percentage > 5.0 {
+            time_str.yellow().to_string()
+        } else {
+            time_str
+        };
+
+        eprintln!(
+            "{:>10}  {:>6}  {:>6}  {:<30}  {}",
+            time_display,
+            pct_str,
+            error_count,
+            name,
+            category.dimmed()
+        );
+    }
+
+    eprintln!("{}", "-".repeat(70));
+    eprintln!(
+        "{:>10}  {:>6}  {:>6}  {}",
+        format_duration(total_time).bold(),
+        "100%".bold(),
+        sorted.iter().map(|(_, (_, _, c))| c).sum::<usize>(),
+        "Total".bold()
+    );
+    eprintln!();
+}
+
+/// Format a duration for display
+fn format_duration(d: std::time::Duration) -> String {
+    let micros = d.as_micros();
+    if micros < 1000 {
+        format!("{}µs", micros)
+    } else if micros < 1_000_000 {
+        format!("{:.2}ms", micros as f64 / 1000.0)
+    } else {
+        format!("{:.2}s", d.as_secs_f64())
+    }
 }
 
 /// Lint a single included file and return the result
@@ -297,6 +392,7 @@ fn lint_file(
     included: &IncludedFile,
     linter: &Linter,
     lint_config: Option<&LintConfig>,
+    profile: bool,
 ) -> FileResult {
     let path = &included.path;
 
@@ -324,17 +420,30 @@ fn lint_file(
 
     // Lint the parsed config
     if let Some(ref config) = included.config {
-        let (errors, ignored_count) = linter.lint_with_content(config, path, &content);
-        FileResult::LintErrors {
-            path: path.clone(),
-            errors,
-            ignored_count,
+        if profile {
+            let (errors, ignored_count, profiles) =
+                linter.lint_with_content_and_profile(config, path, &content);
+            FileResult::LintErrors {
+                path: path.clone(),
+                errors,
+                ignored_count,
+                profiles: Some(profiles),
+            }
+        } else {
+            let (errors, ignored_count) = linter.lint_with_content(config, path, &content);
+            FileResult::LintErrors {
+                path: path.clone(),
+                errors,
+                ignored_count,
+                profiles: None,
+            }
         }
     } else {
         FileResult::LintErrors {
             path: path.clone(),
             errors: Vec::new(),
             ignored_count: 0,
+            profiles: None,
         }
     }
 }
@@ -497,24 +606,26 @@ fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
-    // Lint files (parallel when not fixing, sequential when fixing)
-    let results: Vec<FileResult> = if cli.fix {
-        // Sequential processing for fix mode (file modifications should not be parallel)
+    // Lint files (parallel when not fixing and not profiling, sequential otherwise)
+    // Profiling requires sequential execution for accurate timing
+    let results: Vec<FileResult> = if cli.fix || cli.profile {
+        // Sequential processing for fix mode or profile mode
         included_files
             .iter()
-            .map(|inc| lint_file(inc, &linter, lint_config.as_ref()))
+            .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), cli.profile))
             .collect()
     } else {
         // Parallel processing for lint-only mode
         included_files
             .par_iter()
-            .map(|inc| lint_file(inc, &linter, lint_config.as_ref()))
+            .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), false))
             .collect()
     };
 
     // Process results sequentially (for consistent output ordering)
     let mut all_errors = Vec::new();
     let mut has_fatal_error = false;
+    let mut all_profiles: Vec<RuleProfile> = Vec::new();
 
     for result in results {
         match result {
@@ -543,6 +654,7 @@ fn run_lint(cli: Cli) -> ExitCode {
                 path,
                 errors,
                 ignored_count,
+                profiles,
             } => {
                 if cli.fix {
                     match apply_fixes(&path, &errors) {
@@ -559,8 +671,16 @@ fn run_lint(cli: Cli) -> ExitCode {
                     reporter.report(&errors, &path, ignored_count);
                 }
                 all_errors.extend(errors);
+                if let Some(p) = profiles {
+                    all_profiles.extend(p);
+                }
             }
         }
+    }
+
+    // Display profile results if requested
+    if cli.profile && !all_profiles.is_empty() {
+        display_profile(&all_profiles);
     }
 
     if has_fatal_error {

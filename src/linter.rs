@@ -343,6 +343,74 @@ impl Linter {
         errors.extend(warnings_to_errors(result.unused_warnings));
         (errors, result.ignored_count)
     }
+
+    /// Run all lint rules with profiling and collect errors with timing information
+    ///
+    /// Returns a tuple of (errors, profile_results) where profile_results contains
+    /// the time each rule took to execute.
+    #[cfg(feature = "cli")]
+    pub fn lint_with_profile(
+        &self,
+        config: &Config,
+        path: &Path,
+    ) -> (Vec<LintError>, Vec<RuleProfile>) {
+        use std::time::Instant;
+
+        let results: Vec<(Vec<LintError>, RuleProfile)> = self
+            .rules
+            .iter()
+            .map(|rule| {
+                let start = Instant::now();
+                let errors = rule.check(config, path);
+                let duration = start.elapsed();
+                let profile = RuleProfile {
+                    name: rule.name().to_string(),
+                    category: rule.category().to_string(),
+                    duration,
+                    error_count: errors.len(),
+                };
+                (errors, profile)
+            })
+            .collect();
+
+        let errors: Vec<LintError> = results.iter().flat_map(|(e, _)| e.clone()).collect();
+        let profiles: Vec<RuleProfile> = results.into_iter().map(|(_, p)| p).collect();
+
+        (errors, profiles)
+    }
+
+    /// Run all lint rules with profiling and ignore comment support
+    #[cfg(feature = "cli")]
+    pub fn lint_with_content_and_profile(
+        &self,
+        config: &Config,
+        path: &Path,
+        content: &str,
+    ) -> (Vec<LintError>, usize, Vec<RuleProfile>) {
+        use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
+
+        let valid_rules = known_rule_names();
+        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (errors, profiles) = self.lint_with_profile(config, path);
+        let result = filter_errors(errors, &mut tracker);
+        let mut errors = result.errors;
+        errors.extend(warnings_to_errors(warnings));
+        errors.extend(warnings_to_errors(result.unused_warnings));
+        (errors, result.ignored_count, profiles)
+    }
+}
+
+/// Profiling information for a single rule
+#[derive(Debug, Clone)]
+pub struct RuleProfile {
+    /// Rule name
+    pub name: String,
+    /// Rule category
+    pub category: String,
+    /// Time taken to execute the rule
+    pub duration: std::time::Duration,
+    /// Number of errors found by this rule
+    pub error_count: usize,
 }
 
 impl Default for Linter {

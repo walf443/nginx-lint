@@ -26,6 +26,8 @@ pub mod plugin_sdk;
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
 pub use ignore::{filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning};
 pub use linter::{Fix, LintError, Linter, Severity};
+#[cfg(feature = "cli")]
+pub use linter::RuleProfile;
 pub use parser::{parse_config, parse_string};
 
 #[cfg(feature = "cli")]
