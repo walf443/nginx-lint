@@ -358,10 +358,21 @@ enabled = true</textarea>
 
             const editor = document.getElementById('editor');
             const content = editor.value;
-            const lines = content.split('\n');
             const fix = error.fix;
 
-            // Apply the fix
+            // Check if this is a range-based fix
+            if (fix.start_offset !== null && fix.start_offset !== undefined &&
+                fix.end_offset !== null && fix.end_offset !== undefined) {
+                // Range-based fix: replace bytes from start_offset to end_offset
+                const before = content.substring(0, fix.start_offset);
+                const after = content.substring(fix.end_offset);
+                editor.value = before + fix.new_text + after;
+                lintConfig();
+                return;
+            }
+
+            // Line-based fix
+            const lines = content.split('\n');
             const lineIndex = fix.line - 1;
             if (lineIndex < 0 || lineIndex >= lines.length + 1) return;
 
@@ -383,17 +394,34 @@ enabled = true</textarea>
             lintConfig();
         };
 
-        // Apply all fixes (in reverse order to maintain line numbers)
+        // Apply all fixes (in reverse order to maintain offsets/line numbers)
         window.applyAllFixes = function() {
             const fixableErrors = currentErrors
                 .map((err, index) => ({ err, index }))
-                .filter(item => item.err.fix)
-                .sort((a, b) => (b.err.fix.line - a.err.fix.line));
+                .filter(item => item.err.fix);
+
+            // Separate range-based and line-based fixes
+            const rangeFixes = fixableErrors.filter(item =>
+                item.err.fix.start_offset !== null && item.err.fix.start_offset !== undefined);
+            const lineFixes = fixableErrors.filter(item =>
+                item.err.fix.start_offset === null || item.err.fix.start_offset === undefined);
 
             const editor = document.getElementById('editor');
-            let lines = editor.value.split('\n');
+            let content = editor.value;
 
-            for (const { err } of fixableErrors) {
+            // Apply range-based fixes first (sorted by start_offset descending)
+            rangeFixes.sort((a, b) => b.err.fix.start_offset - a.err.fix.start_offset);
+            for (const { err } of rangeFixes) {
+                const fix = err.fix;
+                const before = content.substring(0, fix.start_offset);
+                const after = content.substring(fix.end_offset);
+                content = before + fix.new_text + after;
+            }
+
+            // Apply line-based fixes (sorted by line descending)
+            lineFixes.sort((a, b) => b.err.fix.line - a.err.fix.line);
+            let lines = content.split('\n');
+            for (const { err } of lineFixes) {
                 const fix = err.fix;
                 const lineIndex = fix.line - 1;
                 if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;

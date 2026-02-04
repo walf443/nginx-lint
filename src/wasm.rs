@@ -73,6 +73,10 @@ struct JsFix {
     new_text: String,
     delete_line: bool,
     insert_after: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    start_offset: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_offset: Option<usize>,
 }
 
 /// A single lint error for JavaScript
@@ -107,6 +111,8 @@ impl From<&LintError> for JsLintError {
                 new_text: f.new_text.clone(),
                 delete_line: f.delete_line,
                 insert_after: f.insert_after,
+                start_offset: f.start_offset,
+                end_offset: f.end_offset,
             }),
         }
     }
