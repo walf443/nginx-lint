@@ -318,18 +318,7 @@ http {
                 <div class="panel-header" style="margin-top: 15px;">
                     <span class="panel-title">.nginx-lint.toml</span>
                 </div>
-                <textarea id="config-editor" class="config" spellcheck="false"># Configuration file
-# You can generate from template by nginx-lint config init
-
-[rules.indent]
-enabled = true
-indent_size = 2
-
-[rules.server-tokens-enabled]
-enabled = true
-
-[rules.autoindex-enabled]
-enabled = true</textarea>
+                <textarea id="config-editor" class="config" spellcheck="false"># Loading configuration...</textarea>
             </div>
         </div>
     </div>
@@ -344,7 +333,7 @@ enabled = true</textarea>
     </div>
 
     <script type="module">
-        import init, { lint_with_config, version, get_rule_names, get_rule_info, debug_plugin_status } from '/pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names, get_rule_info, get_default_config, debug_plugin_status } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
         let currentErrors = [];
@@ -361,6 +350,9 @@ enabled = true</textarea>
                 ruleDescriptions = JSON.parse(get_rule_info());
                 console.log('Available rules:', ruleNames.length);
                 console.log('Plugin status:', debug_plugin_status());
+
+                // Set default configuration
+                document.getElementById('config-editor').value = get_default_config();
 
                 document.getElementById('results').innerHTML = '<div class="no-issues">Ready! Click "Lint" or start typing.</div>';
 

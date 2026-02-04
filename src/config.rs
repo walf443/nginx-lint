@@ -3,6 +3,133 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+/// Default configuration template for nginx-lint
+pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# nginx-lint configuration file
+# See https://github.com/walf443/nginx-lint for documentation
+
+# Color output settings
+[color]
+# Color mode: "auto", "always", or "never"
+ui = "auto"
+# Severity colors (available: black, red, green, yellow, blue, magenta, cyan, white,
+#                  bright_black, bright_red, bright_green, bright_yellow, bright_blue,
+#                  bright_magenta, bright_cyan, bright_white)
+error = "red"
+warning = "yellow"
+info = "blue"
+
+# =============================================================================
+# Syntax Rules
+# =============================================================================
+
+[rules.duplicate-directive]
+enabled = true
+
+[rules.unmatched-braces]
+enabled = true
+
+[rules.unclosed-quote]
+enabled = true
+
+[rules.missing-semicolon]
+enabled = true
+
+# =============================================================================
+# Security Rules
+# =============================================================================
+
+[rules.deprecated-ssl-protocol]
+enabled = true
+# Allowed protocols for auto-fix (default: ["TLSv1.2", "TLSv1.3"])
+allowed_protocols = ["TLSv1.2", "TLSv1.3"]
+
+[rules.server-tokens-enabled]
+enabled = true
+
+[rules.autoindex-enabled]
+enabled = true
+
+[rules.weak-ssl-ciphers]
+enabled = true
+# Weak cipher patterns to detect
+weak_ciphers = [
+    "NULL",
+    "EXPORT",
+    "DES",
+    "RC4",
+    "MD5",
+    "aNULL",
+    "eNULL",
+    "ADH",
+    "AECDH",
+    "PSK",
+    "SRP",
+    "CAMELLIA",
+]
+# Required exclusion patterns
+required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
+
+# =============================================================================
+# Style Rules
+# =============================================================================
+
+[rules.indent]
+enabled = true
+# Indentation size (default: 2)
+indent_size = 2
+
+[rules.trailing-whitespace]
+enabled = true
+
+[rules.space-before-semicolon]
+enabled = true
+
+# =============================================================================
+# Best Practices
+# =============================================================================
+
+[rules.gzip-not-enabled]
+# Disabled by default: gzip is not always appropriate (CDN, CPU constraints, BREACH attack)
+enabled = false
+
+[rules.missing-error-log]
+# Disabled by default: error_log is typically set at top level in main config
+enabled = false
+
+[rules.proxy-pass-domain]
+enabled = true
+
+[rules.upstream-server-no-resolve]
+enabled = true
+
+[rules.proxy-set-header-inheritance]
+enabled = true
+
+[rules.root-in-location]
+enabled = true
+
+[rules.alias-location-slash-mismatch]
+enabled = true
+
+[rules.proxy-pass-with-uri]
+enabled = true
+
+[rules.add-header-inheritance]
+enabled = true
+
+[rules.proxy-keepalive]
+enabled = true
+
+# =============================================================================
+# Parser Settings
+# =============================================================================
+
+[parser]
+# Additional block directives for extension modules
+# These are added to the built-in list (http, server, location, etc.)
+# block_directives = ["my_custom_block", "another_block"]
+"#;
+
 /// Configuration for nginx-lint loaded from .nginx-lint.toml
 #[derive(Debug, Default, Deserialize)]
 pub struct LintConfig {

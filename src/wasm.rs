@@ -329,6 +329,12 @@ pub fn debug_plugin_status() -> String {
     }
 }
 
+/// Get the default configuration template
+#[wasm_bindgen]
+pub fn get_default_config() -> String {
+    crate::config::DEFAULT_CONFIG_TEMPLATE.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
