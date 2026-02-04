@@ -30,6 +30,7 @@ pub struct UnmatchedBraces;
 struct BraceInfo {
     line: usize,
     column: usize,
+    /// Indentation of the line containing the opening brace (for fix generation)
     indent: usize,
 }
 
@@ -67,15 +68,8 @@ impl UnmatchedBraces {
         let mut raw_block_depth = 0;
 
         // Track where to insert missing closing braces
-        // Maps line number to the indentation needed for closing brace
-        let mut missing_close_braces: Vec<(usize, usize, usize)> = Vec::new(); // (insert_after_line, indent, error_line)
-
-        // Track comment lines before which closing braces should be inserted
-        // (insert_before_line, indent, error_line)
-        let mut comment_insertions: Vec<(usize, usize, usize)> = Vec::new();
-
-        // Track lines where we've already detected a block directive missing '{'
-        let mut block_directive_error_lines: Vec<usize> = Vec::new();
+        // (insert_after_line, error_line, indent)
+        let mut missing_close_braces: Vec<(usize, usize, usize)> = Vec::new();
 
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
@@ -107,45 +101,9 @@ impl UnmatchedBraces {
                 }
             }
 
-            // Check if this is a comment-only line
+            // Skip comment-only lines for brace processing
             if trimmed.starts_with('#') {
-                // Check if any unclosed brace should be closed at this comment's indent
-                while let Some(top) = brace_stack.last() {
-                    if top.indent > line_indent {
-                        // This block should be closed before this comment
-                        let unclosed = brace_stack.pop().unwrap();
-                        missing_close_braces.push((
-                            line_number - 1,
-                            unclosed.indent,
-                            unclosed.line,
-                        ));
-                        errors.push(
-                            LintError::new(
-                                self.name(),
-                                self.category(),
-                                "Unclosed brace '{' - missing closing brace '}'",
-                                Severity::Error,
-                            )
-                            .with_location(unclosed.line, unclosed.column),
-                        );
-                    } else if top.indent == line_indent {
-                        // Insert closing brace before this comment line
-                        let unclosed = brace_stack.pop().unwrap();
-                        comment_insertions.push((line_number - 1, unclosed.indent, unclosed.line));
-                        errors.push(
-                            LintError::new(
-                                self.name(),
-                                self.category(),
-                                "Unclosed brace '{' - missing closing brace '}'",
-                                Severity::Error,
-                            )
-                            .with_location(unclosed.line, unclosed.column),
-                        );
-                    } else {
-                        break;
-                    }
-                }
-                continue; // Skip character processing for comment lines
+                continue;
             }
 
             for (col, &ch) in chars.iter().enumerate() {
@@ -185,82 +143,26 @@ impl UnmatchedBraces {
                         indent: line_indent,
                     });
                 } else if ch == '}' {
-                    // Check if this closing brace matches the expected indent
-                    let close_indent = line_indent;
-                    let mut found_match = false;
-
-                    // Pop blocks that should have been closed before this one
-                    while let Some(top) = brace_stack.last() {
-                        if top.indent > close_indent {
-                            // This block was never closed - needs a closing brace
-                            let unclosed = brace_stack.pop().unwrap();
-                            // Insert before current line
-                            missing_close_braces.push((
-                                line_number - 1,
-                                unclosed.indent,
-                                unclosed.line,
-                            ));
-                            // Add error for unclosed brace
-                            errors.push(
-                                LintError::new(
-                                    self.name(),
-                                    self.category(),
-                                    "Unclosed brace '{' - missing closing brace '}'",
-                                    Severity::Error,
-                                )
-                                .with_location(unclosed.line, unclosed.column),
-                            );
-                        } else if top.indent == close_indent {
-                            // This closing brace matches the top block
-                            brace_stack.pop();
-                            found_match = true;
-                            break;
-                        } else {
-                            // close_indent > top.indent - unexpected closing brace
-                            break;
-                        }
-                    }
-
-                    if !found_match {
+                    // Simple stack-based matching (ignore indentation)
+                    if brace_stack.pop().is_none() {
                         // Extra closing brace - no matching opening brace
-                        // Try to find a block directive above that's missing '{'
-                        let fix_result = find_missing_open_brace_fix(&lines, &line_offsets, line_number, close_indent);
+                        let fix = if line.trim() == "}" {
+                            Some(Fix::delete(line_number))
+                        } else {
+                            None
+                        };
 
-                        // Skip if we already reported this as a block directive missing '{'
-                        let already_reported = fix_result.as_ref().map_or(false, |(_, fix_line)| {
-                            block_directive_error_lines.contains(fix_line)
-                        });
-
-                        if !already_reported {
-                            let (message, fix) = if let Some((f, _)) = fix_result {
-                                (
-                                    "Missing opening brace '{' for block directive",
-                                    Some(f),
-                                )
-                            } else if line.trim() == "}" {
-                                (
-                                    "Unexpected closing brace '}' without matching opening brace",
-                                    Some(Fix::delete(line_number)),
-                                )
-                            } else {
-                                (
-                                    "Unexpected closing brace '}' without matching opening brace",
-                                    None,
-                                )
-                            };
-
-                            let mut error = LintError::new(
-                                self.name(),
-                                self.category(),
-                                message,
-                                Severity::Error,
-                            )
-                            .with_location(line_number, column);
-                            if let Some(f) = fix {
-                                error = error.with_fix(f);
-                            }
-                            errors.push(error);
+                        let mut error = LintError::new(
+                            self.name(),
+                            self.category(),
+                            "Unexpected closing brace '}' without matching opening brace",
+                            Severity::Error,
+                        )
+                        .with_location(line_number, column);
+                        if let Some(f) = fix {
+                            error = error.with_fix(f);
                         }
+                        errors.push(error);
                     }
                 }
 
@@ -309,7 +211,12 @@ impl UnmatchedBraces {
                                 .with_location(line_number, trimmed.len())
                                 .with_fix(fix),
                             );
-                            block_directive_error_lines.push(line_number);
+                            // Add virtual opening brace to stack so the closing brace matches
+                            brace_stack.push(BraceInfo {
+                                line: line_number,
+                                column: trimmed.len(),
+                                indent: line_indent,
+                            });
                         }
                     }
                 }
@@ -318,7 +225,7 @@ impl UnmatchedBraces {
 
         // Remaining unclosed braces - add closing braces at end of file
         while let Some(unclosed) = brace_stack.pop() {
-            missing_close_braces.push((total_lines, unclosed.indent, unclosed.line));
+            missing_close_braces.push((total_lines, unclosed.line, unclosed.indent));
             errors.push(
                 LintError::new(
                     self.name(),
@@ -330,18 +237,11 @@ impl UnmatchedBraces {
             );
         }
 
-        // Merge comment insertions into missing_close_braces (both use insert_after)
-        missing_close_braces.extend(comment_insertions);
-
         // Create fixes for missing closing braces (insert after)
-        // Sort by insert line descending, then by indent ascending
-        // (outer blocks should be inserted first so they end up at the bottom)
-        missing_close_braces.sort_by(|a, b| match b.0.cmp(&a.0) {
-            std::cmp::Ordering::Equal => a.1.cmp(&b.1),
-            other => other,
-        });
+        // Sort by insert line descending so outer blocks end up at the bottom
+        missing_close_braces.sort_by(|a, b| b.0.cmp(&a.0));
 
-        for (insert_after_line, indent, error_line) in missing_close_braces {
+        for (insert_after_line, error_line, indent) in missing_close_braces {
             let closing_brace = format!("{}}}", " ".repeat(indent));
             // Find the corresponding error by matching the error's line number
             for error in &mut errors {
@@ -365,59 +265,6 @@ impl UnmatchedBraces {
     fn category(&self) -> &'static str {
         "syntax"
     }
-}
-
-/// Find a block directive above that's missing an opening brace
-/// Returns a tuple of (Fix, line_number) if found
-fn find_missing_open_brace_fix(
-    lines: &[&str],
-    line_offsets: &[usize],
-    close_line: usize,
-    close_indent: usize,
-) -> Option<(Fix, usize)> {
-    // Look backwards for a line at the same indent that looks like a block directive
-    // Block directives typically: don't end with ';' or '{', and have content
-    for i in (0..close_line - 1).rev() {
-        let line = lines[i];
-        let trimmed = line.trim();
-        let line_indent = line.len() - line.trim_start().len();
-
-        // Skip empty lines and comments
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        // If we find a line with less indent, stop searching
-        if line_indent < close_indent {
-            // Check if this line looks like a block directive missing '{'
-            if !trimmed.ends_with('{') && !trimmed.ends_with(';') && !trimmed.ends_with('}') {
-                // This could be the block directive missing '{'
-                // Use range-based fix: replace trailing whitespace with " {"
-                let line_number = i + 1;
-                let line_start = line_offsets[i];
-                let content_end = line_start + line.trim_end().len();
-                let line_end = line_start + line.len();
-                return Some((Fix::replace_range(content_end, line_end, " {"), line_number));
-            }
-            break;
-        }
-
-        // If same indent and doesn't end with '{', ';', or '}', it might be the missing block
-        if line_indent == close_indent
-            && !trimmed.ends_with('{')
-            && !trimmed.ends_with(';')
-            && !trimmed.ends_with('}')
-        {
-            // Use range-based fix: replace trailing whitespace with " {"
-            let line_number = i + 1;
-            let line_start = line_offsets[i];
-            let content_end = line_start + line.trim_end().len();
-            let line_end = line_start + line.len();
-            return Some((Fix::replace_range(content_end, line_end, " {"), line_number));
-        }
-    }
-
-    None
 }
 
 impl LintRule for UnmatchedBraces {
