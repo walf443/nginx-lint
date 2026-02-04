@@ -71,6 +71,10 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-keepalive",
 ];
 
+/// Global cache for the plugin loader (Engine is expensive to create)
+#[cfg(feature = "builtin-plugins")]
+static PLUGIN_LOADER_CACHE: std::sync::OnceLock<PluginLoader> = std::sync::OnceLock::new();
+
 /// Global cache for compiled builtin plugins
 /// This avoids recompiling WASM modules on every Linter creation
 #[cfg(feature = "builtin-plugins")]
@@ -81,11 +85,16 @@ static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<WasmLintRule>> = std::sync
 /// The first call compiles all WASM modules and caches them.
 /// Subsequent calls clone from the cache, which is much faster.
 #[cfg(feature = "builtin-plugins")]
-pub fn load_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, PluginError> {
+pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
     // Try to get from cache first
     if let Some(cached) = BUILTIN_PLUGINS_CACHE.get() {
         return Ok(cached.clone());
     }
+
+    // Get or create the loader
+    let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
+        PluginLoader::new().expect("Failed to create PluginLoader")
+    });
 
     // Compile plugins
     let plugins = compile_builtin_plugins(loader)?;

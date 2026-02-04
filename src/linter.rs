@@ -248,14 +248,11 @@ impl Linter {
         #[cfg(feature = "builtin-plugins")]
         {
             use crate::plugin::builtin::load_builtin_plugins;
-            use crate::plugin::PluginLoader;
 
-            if let Ok(loader) = PluginLoader::new() {
-                if let Ok(plugins) = load_builtin_plugins(&loader) {
-                    for plugin in plugins {
-                        if is_enabled(plugin.name()) {
-                            linter.add_rule(Box::new(plugin));
-                        }
+            if let Ok(plugins) = load_builtin_plugins() {
+                for plugin in plugins {
+                    if is_enabled(plugin.name()) {
+                        linter.add_rule(Box::new(plugin));
                     }
                 }
             }

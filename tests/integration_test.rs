@@ -1,7 +1,31 @@
-use nginx_lint::{apply_fixes, parse_config, parse_string, pre_parse_checks, Linter, Severity};
+use nginx_lint::{apply_fixes, parse_config, parse_string, pre_parse_checks, LintConfig, Linter, Severity};
+use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tempfile::NamedTempFile;
+
+/// Global cached linter with default rules (thread-safe)
+fn get_default_linter() -> &'static Linter {
+    static LINTER: OnceLock<Linter> = OnceLock::new();
+    LINTER.get_or_init(Linter::with_default_rules)
+}
+
+/// Global cached linter with all rules enabled (thread-safe)
+fn get_all_rules_linter() -> &'static Linter {
+    static LINTER: OnceLock<Linter> = OnceLock::new();
+    LINTER.get_or_init(|| {
+        let config_toml = r#"
+[rules.gzip-not-enabled]
+enabled = true
+
+[rules.missing-error-log]
+enabled = true
+"#;
+        let config: LintConfig = toml::from_str(config_toml).unwrap();
+        Linter::with_config(Some(&config))
+    })
+}
 
 fn fixtures_base() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -55,7 +79,7 @@ fn misc_fixture(name: &str) -> PathBuf {
 fn test_valid_config() {
     let path = parser_fixture("valid");
     let config = parse_config(&path).expect("Failed to parse valid config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // valid config should have no errors or warnings
@@ -75,7 +99,7 @@ fn test_valid_config() {
 fn test_minimal_config() {
     let path = parser_fixture("minimal");
     let config = parse_config(&path).expect("Failed to parse minimal config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // Should have no errors (info-level rules like gzip-not-enabled and missing-error-log
@@ -91,7 +115,7 @@ fn test_minimal_config() {
 fn test_with_ssl_config() {
     let path = parser_fixture("with_ssl");
     let config = parse_config(&path).expect("Failed to parse with_ssl config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // SSL config should have no errors or warnings
@@ -111,7 +135,7 @@ fn test_with_ssl_config() {
 fn test_with_include_config() {
     let path = parser_fixture("with_include");
     let config = parse_config(&path).expect("Failed to parse with_include config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // Main config has gzip and error_log, so no info messages for those
@@ -127,7 +151,7 @@ fn test_with_include_config() {
 fn test_with_nested_include_config() {
     let path = parser_fixture("with_nested_include");
     let config = parse_config(&path).expect("Failed to parse with_nested_include config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // Just verify it parses without errors
@@ -177,7 +201,7 @@ http {
 fn test_multiple_issues_config() {
     let path = misc_fixture("multiple_issues");
     let config = parse_config(&path).expect("Failed to parse multiple_issues config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     // Should have multiple server_tokens warnings
@@ -198,7 +222,7 @@ fn test_multiple_issues_config() {
 fn test_error_locations() {
     let path = rule_error_fixture("security", "server_tokens_enabled");
     let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     let server_tokens_warning = errors
@@ -238,7 +262,7 @@ http {
     )
     .unwrap();
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, Path::new("test.conf"));
 
     let server_tokens_warnings: Vec<_> = errors
@@ -274,7 +298,7 @@ server {
     // Simulate being included from http context
     config.include_context = vec!["http".to_string()];
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, Path::new("sites-available/example.conf"));
 
     let server_tokens_warnings: Vec<_> = errors
@@ -307,7 +331,7 @@ server {
     // Simulate being included from http context
     config.include_context = vec!["http".to_string()];
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, Path::new("sites-available/example.conf"));
 
     let server_tokens_warnings: Vec<_> = errors
@@ -343,7 +367,7 @@ location / {
     // Simulate being included from http > server context
     config.include_context = vec!["http".to_string(), "server".to_string()];
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, Path::new("snippets/location.conf"));
 
     let server_tokens_warnings: Vec<_> = errors
@@ -403,7 +427,7 @@ fn test_context_comment_prevents_invalid_context_error() {
     );
 
     // Lint the file - should NOT have invalid-directive-context error
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(config, file.path());
 
     let context_errors: Vec<_> = errors
@@ -439,7 +463,7 @@ fn test_no_context_comment_causes_invalid_context_error() {
     let config = included_files[0].config.as_ref().unwrap();
 
     // Lint the file - SHOULD have invalid-directive-context error
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(config, file.path());
 
     let context_errors: Vec<_> = errors
@@ -458,7 +482,7 @@ fn test_no_context_comment_causes_invalid_context_error() {
 fn test_severity_counts() {
     let path = misc_fixture("multiple_issues");
     let config = parse_config(&path).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
     let error_count = errors
@@ -494,7 +518,7 @@ server {
     )
     .expect("Failed to parse ssl_protocols");
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Should detect deprecated protocols
@@ -523,7 +547,7 @@ http {
     )
     .expect("Failed to parse autoindex");
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Should detect autoindex enabled
@@ -544,60 +568,73 @@ fn test_generated_fixtures_parse_without_errors() {
         return;
     }
 
-    let entries = fs::read_dir(&test_generated_dir).expect("Failed to read test_generated directory");
+    // Collect all .conf files first
+    let conf_files: Vec<PathBuf> = fs::read_dir(&test_generated_dir)
+        .expect("Failed to read test_generated directory")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "conf"))
+        .collect();
 
-    // Create linter once outside the loop for better performance
-    let linter = Linter::with_default_rules();
+    // Ensure we have files to test
+    assert!(
+        !conf_files.is_empty(),
+        "No .conf files found in test_generated directory"
+    );
 
-    let mut tested_count = 0;
-    for entry in entries {
-        let entry = entry.expect("Failed to read directory entry");
-        let path = entry.path();
+    // Create linter once (thread-safe for read operations)
+    let linter = get_default_linter();
 
-        // Only test .conf files
-        if path.extension().is_some_and(|ext| ext == "conf") {
+    // Test all files in parallel, collecting failures
+    let failures: Vec<String> = conf_files
+        .par_iter()
+        .filter_map(|path| {
             // First run pre-parse checks
-            let pre_errors = pre_parse_checks(&path);
+            let pre_errors = pre_parse_checks(path);
             let pre_errors_critical: Vec<_> = pre_errors
                 .iter()
                 .filter(|e| e.severity == Severity::Error)
                 .collect();
 
-            assert!(
-                pre_errors_critical.is_empty(),
-                "Pre-parse errors in {}: {:?}",
-                path.display(),
-                pre_errors_critical
-            );
+            if !pre_errors_critical.is_empty() {
+                return Some(format!(
+                    "Pre-parse errors in {}: {:?}",
+                    path.display(),
+                    pre_errors_critical
+                ));
+            }
 
             // Then parse and lint
-            let config = parse_config(&path).unwrap_or_else(|e| {
-                panic!("Failed to parse {}: {}", path.display(), e)
-            });
+            let config = match parse_config(path) {
+                Ok(c) => c,
+                Err(e) => return Some(format!("Failed to parse {}: {}", path.display(), e)),
+            };
 
-            let errors = linter.lint(&config, &path);
+            let errors = linter.lint(&config, path);
 
             // Should have no errors (warnings and info are OK)
-            let error_count = errors
+            let critical_errors: Vec<_> = errors
                 .iter()
                 .filter(|e| e.severity == Severity::Error)
-                .count();
+                .collect();
 
-            assert_eq!(
-                error_count, 0,
-                "Expected no errors in {}, got: {:?}",
-                path.display(),
-                errors.iter().filter(|e| e.severity == Severity::Error).collect::<Vec<_>>()
-            );
+            if !critical_errors.is_empty() {
+                return Some(format!(
+                    "Expected no errors in {}, got: {:?}",
+                    path.display(),
+                    critical_errors
+                ));
+            }
 
-            tested_count += 1;
-        }
-    }
+            None
+        })
+        .collect();
 
-    // Ensure we actually tested some files
+    // Report all failures at once
     assert!(
-        tested_count > 0,
-        "No .conf files found in test_generated directory"
+        failures.is_empty(),
+        "Test failures:\n{}",
+        failures.join("\n")
     );
 }
 
@@ -612,159 +649,179 @@ fn dir_name_to_rule_name(dir_name: &str) -> String {
     dir_name.replace('_', "-")
 }
 
+/// Test case information for parallel execution
+struct RuleTestCase {
+    category: String,
+    rule_dir_name: String,
+    rule_name: String,
+    case: String,
+    error_path: PathBuf,
+    expected_path: PathBuf,
+}
+
 /// Automatically discover and test all rule fixtures
 /// This test iterates over all fixtures in tests/fixtures/rules/ and runs appropriate tests
 #[test]
 fn test_all_rule_fixtures() {
-    use nginx_lint::LintConfig;
     use std::io::Write;
 
     let rules_dir = fixtures_base().join("rules");
 
-    // Create linter with all rules enabled (including rules disabled by default)
-    let config_toml = r#"
-[rules.gzip-not-enabled]
-enabled = true
+    // Use cached linter with all rules enabled
+    let linter = get_all_rules_linter();
 
-[rules.missing-error-log]
-enabled = true
-"#;
-    let config: LintConfig = toml::from_str(config_toml).unwrap();
-    let linter = Linter::with_config(Some(&config));
+    // Collect all test cases first
+    let mut test_cases: Vec<RuleTestCase> = Vec::new();
 
-    // Iterate over categories (security, syntax, style, best_practices)
     for category_entry in fs::read_dir(&rules_dir).expect("Failed to read rules directory") {
         let category_entry = category_entry.expect("Failed to read category entry");
         let category_path = category_entry.path();
         if !category_path.is_dir() {
             continue;
         }
-        let category = category_path.file_name().unwrap().to_str().unwrap();
+        let category = category_path.file_name().unwrap().to_str().unwrap().to_string();
 
-        // Iterate over rules in this category
         for rule_entry in fs::read_dir(&category_path).expect("Failed to read category directory") {
             let rule_entry = rule_entry.expect("Failed to read rule entry");
             let rule_path = rule_entry.path();
             if !rule_path.is_dir() {
                 continue;
             }
-            let rule_dir_name = rule_path.file_name().unwrap().to_str().unwrap();
-            let rule_name = dir_name_to_rule_name(rule_dir_name);
+            let rule_dir_name = rule_path.file_name().unwrap().to_str().unwrap().to_string();
+            let rule_name = dir_name_to_rule_name(&rule_dir_name);
 
-            // Iterate over test cases for this rule
             for case_entry in fs::read_dir(&rule_path).expect("Failed to read rule directory") {
                 let case_entry = case_entry.expect("Failed to read case entry");
                 let case_path = case_entry.path();
                 if !case_path.is_dir() {
                     continue;
                 }
-                let case = case_path.file_name().unwrap().to_str().unwrap();
+                let case = case_path.file_name().unwrap().to_str().unwrap().to_string();
 
-                let error_path = case_path.join("error").join("nginx.conf");
-                let expected_path = case_path.join("expected").join("nginx.conf");
-
-                // Test error fixture: should detect errors
-                if error_path.exists() {
-                    // Try to parse - some syntax error fixtures can't be parsed
-                    let can_parse = parse_config(&error_path).is_ok();
-
-                    // Always get pre_parse_checks errors (includes ignore warnings)
-                    let mut errors = pre_parse_checks(&error_path);
-
-                    if can_parse {
-                        let config = parse_config(&error_path).unwrap();
-                        errors.extend(linter.lint(&config, &error_path));
-                    }
-
-                    let rule_errors: Vec<_> = errors
-                        .iter()
-                        .filter(|e| e.rule == rule_name)
-                        .collect();
-
-                    assert!(
-                        !rule_errors.is_empty(),
-                        "Expected {} errors in {}/{}/{}/error/nginx.conf, got none",
-                        rule_name, category, rule_dir_name, case
-                    );
-                }
-
-                // Test expected fixture: should have no errors for this rule
-                if expected_path.exists() {
-                    let can_parse = parse_config(&expected_path).is_ok();
-
-                    // Always get pre_parse_checks errors (includes ignore warnings)
-                    let mut errors = pre_parse_checks(&expected_path);
-
-                    if can_parse {
-                        let config = parse_config(&expected_path).unwrap();
-                        errors.extend(linter.lint(&config, &expected_path));
-                    }
-
-                    let rule_errors: Vec<_> = errors
-                        .iter()
-                        .filter(|e| e.rule == rule_name)
-                        .collect();
-
-                    assert!(
-                        rule_errors.is_empty(),
-                        "Expected no {} errors in {}/{}/{}/expected/nginx.conf, got: {:?}",
-                        rule_name, category, rule_dir_name, case, rule_errors
-                    );
-                }
-
-                // Test fix: if both error and expected exist, verify fix produces expected
-                // Only test if this rule has fixes (filter to just this rule's errors)
-                if error_path.exists() && expected_path.exists() {
-                    let error_content = fs::read_to_string(&error_path)
-                        .expect("Failed to read error fixture");
-
-                    // Create temp file with error content
-                    let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
-                    write!(temp_file, "{}", error_content).expect("Failed to write temp file");
-                    let temp_path = temp_file.path();
-
-                    // Get all errors: combine pre-parse checks and linter errors
-                    let mut all_errors = pre_parse_checks(temp_path);
-                    if let Ok(config) = parse_config(temp_path) {
-                        all_errors.extend(linter.lint(&config, temp_path));
-                    }
-
-                    // Filter to only this rule's errors with fixes
-                    let rule_errors_with_fixes: Vec<_> = all_errors
-                        .iter()
-                        .filter(|e| e.rule == rule_name && e.fix.is_some())
-                        .cloned()
-                        .collect();
-
-                    // Skip if this rule has no fixes
-                    if rule_errors_with_fixes.is_empty() {
-                        continue;
-                    }
-
-                    // Apply only this rule's fixes
-                    let fix_count = apply_fixes(temp_path, &rule_errors_with_fixes)
-                        .expect("Failed to apply fixes");
-
-                    if fix_count == 0 {
-                        continue; // Skip if no fixes were applied
-                    }
-
-                    // Read fixed content and expected content
-                    let fixed_content = fs::read_to_string(temp_path)
-                        .expect("Failed to read fixed file");
-                    let expected_content = fs::read_to_string(&expected_path)
-                        .expect("Failed to read expected file");
-
-                    assert_eq!(
-                        fixed_content.trim(),
-                        expected_content.trim(),
-                        "Fix for {}/{}/{} did not produce expected output.\n\nFixed:\n{}\n\nExpected:\n{}",
-                        category, rule_dir_name, case, fixed_content, expected_content
-                    );
-                }
+                test_cases.push(RuleTestCase {
+                    category: category.clone(),
+                    rule_dir_name: rule_dir_name.clone(),
+                    rule_name: rule_name.clone(),
+                    case,
+                    error_path: case_path.join("error").join("nginx.conf"),
+                    expected_path: case_path.join("expected").join("nginx.conf"),
+                });
             }
         }
     }
+
+    // Run all test cases in parallel, collecting failures
+    let failures: Vec<String> = test_cases
+        .par_iter()
+        .flat_map(|tc| {
+            let mut case_failures = Vec::new();
+
+            // Parse error fixture once
+            let error_config = if tc.error_path.exists() {
+                parse_config(&tc.error_path).ok()
+            } else {
+                None
+            };
+
+            // Parse expected fixture once
+            let expected_config = if tc.expected_path.exists() {
+                parse_config(&tc.expected_path).ok()
+            } else {
+                None
+            };
+
+            // Test error fixture: should detect errors
+            if tc.error_path.exists() {
+                let mut errors = pre_parse_checks(&tc.error_path);
+
+                if let Some(ref config) = error_config {
+                    errors.extend(linter.lint(config, &tc.error_path));
+                }
+
+                let rule_errors: Vec<_> = errors
+                    .iter()
+                    .filter(|e| e.rule == tc.rule_name)
+                    .collect();
+
+                if rule_errors.is_empty() {
+                    case_failures.push(format!(
+                        "Expected {} errors in {}/{}/{}/error/nginx.conf, got none",
+                        tc.rule_name, tc.category, tc.rule_dir_name, tc.case
+                    ));
+                }
+            }
+
+            // Test expected fixture: should have no errors for this rule
+            if tc.expected_path.exists() {
+                let mut errors = pre_parse_checks(&tc.expected_path);
+
+                if let Some(ref config) = expected_config {
+                    errors.extend(linter.lint(config, &tc.expected_path));
+                }
+
+                let rule_errors: Vec<_> = errors
+                    .iter()
+                    .filter(|e| e.rule == tc.rule_name)
+                    .collect();
+
+                if !rule_errors.is_empty() {
+                    case_failures.push(format!(
+                        "Expected no {} errors in {}/{}/{}/expected/nginx.conf, got: {:?}",
+                        tc.rule_name, tc.category, tc.rule_dir_name, tc.case, rule_errors
+                    ));
+                }
+            }
+
+            // Test fix: if both error and expected exist, verify fix produces expected
+            if tc.error_path.exists() && tc.expected_path.exists() && error_config.is_some() {
+                if let Ok(error_content) = fs::read_to_string(&tc.error_path) {
+                    if let Ok(mut temp_file) = NamedTempFile::new() {
+                        if write!(temp_file, "{}", error_content).is_ok() {
+                            let temp_path = temp_file.path();
+
+                            let mut all_errors = pre_parse_checks(temp_path);
+                            if let Ok(config) = parse_config(temp_path) {
+                                all_errors.extend(linter.lint(&config, temp_path));
+                            }
+
+                            let rule_errors_with_fixes: Vec<_> = all_errors
+                                .iter()
+                                .filter(|e| e.rule == tc.rule_name && e.fix.is_some())
+                                .cloned()
+                                .collect();
+
+                            if !rule_errors_with_fixes.is_empty() {
+                                if let Ok(fix_count) = apply_fixes(temp_path, &rule_errors_with_fixes) {
+                                    if fix_count > 0 {
+                                        if let (Ok(fixed_content), Ok(expected_content)) = (
+                                            fs::read_to_string(temp_path),
+                                            fs::read_to_string(&tc.expected_path),
+                                        ) {
+                                            if fixed_content.trim() != expected_content.trim() {
+                                                case_failures.push(format!(
+                                                    "Fix for {}/{}/{} did not produce expected output.\n\nFixed:\n{}\n\nExpected:\n{}",
+                                                    tc.category, tc.rule_dir_name, tc.case, fixed_content, expected_content
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            case_failures
+        })
+        .collect();
+
+    // Report all failures at once
+    assert!(
+        failures.is_empty(),
+        "Test failures:\n{}",
+        failures.join("\n\n")
+    );
 }
 
 // ============================================================================
@@ -1009,7 +1066,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
@@ -1048,7 +1105,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
@@ -1123,7 +1180,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
@@ -1166,7 +1223,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let (errors, ignored_count) = linter.lint_with_content(&config, std::path::Path::new("test.conf"), content);
 
     // server-tokens-enabled should be ignored
@@ -1206,7 +1263,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
@@ -1244,7 +1301,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     // Build tracker and filter errors
@@ -1282,7 +1339,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1313,7 +1370,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1345,7 +1402,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1368,7 +1425,7 @@ server {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1420,7 +1477,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1447,7 +1504,7 @@ location / {
     // Set include context as if this file was included from http { server { ... } }
     config.include_context = vec!["http".to_string(), "server".to_string()];
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1474,7 +1531,7 @@ location / {
     // Set include context as if this file was included from http { ... } (no server)
     config.include_context = vec!["http".to_string()];
 
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let context_errors: Vec<_> = errors
@@ -1511,7 +1568,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1544,7 +1601,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1577,7 +1634,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1604,7 +1661,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1632,7 +1689,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1662,7 +1719,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1689,7 +1746,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1719,7 +1776,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let proxy_pass_errors: Vec<_> = errors
@@ -1750,7 +1807,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let upstream_errors: Vec<_> = errors
@@ -1792,7 +1849,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let upstream_errors: Vec<_> = errors
@@ -1822,7 +1879,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let upstream_errors: Vec<_> = errors
@@ -1858,7 +1915,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let upstream_errors: Vec<_> = errors
@@ -1889,7 +1946,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let inheritance_errors: Vec<_> = errors
@@ -1928,7 +1985,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let inheritance_errors: Vec<_> = errors
@@ -1958,7 +2015,7 @@ http {
 }
 "#;
     let config = parse_string(content).expect("Failed to parse config");
-    let linter = Linter::with_default_rules();
+    let linter = get_default_linter();
     let errors = linter.lint(&config, std::path::Path::new("test.conf"));
 
     let inheritance_errors: Vec<_> = errors

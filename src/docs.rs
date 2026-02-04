@@ -122,25 +122,22 @@ pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
     use crate::linter::LintRule;
     use crate::plugin::builtin::load_builtin_plugins;
-    use crate::plugin::PluginLoader;
 
     let mut docs = Vec::new();
 
-    if let Ok(loader) = PluginLoader::new() {
-        if let Ok(plugins) = load_builtin_plugins(&loader) {
-            for plugin in plugins {
-                docs.push(RuleDocOwned {
-                    name: plugin.name().to_string(),
-                    category: plugin.category().to_string(),
-                    description: plugin.description().to_string(),
-                    severity: plugin.severity().unwrap_or("warning").to_string(),
-                    why: plugin.why().unwrap_or("").to_string(),
-                    bad_example: plugin.bad_example().unwrap_or("").to_string(),
-                    good_example: plugin.good_example().unwrap_or("").to_string(),
-                    references: plugin.references().unwrap_or_default(),
-                    is_plugin: true,
-                });
-            }
+    if let Ok(plugins) = load_builtin_plugins() {
+        for plugin in plugins {
+            docs.push(RuleDocOwned {
+                name: plugin.name().to_string(),
+                category: plugin.category().to_string(),
+                description: plugin.description().to_string(),
+                severity: plugin.severity().unwrap_or("warning").to_string(),
+                why: plugin.why().unwrap_or("").to_string(),
+                bad_example: plugin.bad_example().unwrap_or("").to_string(),
+                good_example: plugin.good_example().unwrap_or("").to_string(),
+                references: plugin.references().unwrap_or_default(),
+                is_plugin: true,
+            });
         }
     }
 
