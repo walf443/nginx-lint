@@ -1,6 +1,6 @@
 //! Ignore comment support for nginx-lint
 //!
-//! This module provides support for inline disable comments that ignore
+//! This module provides support for inline ignore comments that ignore
 //! lint errors on specific lines.
 //!
 //! # Comment Formats
@@ -87,33 +87,33 @@ impl IgnoreTracker {
         let mut tracker = Self::new();
         let mut warnings = Vec::new();
 
-        // First pass: parse all disable comments
+        // First pass: parse all ignore comments
         let lines: Vec<&str> = content.lines().collect();
-        let mut parsed_comments: Vec<(usize, Result<ParsedDisableComment, IgnoreWarning>)> =
+        let mut parsed_comments: Vec<(usize, Result<ParsedIgnoreComment, IgnoreWarning>)> =
             Vec::new();
 
         for (line_idx, line) in lines.iter().enumerate() {
             let line_number = line_idx + 1; // Convert to 1-indexed
-            if let Some(result) = parse_disable_comment(line, line_number) {
+            if let Some(result) = parse_ignore_comment(line, line_number) {
                 parsed_comments.push((line_idx, result));
             }
         }
 
-        // Second pass: adjust target lines for consecutive comment-only disables
-        // They should all target the first non-disable-comment line
+        // Second pass: adjust target lines for consecutive comment-only ignores
+        // They should all target the first non-ignore-comment line
         for i in 0..parsed_comments.len() {
             let (line_idx, ref result) = parsed_comments[i];
 
             match result {
                 Ok(parsed) if !parsed.is_inline => {
-                    // Find the first non-disable-comment line after this one
+                    // Find the first non-ignore-comment line after this one
                     let mut target_idx = line_idx + 1;
                     while target_idx < lines.len() {
-                        // Check if this line is also a disable comment
-                        let is_disable_comment = parsed_comments
+                        // Check if this line is also a ignore comment
+                        let is_ignore_comment = parsed_comments
                             .iter()
                             .any(|(idx, r)| *idx == target_idx && matches!(r, Ok(p) if !p.is_inline));
-                        if !is_disable_comment {
+                        if !is_ignore_comment {
                             break;
                         }
                         target_idx += 1;
@@ -244,9 +244,9 @@ impl IgnoreTracker {
     }
 }
 
-/// Parsed result of a disable comment
+/// Parsed result of a ignore comment
 #[derive(Debug)]
-struct ParsedDisableComment {
+struct ParsedIgnoreComment {
     /// Rule name to ignore
     rule_name: String,
     /// Target line number (the line to ignore errors on)
@@ -259,20 +259,20 @@ struct ParsedDisableComment {
     content_before_comment: Option<String>,
 }
 
-/// Parse a disable comment from a line
+/// Parse a ignore comment from a line
 ///
 /// Supports two formats:
 /// 1. Comment-only line: `# nginx-lint:ignore rule-name reason` → targets next line
 /// 2. Inline comment: `directive; # nginx-lint:ignore rule-name reason` → targets current line
 ///
 /// Returns:
-/// - `None` if the line does not contain a disable comment
-/// - `Some(Ok(ParsedDisableComment))` if valid
+/// - `None` if the line does not contain a ignore comment
+/// - `Some(Ok(ParsedIgnoreComment))` if valid
 /// - `Some(Err(warning))` if the comment is malformed
-fn parse_disable_comment(
+fn parse_ignore_comment(
     line: &str,
     line_number: usize,
-) -> Option<Result<ParsedDisableComment, IgnoreWarning>> {
+) -> Option<Result<ParsedIgnoreComment, IgnoreWarning>> {
     const IGNORE_PREFIX: &str = "nginx-lint:ignore";
 
     // Find the comment marker
@@ -328,7 +328,7 @@ fn parse_disable_comment(
         None
     };
 
-    Some(Ok(ParsedDisableComment {
+    Some(Ok(ParsedIgnoreComment {
         rule_name,
         target_line,
         comment_line: line_number,
@@ -490,8 +490,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_valid_disable_comment() {
-        let result = parse_disable_comment(
+    fn test_parse_valid_ignore_comment() {
+        let result = parse_ignore_comment(
             "# nginx-lint:ignore server-tokens-enabled for dev environment",
             5,
         );
@@ -505,8 +505,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_disable_comment_with_japanese_reason() {
-        let result = parse_disable_comment(
+    fn test_parse_ignore_comment_with_japanese_reason() {
+        let result = parse_ignore_comment(
             "# nginx-lint:ignore server-tokens-enabled 開発環境用",
             5,
         );
@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn test_parse_missing_rule_name() {
-        let result = parse_disable_comment("# nginx-lint:ignore", 5);
+        let result = parse_ignore_comment("# nginx-lint:ignore", 5);
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_parse_missing_reason() {
-        let result = parse_disable_comment("# nginx-lint:ignore server-tokens-enabled", 5);
+        let result = parse_ignore_comment("# nginx-lint:ignore server-tokens-enabled", 5);
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
@@ -543,13 +543,13 @@ mod tests {
 
     #[test]
     fn test_parse_not_a_comment() {
-        let result = parse_disable_comment("server_tokens on;", 5);
+        let result = parse_ignore_comment("server_tokens on;", 5);
         assert!(result.is_none());
     }
 
     #[test]
     fn test_parse_regular_comment() {
-        let result = parse_disable_comment("# This is a regular comment", 5);
+        let result = parse_ignore_comment("# This is a regular comment", 5);
         assert!(result.is_none());
     }
 
@@ -655,8 +655,8 @@ server_tokens on;
     }
 
     #[test]
-    fn test_consecutive_disable_comments() {
-        // Multiple consecutive disable comments should all target the same line
+    fn test_consecutive_ignore_comments() {
+        // Multiple consecutive ignore comments should all target the same line
         let content = r#"
 # nginx-lint:ignore server-tokens-enabled reason1
 # nginx-lint:ignore autoindex-enabled reason2
@@ -673,7 +673,7 @@ server_tokens on;
     }
 
     #[test]
-    fn test_three_consecutive_disable_comments() {
+    fn test_three_consecutive_ignore_comments() {
         let content = r#"
 # nginx-lint:ignore server-tokens-enabled reason1
 # nginx-lint:ignore autoindex-enabled reason2
@@ -724,7 +724,7 @@ server_tokens on;
 
     #[test]
     fn test_parse_inline_comment() {
-        let result = parse_disable_comment(
+        let result = parse_ignore_comment(
             "server_tokens on; # nginx-lint:ignore server-tokens-enabled dev environment",
             5,
         );
@@ -739,7 +739,7 @@ server_tokens on;
 
     #[test]
     fn test_parse_inline_comment_with_japanese_reason() {
-        let result = parse_disable_comment(
+        let result = parse_ignore_comment(
             "server_tokens on; # nginx-lint:ignore server-tokens-enabled 開発環境用",
             5,
         );
@@ -754,7 +754,7 @@ server_tokens on;
 
     #[test]
     fn test_inline_comment_missing_reason() {
-        let result = parse_disable_comment(
+        let result = parse_ignore_comment(
             "server_tokens on; # nginx-lint:ignore server-tokens-enabled",
             5,
         );
