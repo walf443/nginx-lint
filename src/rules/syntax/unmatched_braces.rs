@@ -36,6 +36,36 @@ struct BraceInfo {
 
 
 impl UnmatchedBraces {
+    /// Strip trailing comment from a line (# preceded by whitespace)
+    /// Returns the line without the comment, trimmed
+    fn strip_trailing_comment(line: &str) -> &str {
+        let mut in_string = false;
+        let mut string_char = None;
+        let mut prev_char = ' ';
+        let chars: Vec<char> = line.chars().collect();
+
+        for (i, &ch) in chars.iter().enumerate() {
+            // Handle strings
+            if (ch == '"' || ch == '\'') && !in_string {
+                in_string = true;
+                string_char = Some(ch);
+            } else if in_string && Some(ch) == string_char && prev_char != '\\' {
+                in_string = false;
+                string_char = None;
+            } else if !in_string && ch == '#' {
+                // Check if preceded by whitespace
+                if i == 0 || chars[i - 1].is_whitespace() {
+                    // Found comment start, return everything before it (trimmed)
+                    return line[..line.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(line.len())]
+                        .trim_end();
+                }
+            }
+            prev_char = ch;
+        }
+
+        line
+    }
+
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
         self.check_content_with_extras(content, &[])
@@ -182,12 +212,14 @@ impl UnmatchedBraces {
             // Skip this check inside raw blocks (like lua_block)
             if string_char.is_none() && !in_raw_block {
                 let trimmed = line.trim();
+                // Strip trailing comment (# preceded by whitespace) before checking line ending
+                let trimmed_no_comment = Self::strip_trailing_comment(trimmed);
                 // Skip empty lines, comments, and lines ending with { ; or }
                 if !trimmed.is_empty()
                     && !trimmed.starts_with('#')
-                    && !trimmed.ends_with('{')
-                    && !trimmed.ends_with(';')
-                    && !trimmed.ends_with('}')
+                    && !trimmed_no_comment.ends_with('{')
+                    && !trimmed_no_comment.ends_with(';')
+                    && !trimmed_no_comment.ends_with('}')
                 {
                     // Get the first word (directive name)
                     if let Some(first_word) = trimmed.split_whitespace().next() {
@@ -851,5 +883,39 @@ http {
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("types"));
+    }
+
+    #[test]
+    fn test_server_in_upstream_with_trailing_comment() {
+        // server directive in upstream with trailing comment should not be
+        // detected as a block directive missing braces
+        let content = r#"http {
+    upstream backend {
+        server 10.0.0.1:8080; # backend-a
+        server 10.0.0.2:8080; # backend-b
+    }
+
+    server {
+        listen 80;
+        location / {
+            proxy_pass http://backend;
+        }
+    }
+}
+"#;
+        let errors = check_braces(content);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_strip_trailing_comment() {
+        // Basic comment stripping
+        assert_eq!(UnmatchedBraces::strip_trailing_comment("server 127.0.0.1:8080; # comment"), "server 127.0.0.1:8080;");
+        // No comment
+        assert_eq!(UnmatchedBraces::strip_trailing_comment("listen 80;"), "listen 80;");
+        // Hash in string should not be treated as comment
+        assert_eq!(UnmatchedBraces::strip_trailing_comment(r#"return 200 "test#value";"#), r#"return 200 "test#value";"#);
+        // Hash not preceded by whitespace (e.g., in regex)
+        assert_eq!(UnmatchedBraces::strip_trailing_comment("location ~* foo#bar {"), "location ~* foo#bar {");
     }
 }
