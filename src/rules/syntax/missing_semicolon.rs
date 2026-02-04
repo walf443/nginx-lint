@@ -211,6 +211,7 @@ fn is_raw_block_line(line: &str) -> bool {
 }
 
 /// Strip inline comments from a line, respecting string literals
+/// In nginx, # only starts a comment when preceded by whitespace
 fn strip_inline_comment(line: &str) -> &str {
     let mut in_string = false;
     let mut string_char: Option<char> = None;
@@ -228,9 +229,13 @@ fn strip_inline_comment(line: &str) -> &str {
             }
         }
 
-        // Check for comment start (only if not in a string)
+        // Check for comment start (only if not in a string and preceded by whitespace)
+        // In nginx, # only starts a comment when preceded by whitespace
         if ch == '#' && !in_string {
-            return &line[..i];
+            let preceded_by_whitespace = prev_char.map_or(true, |c| c.is_whitespace());
+            if preceded_by_whitespace {
+                return &line[..i];
+            }
         }
 
         prev_char = Some(ch);
@@ -511,5 +516,50 @@ worker_processes auto;
             "Expected no errors in lua_blocks, got: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn test_semicolon_with_trailing_comment() {
+        // Semicolon followed by comment should work correctly
+        let content = r#"http {
+    upstream backend {
+        server 10.0.0.1:8080; # backend-a
+        server 10.0.0.2:8080; # backend-b
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for semicolon with trailing comment, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_hash_in_regex_not_treated_as_comment() {
+        // Hash inside regex pattern should not be treated as comment start
+        let content = r#"http {
+    server {
+        location ~* foo#bar {
+            deny all;
+        }
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for hash in regex, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_strip_inline_comment_basic() {
+        assert_eq!(strip_inline_comment("listen 80; # port"), "listen 80; ");
+        assert_eq!(strip_inline_comment("listen 80;"), "listen 80;");
+        // Hash not preceded by whitespace should not be treated as comment
+        assert_eq!(strip_inline_comment("location ~* foo#bar {"), "location ~* foo#bar {");
     }
 }
