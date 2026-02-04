@@ -66,7 +66,7 @@ impl IfIsEvilPlugin {
                 "best-practices",
                 &format!(
                     "Avoid using '{}' inside 'if' in location context. \
-                     Only 'return', 'rewrite ... last', and 'set' are safe. \
+                     Only 'return', 'rewrite ... last/break', 'set', and 'break' are safe. \
                      Consider using a separate location block instead.",
                     unsafe_list
                 ),
@@ -81,15 +81,21 @@ impl IfIsEvilPlugin {
         let name = directive.name.as_str();
 
         match name {
-            "return" | "set" => true,
+            "return" | "set" | "break" => true,
             "rewrite" => {
-                // rewrite is only safe with 'last' flag
+                // rewrite is safe with 'last' or 'break' flag
                 // rewrite pattern replacement [flag];
                 // flags: last, break, redirect, permanent
+                // - last: stops and restarts location search
+                // - break: stops rewrite processing
+                // - redirect/permanent: external redirects (unsafe in if)
                 directive
                     .args
                     .last()
-                    .map(|arg| arg.as_str() == "last")
+                    .map(|arg| {
+                        let flag = arg.as_str();
+                        flag == "last" || flag == "break"
+                    })
                     .unwrap_or(false)
             }
             _ => false,
@@ -112,7 +118,9 @@ impl Plugin for IfIsEvilPlugin {
              Only the following are 100% safe inside 'if' in location context:\n\
              - return ...\n\
              - rewrite ... last\n\
-             - set $var value\n\n\
+             - rewrite ... break\n\
+             - set $var value\n\
+             - break\n\n\
              Other directives like proxy_pass, try_files, fastcgi_pass, etc. can cause \
              unpredictable behavior. Use separate location blocks or map directive instead.",
         )
@@ -228,27 +236,44 @@ http {
     }
 
     #[test]
-    fn test_unsafe_rewrite_break_in_if() {
-        let config = parse_string(
+    fn test_safe_rewrite_break_in_if() {
+        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+
+        // rewrite with 'break' is also safe
+        runner.assert_no_errors(
             r#"
 http {
     server {
         location / {
             if ($host ~* ^www\.) {
-                rewrite ^(.*)$ https://example.com$1 break;
+                rewrite ^(.*)$ /new-path$1 break;
             }
         }
     }
 }
 "#,
-        )
-        .unwrap();
+        );
+    }
 
-        let plugin = IfIsEvilPlugin;
-        let errors = plugin.check(&config, "test.conf");
+    #[test]
+    fn test_safe_break_directive_in_if() {
+        let runner = PluginTestRunner::new(IfIsEvilPlugin);
 
-        assert_eq!(errors.len(), 1);
-        assert!(errors[0].message.contains("rewrite"));
+        // standalone 'break' directive is safe
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location / {
+            if ($uri ~* "^/stop") {
+                set $stop 1;
+                break;
+            }
+        }
+    }
+}
+"#,
+        );
     }
 
     #[test]
