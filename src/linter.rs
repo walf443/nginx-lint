@@ -161,6 +161,26 @@ pub trait LintRule: Send + Sync {
     fn category(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError>;
+
+    /// Get detailed explanation of why this rule exists
+    fn why(&self) -> Option<&str> {
+        None
+    }
+
+    /// Get example of bad configuration
+    fn bad_example(&self) -> Option<&str> {
+        None
+    }
+
+    /// Get example of good configuration
+    fn good_example(&self) -> Option<&str> {
+        None
+    }
+
+    /// Get reference URLs
+    fn references(&self) -> Option<Vec<String>> {
+        None
+    }
 }
 
 pub struct Linter {

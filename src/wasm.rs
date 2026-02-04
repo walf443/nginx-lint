@@ -273,15 +273,40 @@ pub fn get_rule_names() -> String {
     serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Get rule information (name -> description mapping) as JSON
+/// Extended rule information for JavaScript
+#[derive(serde::Serialize)]
+struct JsRuleInfo {
+    description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    why: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bad_example: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    good_example: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    references: Option<Vec<String>>,
+}
+
+/// Get rule information (name -> extended info mapping) as JSON
 #[wasm_bindgen]
 pub fn get_rule_info() -> String {
     use std::collections::HashMap;
     let linter = Linter::with_default_rules();
-    let info: HashMap<&str, &str> = linter
+    let info: HashMap<&str, JsRuleInfo> = linter
         .rules()
         .iter()
-        .map(|r| (r.name(), r.description()))
+        .map(|r| {
+            (
+                r.name(),
+                JsRuleInfo {
+                    description: r.description().to_string(),
+                    why: r.why().map(|s| s.to_string()),
+                    bad_example: r.bad_example().map(|s| s.to_string()),
+                    good_example: r.good_example().map(|s| s.to_string()),
+                    references: r.references(),
+                },
+            )
+        })
         .collect();
     serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
 }

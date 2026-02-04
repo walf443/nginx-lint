@@ -531,6 +531,22 @@ impl LintRule for WasmLintRule {
             }
         }
     }
+
+    fn why(&self) -> Option<&str> {
+        self.info.why.as_deref()
+    }
+
+    fn bad_example(&self) -> Option<&str> {
+        self.info.bad_example.as_deref()
+    }
+
+    fn good_example(&self) -> Option<&str> {
+        self.info.good_example.as_deref()
+    }
+
+    fn references(&self) -> Option<Vec<String>> {
+        self.info.references.clone()
+    }
 }
 
 // WasmLintRule is Send + Sync because:

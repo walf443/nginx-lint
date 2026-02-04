@@ -106,25 +106,88 @@
             color: #4fc3f7;
             font-size: 11px;
             float: right;
-            cursor: help;
-            position: relative;
+            cursor: pointer;
+            text-decoration: underline;
+            text-decoration-style: dotted;
         }
-        .error-rule[title]:hover::after {
-            content: attr(title);
-            position: absolute;
-            right: 0;
-            top: 100%;
-            margin-top: 5px;
-            padding: 8px 12px;
-            background: #424242;
-            color: #fff;
-            border-radius: 4px;
-            font-size: 12px;
-            white-space: normal;
-            width: 280px;
+        .error-rule:hover {
+            color: #81d4fa;
+        }
+        .rule-modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
             z-index: 1000;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .rule-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 8px;
+            padding: 20px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            z-index: 1001;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        }
+        .rule-modal h3 {
+            color: #4fc3f7;
+            margin: 0 0 15px 0;
+            font-size: 16px;
+        }
+        .rule-modal-close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            color: #888;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 0;
+        }
+        .rule-modal-close:hover {
+            color: #fff;
+        }
+        .rule-modal-section {
+            margin-bottom: 15px;
+        }
+        .rule-modal-section h4 {
+            color: #888;
+            font-size: 12px;
+            margin: 0 0 8px 0;
+            text-transform: uppercase;
+        }
+        .rule-modal-section p {
+            margin: 0;
+            line-height: 1.5;
+        }
+        .rule-modal pre {
+            background: #1e1e1e;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 0;
+            overflow-x: auto;
+            font-size: 12px;
             line-height: 1.4;
+        }
+        .rule-modal .example-bad {
+            border-left: 3px solid #f44336;
+        }
+        .rule-modal .example-good {
+            border-left: 3px solid #4caf50;
+        }
+        .rule-modal a {
+            color: #4fc3f7;
         }
         .error-message {
             color: #fff;
@@ -271,6 +334,15 @@ enabled = true</textarea>
         </div>
     </div>
 
+    <!-- Rule Info Modal -->
+    <div id="rule-modal-overlay" class="rule-modal-overlay" onclick="closeRuleModal()">
+        <div class="rule-modal" onclick="event.stopPropagation()">
+            <button class="rule-modal-close" onclick="closeRuleModal()">&times;</button>
+            <h3 id="rule-modal-title"></h3>
+            <div id="rule-modal-content"></div>
+        </div>
+    </div>
+
     <script type="module">
         import init, { lint_with_config, version, get_rule_names, get_rule_info, debug_plugin_status } from '/pkg/nginx_lint.js';
 
@@ -339,14 +411,15 @@ enabled = true</textarea>
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
                         const fixBtn = err.fix ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
                         const ignoreBtn = err.line ? `<button class="ignore-btn" onclick="ignoreError(${index})">Ignore</button>` : '';
-                        const description = ruleDescriptions[err.rule] || '';
-                        const titleAttr = description ? `title="${description.replace(/"/g, '&quot;')}"` : '';
+                        const ruleInfo = ruleDescriptions[err.rule];
+                        const hasDetails = ruleInfo && (ruleInfo.why || ruleInfo.bad_example || ruleInfo.good_example);
+                        const ruleClick = hasDetails ? `onclick="showRuleModal('${err.rule}')"` : '';
                         html += `
                             <div class="error-item ${err.severity}">
                                 <div class="error-header">
                                     <div class="error-location">${location}</div>
                                     <div class="error-actions">
-                                        <span class="error-rule" ${titleAttr}>${err.category}/${err.rule}</span>
+                                        <span class="error-rule" ${ruleClick}>${err.category}/${err.rule}</span>
                                         ${fixBtn}
                                         ${ignoreBtn}
                                     </div>
@@ -494,6 +567,72 @@ enabled = true</textarea>
             editor.value = lines.join('\n');
             lintConfig();
         };
+
+        // Show rule info modal
+        window.showRuleModal = function(ruleName) {
+            const info = ruleDescriptions[ruleName];
+            if (!info) return;
+
+            const escapeHtml = (str) => str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            document.getElementById('rule-modal-title').textContent = ruleName;
+
+            let content = '';
+
+            // Description
+            content += `<div class="rule-modal-section">
+                <h4>Description</h4>
+                <p>${escapeHtml(info.description)}</p>
+            </div>`;
+
+            // Why (detailed explanation)
+            if (info.why) {
+                content += `<div class="rule-modal-section">
+                    <h4>Why</h4>
+                    <p>${escapeHtml(info.why)}</p>
+                </div>`;
+            }
+
+            // Bad example
+            if (info.bad_example) {
+                content += `<div class="rule-modal-section">
+                    <h4>Bad Example</h4>
+                    <pre class="example-bad">${escapeHtml(info.bad_example)}</pre>
+                </div>`;
+            }
+
+            // Good example
+            if (info.good_example) {
+                content += `<div class="rule-modal-section">
+                    <h4>Good Example</h4>
+                    <pre class="example-good">${escapeHtml(info.good_example)}</pre>
+                </div>`;
+            }
+
+            // References
+            if (info.references && info.references.length > 0) {
+                content += `<div class="rule-modal-section">
+                    <h4>References</h4>
+                    <ul>${info.references.map(ref => `<li><a href="${escapeHtml(ref)}" target="_blank">${escapeHtml(ref)}</a></li>`).join('')}</ul>
+                </div>`;
+            }
+
+            document.getElementById('rule-modal-content').innerHTML = content;
+            document.getElementById('rule-modal-overlay').style.display = 'block';
+        };
+
+        // Close rule info modal
+        window.closeRuleModal = function() {
+            document.getElementById('rule-modal-overlay').style.display = 'none';
+        };
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') closeRuleModal();
+        });
 
         initWasm();
     </script>
