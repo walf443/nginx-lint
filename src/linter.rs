@@ -221,7 +221,12 @@ impl Linter {
             linter.add_rule(Box::new(MissingSemicolon));
         }
         if is_enabled("invalid-directive-context") {
-            linter.add_rule(Box::new(InvalidDirectiveContext));
+            let rule = if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned() {
+                InvalidDirectiveContext::with_additional_contexts(additional)
+            } else {
+                InvalidDirectiveContext::new()
+            };
+            linter.add_rule(Box::new(rule));
         }
 
         // Security rules

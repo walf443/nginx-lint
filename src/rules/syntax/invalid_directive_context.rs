@@ -1,6 +1,7 @@
 use crate::docs::RuleDoc;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::{Config, ConfigItem};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Rule documentation
@@ -21,22 +22,37 @@ with a configuration error."#,
 };
 
 /// Check for directives placed in invalid contexts
-pub struct InvalidDirectiveContext;
+pub struct InvalidDirectiveContext {
+    /// Additional valid parent contexts for directives (from config)
+    additional_contexts: HashMap<String, Vec<String>>,
+}
 
 impl InvalidDirectiveContext {
+    /// Create a new rule with default settings
+    pub fn new() -> Self {
+        Self {
+            additional_contexts: HashMap::new(),
+        }
+    }
+
+    /// Create a new rule with additional contexts
+    pub fn with_additional_contexts(additional_contexts: HashMap<String, Vec<String>>) -> Self {
+        Self { additional_contexts }
+    }
+
     /// Define valid parent contexts for each block directive
     /// Returns None if the directive has no restrictions (can be anywhere)
     ///
     /// Note: This only applies to block directives (directives with `{}`).
     /// For example, `server` inside `upstream` is a simple directive (server address),
     /// not a block directive, so it's not checked here.
-    fn valid_contexts(directive_name: &str, has_block: bool) -> Option<&'static [&'static str]> {
+    fn valid_contexts(&self, directive_name: &str, has_block: bool) -> Option<Vec<&str>> {
         // Only check block directives
         if !has_block {
             return None;
         }
 
-        match directive_name {
+        let base_contexts: Option<&[&str]> = match directive_name {
             // Root-only directives (empty slice = root only)
             "http" | "events" | "stream" | "mail" => Some(&[]),
             // server can be in http, stream, or mail
@@ -55,6 +71,29 @@ impl InvalidDirectiveContext {
             "map" | "geo" => Some(&["http", "stream"]),
             // No restrictions for other directives
             _ => None,
+        };
+
+        // Merge base contexts with additional contexts from config
+        match base_contexts {
+            Some(base) => {
+                let mut contexts: Vec<&str> = base.to_vec();
+                if let Some(additional) = self.additional_contexts.get(directive_name) {
+                    for ctx in additional {
+                        if !contexts.contains(&ctx.as_str()) {
+                            contexts.push(ctx.as_str());
+                        }
+                    }
+                }
+                Some(contexts)
+            }
+            None => {
+                // Check if there are additional contexts for unknown directives
+                if let Some(additional) = self.additional_contexts.get(directive_name) {
+                    Some(additional.iter().map(|s| s.as_str()).collect())
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -69,7 +108,7 @@ impl InvalidDirectiveContext {
                 let has_block = directive.block.is_some();
 
                 // Check if this directive has context restrictions
-                if let Some(valid_parents) = Self::valid_contexts(&directive.name, has_block) {
+                if let Some(valid_parents) = self.valid_contexts(&directive.name, has_block) {
                     let current_parent = parent_stack.last().copied();
                     let is_valid = if valid_parents.is_empty() {
                         // Must be at root (no parent)
@@ -126,6 +165,12 @@ impl InvalidDirectiveContext {
     }
 }
 
+impl Default for InvalidDirectiveContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LintRule for InvalidDirectiveContext {
     fn name(&self) -> &'static str {
         "invalid-directive-context"
@@ -159,14 +204,23 @@ mod tests {
 
     fn check_config(content: &str) -> Vec<LintError> {
         let config = parse_string(content).expect("Failed to parse config");
-        let rule = InvalidDirectiveContext;
+        let rule = InvalidDirectiveContext::new();
         rule.check(&config, &PathBuf::from("test.conf"))
     }
 
     fn check_config_with_context(content: &str, context: Vec<String>) -> Vec<LintError> {
         let mut config = parse_string(content).expect("Failed to parse config");
         config.include_context = context;
-        let rule = InvalidDirectiveContext;
+        let rule = InvalidDirectiveContext::new();
+        rule.check(&config, &PathBuf::from("test.conf"))
+    }
+
+    fn check_config_with_additional_contexts(
+        content: &str,
+        additional_contexts: HashMap<String, Vec<String>>,
+    ) -> Vec<LintError> {
+        let config = parse_string(content).expect("Failed to parse config");
+        let rule = InvalidDirectiveContext::with_additional_contexts(additional_contexts);
         rule.check(&config, &PathBuf::from("test.conf"))
     }
 
@@ -528,6 +582,51 @@ http {
 "#;
         let context = vec![];
         let errors = check_config_with_context(content, context);
+        assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
+    }
+
+    // Tests for additional_contexts (extension modules like nginx-rtmp-module)
+
+    #[test]
+    fn test_additional_contexts_rtmp_server() {
+        // Without additional_contexts, server inside rtmp should error
+        let content = r#"
+rtmp {
+    server {
+        listen 1935;
+    }
+}
+"#;
+        let errors = check_config(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error without additional_contexts, got: {:?}", errors);
+        assert!(errors[0].message.contains("'server' directive cannot be inside 'rtmp'"));
+
+        // With additional_contexts, server inside rtmp should be valid
+        let mut additional = HashMap::new();
+        additional.insert("server".to_string(), vec!["rtmp".to_string()]);
+        let errors = check_config_with_additional_contexts(content, additional);
+        assert!(errors.is_empty(), "Expected no errors with additional_contexts, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_additional_contexts_multiple_directives() {
+        // Test multiple directives with additional contexts
+        let content = r#"
+rtmp {
+    server {
+        listen 1935;
+        application live {
+            live on;
+        }
+    }
+}
+"#;
+        // Add server and application as valid inside rtmp
+        let mut additional = HashMap::new();
+        additional.insert("server".to_string(), vec!["rtmp".to_string()]);
+        // application is not a built-in directive, so we define its valid contexts
+        additional.insert("application".to_string(), vec!["server".to_string()]);
+        let errors = check_config_with_additional_contexts(content, additional);
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
     }
 }

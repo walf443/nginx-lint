@@ -34,6 +34,12 @@ enabled = true
 [rules.missing-semicolon]
 enabled = true
 
+[rules.invalid-directive-context]
+enabled = true
+# Additional valid parent contexts for directives (for extension modules like nginx-rtmp-module)
+# Example for nginx-rtmp-module:
+# additional_contexts = { server = ["rtmp"], upstream = ["rtmp"] }
+
 # =============================================================================
 # Security Rules
 # =============================================================================
@@ -133,7 +139,8 @@ enabled = true
 [parser]
 # Additional block directives for extension modules
 # These are added to the built-in list (http, server, location, etc.)
-# block_directives = ["my_custom_block", "another_block"]
+# Example for nginx-rtmp-module:
+# block_directives = ["rtmp", "application"]
 "#;
 
 /// Configuration for nginx-lint loaded from .nginx-lint.toml
@@ -297,6 +304,9 @@ pub struct RuleConfig {
     pub weak_ciphers: Option<Vec<String>>,
     /// For weak-ssl-ciphers rule: required exclusion patterns
     pub required_exclusions: Option<Vec<String>>,
+    /// For invalid-directive-context rule: additional valid parent contexts
+    /// Format: { "server" = ["rtmp"], "upstream" = ["rtmp"] }
+    pub additional_contexts: Option<HashMap<String, Vec<String>>>,
 }
 
 fn default_true() -> bool {
@@ -367,6 +377,13 @@ impl LintConfig {
     /// Get additional block directives from config
     pub fn additional_block_directives(&self) -> &[String] {
         &self.parser.block_directives
+    }
+
+    /// Get additional contexts for invalid-directive-context rule
+    pub fn additional_contexts(&self) -> Option<&HashMap<String, Vec<String>>> {
+        self.rules
+            .get("invalid-directive-context")
+            .and_then(|r| r.additional_contexts.as_ref())
     }
 
     /// Validate a configuration file and return any errors
