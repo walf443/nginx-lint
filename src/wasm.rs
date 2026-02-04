@@ -273,6 +273,19 @@ pub fn get_rule_names() -> String {
     serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
 }
 
+/// Get rule information (name -> description mapping) as JSON
+#[wasm_bindgen]
+pub fn get_rule_info() -> String {
+    use std::collections::HashMap;
+    let linter = Linter::with_default_rules();
+    let info: HashMap<&str, &str> = linter
+        .rules()
+        .iter()
+        .map(|r| (r.name(), r.description()))
+        .collect();
+    serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+}
+
 /// Debug function to check plugin loading status
 #[wasm_bindgen]
 pub fn debug_plugin_status() -> String {

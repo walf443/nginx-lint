@@ -106,6 +106,25 @@
             color: #4fc3f7;
             font-size: 11px;
             float: right;
+            cursor: help;
+            position: relative;
+        }
+        .error-rule[title]:hover::after {
+            content: attr(title);
+            position: absolute;
+            right: 0;
+            top: 100%;
+            margin-top: 5px;
+            padding: 8px 12px;
+            background: #424242;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: normal;
+            width: 280px;
+            z-index: 1000;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            line-height: 1.4;
         }
         .error-message {
             color: #fff;
@@ -253,10 +272,11 @@ enabled = true</textarea>
     </div>
 
     <script type="module">
-        import init, { lint_with_config, version, get_rule_names, debug_plugin_status } from '/pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names, get_rule_info, debug_plugin_status } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
         let currentErrors = [];
+        let ruleDescriptions = {};
 
         async function initWasm() {
             try {
@@ -264,10 +284,10 @@ enabled = true</textarea>
                 wasmReady = true;
                 document.getElementById('version').textContent = 'v' + version();
 
-                // Log available rules for debugging
+                // Load rule information
                 const ruleNames = JSON.parse(get_rule_names());
-                console.log('Available rules:', ruleNames);
-                console.log('Rule count:', ruleNames.length);
+                ruleDescriptions = JSON.parse(get_rule_info());
+                console.log('Available rules:', ruleNames.length);
                 console.log('Plugin status:', debug_plugin_status());
 
                 document.getElementById('results').innerHTML = '<div class="no-issues">Ready! Click "Lint" or start typing.</div>';
@@ -319,12 +339,14 @@ enabled = true</textarea>
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
                         const fixBtn = err.fix ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
                         const ignoreBtn = err.line ? `<button class="ignore-btn" onclick="ignoreError(${index})">Ignore</button>` : '';
+                        const description = ruleDescriptions[err.rule] || '';
+                        const titleAttr = description ? `title="${description.replace(/"/g, '&quot;')}"` : '';
                         html += `
                             <div class="error-item ${err.severity}">
                                 <div class="error-header">
                                     <div class="error-location">${location}</div>
                                     <div class="error-actions">
-                                        <span class="error-rule">${err.category}/${err.rule}</span>
+                                        <span class="error-rule" ${titleAttr}>${err.category}/${err.rule}</span>
                                         ${fixBtn}
                                         ${ignoreBtn}
                                     </div>
