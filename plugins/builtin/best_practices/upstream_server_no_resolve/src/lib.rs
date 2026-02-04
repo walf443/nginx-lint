@@ -68,8 +68,10 @@ impl Plugin for UpstreamServerNoResolvePlugin {
             "When upstream server specifies a domain name directly without 'resolve', nginx resolves \
              the DNS at startup and caches the IP address. If the IP address changes, nginx \
              will continue using the old IP until restarted.\n\n\
-             Add the 'resolve' parameter to enable runtime DNS resolution. \
-             Note: The 'resolve' parameter is available in nginx 1.27.3+ (OSS) or nginx Plus.\n\n\
+             Solutions:\n\
+             1. Add 'resolve' parameter and 'zone' directive (nginx 1.27.3+ or nginx Plus)\n\
+             2. For older nginx: Use a variable with 'set' and 'resolver' directive to force \
+             re-resolution on each request: set $backend \"domain:port\"; proxy_pass http://$backend;\n\n\
              When using 'resolve', a 'zone' directive is also required in the upstream block to store \
              the dynamically resolved addresses in shared memory.",
         )
@@ -115,8 +117,9 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                                 &format!(
                                     "upstream server uses domain '{}' without 'resolve' parameter; \
                                      DNS is resolved at startup and cached. \
-                                     Add 'resolve' parameter and 'zone' directive for runtime DNS resolution (nginx 1.27.3+ or nginx Plus)",
-                                    domain
+                                     Add 'resolve' parameter and 'zone' directive (nginx 1.27.3+/Plus), \
+                                     or use 'set $var \"{}\"' with 'resolver' for older versions",
+                                    domain, domain
                                 ),
                                 ctx.directive.span.start.line,
                                 ctx.directive.span.start.column,

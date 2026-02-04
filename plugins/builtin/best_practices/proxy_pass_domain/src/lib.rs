@@ -29,9 +29,10 @@ impl Plugin for ProxyPassDomainPlugin {
             "When proxy_pass specifies a domain name directly, nginx resolves \
              the DNS at startup and caches the IP address. If the IP address changes, nginx \
              will continue using the old IP until restarted.\n\n\
-             Use one of these alternatives:\n\
-             - upstream block with 'resolve' parameter (requires nginx Plus or ngx_upstream_jdomain)\n\
-             - Variable with 'resolver' directive for runtime DNS resolution",
+             Solutions:\n\
+             1. upstream with 'resolve' and 'zone' (nginx 1.27.3+ or nginx Plus)\n\
+             2. For older nginx: Use 'set $var \"domain\"' with 'resolver' directive \
+             to force DNS re-resolution on each request",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
@@ -55,8 +56,9 @@ impl Plugin for ProxyPassDomainPlugin {
                                 "best-practices",
                                 &format!(
                                     "proxy_pass uses domain '{}' directly; DNS is resolved at startup and cached. \
-                                     Use upstream with 'resolve' or a variable with 'resolver' instead",
-                                    domain
+                                     Use upstream with 'resolve' (nginx 1.27.3+/Plus), \
+                                     or use 'set $var \"{}\"' with 'resolver' for older nginx",
+                                    domain, domain
                                 ),
                                 directive.span.start.line,
                                 directive.span.start.column,
