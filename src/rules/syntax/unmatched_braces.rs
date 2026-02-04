@@ -191,32 +191,43 @@ impl UnmatchedBraces {
                             first_word,
                             additional_block_directives,
                         ) {
-                            // This is a block directive missing its opening brace
-                            // Use range-based fix: replace trailing whitespace with " {"
-                            let line_start = line_offsets[line_num];
-                            let content_end = line_start + line.trim_end().len();
-                            let line_end = line_start + line.len();
-                            // Replace from end of content to end of line with " {"
-                            let fix = Fix::replace_range(content_end, line_end, " {");
-                            errors.push(
-                                LintError::new(
-                                    self.name(),
-                                    self.category(),
-                                    &format!(
-                                        "Block directive '{}' is missing opening brace '{{'",
-                                        first_word
-                                    ),
-                                    Severity::Error,
-                                )
-                                .with_location(line_number, trimmed.len())
-                                .with_fix(fix),
-                            );
-                            // Add virtual opening brace to stack so the closing brace matches
-                            brace_stack.push(BraceInfo {
-                                line: line_number,
-                                column: trimmed.len(),
-                                indent: line_indent,
-                            });
+                            // Check if next non-empty, non-comment line starts with '{'
+                            // This allows brace-on-next-line style
+                            let next_has_brace = lines
+                                .iter()
+                                .skip(line_num + 1)
+                                .map(|l| l.trim())
+                                .find(|l| !l.is_empty() && !l.starts_with('#'))
+                                .map_or(false, |l| l.starts_with('{'));
+
+                            if !next_has_brace {
+                                // This is a block directive missing its opening brace
+                                // Use range-based fix: replace trailing whitespace with " {"
+                                let line_start = line_offsets[line_num];
+                                let content_end = line_start + line.trim_end().len();
+                                let line_end = line_start + line.len();
+                                // Replace from end of content to end of line with " {"
+                                let fix = Fix::replace_range(content_end, line_end, " {");
+                                errors.push(
+                                    LintError::new(
+                                        self.name(),
+                                        self.category(),
+                                        &format!(
+                                            "Block directive '{}' is missing opening brace '{{'",
+                                            first_word
+                                        ),
+                                        Severity::Error,
+                                    )
+                                    .with_location(line_number, trimmed.len())
+                                    .with_fix(fix),
+                                );
+                                // Add virtual opening brace to stack so the closing brace matches
+                                brace_stack.push(BraceInfo {
+                                    line: line_number,
+                                    column: trimmed.len(),
+                                    indent: line_indent,
+                                });
+                            }
                         }
                     }
                 }
