@@ -48,6 +48,9 @@ mod embedded {
     /// add-header-inheritance plugin
     pub const ADD_HEADER_INHERITANCE: &[u8] =
         include_bytes!("../../target/builtin-plugins/add_header_inheritance.wasm");
+    /// proxy-keepalive plugin
+    pub const PROXY_KEEPALIVE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/proxy_keepalive.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -65,6 +68,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "alias-location-slash-mismatch",
     "proxy-pass-with-uri",
     "add-header-inheritance",
+    "proxy-keepalive",
 ];
 
 /// Global cache for compiled builtin plugins
@@ -212,6 +216,15 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:add-header-inheritance"),
         embedded::ADD_HEADER_INHERITANCE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+    )?);
+
+    // Load proxy-keepalive
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:proxy-keepalive"),
+        embedded::PROXY_KEEPALIVE,
         loader.memory_limit(),
         loader.fuel_limit(),
     )?);
