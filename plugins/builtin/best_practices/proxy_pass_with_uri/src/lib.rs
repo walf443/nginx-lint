@@ -87,13 +87,13 @@ impl ProxyPassWithUriPlugin {
                             let message = if path == "/" {
                                 format!(
                                     "proxy_pass '{}' has trailing slash which causes URI rewriting; \
-                                     use '# nginx-lint-disable' if this is intentional",
+                                     use '# nginx-lint:ignore' if this is intentional",
                                     url
                                 )
                             } else {
                                 format!(
                                     "proxy_pass '{}' has URI path '{}' which causes URI rewriting; \
-                                     use '# nginx-lint-disable' if this is intentional",
+                                     use '# nginx-lint:ignore' if this is intentional",
                                     url, path
                                 )
                             };
@@ -133,7 +133,7 @@ impl Plugin for ProxyPassWithUriPlugin {
              For example:\n\
              - `location /api/ { proxy_pass http://backend/; }` rewrites `/api/foo` to `/foo`\n\
              - `location /api/ { proxy_pass http://backend; }` keeps `/api/foo` as-is\n\n\
-             If URI rewriting is intentional, use `# nginx-lint-disable: proxy-pass-with-uri` \
+             If URI rewriting is intentional, use `# nginx-lint:ignore proxy-pass-with-uri -- reason` \
              to suppress this warning.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
