@@ -1,4 +1,4 @@
-//! if-is-evil plugin
+//! if-is-evil-in-location-in-location plugin
 //!
 //! This plugin warns when `if` blocks inside `location` contain directives
 //! other than the safe ones: `return`, `rewrite ... last`, and `set`.
@@ -12,9 +12,9 @@ use nginx_lint::plugin_sdk::prelude::*;
 
 /// Check for unsafe `if` usage in location blocks
 #[derive(Default)]
-pub struct IfIsEvilPlugin;
+pub struct IfIsEvilInLocationPlugin;
 
-impl IfIsEvilPlugin {
+impl IfIsEvilInLocationPlugin {
     /// Check a block for unsafe `if` usage
     fn check_block(&self, items: &[ConfigItem], in_location: bool, errors: &mut Vec<LintError>) {
         for item in items {
@@ -62,7 +62,7 @@ impl IfIsEvilPlugin {
         if !unsafe_directives.is_empty() {
             let unsafe_list = unsafe_directives.join(", ");
             errors.push(LintError::warning(
-                "if-is-evil",
+                "if-is-evil-in-location",
                 "best-practices",
                 &format!(
                     "Avoid using '{}' inside 'if' in location context. \
@@ -103,10 +103,10 @@ impl IfIsEvilPlugin {
     }
 }
 
-impl Plugin for IfIsEvilPlugin {
+impl Plugin for IfIsEvilInLocationPlugin {
     fn info(&self) -> PluginInfo {
         PluginInfo::new(
-            "if-is-evil",
+            "if-is-evil-in-location",
             "best-practices",
             "Warns when 'if' blocks in location context contain unsafe directives",
         )
@@ -128,7 +128,7 @@ impl Plugin for IfIsEvilPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://github.com/nginxinc/nginx-wiki/blob/master/source/start/topics/depth/ifisevil.rst".to_string(),
-            "https://www.getpagespeed.com/server-setup/nginx/nginx-if-is-evil".to_string(),
+            "https://www.getpagespeed.com/server-setup/nginx/nginx-if-is-evil-in-location".to_string(),
             "https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#if".to_string(),
         ])
     }
@@ -141,7 +141,7 @@ impl Plugin for IfIsEvilPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(IfIsEvilPlugin);
+nginx_lint::export_plugin!(IfIsEvilInLocationPlugin);
 
 #[cfg(test)]
 mod tests {
@@ -166,7 +166,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -190,7 +190,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -199,7 +199,7 @@ http {
 
     #[test]
     fn test_safe_return_in_if() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -218,7 +218,7 @@ http {
 
     #[test]
     fn test_safe_rewrite_last_in_if() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -237,7 +237,7 @@ http {
 
     #[test]
     fn test_safe_rewrite_break_in_if() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         // rewrite with 'break' is also safe
         runner.assert_no_errors(
@@ -257,7 +257,7 @@ http {
 
     #[test]
     fn test_safe_break_directive_in_if() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         // standalone 'break' directive is safe
         runner.assert_no_errors(
@@ -278,7 +278,7 @@ http {
 
     #[test]
     fn test_safe_set_in_if() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -299,7 +299,7 @@ http {
 
     #[test]
     fn test_if_in_server_context_is_ok() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         // if in server context (not location) should not trigger warning
         runner.assert_no_errors(
@@ -337,7 +337,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -364,7 +364,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -373,7 +373,7 @@ http {
 
     #[test]
     fn test_safe_combination_return_and_set() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -393,7 +393,7 @@ http {
 
     #[test]
     fn test_examples() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
         runner.test_examples(
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
@@ -422,7 +422,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -446,7 +446,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -470,7 +470,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -494,7 +494,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -519,7 +519,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -544,7 +544,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -568,7 +568,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -592,7 +592,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -616,7 +616,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -640,7 +640,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -665,7 +665,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -693,7 +693,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -717,7 +717,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -741,7 +741,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -772,7 +772,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
@@ -782,7 +782,7 @@ http {
     fn test_if_in_server_with_unsafe_is_ok() {
         // if in server context (not location) should not trigger warning
         // even with "unsafe" directives
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -805,7 +805,7 @@ http {
 
     #[test]
     fn test_safe_return_with_body() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -825,7 +825,7 @@ http {
 
     #[test]
     fn test_safe_multiple_set_directives() {
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"
@@ -868,7 +868,7 @@ http {
         )
         .unwrap();
 
-        let plugin = IfIsEvilPlugin;
+        let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
         // Should only report limit_rate, not set or return
@@ -883,7 +883,7 @@ http {
     #[test]
     fn test_limit_except_inside_location_not_confused_with_if() {
         // limit_except is a block directive, not if, so should not trigger
-        let runner = PluginTestRunner::new(IfIsEvilPlugin);
+        let runner = PluginTestRunner::new(IfIsEvilInLocationPlugin);
 
         runner.assert_no_errors(
             r#"

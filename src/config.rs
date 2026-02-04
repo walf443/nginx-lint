@@ -123,7 +123,7 @@ enabled = true
 [rules.try-files-with-proxy]
 enabled = true
 
-[rules.if-is-evil]
+[rules.if-is-evil-in-location]
 enabled = true
 
 # =============================================================================
@@ -464,7 +464,7 @@ impl LintConfig {
                     "add-header-inheritance",
                     "proxy-keepalive",
                     "try-files-with-proxy",
-                    "if-is-evil",
+                    "if-is-evil-in-location",
                 ]
                 .into_iter()
                 .collect();

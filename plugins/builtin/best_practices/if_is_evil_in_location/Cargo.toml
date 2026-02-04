@@ -1,5 +1,5 @@
 [package]
-name = "if-is-evil-plugin"
+name = "if-is-evil-in-location-plugin"
 version = "0.1.0"
 edition = "2021"
 

@@ -54,9 +54,9 @@ mod embedded {
     /// try-files-with-proxy plugin
     pub const TRY_FILES_WITH_PROXY: &[u8] =
         include_bytes!("../../target/builtin-plugins/try_files_with_proxy.wasm");
-    /// if-is-evil plugin
-    pub const IF_IS_EVIL: &[u8] =
-        include_bytes!("../../target/builtin-plugins/if_is_evil.wasm");
+    /// if-is-evil-in-location plugin
+    pub const IF_IS_EVIL_IN_LOCATION: &[u8] =
+        include_bytes!("../../target/builtin-plugins/if_is_evil_in_location.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -76,7 +76,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "add-header-inheritance",
     "proxy-keepalive",
     "try-files-with-proxy",
-    "if-is-evil",
+    "if-is-evil-in-location",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -273,11 +273,11 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         fuel_enabled,
     )?);
 
-    // Load if-is-evil
+    // Load if-is-evil-in-location
     plugins.push(WasmLintRule::new(
         loader.engine(),
-        PathBuf::from("builtin:if-is-evil"),
-        embedded::IF_IS_EVIL,
+        PathBuf::from("builtin:if-is-evil-in-location"),
+        embedded::IF_IS_EVIL_IN_LOCATION,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
