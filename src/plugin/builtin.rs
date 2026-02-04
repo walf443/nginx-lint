@@ -51,6 +51,9 @@ mod embedded {
     /// proxy-keepalive plugin
     pub const PROXY_KEEPALIVE: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_keepalive.wasm");
+    /// try-files-with-proxy plugin
+    pub const TRY_FILES_WITH_PROXY: &[u8] =
+        include_bytes!("../../target/builtin-plugins/try_files_with_proxy.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -69,6 +72,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-pass-with-uri",
     "add-header-inheritance",
     "proxy-keepalive",
+    "try-files-with-proxy",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -250,6 +254,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-keepalive"),
         embedded::PROXY_KEEPALIVE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load try-files-with-proxy
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:try-files-with-proxy"),
+        embedded::TRY_FILES_WITH_PROXY,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
