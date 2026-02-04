@@ -1,4 +1,9 @@
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help
+# Plugin directories (for parallel builds)
+PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
+PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
+PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
+
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help $(PLUGIN_NAMES)
 
 # Build CLI with builtin plugins (release)
 build: collect-plugins
@@ -24,16 +29,20 @@ run-web:
 run-web-embed: build-web
 	cargo run --release --features web-server-embed-wasm -- web
 
-# Build all builtin plugins
-build-plugins:
-	@echo "Building builtin plugins..."
-	@for dir in plugins/builtin/*/*/; do \
-		if [ -f "$$dir/Cargo.toml" ]; then \
-			echo "  Building $$(basename $$dir)..."; \
-			(cd "$$dir" && cargo build --target wasm32-unknown-unknown --release); \
-		fi \
-	done
+# Build all builtin plugins (use -j for parallel builds: make -j8 build-plugins)
+build-plugins: $(PLUGIN_NAMES)
 	@echo "Done building plugins."
+
+# Pattern rule for building individual plugins (uses separate target-dir to avoid lock contention)
+$(PLUGIN_NAMES):
+	@echo "Building $@..."
+	@dir=$$(find plugins/builtin -type d -name "$@" 2>/dev/null | head -1); \
+	if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
+		cargo build --manifest-path "$$dir/Cargo.toml" \
+			--target wasm32-unknown-unknown \
+			--target-dir "$$dir/target" \
+			--release; \
+	fi
 
 # Collect built plugins to target/builtin-plugins/
 collect-plugins: build-plugins
@@ -114,7 +123,7 @@ help:
 	@echo "nginx-lint build targets:"
 	@echo ""
 	@echo "  make build              - Build CLI with builtin plugins (release)"
-	@echo "  make build-plugins      - Build WASM builtin plugins"
+	@echo "  make build-plugins      - Build WASM builtin plugins (use -j for parallel)"
 	@echo "  make build-with-plugins - Build CLI with embedded builtin plugins"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"
