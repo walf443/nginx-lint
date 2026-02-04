@@ -123,6 +123,9 @@ enabled = true
 [rules.try-files-with-proxy]
 enabled = true
 
+[rules.if-is-evil]
+enabled = true
+
 # =============================================================================
 # Parser Settings
 # =============================================================================
@@ -461,6 +464,7 @@ impl LintConfig {
                     "add-header-inheritance",
                     "proxy-keepalive",
                     "try-files-with-proxy",
+                    "if-is-evil",
                 ]
                 .into_iter()
                 .collect();

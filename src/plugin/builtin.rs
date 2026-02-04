@@ -54,6 +54,9 @@ mod embedded {
     /// try-files-with-proxy plugin
     pub const TRY_FILES_WITH_PROXY: &[u8] =
         include_bytes!("../../target/builtin-plugins/try_files_with_proxy.wasm");
+    /// if-is-evil plugin
+    pub const IF_IS_EVIL: &[u8] =
+        include_bytes!("../../target/builtin-plugins/if_is_evil.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -73,6 +76,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "add-header-inheritance",
     "proxy-keepalive",
     "try-files-with-proxy",
+    "if-is-evil",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -264,6 +268,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:try-files-with-proxy"),
         embedded::TRY_FILES_WITH_PROXY,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load if-is-evil
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:if-is-evil"),
+        embedded::IF_IS_EVIL,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
