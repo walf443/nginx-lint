@@ -57,6 +57,9 @@ mod embedded {
     /// if-is-evil-in-location plugin
     pub const IF_IS_EVIL_IN_LOCATION: &[u8] =
         include_bytes!("../../target/builtin-plugins/if_is_evil_in_location.wasm");
+    /// unreachable-location plugin
+    pub const UNREACHABLE_LOCATION: &[u8] =
+        include_bytes!("../../target/builtin-plugins/unreachable_location.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -77,6 +80,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-keepalive",
     "try-files-with-proxy",
     "if-is-evil-in-location",
+    "unreachable-location",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -278,6 +282,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:if-is-evil-in-location"),
         embedded::IF_IS_EVIL_IN_LOCATION,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load unreachable-location
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:unreachable-location"),
+        embedded::UNREACHABLE_LOCATION,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
