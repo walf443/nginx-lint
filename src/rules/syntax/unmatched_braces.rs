@@ -109,9 +109,13 @@ impl UnmatchedBraces {
             for (col, &ch) in chars.iter().enumerate() {
                 let column = col + 1;
 
-                // Handle comments (only outside strings)
-                if ch == '#' && string_char.is_none() {
-                    in_comment = true;
+                // Handle comments (only outside strings and when preceded by whitespace)
+                // In nginx, # only starts a comment when preceded by whitespace
+                if ch == '#' && string_char.is_none() && !in_comment {
+                    let preceded_by_whitespace = col == 0 || chars.get(col - 1).map_or(true, |c| c.is_whitespace());
+                    if preceded_by_whitespace {
+                        in_comment = true;
+                    }
                 }
 
                 if in_comment {

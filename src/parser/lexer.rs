@@ -132,8 +132,8 @@ impl<'a> Lexer<'a> {
             ';' => TokenKind::Semicolon,
             '{' => TokenKind::OpenBrace,
             '}' => TokenKind::CloseBrace,
-            '#' => {
-                // Comment - read until end of line
+            '#' if !leading_whitespace.is_empty() || start_pos.column == 1 => {
+                // Comment - only when preceded by whitespace or at start of line
                 let mut text = String::from('#');
                 while let Some(c) = self.peek() {
                     if c == '\n' {
@@ -143,6 +143,11 @@ impl<'a> Lexer<'a> {
                     self.advance();
                 }
                 TokenKind::Comment(text)
+            }
+            '#' => {
+                // # not preceded by whitespace - treat as part of argument
+                let value = self.read_argument(ch);
+                TokenKind::Argument(value)
             }
             '"' => self.read_double_quoted_string(start_pos)?,
             '\'' => self.read_single_quoted_string(start_pos)?,
@@ -474,7 +479,9 @@ fn is_ident_continue(ch: char) -> bool {
 /// Check if a character is valid in an unquoted argument
 fn is_argument_char(ch: char) -> bool {
     // Arguments can contain most characters except whitespace and special chars
-    !ch.is_whitespace() && !matches!(ch, ';' | '{' | '}' | '#' | '"' | '\'' | '$')
+    // Note: '#' is allowed inside arguments (e.g., regex patterns like (?:#.*#|...))
+    // '#' only starts a comment when preceded by whitespace
+    !ch.is_whitespace() && !matches!(ch, ';' | '{' | '}' | '"' | '\'' | '$')
 }
 
 #[cfg(test)]
@@ -775,6 +782,54 @@ mod tests {
                 TokenKind::Argument("~".to_string()),
                 TokenKind::Argument(r"^/data/\{id\}/\{name\}$".to_string()),
                 TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hash_in_argument() {
+        // # inside an argument should not be treated as comment
+        let tokens = tokenize("location ~* foo#bar {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~*".to_string()),
+                TokenKind::Ident("foo#bar".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hash_in_regex_pattern() {
+        // Emacs auto-save pattern: #.*#
+        let tokens = tokenize(r"location ~* (?:#.*#|\.bak)$ {");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("location".to_string()),
+                TokenKind::Argument("~*".to_string()),
+                TokenKind::Argument(r"(?:#.*#|\.bak)$".to_string()),
+                TokenKind::OpenBrace,
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hash_comment_after_whitespace() {
+        // # after whitespace is still a comment
+        let tokens = tokenize("listen 80; # this is a comment");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Ident("listen".to_string()),
+                TokenKind::Argument("80".to_string()),
+                TokenKind::Semicolon,
+                TokenKind::Comment("# this is a comment".to_string()),
                 TokenKind::Eof,
             ]
         );
