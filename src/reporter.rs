@@ -38,7 +38,27 @@ impl Reporter {
     fn report_text(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         let path_str = path.display();
 
-        for error in errors {
+        // Sort errors by line number, then by column number
+        let mut sorted_errors: Vec<_> = errors.iter().collect();
+        sorted_errors.sort_by(|a, b| {
+            match (a.line, b.line) {
+                (Some(line_a), Some(line_b)) => {
+                    line_a.cmp(&line_b).then_with(|| {
+                        match (a.column, b.column) {
+                            (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
+                            (Some(_), None) => std::cmp::Ordering::Less,
+                            (None, Some(_)) => std::cmp::Ordering::Greater,
+                            (None, None) => std::cmp::Ordering::Equal,
+                        }
+                    })
+                }
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+
+        for error in sorted_errors {
             let location = match (error.line, error.column) {
                 (Some(line), Some(col)) => format!("{}:{}:{}", path_str, line, col),
                 (Some(line), None) => format!("{}:{}", path_str, line),
@@ -84,9 +104,9 @@ impl Reporter {
 
     fn report_json(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         #[derive(serde::Serialize)]
-        struct JsonReport<'a> {
+        struct JsonReport {
             file: String,
-            errors: &'a [LintError],
+            errors: Vec<LintError>,
             summary: Summary,
         }
 
@@ -98,9 +118,29 @@ impl Reporter {
             ignored: usize,
         }
 
+        // Sort errors by line number, then by column number
+        let mut sorted_errors: Vec<_> = errors.to_vec();
+        sorted_errors.sort_by(|a, b| {
+            match (a.line, b.line) {
+                (Some(line_a), Some(line_b)) => {
+                    line_a.cmp(&line_b).then_with(|| {
+                        match (a.column, b.column) {
+                            (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
+                            (Some(_), None) => std::cmp::Ordering::Less,
+                            (None, Some(_)) => std::cmp::Ordering::Greater,
+                            (None, None) => std::cmp::Ordering::Equal,
+                        }
+                    })
+                }
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+
         let report = JsonReport {
             file: path.display().to_string(),
-            errors,
+            errors: sorted_errors,
             summary: Summary {
                 errors: errors.iter().filter(|e| e.severity == Severity::Error).count(),
                 warnings: errors.iter().filter(|e| e.severity == Severity::Warning).count(),
