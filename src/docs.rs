@@ -67,27 +67,21 @@ pub fn get_rule_doc(name: &str) -> Option<&'static RuleDoc> {
     all_rule_docs().iter().find(|doc| doc.name == name).copied()
 }
 
-/// Get all rule documentation
+/// Get all rule documentation (native rules only)
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
     use crate::rules::{
-        best_practices::missing_error_log,
-        security::{deprecated_ssl_protocol, weak_ssl_ciphers},
         style::indent,
-        syntax::{missing_semicolon, unclosed_quote, unmatched_braces},
+        syntax::{invalid_directive_context, missing_semicolon, unclosed_quote, unmatched_braces},
     };
 
     static DOCS: &[&RuleDoc] = &[
-        // Security (builtin plugins: server-tokens-enabled, autoindex-enabled)
-        &deprecated_ssl_protocol::DOC,
-        &weak_ssl_ciphers::DOC,
-        // Syntax (builtin plugin: duplicate-directive)
+        // Syntax
         &unmatched_braces::DOC,
         &unclosed_quote::DOC,
         &missing_semicolon::DOC,
-        // Style (builtin plugins: space-before-semicolon, trailing-whitespace)
+        &invalid_directive_context::DOC,
+        // Style
         &indent::DOC,
-        // Best Practices (builtin plugin: gzip-not-enabled)
-        &missing_error_log::DOC,
     ];
 
     DOCS
@@ -150,11 +144,11 @@ mod tests {
 
     #[test]
     fn test_get_rule_doc() {
-        let doc = get_rule_doc("deprecated-ssl-protocol");
+        let doc = get_rule_doc("indent");
         assert!(doc.is_some());
         let doc = doc.unwrap();
-        assert_eq!(doc.name, "deprecated-ssl-protocol");
-        assert_eq!(doc.category, "security");
+        assert_eq!(doc.name, "indent");
+        assert_eq!(doc.category, "style");
     }
 
     #[test]
@@ -166,9 +160,9 @@ mod tests {
     #[test]
     fn test_all_rule_names() {
         let names = all_rule_names();
-        assert!(names.contains(&"deprecated-ssl-protocol"));
         assert!(names.contains(&"indent"));
-        assert!(names.contains(&"missing-error-log"));
+        assert!(names.contains(&"unmatched-braces"));
+        assert!(names.contains(&"invalid-directive-context"));
     }
 }
 

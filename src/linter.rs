@@ -211,14 +211,9 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
-        use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-        #[cfg(not(feature = "builtin-plugins"))]
         use crate::rules::{
-            DeprecatedSslProtocol, InvalidDirectiveContext, MissingErrorLog, WeakSslCiphers,
+            Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
         };
-        // InvalidDirectiveContext native implementation is used when additional_contexts is configured
-        #[cfg(feature = "builtin-plugins")]
-        use crate::rules::InvalidDirectiveContext;
 
         let mut linter = Self::new();
 
@@ -239,54 +234,21 @@ impl Linter {
             linter.add_rule(Box::new(MissingSemicolon));
         }
         // invalid-directive-context: use native implementation when additional_contexts is configured
-        // or when builtin-plugins is not enabled; otherwise use WASM plugin
+        // (for extension modules like nginx-rtmp-module); otherwise use WASM plugin
+        #[cfg(feature = "builtin-plugins")]
+        let use_native_invalid_directive_context = config
+            .and_then(|c| c.additional_contexts())
+            .is_some_and(|additional| !additional.is_empty());
         #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("invalid-directive-context") {
+        let use_native_invalid_directive_context = true;
+
+        if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
             let rule = if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned()
             {
                 InvalidDirectiveContext::with_additional_contexts(additional)
             } else {
                 InvalidDirectiveContext::new()
             };
-            linter.add_rule(Box::new(rule));
-        }
-        // Track whether native invalid-directive-context was added (for builtin-plugins feature)
-        #[cfg(feature = "builtin-plugins")]
-        let use_native_invalid_directive_context = config
-            .and_then(|c| c.additional_contexts())
-            .is_some_and(|additional| !additional.is_empty());
-        #[cfg(feature = "builtin-plugins")]
-        if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
-            // Use native implementation when additional_contexts is configured
-            let additional = config.and_then(|c| c.additional_contexts()).cloned().unwrap();
-            linter.add_rule(Box::new(InvalidDirectiveContext::with_additional_contexts(
-                additional,
-            )));
-        }
-
-        // Security rules (native implementation, used when builtin-plugins is not enabled)
-        #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("deprecated-ssl-protocol") {
-            let mut rule = DeprecatedSslProtocol::default();
-            if let Some(allowed) = config
-                .and_then(|c| c.get_rule_config("deprecated-ssl-protocol"))
-                .and_then(|cfg| cfg.allowed_protocols.clone())
-            {
-                rule.allowed_protocols = allowed;
-            }
-            linter.add_rule(Box::new(rule));
-        }
-        #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("weak-ssl-ciphers") {
-            let mut rule = WeakSslCiphers::default();
-            if let Some(cfg) = config.and_then(|c| c.get_rule_config("weak-ssl-ciphers")) {
-                if let Some(weak_ciphers) = cfg.weak_ciphers.clone() {
-                    rule.weak_ciphers = weak_ciphers;
-                }
-                if let Some(required_exclusions) = cfg.required_exclusions.clone() {
-                    rule.required_exclusions = required_exclusions;
-                }
-            }
             linter.add_rule(Box::new(rule));
         }
 
@@ -302,12 +264,6 @@ impl Linter {
             };
             linter.add_rule(Box::new(rule));
         }
-        // Best practices (native implementation, used when builtin-plugins is not enabled)
-        #[cfg(not(feature = "builtin-plugins"))]
-        if is_enabled("missing-error-log") {
-            linter.add_rule(Box::new(MissingErrorLog));
-        }
-
         // Load builtin plugins when feature is enabled
         #[cfg(feature = "builtin-plugins")]
         {

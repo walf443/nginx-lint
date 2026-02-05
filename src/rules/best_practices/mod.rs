@@ -1,3 +1,2 @@
-pub mod missing_error_log;
-
-pub use missing_error_log::MissingErrorLog;
+// Best practices rules are now WASM plugins only
+// See plugins/builtin/best_practices/ for implementations

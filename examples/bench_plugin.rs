@@ -11,7 +11,7 @@
 
 use nginx_lint::linter::LintRule;
 use nginx_lint::plugin::PluginLoader;
-use nginx_lint::rules::DeprecatedSslProtocol;
+use nginx_lint::rules::MissingSemicolon;
 use nginx_lint::{parse_string, Linter};
 use std::path::Path;
 use std::time::Instant;
@@ -62,8 +62,8 @@ http {
     );
 
     // Benchmark single built-in rule
-    println!("\n=== Single built-in rule (DeprecatedSslProtocol) ===");
-    let single_rule = DeprecatedSslProtocol::default();
+    println!("\n=== Single built-in rule (MissingSemicolon) ===");
+    let single_rule = MissingSemicolon;
 
     // Warmup
     for _ in 0..10 {
