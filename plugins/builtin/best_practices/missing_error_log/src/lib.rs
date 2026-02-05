@@ -44,13 +44,8 @@ impl Plugin for MissingErrorLogPlugin {
         }
 
         // No error_log found
-        vec![LintError::info(
-            "missing-error-log",
-            "best-practices",
-            "Consider configuring error_log for debugging",
-            0,
-            0,
-        )]
+        let err = self.info().error_builder();
+        vec![err.info("Consider configuring error_log for debugging", 0, 0)]
     }
 }
 

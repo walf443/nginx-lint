@@ -42,7 +42,7 @@ impl Plugin for GzipNotEnabledPlugin {
         let mut has_http_block = false;
 
         // Check if this config is included from within http context
-        let in_http_include_context = config.include_context.iter().any(|c| c == "http");
+        let in_http_include_context = config.is_included_from_http();
 
         for ctx in config.all_directives_with_context() {
             // Track if we have an http block in THIS file
@@ -65,13 +65,8 @@ impl Plugin for GzipNotEnabledPlugin {
         // Only warn if THIS file has an http block but no gzip on
         // Don't warn for included files - gzip should be set in the main config
         if has_http_block && !gzip_on {
-            vec![LintError::info(
-                "gzip-not-enabled",
-                "best-practices",
-                "Consider enabling gzip compression for better performance",
-                0,
-                0,
-            )]
+            let err = self.info().error_builder();
+            vec![err.info("Consider enabling gzip compression for better performance", 0, 0)]
         } else {
             vec![]
         }

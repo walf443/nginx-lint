@@ -340,15 +340,22 @@ pub trait ConfigExt {
     /// Shorthand for `config.is_included_from("http")`
     fn is_included_from_http(&self) -> bool;
 
-    /// Check if this config is included from within server context
+    /// Check if this config is included from within http > server context
     ///
-    /// Shorthand for `config.is_included_from("server")`
-    fn is_included_from_server(&self) -> bool;
+    /// This checks that both "http" and "server" are in the include_context,
+    /// with "http" appearing before "server".
+    fn is_included_from_http_server(&self) -> bool;
 
-    /// Check if this config is included from within location context
+    /// Check if this config is included from within http > server > location context
     ///
-    /// Shorthand for `config.is_included_from("location")`
-    fn is_included_from_location(&self) -> bool;
+    /// This checks that "http", "server", and "location" are in the include_context
+    /// in the correct order.
+    fn is_included_from_http_location(&self) -> bool;
+
+    /// Check if this config is included from within stream context
+    ///
+    /// Shorthand for `config.is_included_from("stream")`
+    fn is_included_from_stream(&self) -> bool;
 }
 
 impl ConfigExt for Config {
@@ -372,12 +379,22 @@ impl ConfigExt for Config {
         self.is_included_from("http")
     }
 
-    fn is_included_from_server(&self) -> bool {
-        self.is_included_from("server")
+    fn is_included_from_http_server(&self) -> bool {
+        let ctx = &self.include_context;
+        ctx.iter().any(|c| c == "http")
+            && ctx.iter().any(|c| c == "server")
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server")
     }
 
-    fn is_included_from_location(&self) -> bool {
-        self.is_included_from("location")
+    fn is_included_from_http_location(&self) -> bool {
+        let ctx = &self.include_context;
+        ctx.iter().any(|c| c == "http")
+            && ctx.iter().any(|c| c == "location")
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location")
+    }
+
+    fn is_included_from_stream(&self) -> bool {
+        self.is_included_from("stream")
     }
 }
 
@@ -785,7 +802,37 @@ error_log /var/log/nginx/error.log;
         assert!(config.is_included_from("http"));
         assert!(config.is_included_from_http());
         assert!(!config.is_included_from("server"));
-        assert!(!config.is_included_from_server());
+        assert!(!config.is_included_from_http_server());
+    }
+
+    #[test]
+    fn test_config_is_included_from_http_server() {
+        let mut config = parse_string("location / { root /var/www; }").unwrap();
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        assert!(config.is_included_from_http());
+        assert!(config.is_included_from_http_server());
+        assert!(!config.is_included_from_http_location());
+    }
+
+    #[test]
+    fn test_config_is_included_from_http_location() {
+        let mut config = parse_string("proxy_pass http://backend;").unwrap();
+        config.include_context = vec!["http".to_string(), "server".to_string(), "location".to_string()];
+
+        assert!(config.is_included_from_http());
+        assert!(config.is_included_from_http_server());
+        assert!(config.is_included_from_http_location());
+    }
+
+    #[test]
+    fn test_config_is_included_from_stream() {
+        let mut config = parse_string("server { listen 12345; }").unwrap();
+        config.include_context = vec!["stream".to_string()];
+
+        assert!(config.is_included_from_stream());
+        assert!(!config.is_included_from_http());
+        assert!(!config.is_included_from_http_server());
     }
 
     #[test]

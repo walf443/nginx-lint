@@ -94,6 +94,7 @@ impl DuplicateDirectivePlugin {
         &self,
         items: &[ConfigItem],
         parent_context: Option<&str>,
+        err: &ErrorBuilder,
         errors: &mut Vec<LintError>,
     ) {
         let unique_directives = get_unique_directives_for_context(parent_context);
@@ -111,14 +112,9 @@ impl DuplicateDirectivePlugin {
                             directive.name, context_name, first_line
                         );
 
-                        let error = LintError::warning(
-                            "duplicate-directive",
-                            "syntax",
-                            &message,
-                            directive.span.start.line,
-                            directive.span.start.column,
-                        )
-                        .with_fix(Fix::delete(directive.span.start.line));
+                        let error = err
+                            .warning_at(&message, directive)
+                            .with_fix(directive.delete_line());
                         errors.push(error);
                     } else {
                         seen.insert(&directive.name, directive.span.start.line);
@@ -127,7 +123,7 @@ impl DuplicateDirectivePlugin {
 
                 // Recursively check nested blocks
                 if let Some(block) = &directive.block {
-                    self.check_block(&block.items, Some(&directive.name), errors);
+                    self.check_block(&block.items, Some(&directive.name), err, errors);
                 }
             }
         }
@@ -154,11 +150,12 @@ impl Plugin for DuplicateDirectivePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         // Determine the parent context from include_context
         let parent_context = config.include_context.last().map(|s| s.as_str());
 
-        self.check_block(&config.items, parent_context, &mut errors);
+        self.check_block(&config.items, parent_context, &err, &mut errors);
 
         errors
     }

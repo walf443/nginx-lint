@@ -40,6 +40,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         for directive in config.all_directives() {
             if !directive.is("ssl_protocols") {
@@ -63,15 +64,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             let fixed_protocols = generate_fixed_protocols(&current_protocols);
 
             // Use range-based fix to replace the directive content
-            // Include leading whitespace for proper indentation
-            let fixed_content = format!(
-                "{}ssl_protocols {};",
-                directive.leading_whitespace,
-                fixed_protocols
-            );
-            let start = directive.span.start.offset - directive.leading_whitespace.len();
-            let end = directive.span.end.offset;
-            let fix = Fix::replace_range(start, end, &fixed_content);
+            let fix = directive.replace_with(&format!("ssl_protocols {};", fixed_protocols));
 
             // Report each deprecated protocol but attach fix only to the first one
             for (i, arg) in deprecated_args.iter().enumerate() {
@@ -80,13 +73,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
                     "Deprecated SSL/TLS protocol '{}' should not be used",
                     protocol
                 );
-                let mut error = LintError::warning(
-                    "deprecated-ssl-protocol",
-                    "security",
-                    &message,
-                    arg.span.start.line,
-                    arg.span.start.column,
-                );
+                let mut error = err.warning(&message, arg.span.start.line, arg.span.start.column);
 
                 // Attach fix only to the first error to avoid duplicate fixes
                 if i == 0 {

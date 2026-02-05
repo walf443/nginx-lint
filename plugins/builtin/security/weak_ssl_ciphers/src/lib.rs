@@ -58,6 +58,7 @@ impl Plugin for WeakSslCiphersPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         for directive in config.all_directives() {
             if !directive.is("ssl_ciphers") {
@@ -74,13 +75,7 @@ impl Plugin for WeakSslCiphersPlugin {
             let weak_ciphers = find_weak_ciphers(cipher_string);
             for weak in &weak_ciphers {
                 let message = format!("Weak cipher suite '{}' should not be used", weak);
-                errors.push(LintError::warning(
-                    "weak-ssl-ciphers",
-                    "security",
-                    &message,
-                    cipher_arg.span.start.line,
-                    cipher_arg.span.start.column,
-                ));
+                errors.push(err.warning(&message, cipher_arg.span.start.line, cipher_arg.span.start.column));
             }
 
             // Check for missing exclusions
@@ -100,27 +95,18 @@ impl Plugin for WeakSslCiphersPlugin {
                 };
 
                 // Use range-based fix to replace the directive content
-                let fixed_content = format!(
-                    "{}ssl_ciphers {}{}{};",
-                    directive.leading_whitespace, quote_char, fixed_cipher_string, quote_char
-                );
-                let start = directive.span.start.offset - directive.leading_whitespace.len();
-                let end = directive.span.end.offset;
-                let fix = Fix::replace_range(start, end, &fixed_content);
+                let fix = directive.replace_with(&format!(
+                    "ssl_ciphers {}{}{};",
+                    quote_char, fixed_cipher_string, quote_char
+                ));
 
                 let message = format!(
                     "Missing cipher exclusions: {}",
                     missing_exclusions.join(", ")
                 );
                 errors.push(
-                    LintError::warning(
-                        "weak-ssl-ciphers",
-                        "security",
-                        &message,
-                        cipher_arg.span.start.line,
-                        cipher_arg.span.start.column,
-                    )
-                    .with_fix(fix),
+                    err.warning(&message, cipher_arg.span.start.line, cipher_arg.span.start.column)
+                        .with_fix(fix),
                 );
             }
         }

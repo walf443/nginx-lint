@@ -38,9 +38,10 @@ impl Plugin for AutoindexEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         // Check if this config is included from within http context
-        let in_http_include_context = config.include_context.iter().any(|c| c == "http");
+        let in_http_include_context = config.is_included_from_http();
 
         for ctx in config.all_directives_with_context() {
             // Only check autoindex in http context (http, server, location)
@@ -51,19 +52,9 @@ impl Plugin for AutoindexEnabledPlugin {
 
             if ctx.directive.is("autoindex") && ctx.directive.first_arg_is("on") {
                 let directive = ctx.directive;
-                // Calculate byte offsets for range-based fix
-                let start = directive.span.start.offset - directive.leading_whitespace.len();
-                let end = directive.span.end.offset;
-                let fixed = format!("{}autoindex off;", directive.leading_whitespace);
-
-                let error = LintError::warning(
-                    "autoindex-enabled",
-                    "security",
-                    "autoindex is enabled, which can expose directory contents",
-                    directive.span.start.line,
-                    directive.span.start.column,
-                )
-                .with_fix(Fix::replace_range(start, end, &fixed));
+                let error = err
+                    .warning_at("autoindex is enabled, which can expose directory contents", directive)
+                    .with_fix(directive.replace_with("autoindex off;"));
                 errors.push(error);
             }
         }

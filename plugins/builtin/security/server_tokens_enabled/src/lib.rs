@@ -39,12 +39,13 @@ impl Plugin for ServerTokensEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
         let mut has_server_tokens_off = false;
         let mut has_server_tokens_on = false;
         let mut http_block_line: Option<usize> = None;
 
         // Check if this config is included from within http context
-        let in_http_include_context = config.include_context.iter().any(|c| c == "http");
+        let in_http_include_context = config.is_included_from_http();
 
         for ctx in config.all_directives_with_context() {
             // Track if we have an http block and remember its line
@@ -66,18 +67,9 @@ impl Plugin for ServerTokensEnabledPlugin {
                     has_server_tokens_on = true;
                     // Explicit 'on' - warn with fix
                     let directive = ctx.directive;
-                    let start = directive.span.start.offset - directive.leading_whitespace.len();
-                    let end = directive.span.end.offset;
-                    let fixed = format!("{}server_tokens off;", directive.leading_whitespace);
-
-                    let error = LintError::warning(
-                        "server-tokens-enabled",
-                        "security",
-                        "server_tokens should be 'off' to hide nginx version",
-                        directive.span.start.line,
-                        directive.span.start.column,
-                    )
-                    .with_fix(Fix::replace_range(start, end, &fixed));
+                    let error = err
+                        .warning_at("server_tokens should be 'off' to hide nginx version", directive)
+                        .with_fix(directive.replace_with("server_tokens off;"));
                     errors.push(error);
                 }
             }
@@ -91,9 +83,7 @@ impl Plugin for ServerTokensEnabledPlugin {
         let has_http_block = http_block_line.is_some();
         if has_http_block && !has_server_tokens_off && !has_server_tokens_on {
             let line = http_block_line.unwrap();
-            errors.push(LintError::warning(
-                "server-tokens-enabled",
-                "security",
+            errors.push(err.warning(
                 "server_tokens defaults to 'on', consider adding 'server_tokens off;' in http context",
                 line,
                 1,
