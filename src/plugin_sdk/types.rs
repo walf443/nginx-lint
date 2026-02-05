@@ -80,6 +80,69 @@ impl PluginInfo {
         self.references = Some(refs);
         self
     }
+
+    /// Create an error builder that uses this plugin's name and category
+    ///
+    /// This reduces boilerplate when creating errors in the check method.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+    ///     let info = self.info();
+    ///     let error = info.error_builder();
+    ///
+    ///     // Instead of:
+    ///     // LintError::warning("my-rule", "security", "message", line, col)
+    ///     // Use:
+    ///     error.warning("message", line, col)
+    /// }
+    /// ```
+    pub fn error_builder(&self) -> ErrorBuilder {
+        ErrorBuilder {
+            rule: self.name.clone(),
+            category: self.category.clone(),
+        }
+    }
+}
+
+/// Builder for creating LintError with pre-filled rule and category
+#[derive(Debug, Clone)]
+pub struct ErrorBuilder {
+    rule: String,
+    category: String,
+}
+
+impl ErrorBuilder {
+    /// Create an error with Error severity
+    pub fn error(&self, message: &str, line: usize, column: usize) -> LintError {
+        LintError::error(&self.rule, &self.category, message, line, column)
+    }
+
+    /// Create an error with Warning severity
+    pub fn warning(&self, message: &str, line: usize, column: usize) -> LintError {
+        LintError::warning(&self.rule, &self.category, message, line, column)
+    }
+
+    /// Create an error with Info severity
+    pub fn info(&self, message: &str, line: usize, column: usize) -> LintError {
+        LintError::info(&self.rule, &self.category, message, line, column)
+    }
+
+    /// Create an error from a directive's location
+    pub fn error_at(&self, message: &str, directive: &Directive) -> LintError {
+        self.error(message, directive.span.start.line, directive.span.start.column)
+    }
+
+    /// Create a warning from a directive's location
+    pub fn warning_at(&self, message: &str, directive: &Directive) -> LintError {
+        self.warning(message, directive.span.start.line, directive.span.start.column)
+    }
+
+    /// Create an info from a directive's location
+    pub fn info_at(&self, message: &str, directive: &Directive) -> LintError {
+        self.info(message, directive.span.start.line, directive.span.start.column)
+    }
 }
 
 /// Severity level for lint errors
@@ -259,6 +322,33 @@ pub trait ConfigExt {
     /// }
     /// ```
     fn all_directives_with_context(&self) -> AllDirectivesWithContextIter<'_>;
+
+    /// Check if this config is included from within a specific context
+    ///
+    /// This is useful for rules that only apply within certain contexts (like http).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Check if this file was included from http context
+    /// let in_http_include = config.is_included_from("http");
+    /// ```
+    fn is_included_from(&self, context: &str) -> bool;
+
+    /// Check if this config is included from within http context
+    ///
+    /// Shorthand for `config.is_included_from("http")`
+    fn is_included_from_http(&self) -> bool;
+
+    /// Check if this config is included from within server context
+    ///
+    /// Shorthand for `config.is_included_from("server")`
+    fn is_included_from_server(&self) -> bool;
+
+    /// Check if this config is included from within location context
+    ///
+    /// Shorthand for `config.is_included_from("location")`
+    fn is_included_from_location(&self) -> bool;
 }
 
 impl ConfigExt for Config {
@@ -272,6 +362,22 @@ impl ConfigExt for Config {
         // Use include_context as the initial parent stack
         let initial_context: Vec<String> = self.include_context.clone();
         AllDirectivesWithContextIter::new(&self.items, initial_context)
+    }
+
+    fn is_included_from(&self, context: &str) -> bool {
+        self.include_context.iter().any(|c| c == context)
+    }
+
+    fn is_included_from_http(&self) -> bool {
+        self.is_included_from("http")
+    }
+
+    fn is_included_from_server(&self) -> bool {
+        self.is_included_from("server")
+    }
+
+    fn is_included_from_location(&self) -> bool {
+        self.is_included_from("location")
     }
 }
 
@@ -399,6 +505,42 @@ pub trait DirectiveExt {
 
     /// Check if the first argument equals a specific value
     fn first_arg_is(&self, value: &str) -> bool;
+
+    /// Get the argument at a specific index (0-indexed)
+    fn arg_at(&self, index: usize) -> Option<&str>;
+
+    /// Get the last argument value as a string
+    fn last_arg(&self) -> Option<&str>;
+
+    /// Check if the directive has an argument with the given value
+    fn has_arg(&self, value: &str) -> bool;
+
+    /// Get the number of arguments
+    fn arg_count(&self) -> usize;
+
+    /// Get the start offset including leading whitespace (for Fix calculations)
+    ///
+    /// This is commonly used when creating range-based fixes:
+    /// ```rust,ignore
+    /// let start = directive.full_start_offset();
+    /// let end = directive.span.end.offset;
+    /// let fixed = format!("{}new_directive;", directive.leading_whitespace);
+    /// Fix::replace_range(start, end, &fixed)
+    /// ```
+    fn full_start_offset(&self) -> usize;
+
+    /// Create a range-based fix that replaces this entire directive (including leading whitespace)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Replace "server_tokens on;" with "server_tokens off;"
+    /// let fix = directive.replace_with("server_tokens off;");
+    /// ```
+    fn replace_with(&self, new_text: &str) -> Fix;
+
+    /// Create a fix that deletes this entire directive line
+    fn delete_line(&self) -> Fix;
 }
 
 impl DirectiveExt for Directive {
@@ -412,6 +554,37 @@ impl DirectiveExt for Directive {
 
     fn first_arg_is(&self, value: &str) -> bool {
         self.first_arg() == Some(value)
+    }
+
+    fn arg_at(&self, index: usize) -> Option<&str> {
+        self.args.get(index).map(|a| a.as_str())
+    }
+
+    fn last_arg(&self) -> Option<&str> {
+        self.args.last().map(|a| a.as_str())
+    }
+
+    fn has_arg(&self, value: &str) -> bool {
+        self.args.iter().any(|a| a.as_str() == value)
+    }
+
+    fn arg_count(&self) -> usize {
+        self.args.len()
+    }
+
+    fn full_start_offset(&self) -> usize {
+        self.span.start.offset - self.leading_whitespace.len()
+    }
+
+    fn replace_with(&self, new_text: &str) -> Fix {
+        let start = self.full_start_offset();
+        let end = self.span.end.offset;
+        let fixed = format!("{}{}", self.leading_whitespace, new_text);
+        Fix::replace_range(start, end, &fixed)
+    }
+
+    fn delete_line(&self) -> Fix {
+        Fix::delete(self.span.start.line)
     }
 }
 
@@ -602,5 +775,73 @@ error_log /var/log/nginx/error.log;
         assert!(contexts[1].is_at_root());
         assert_eq!(contexts[0].depth, 0);
         assert_eq!(contexts[1].depth, 0);
+    }
+
+    #[test]
+    fn test_config_is_included_from() {
+        let mut config = parse_string("server { listen 80; }").unwrap();
+        config.include_context = vec!["http".to_string()];
+
+        assert!(config.is_included_from("http"));
+        assert!(config.is_included_from_http());
+        assert!(!config.is_included_from("server"));
+        assert!(!config.is_included_from_server());
+    }
+
+    #[test]
+    fn test_directive_ext_helpers() {
+        let config = parse_string("proxy_pass http://backend last;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        assert!(directive.is("proxy_pass"));
+        assert!(!directive.is("server"));
+
+        assert_eq!(directive.first_arg(), Some("http://backend"));
+        assert_eq!(directive.arg_at(0), Some("http://backend"));
+        assert_eq!(directive.arg_at(1), Some("last"));
+        assert_eq!(directive.arg_at(2), None);
+        assert_eq!(directive.last_arg(), Some("last"));
+
+        assert!(directive.has_arg("last"));
+        assert!(!directive.has_arg("break"));
+
+        assert_eq!(directive.arg_count(), 2);
+    }
+
+    #[test]
+    fn test_directive_replace_with() {
+        let config = parse_string("    server_tokens on;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        let fix = directive.replace_with("server_tokens off;");
+        assert!(fix.is_range_based());
+        assert_eq!(fix.new_text, "    server_tokens off;");
+    }
+
+    #[test]
+    fn test_error_builder() {
+        let info = PluginInfo::new("test-rule", "security", "Test rule");
+        let builder = info.error_builder();
+
+        let error = builder.warning("test message", 10, 5);
+        assert_eq!(error.rule, "test-rule");
+        assert_eq!(error.category, "security");
+        assert_eq!(error.message, "test message");
+        assert_eq!(error.line, Some(10));
+        assert_eq!(error.column, Some(5));
+    }
+
+    #[test]
+    fn test_error_builder_at_directive() {
+        let config = parse_string("server_tokens on;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        let info = PluginInfo::new("test-rule", "security", "Test rule");
+        let builder = info.error_builder();
+
+        let error = builder.warning_at("test message", directive);
+        assert_eq!(error.rule, "test-rule");
+        assert_eq!(error.line, Some(1));
+        assert_eq!(error.column, Some(1));
     }
 }

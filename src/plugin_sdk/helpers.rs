@@ -112,6 +112,12 @@ pub fn extract_host_from_url(url: &str) -> Option<&str> {
         return None;
     };
 
+    // Handle unix socket URLs (e.g., "unix:/var/run/app.sock")
+    // The entire "unix:/path/to/socket" is the host
+    if after_protocol.starts_with("unix:") {
+        return Some(after_protocol);
+    }
+
     // Remove path
     let host_and_port = if let Some(pos) = after_protocol.find('/') {
         &after_protocol[..pos]
