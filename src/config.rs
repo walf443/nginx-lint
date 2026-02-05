@@ -96,6 +96,22 @@ warning = "yellow"
 info = "blue"
 
 # =============================================================================
+# Style Rules
+# =============================================================================
+
+[rules.indent]
+enabled = true
+# Indentation size: number or "auto" for auto-detection (default: "auto")
+# indent_size = 4
+indent_size = "auto"
+
+[rules.trailing-whitespace]
+enabled = true
+
+[rules.space-before-semicolon]
+enabled = true
+
+# =============================================================================
 # Syntax Rules
 # =============================================================================
 
@@ -151,22 +167,6 @@ weak_ciphers = [
 ]
 # Required exclusion patterns
 required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
-
-# =============================================================================
-# Style Rules
-# =============================================================================
-
-[rules.indent]
-enabled = true
-# Indentation size: number or "auto" for auto-detection (default: "auto")
-# indent_size = 4
-indent_size = "auto"
-
-[rules.trailing-whitespace]
-enabled = true
-
-[rules.space-before-semicolon]
-enabled = true
 
 # =============================================================================
 # Best Practices
