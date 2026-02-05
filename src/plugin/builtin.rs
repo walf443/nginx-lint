@@ -63,6 +63,9 @@ mod embedded {
     /// missing-error-log plugin
     pub const MISSING_ERROR_LOG: &[u8] =
         include_bytes!("../../target/builtin-plugins/missing_error_log.wasm");
+    /// deprecated-ssl-protocol plugin
+    pub const DEPRECATED_SSL_PROTOCOL: &[u8] =
+        include_bytes!("../../target/builtin-plugins/deprecated_ssl_protocol.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -85,6 +88,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "if-is-evil-in-location",
     "unreachable-location",
     "missing-error-log",
+    "deprecated-ssl-protocol",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -306,6 +310,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:missing-error-log"),
         embedded::MISSING_ERROR_LOG,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load deprecated-ssl-protocol
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:deprecated-ssl-protocol"),
+        embedded::DEPRECATED_SSL_PROTOCOL,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,

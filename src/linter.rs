@@ -212,11 +212,11 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            DeprecatedSslProtocol, Indent, InvalidDirectiveContext, MissingSemicolon,
-            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
+            WeakSslCiphers,
         };
         #[cfg(not(feature = "builtin-plugins"))]
-        use crate::rules::MissingErrorLog;
+        use crate::rules::{DeprecatedSslProtocol, MissingErrorLog};
 
         let mut linter = Self::new();
 
@@ -245,7 +245,8 @@ impl Linter {
             linter.add_rule(Box::new(rule));
         }
 
-        // Security rules
+        // Security rules (native implementation, used when builtin-plugins is not enabled)
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("deprecated-ssl-protocol") {
             let mut rule = DeprecatedSslProtocol::default();
             if let Some(allowed) = config
