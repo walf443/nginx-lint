@@ -275,4 +275,10 @@ server {
             "TLSv1.2 TLSv1.3"
         );
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

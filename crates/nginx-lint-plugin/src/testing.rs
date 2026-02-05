@@ -5,6 +5,19 @@
 use super::types::{Config, Fix, LintError, Plugin, PluginInfo};
 use std::path::{Path, PathBuf};
 
+/// Macro to get the fixtures directory path relative to the plugin's Cargo.toml
+///
+/// Usage in plugin tests:
+/// ```ignore
+/// runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+/// ```
+#[macro_export]
+macro_rules! fixtures_dir {
+    () => {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures")
+    };
+}
+
 /// Test runner for plugins
 pub struct PluginTestRunner<P: Plugin> {
     plugin: P,

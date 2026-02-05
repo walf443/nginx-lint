@@ -263,4 +263,10 @@ autoindex on;
 
         assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(AutoindexEnabledPlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

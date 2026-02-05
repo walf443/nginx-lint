@@ -534,4 +534,10 @@ server {
         let errors = plugin.check(&config, "test.conf");
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(InvalidDirectiveContextPlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

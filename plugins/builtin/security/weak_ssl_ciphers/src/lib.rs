@@ -343,4 +343,10 @@ server {
         let fixed = generate_fixed_cipher_string("", &["!RC4".to_string()]);
         assert_eq!(fixed, "!RC4");
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(WeakSslCiphersPlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

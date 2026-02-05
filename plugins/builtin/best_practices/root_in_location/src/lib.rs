@@ -275,4 +275,10 @@ root /var/www/html;
 
         assert!(errors.is_empty(), "Expected no errors for root in server context, got: {:?}", errors);
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(RootInLocationPlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

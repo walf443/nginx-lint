@@ -389,4 +389,10 @@ root /var/www/html;
         assert!(errors[0].message.contains("Duplicate 'root'"));
         assert!(errors[0].message.contains("server context"));
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(DuplicateDirectivePlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }

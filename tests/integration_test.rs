@@ -40,31 +40,6 @@ fn parser_fixture(name: &str) -> PathBuf {
         .join("nginx.conf")
 }
 
-/// Find the first case directory for a rule (sorted alphabetically)
-fn find_first_case(category: &str, rule: &str) -> Option<String> {
-    let rule_dir = fixtures_base().join("rules").join(category).join(rule);
-    let mut cases: Vec<_> = fs::read_dir(&rule_dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
-        .collect();
-    cases.sort();
-    cases.into_iter().next()
-}
-
-fn rule_error_fixture(category: &str, rule: &str) -> PathBuf {
-    let case = find_first_case(category, rule)
-        .unwrap_or_else(|| panic!("No case directory found for {}/{}", category, rule));
-    fixtures_base()
-        .join("rules")
-        .join(category)
-        .join(rule)
-        .join(case)
-        .join("error")
-        .join("nginx.conf")
-}
-
 fn misc_fixture(name: &str) -> PathBuf {
     fixtures_base()
         .join(name)
@@ -220,10 +195,26 @@ fn test_multiple_issues_config() {
 
 #[test]
 fn test_error_locations() {
-    let path = rule_error_fixture("security", "server_tokens_enabled");
-    let config = parse_config(&path).expect("Failed to parse config");
+    use nginx_lint::parse_string;
+
+    // Test that error locations are correctly reported
+    let config = parse_string(
+        r#"# Test config
+worker_processes auto;
+
+http {
+  server_tokens on;
+
+  server {
+    listen 80;
+  }
+}
+"#,
+    )
+    .unwrap();
+
     let linter = get_default_linter();
-    let errors = linter.lint(&config, &path);
+    let errors = linter.lint(&config, Path::new("test.conf"));
 
     let server_tokens_warning = errors
         .iter()

@@ -507,4 +507,10 @@ http {
             include_str!("../examples/good.conf"),
         );
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(ProxySetHeaderInheritancePlugin);
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }
