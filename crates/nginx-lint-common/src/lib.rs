@@ -12,11 +12,13 @@ pub mod config;
 pub mod docs;
 pub mod ignore;
 pub mod linter;
-pub mod parser;
+
+// Re-export parser crate
+pub use nginx_lint_parser as parser;
 
 // Re-export commonly used types
 pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
 pub use docs::{RuleDoc, RuleDocOwned};
 pub use ignore::{filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning};
 pub use linter::{Fix, LintError, LintRule, Linter, Severity};
-pub use parser::{parse_config, parse_string};
+pub use nginx_lint_parser::{parse_config, parse_string};

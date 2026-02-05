@@ -340,11 +340,20 @@ dependencies = [
 name = "nginx-lint-common"
 version = "0.1.0"
 dependencies = [
+ "nginx-lint-parser",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "nginx-lint-parser"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

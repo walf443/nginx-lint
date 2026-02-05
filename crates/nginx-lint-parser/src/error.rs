@@ -1,4 +1,4 @@
-use crate::parser::ast::Position;
+use crate::ast::Position;
 use std::fmt;
 use thiserror::Error;
 

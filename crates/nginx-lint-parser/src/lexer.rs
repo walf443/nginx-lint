@@ -1,5 +1,5 @@
-use crate::parser::ast::{Position, Span};
-use crate::parser::error::{LexerError, ParseResult};
+use crate::ast::{Position, Span};
+use crate::error::{LexerError, ParseResult};
 
 /// Token types for nginx configuration
 #[derive(Debug, Clone, PartialEq)]

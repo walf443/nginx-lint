@@ -1,0 +1,9 @@
+[package]
+name = "nginx-lint-parser"
+version = "0.1.0"
+edition = "2024"
+description = "nginx configuration file parser"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "1"
