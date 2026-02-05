@@ -568,50 +568,13 @@ impl DirectiveExt for Directive {
     }
 }
 
-/// Extension trait for Argument
+/// Extension trait for Argument to add source reconstruction
 pub trait ArgumentExt {
-    fn as_str(&self) -> &str;
-    fn is_on(&self) -> bool;
-    fn is_off(&self) -> bool;
-    fn is_variable(&self) -> bool;
-    fn is_quoted(&self) -> bool;
-    fn is_literal(&self) -> bool;
+    /// Reconstruct the source text for this argument
     fn to_source(&self) -> String;
 }
 
 impl ArgumentExt for Argument {
-    fn as_str(&self) -> &str {
-        match &self.value {
-            ArgumentValue::Literal(s) => s,
-            ArgumentValue::QuotedString(s) => s,
-            ArgumentValue::SingleQuotedString(s) => s,
-            ArgumentValue::Variable(s) => s,
-        }
-    }
-
-    fn is_on(&self) -> bool {
-        self.as_str() == "on"
-    }
-
-    fn is_off(&self) -> bool {
-        self.as_str() == "off"
-    }
-
-    fn is_variable(&self) -> bool {
-        matches!(self.value, ArgumentValue::Variable(_))
-    }
-
-    fn is_quoted(&self) -> bool {
-        matches!(
-            self.value,
-            ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_)
-        )
-    }
-
-    fn is_literal(&self) -> bool {
-        matches!(self.value, ArgumentValue::Literal(_))
-    }
-
     fn to_source(&self) -> String {
         match &self.value {
             ArgumentValue::Literal(s) => s.clone(),
