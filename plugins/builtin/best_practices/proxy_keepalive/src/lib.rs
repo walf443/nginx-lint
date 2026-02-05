@@ -107,6 +107,72 @@ impl ProxyKeepalivePlugin {
     }
 }
 
+impl ProxyKeepalivePlugin {
+    /// Check top-level items when included from a block context
+    fn check_top_level(&self, items: &[ConfigItem], errors: &mut Vec<LintError>) {
+        // Find proxy_http_version 1.1+ in top-level items
+        let mut http_version_directive: Option<&Directive> = None;
+
+        for item in items {
+            if let ConfigItem::Directive(d) = item {
+                if d.name == "proxy_http_version" {
+                    if let Some(version) = d.first_arg() {
+                        if Self::is_http_11_or_higher(version) {
+                            http_version_directive = Some(d);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we found proxy_http_version 1.1+, check for Connection header
+        if let Some(version_directive) = http_version_directive {
+            let has_connection = items.iter().any(|item| {
+                if let ConfigItem::Directive(d) = item {
+                    if d.name == "proxy_set_header" {
+                        if let Some(header_name) = d.first_arg() {
+                            return header_name.eq_ignore_ascii_case("connection");
+                        }
+                    }
+                }
+                false
+            });
+
+            if !has_connection {
+                let version = version_directive.first_arg().unwrap_or("1.1");
+
+                let indent = " ".repeat(version_directive.span.start.column.saturating_sub(1));
+                let fix_text = format!("\n{}proxy_set_header Connection \"\";", indent);
+                let insert_offset = version_directive.span.end.offset;
+
+                let err = PluginInfo::new(
+                    "proxy-keepalive",
+                    "best-practices",
+                    "",
+                ).error_builder();
+
+                let mut error = err.warning_at(
+                    &format!(
+                        "proxy_http_version {} is set but proxy_set_header Connection is not configured. \
+                         For keepalive connections with upstream, add 'proxy_set_header Connection \"\";'",
+                        version
+                    ),
+                    version_directive,
+                );
+
+                error = error.with_fix(Fix::replace_range(
+                    insert_offset,
+                    insert_offset,
+                    &fix_text,
+                ));
+
+                errors.push(error);
+            }
+        }
+    }
+}
+
 impl Plugin for ProxyKeepalivePlugin {
     fn info(&self) -> PluginInfo {
         PluginInfo::new(
@@ -131,6 +197,12 @@ impl Plugin for ProxyKeepalivePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+
+        // If included from a block context (server, location, http), check top-level items
+        if config.is_included_from_http() {
+            self.check_top_level(&config.items, &mut errors);
+        }
+
         self.check_block(&config.items, &mut errors);
         errors
     }
@@ -423,5 +495,120 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    // =========================================================================
+    // Include context tests
+    // =========================================================================
+
+    #[test]
+    fn test_include_context_from_location() {
+        // Test that proxy_http_version 1.1 without Connection is detected when included from location
+        let mut config = parse_string(
+            r#"
+proxy_http_version 1.1;
+proxy_pass http://backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = ProxyKeepalivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}", errors);
+        assert!(errors[0].message.contains("proxy_http_version 1.1"));
+        assert!(errors[0].message.contains("Connection"));
+    }
+
+    #[test]
+    fn test_include_context_from_server() {
+        // Test that proxy_http_version 1.1 without Connection is detected when included from server
+        let mut config = parse_string(
+            r#"
+proxy_http_version 1.1;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = ProxyKeepalivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_with_connection_header() {
+        // Test that no error when Connection header is present in included file
+        let mut config = parse_string(
+            r#"
+proxy_http_version 1.1;
+proxy_set_header Connection "";
+proxy_pass http://backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = ProxyKeepalivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors when Connection header is set, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_http_10_no_warning() {
+        // Test that HTTP/1.0 doesn't trigger warning even when included from location
+        let mut config = parse_string(
+            r#"
+proxy_http_version 1.0;
+proxy_pass http://backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = ProxyKeepalivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for HTTP/1.0, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_no_include_context_no_error() {
+        // Test that top-level directives without include context don't trigger
+        // (they need to be inside a block to trigger)
+        let config = parse_string(
+            r#"
+proxy_http_version 1.1;
+"#,
+        )
+        .unwrap();
+
+        let plugin = ProxyKeepalivePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors without include context, got: {:?}", errors);
     }
 }

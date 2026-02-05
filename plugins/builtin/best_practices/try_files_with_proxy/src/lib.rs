@@ -23,7 +23,7 @@ impl TryFilesWithProxyPlugin {
                 // Only check location blocks
                 if directive.is("location") {
                     if let Some(block) = &directive.block {
-                        self.check_location_block(block, errors);
+                        self.check_location_items(&block.items, errors);
                     }
                 }
 
@@ -35,12 +35,12 @@ impl TryFilesWithProxyPlugin {
         }
     }
 
-    /// Check a location block for try_files + proxy_pass
-    fn check_location_block(&self, block: &Block, errors: &mut Vec<LintError>) {
+    /// Check items inside a location for try_files + proxy_pass
+    fn check_location_items(&self, items: &[ConfigItem], errors: &mut Vec<LintError>) {
         let mut try_files_directive: Option<&Directive> = None;
         let mut proxy_pass_directive: Option<&Directive> = None;
 
-        for item in &block.items {
+        for item in items {
             if let ConfigItem::Directive(directive) = item {
                 if directive.is("try_files") {
                     try_files_directive = Some(directive);
@@ -133,6 +133,12 @@ impl Plugin for TryFilesWithProxyPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+
+        // If included from a location context, check top-level items directly
+        if config.is_included_from_http_location() {
+            self.check_location_items(&config.items, &mut errors);
+        }
+
         self.check_block(&config.items, &mut errors);
         errors
     }
@@ -303,5 +309,80 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    // =========================================================================
+    // Include context tests
+    // =========================================================================
+
+    #[test]
+    fn test_include_context_from_location() {
+        // Test that try_files + proxy_pass is detected when file is included from a location block
+        let mut config = parse_string(
+            r#"
+try_files $uri $uri/ /index.html;
+proxy_pass http://backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = TryFilesWithProxyPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for try_files+proxy_pass in included file from location, got: {:?}", errors);
+        assert!(errors[0].message.contains("try_files"));
+        assert!(errors[0].message.contains("proxy_pass"));
+    }
+
+    #[test]
+    fn test_include_context_from_server_no_error() {
+        // Test that try_files + proxy_pass at server level (not location) doesn't trigger
+        // (though this is still not a valid nginx config, the rule specifically checks location blocks)
+        let mut config = parse_string(
+            r#"
+try_files $uri $uri/ /index.html;
+proxy_pass http://backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context (not location)
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = TryFilesWithProxyPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        // This should NOT trigger because we're not in a location context
+        assert!(errors.is_empty(), "Expected no errors for try_files+proxy_pass in server context, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_with_named_location_fallback() {
+        // Test that named location fallback is still OK when included from location
+        let mut config = parse_string(
+            r#"
+try_files $uri $uri/ @backend;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = TryFilesWithProxyPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for try_files with named location, got: {:?}", errors);
     }
 }

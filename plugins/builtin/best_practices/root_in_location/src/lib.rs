@@ -67,7 +67,9 @@ impl Plugin for RootInLocationPlugin {
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.info().error_builder();
-        self.check_items(&config.items, false, &err, &mut errors);
+        // Check if this file is included from within a location context
+        let in_location = config.is_included_from_http_location();
+        self.check_items(&config.items, in_location, &err, &mut errors);
         errors
     }
 }
@@ -229,5 +231,48 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    #[test]
+    fn test_include_context_from_location() {
+        // Test that root directive is detected when file is included from a location block
+        let mut config = parse_string(
+            r#"
+root /var/www/html;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for root in included file from location, got: {:?}", errors);
+        assert!(errors[0].message.contains("root directive inside location"));
+    }
+
+    #[test]
+    fn test_include_context_from_server_no_error() {
+        // Test that root directive is OK when file is included from a server block (not location)
+        let mut config = parse_string(
+            r#"
+root /var/www/html;
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context (not location)
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = RootInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for root in server context, got: {:?}", errors);
     }
 }

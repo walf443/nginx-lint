@@ -138,7 +138,9 @@ impl Plugin for IfIsEvilInLocationPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        self.check_block(&config.items, false, &mut errors);
+        // Check if this file is included from within a location context
+        let in_location = config.is_included_from_http_location();
+        self.check_block(&config.items, in_location, &mut errors);
         errors
     }
 }
@@ -901,5 +903,81 @@ http {
 }
 "#,
         );
+    }
+
+    // =========================================================================
+    // Include context tests
+    // =========================================================================
+
+    #[test]
+    fn test_include_context_from_location() {
+        // Test that unsafe if is detected when file is included from a location block
+        let mut config = parse_string(
+            r#"
+if ($slow) {
+    proxy_pass http://slow-backend;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = IfIsEvilInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for unsafe if in included file from location, got: {:?}", errors);
+        assert!(errors[0].message.contains("proxy_pass"));
+    }
+
+    #[test]
+    fn test_include_context_from_server_no_error() {
+        // Test that if in server context is OK (not location)
+        let mut config = parse_string(
+            r#"
+if ($slow) {
+    proxy_pass http://slow-backend;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context (not location)
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = IfIsEvilInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for if in server context, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_safe_directive_in_location() {
+        // Test that safe directives in if are still OK when included from location
+        let mut config = parse_string(
+            r#"
+if ($mobile) {
+    return 301 https://m.example.com$request_uri;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server > location context
+        config.include_context = vec![
+            "http".to_string(),
+            "server".to_string(),
+            "location".to_string(),
+        ];
+
+        let plugin = IfIsEvilInLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for safe return in if, got: {:?}", errors);
     }
 }
