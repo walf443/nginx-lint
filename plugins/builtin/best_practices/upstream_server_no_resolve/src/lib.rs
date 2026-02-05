@@ -85,6 +85,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         // First pass: collect upstream names that have 'zone' directive
         let upstreams_with_zone = Self::collect_upstreams_with_zone(config);
@@ -111,9 +112,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                         let domain = helpers::extract_domain(address);
 
                         if !has_resolve {
-                            errors.push(LintError::warning(
-                                "upstream-server-no-resolve",
-                                "best-practices",
+                            errors.push(err.warning_at(
                                 &format!(
                                     "upstream server uses domain '{}' without 'resolve' parameter; \
                                      DNS is resolved at startup and cached. \
@@ -121,8 +120,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                                      or use 'set $var \"{}\"' with 'resolver' for older versions",
                                     domain, domain
                                 ),
-                                ctx.directive.span.start.line,
-                                ctx.directive.span.start.column,
+                                ctx.directive,
                             ));
                         } else {
                             // has_resolve is true, check if zone exists
@@ -132,16 +130,13 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                                 .unwrap_or(false);
 
                             if !has_zone {
-                                errors.push(LintError::warning(
-                                    "upstream-server-no-resolve",
-                                    "best-practices",
+                                errors.push(err.warning_at(
                                     &format!(
                                         "upstream server uses 'resolve' for domain '{}' but upstream block has no 'zone' directive; \
                                          'zone' is required for runtime DNS resolution to store addresses in shared memory",
                                         domain
                                     ),
-                                    ctx.directive.span.start.line,
-                                    ctx.directive.span.start.column,
+                                    ctx.directive,
                                 ));
                             }
                         }

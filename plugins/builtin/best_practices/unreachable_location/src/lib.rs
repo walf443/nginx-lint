@@ -103,13 +103,16 @@ impl UnreachableLocationPlugin {
     /// Check for duplicate location paths (same modifier and pattern)
     fn check_duplicate_locations(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
         let mut seen: HashMap<String, &LocationInfo> = HashMap::new();
+        let err = PluginInfo::new(
+            "unreachable-location",
+            "best-practices",
+            "",
+        ).error_builder();
 
         for loc in locations {
             let key = format!("{}:{}", loc.modifier, loc.pattern);
             if let Some(first) = seen.get(&key) {
-                errors.push(LintError::warning(
-                    "unreachable-location",
-                    "best-practices",
+                errors.push(err.warning(
                     &format!(
                         "Duplicate location '{}' (first defined on line {})",
                         loc.display, first.line
@@ -126,14 +129,17 @@ impl UnreachableLocationPlugin {
     /// Check for regex locations that will never match due to order
     fn check_regex_order(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
         let regex_locations: Vec<&LocationInfo> = locations.iter().filter(|l| l.is_regex()).collect();
+        let err = PluginInfo::new(
+            "unreachable-location",
+            "best-practices",
+            "",
+        ).error_builder();
 
         for (i, loc) in regex_locations.iter().enumerate() {
             for earlier in &regex_locations[..i] {
                 // Check if earlier regex would always match what this one matches
                 if self.regex_shadows(earlier, loc) {
-                    errors.push(LintError::warning(
-                        "unreachable-location",
-                        "best-practices",
+                    errors.push(err.warning(
                         &format!(
                             "Location '{}' may never match because '{}' (line {}) matches first",
                             loc.display, earlier.display, earlier.line
@@ -187,12 +193,16 @@ impl UnreachableLocationPlugin {
             .filter(|l| l.is_regex())
             .collect();
 
+        let err = PluginInfo::new(
+            "unreachable-location",
+            "best-practices",
+            "",
+        ).error_builder();
+
         for regex_loc in &regex_locations {
             for prefix_loc in &prefix_no_regex {
                 if self.prefix_might_shadow_regex(prefix_loc, regex_loc) {
-                    errors.push(LintError::info(
-                        "unreachable-location",
-                        "best-practices",
+                    errors.push(err.info(
                         &format!(
                             "Location '{}' may not match paths under '{}' due to ^~ modifier (line {})",
                             regex_loc.display, prefix_loc.pattern, prefix_loc.line

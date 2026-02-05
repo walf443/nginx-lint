@@ -32,31 +32,27 @@ impl Plugin for SpaceBeforeSemicolonPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        check_items(&config.items, &mut errors);
+        let err = self.info().error_builder();
+        check_items(&config.items, &err, &mut errors);
         errors
     }
 }
 
-fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
+fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintError>) {
     for item in items {
         if let ConfigItem::Directive(directive) = item {
             // Check if directive has space before terminator (semicolon or brace)
             // Only check for non-block directives (those ending with semicolon)
             if directive.block.is_none() && !directive.space_before_terminator.is_empty() {
-                let error = LintError::warning(
-                    "space-before-semicolon",
-                    "style",
-                    "space before semicolon",
-                    directive.span.start.line,
-                    directive.span.start.column,
-                )
-                .with_fix(create_fix(directive));
+                let error = err
+                    .warning_at("space before semicolon", directive)
+                    .with_fix(create_fix(directive));
                 errors.push(error);
             }
 
             // Recursively check nested blocks
             if let Some(block) = &directive.block {
-                check_items(&block.items, errors);
+                check_items(&block.items, err, errors);
             }
         }
     }

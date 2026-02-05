@@ -99,15 +99,18 @@ impl AliasLocationSlashMismatchPlugin {
                             continue;
                         }
 
-                        let mut error = LintError::warning(
+                        let err = PluginInfo::new(
                             "alias-location-slash-mismatch",
                             "best-practices",
+                            "",
+                        ).error_builder();
+
+                        let mut error = err.warning_at(
                             &format!(
                                 "alias path '{}' should end with a trailing slash when location ends with '/'",
                                 path
                             ),
-                            directive.span.start.line,
-                            directive.span.start.column,
+                            directive,
                         );
 
                         // Add autofix: append trailing slash (only for non-regex locations)

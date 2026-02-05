@@ -141,9 +141,13 @@ impl ProxySetHeaderInheritancePlugin {
                                     .map(|h| format!("{}{}\n", indent, h.directive_text))
                                     .collect();
 
-                                let mut error = LintError::warning(
+                                let err = PluginInfo::new(
                                     "proxy-set-header-inheritance",
                                     "best-practices",
+                                    "",
+                                ).error_builder();
+
+                                let mut error = err.warning(
                                     &format!(
                                         "proxy_set_header in this block does not include headers from parent block: {}. \
                                          In nginx, proxy_set_header directives are not inherited - \

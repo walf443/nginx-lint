@@ -61,17 +61,20 @@ impl IfIsEvilInLocationPlugin {
 
         if !unsafe_directives.is_empty() {
             let unsafe_list = unsafe_directives.join(", ");
-            errors.push(LintError::warning(
+            let err = PluginInfo::new(
                 "if-is-evil-in-location",
                 "best-practices",
+                "",
+            ).error_builder();
+
+            errors.push(err.warning_at(
                 &format!(
                     "Avoid using '{}' inside 'if' in location context. \
                      Only 'return', 'rewrite ... last/break', 'set', and 'break' are safe. \
                      Consider using a separate location block instead.",
                     unsafe_list
                 ),
-                if_directive.span.start.line,
-                if_directive.span.start.column,
+                if_directive,
             ));
         }
     }

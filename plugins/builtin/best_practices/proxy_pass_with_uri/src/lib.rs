@@ -98,13 +98,13 @@ impl ProxyPassWithUriPlugin {
                                 )
                             };
 
-                            errors.push(LintError::warning(
+                            let err = PluginInfo::new(
                                 "proxy-pass-with-uri",
                                 "best-practices",
-                                &message,
-                                directive.span.start.line,
-                                directive.span.start.column,
-                            ));
+                                "",
+                            ).error_builder();
+
+                            errors.push(err.warning_at(&message, directive));
                         }
                     }
                 }

@@ -74,16 +74,19 @@ impl ProxyKeepalivePlugin {
                             // Insert after the proxy_http_version line (at end of directive)
                             let insert_offset = version_directive.span.end.offset;
 
-                            let mut error = LintError::warning(
+                            let err = PluginInfo::new(
                                 "proxy-keepalive",
                                 "best-practices",
+                                "",
+                            ).error_builder();
+
+                            let mut error = err.warning_at(
                                 &format!(
                                     "proxy_http_version {} is set but proxy_set_header Connection is not configured. \
                                      For keepalive connections with upstream, add 'proxy_set_header Connection \"\";'",
                                     version
                                 ),
-                                version_directive.span.start.line,
-                                version_directive.span.start.column,
+                                version_directive,
                             );
 
                             error = error.with_fix(Fix::replace_range(

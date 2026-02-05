@@ -18,17 +18,14 @@ pub struct RootInLocationPlugin;
 
 impl RootInLocationPlugin {
     /// Recursively check for root directives inside location blocks
-    fn check_items(&self, items: &[ConfigItem], in_location: bool, errors: &mut Vec<LintError>) {
+    fn check_items(&self, items: &[ConfigItem], in_location: bool, err: &ErrorBuilder, errors: &mut Vec<LintError>) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
                 // Check if we're in a location block and found a root directive
                 if in_location && directive.name == "root" {
-                    errors.push(LintError::warning(
-                        "root-in-location",
-                        "best-practices",
+                    errors.push(err.warning_at(
                         "root directive inside location block; consider defining root at server level and using alias in location blocks",
-                        directive.span.start.line,
-                        directive.span.start.column,
+                        directive,
                     ));
                 }
 
@@ -36,7 +33,7 @@ impl RootInLocationPlugin {
                 if let Some(block) = &directive.block {
                     let is_location = directive.name == "location";
                     // Once we're in a location, stay in_location for nested blocks
-                    self.check_items(&block.items, in_location || is_location, errors);
+                    self.check_items(&block.items, in_location || is_location, err, errors);
                 }
             }
         }
@@ -69,7 +66,8 @@ impl Plugin for RootInLocationPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        self.check_items(&config.items, false, &mut errors);
+        let err = self.info().error_builder();
+        self.check_items(&config.items, false, &err, &mut errors);
         errors
     }
 }

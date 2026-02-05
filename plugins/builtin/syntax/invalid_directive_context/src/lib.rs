@@ -116,13 +116,13 @@ fn check_context(items: &[ConfigItem], parent_stack: &[&str], errors: &mut Vec<L
                         )
                     };
 
-                    errors.push(LintError::error(
+                    let err = PluginInfo::new(
                         "invalid-directive-context",
                         "syntax",
-                        &message,
-                        directive.span.start.line,
-                        directive.span.start.column,
-                    ));
+                        "",
+                    ).error_builder();
+
+                    errors.push(err.error_at(&message, directive));
                 }
             }
 

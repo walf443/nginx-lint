@@ -85,9 +85,13 @@ impl TryFilesWithProxyPlugin {
                 .map(|arg| arg.as_str().starts_with('='))
                 .unwrap_or(false);
 
-            errors.push(LintError::warning(
+            let err = PluginInfo::new(
                 "try-files-with-proxy",
                 "best-practices",
+                "",
+            ).error_builder();
+
+            errors.push(err.warning_at(
                 if ends_with_error_code {
                     "try_files and proxy_pass in the same location: try_files takes precedence, \
                      proxy_pass will never be executed. Use a named location (@fallback) for proxy_pass"
@@ -95,8 +99,7 @@ impl TryFilesWithProxyPlugin {
                     "try_files and proxy_pass in the same location: try_files takes precedence. \
                      If the last try_files argument is a URI, it will be used instead of proxy_pass"
                 },
-                proxy_pass.span.start.line,
-                proxy_pass.span.start.column,
+                proxy_pass,
             ));
         }
     }

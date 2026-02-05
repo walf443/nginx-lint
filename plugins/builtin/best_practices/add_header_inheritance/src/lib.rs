@@ -140,9 +140,13 @@ impl AddHeaderInheritancePlugin {
                                     .map(|h| format!("{}{}\n", indent, h.directive_text))
                                     .collect();
 
-                                let mut error = LintError::warning(
+                                let err = PluginInfo::new(
                                     "add-header-inheritance",
                                     "best-practices",
+                                    "",
+                                ).error_builder();
+
+                                let mut error = err.warning(
                                     &format!(
                                         "add_header in this block does not include headers from parent block: {}. \
                                          In nginx, add_header directives are not inherited - \

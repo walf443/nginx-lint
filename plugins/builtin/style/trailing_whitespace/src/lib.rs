@@ -32,25 +32,21 @@ impl Plugin for TrailingWhitespacePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        check_items(&config.items, &mut errors);
+        let err = self.info().error_builder();
+        check_items(&config.items, &err, &mut errors);
         errors
     }
 }
 
-fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
+fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintError>) {
     for item in items {
         match item {
             ConfigItem::Directive(directive) => {
                 // Check trailing whitespace after the directive terminator (; or {)
                 if !directive.trailing_whitespace.is_empty() {
-                    let error = LintError::warning(
-                        "trailing-whitespace",
-                        "style",
-                        "trailing whitespace at end of line",
-                        directive.span.start.line,
-                        1, // Column doesn't matter much for trailing whitespace
-                    )
-                    .with_fix(create_fix_for_directive(directive));
+                    let error = err
+                        .warning("trailing whitespace at end of line", directive.span.start.line, 1)
+                        .with_fix(create_fix_for_directive(directive));
                     errors.push(error);
                 }
 
@@ -59,31 +55,21 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
                     if !block.trailing_whitespace.is_empty() {
                         // The closing brace is on a separate line
                         let closing_line = block.span.end.line;
-                        let error = LintError::warning(
-                            "trailing-whitespace",
-                            "style",
-                            "trailing whitespace at end of line",
-                            closing_line,
-                            1,
-                        )
-                        .with_fix(create_fix_for_closing_brace(block));
+                        let error = err
+                            .warning("trailing whitespace at end of line", closing_line, 1)
+                            .with_fix(create_fix_for_closing_brace(block));
                         errors.push(error);
                     }
 
                     // Recursively check nested blocks
-                    check_items(&block.items, errors);
+                    check_items(&block.items, err, errors);
                 }
             }
             ConfigItem::Comment(comment) => {
                 if !comment.trailing_whitespace.is_empty() {
-                    let error = LintError::warning(
-                        "trailing-whitespace",
-                        "style",
-                        "trailing whitespace at end of line",
-                        comment.span.start.line,
-                        1,
-                    )
-                    .with_fix(create_fix_for_comment(comment));
+                    let error = err
+                        .warning("trailing whitespace at end of line", comment.span.start.line, 1)
+                        .with_fix(create_fix_for_comment(comment));
                     errors.push(error);
                 }
             }
@@ -93,14 +79,9 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>) {
                     // Use range-based fix to remove the whitespace content
                     let start = blank.span.start.offset;
                     let end = start + blank.content.len();
-                    let error = LintError::warning(
-                        "trailing-whitespace",
-                        "style",
-                        "trailing whitespace at end of line",
-                        blank.span.start.line,
-                        1,
-                    )
-                    .with_fix(Fix::replace_range(start, end, ""));
+                    let error = err
+                        .warning("trailing whitespace at end of line", blank.span.start.line, 1)
+                        .with_fix(Fix::replace_range(start, end, ""));
                     errors.push(error);
                 }
             }

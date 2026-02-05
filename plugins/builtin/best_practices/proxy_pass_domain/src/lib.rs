@@ -43,6 +43,7 @@ impl Plugin for ProxyPassDomainPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+        let err = self.info().error_builder();
 
         for directive in config.all_directives() {
             // Check proxy_pass directive
@@ -51,17 +52,14 @@ impl Plugin for ProxyPassDomainPlugin {
                     if let Some(host) = helpers::extract_host_from_url(url) {
                         if helpers::is_domain_name(host) {
                             let domain = helpers::extract_domain(host);
-                            errors.push(LintError::warning(
-                                "proxy-pass-domain",
-                                "best-practices",
+                            errors.push(err.warning_at(
                                 &format!(
                                     "proxy_pass uses domain '{}' directly; DNS is resolved at startup and cached. \
                                      Use upstream with 'resolve' (nginx 1.27.3+/Plus), \
                                      or use 'set $var \"{}\"' with 'resolver' for older nginx",
                                     domain, domain
                                 ),
-                                directive.span.start.line,
-                                directive.span.start.column,
+                                directive,
                             ));
                         }
                     }
