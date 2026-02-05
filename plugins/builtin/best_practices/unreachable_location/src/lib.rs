@@ -295,6 +295,12 @@ impl Plugin for UnreachableLocationPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
+
+        // If included from a server context, check top-level locations directly
+        if config.is_included_from_http_server() {
+            self.check_server_locations(&config.items, &mut errors);
+        }
+
         self.check_items(&config.items, &mut errors);
         errors
     }
@@ -439,5 +445,116 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    // =========================================================================
+    // Include context tests
+    // =========================================================================
+
+    #[test]
+    fn test_include_context_from_server_duplicate_location() {
+        // Test that duplicate locations are detected when file is included from server
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+location /api {
+    proxy_pass http://backend1;
+}
+location /api {
+    proxy_pass http://backend2;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = UnreachableLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for duplicate location, got: {:?}", errors);
+        assert!(errors[0].message.contains("Duplicate location"));
+    }
+
+    #[test]
+    fn test_include_context_from_server_regex_order() {
+        // Test that regex order issues are detected when file is included from server
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+location ~ /api {
+    proxy_pass http://backend;
+}
+location ~ /api/v1 {
+    proxy_pass http://v1;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = UnreachableLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error for shadowed regex location, got: {:?}", errors);
+        assert!(errors[0].message.contains("may never match"));
+    }
+
+    #[test]
+    fn test_include_context_from_http_no_error() {
+        // Test that locations at http level (not server) don't trigger
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+location /api {
+    proxy_pass http://backend1;
+}
+location /api {
+    proxy_pass http://backend2;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http context only (not server)
+        config.include_context = vec!["http".to_string()];
+
+        let plugin = UnreachableLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        // Should NOT trigger because we're not in a server context
+        assert!(errors.is_empty(), "Expected no errors for locations in http context, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_include_context_different_locations_ok() {
+        // Test that different locations don't trigger when included from server
+        use nginx_lint::parse_string;
+
+        let mut config = parse_string(
+            r#"
+location / {
+    root /var/www;
+}
+location /api {
+    proxy_pass http://backend;
+}
+"#,
+        )
+        .unwrap();
+
+        // Simulate being included from http > server context
+        config.include_context = vec!["http".to_string(), "server".to_string()];
+
+        let plugin = UnreachableLocationPlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert!(errors.is_empty(), "Expected no errors for different locations, got: {:?}", errors);
     }
 }
