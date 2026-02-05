@@ -447,7 +447,7 @@ impl Parser {
 ///
 /// # Examples
 /// ```
-/// use nginx_lint::parser::is_raw_block_directive;
+/// use nginx_lint_parser::is_raw_block_directive;
 ///
 /// assert!(is_raw_block_directive("content_by_lua_block"));
 /// assert!(is_raw_block_directive("init_by_lua_block"));
@@ -483,7 +483,7 @@ const BLOCK_DIRECTIVES: &[&str] = &[
 ///
 /// # Examples
 /// ```
-/// use nginx_lint::parser::is_block_directive;
+/// use nginx_lint_parser::is_block_directive;
 ///
 /// assert!(is_block_directive("server"));
 /// assert!(is_block_directive("location"));
@@ -500,7 +500,7 @@ pub fn is_block_directive(name: &str) -> bool {
 ///
 /// # Examples
 /// ```
-/// use nginx_lint::parser::is_block_directive_with_extras;
+/// use nginx_lint_parser::is_block_directive_with_extras;
 ///
 /// assert!(is_block_directive_with_extras("server", &[]));
 /// assert!(is_block_directive_with_extras("my_custom_block", &["my_custom_block".to_string()]));
@@ -796,5 +796,452 @@ http {
         assert_eq!(all_directives[1].leading_whitespace, "    ");
         // "listen" has 8 spaces
         assert_eq!(all_directives[2].leading_whitespace, "        ");
+    }
+
+    // ===== Variable tests =====
+
+    #[test]
+    fn test_variable_in_argument() {
+        let config = parse_string("set $var value;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "set");
+        // Variable values are stored without the $ prefix
+        assert_eq!(directive.args[0].as_str(), "var");
+        assert!(directive.args[0].is_variable());
+        // But raw contains the original text
+        assert_eq!(directive.args[0].raw, "$var");
+    }
+
+    #[test]
+    fn test_variable_in_proxy_pass() {
+        // URLs with variables are split into multiple tokens
+        let config = parse_string("proxy_pass http://$backend;").unwrap();
+        let directive = config.directives().next().unwrap();
+        // First part is the literal "http://"
+        assert_eq!(directive.args[0].as_str(), "http://");
+        assert!(directive.args[0].is_literal());
+        // Second part is the variable
+        assert_eq!(directive.args[1].as_str(), "backend");
+        assert!(directive.args[1].is_variable());
+    }
+
+    #[test]
+    fn test_braced_variable() {
+        let config = parse_string(r#"add_header X-Request-Id "${request_id}";"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        // Quoted strings containing variables are treated as quoted strings
+        assert!(directive.args[1].is_quoted());
+        assert!(directive.args[1].as_str().contains("request_id"));
+    }
+
+    // ===== Location directive tests =====
+
+    #[test]
+    fn test_location_exact_match() {
+        let config = parse_string("location = /exact { return 200; }").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "location");
+        assert_eq!(directive.args[0].as_str(), "=");
+        assert_eq!(directive.args[1].as_str(), "/exact");
+    }
+
+    #[test]
+    fn test_location_prefix_match() {
+        let config = parse_string("location ^~ /prefix { return 200; }").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[0].as_str(), "^~");
+        assert_eq!(directive.args[1].as_str(), "/prefix");
+    }
+
+    #[test]
+    fn test_location_regex_case_sensitive() {
+        let config = parse_string(r#"location ~ \.php$ { return 200; }"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[0].as_str(), "~");
+        assert_eq!(directive.args[1].as_str(), r"\.php$");
+    }
+
+    #[test]
+    fn test_location_regex_case_insensitive() {
+        let config = parse_string(r#"location ~* \.(gif|jpg|png)$ { return 200; }"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[0].as_str(), "~*");
+        assert_eq!(directive.args[1].as_str(), r"\.(gif|jpg|png)$");
+    }
+
+    #[test]
+    fn test_named_location() {
+        let config = parse_string("location @backend { proxy_pass http://backend; }").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[0].as_str(), "@backend");
+    }
+
+    // ===== If directive tests =====
+
+    #[test]
+    fn test_if_variable_check() {
+        let config = parse_string("if ($request_uri ~* /admin) { return 403; }").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "if");
+        assert!(directive.block.is_some());
+    }
+
+    #[test]
+    fn test_if_file_exists() {
+        let config = parse_string("if (-f $request_filename) { break; }").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "if");
+        assert_eq!(directive.args[0].as_str(), "(-f");
+    }
+
+    // ===== Upstream tests =====
+
+    #[test]
+    fn test_upstream_basic() {
+        let config = parse_string(
+            r#"upstream backend {
+    server 127.0.0.1:8080;
+    server 127.0.0.1:8081;
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "upstream");
+        assert_eq!(directive.args[0].as_str(), "backend");
+
+        let servers: Vec<_> = directive.block.as_ref().unwrap().directives().collect();
+        assert_eq!(servers.len(), 2);
+    }
+
+    #[test]
+    fn test_upstream_with_options() {
+        let config = parse_string(
+            r#"upstream backend {
+    server 127.0.0.1:8080 weight=5 max_fails=3 fail_timeout=30s;
+    keepalive 32;
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        let block = directive.block.as_ref().unwrap();
+        let items: Vec<_> = block.directives().collect();
+
+        assert_eq!(items[0].name, "server");
+        assert!(items[0].args.iter().any(|a| a.as_str().contains("weight")));
+        assert_eq!(items[1].name, "keepalive");
+    }
+
+    // ===== Geo and Map tests =====
+
+    #[test]
+    fn test_geo_directive() {
+        let config = parse_string(
+            r#"geo $geo {
+    default unknown;
+    127.0.0.1 local;
+    10.0.0.0/8 internal;
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "geo");
+        assert!(directive.block.is_some());
+    }
+
+    #[test]
+    fn test_map_directive() {
+        let config = parse_string(
+            r#"map $uri $new_uri {
+    default $uri;
+    /old /new;
+    ~^/api/v1/(.*) /api/v2/$1;
+}"#,
+        )
+        .unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "map");
+        assert_eq!(directive.args.len(), 2);
+    }
+
+    // ===== Quoting tests =====
+
+    #[test]
+    fn test_single_quoted_string() {
+        let config = parse_string(r#"set $var 'single quoted';"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[1].as_str(), "single quoted");
+        assert!(directive.args[1].is_quoted());
+    }
+
+    #[test]
+    fn test_double_quoted_string() {
+        let config = parse_string(r#"set $var "double quoted";"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[1].as_str(), "double quoted");
+        assert!(directive.args[1].is_quoted());
+    }
+
+    #[test]
+    fn test_quoted_string_with_spaces() {
+        let config = parse_string(r#"add_header X-Custom "value with spaces";"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.args[1].as_str(), "value with spaces");
+    }
+
+    #[test]
+    fn test_escaped_quote_in_string() {
+        let config = parse_string(r#"set $var "say \"hello\"";"#).unwrap();
+        let directive = config.directives().next().unwrap();
+        // The parser preserves escaped quotes in the string content
+        let value = directive.args[1].as_str();
+        assert!(value.contains("hello"), "value was: {}", value);
+    }
+
+    // ===== Include directive tests =====
+
+    #[test]
+    fn test_include_directive() {
+        let config = parse_string("include /etc/nginx/conf.d/*.conf;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "include");
+        assert_eq!(directive.args[0].as_str(), "/etc/nginx/conf.d/*.conf");
+    }
+
+    #[test]
+    fn test_include_with_glob() {
+        let config = parse_string("include sites-enabled/*;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert!(directive.args[0].as_str().contains("*"));
+    }
+
+    // ===== Error handling tests =====
+
+    #[test]
+    fn test_error_unexpected_closing_brace() {
+        let result = parse_string("listen 80; }");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_unclosed_string() {
+        let result = parse_string(r#"set $var "unclosed;"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_empty_directive_name() {
+        // This should work - empty string as a key in map
+        let result = parse_string("map $a $b { '' x; }");
+        assert!(result.is_ok());
+    }
+
+    // ===== Special nginx patterns =====
+
+    #[test]
+    fn test_try_files_directive() {
+        let config = parse_string("try_files $uri $uri/ /index.php?$args;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "try_files");
+        // Variables are tokenized separately, so we have more args
+        // $uri, $uri/, /index.php?, $args
+        assert!(directive.args.len() >= 3);
+        assert!(directive.args.iter().any(|a| a.as_str() == "uri"));
+    }
+
+    #[test]
+    fn test_rewrite_directive() {
+        let config = parse_string("rewrite ^/old/(.*)$ /new/$1 permanent;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "rewrite");
+        // /new/$1 is split into /new/ and $1
+        assert!(directive.args.len() >= 3);
+        assert_eq!(directive.args[0].as_str(), "^/old/(.*)$");
+        assert!(directive.args.iter().any(|a| a.as_str() == "permanent"));
+    }
+
+    #[test]
+    fn test_return_directive() {
+        let config = parse_string("return 301 https://$host$request_uri;").unwrap();
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "return");
+        assert_eq!(directive.args[0].as_str(), "301");
+    }
+
+    #[test]
+    fn test_limit_except_block() {
+        let config = parse_string(
+            r#"location / {
+    limit_except GET POST {
+        deny all;
+    }
+}"#,
+        )
+        .unwrap();
+        let all: Vec<_> = config.all_directives().collect();
+        assert!(all.iter().any(|d| d.name == "limit_except"));
+    }
+
+    // ===== Complex configuration tests =====
+
+    #[test]
+    fn test_ssl_configuration() {
+        let config = parse_string(
+            r#"server {
+    listen 443 ssl http2;
+    ssl_certificate /etc/ssl/cert.pem;
+    ssl_certificate_key /etc/ssl/key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256;
+    ssl_prefer_server_ciphers on;
+}"#,
+        )
+        .unwrap();
+
+        let all: Vec<_> = config.all_directives().collect();
+        assert!(all.iter().any(|d| d.name == "ssl_certificate"));
+        assert!(all.iter().any(|d| d.name == "ssl_protocols"));
+    }
+
+    #[test]
+    fn test_proxy_configuration() {
+        let config = parse_string(
+            r#"location /api {
+    proxy_pass http://backend;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_connect_timeout 60s;
+    proxy_read_timeout 60s;
+}"#,
+        )
+        .unwrap();
+
+        let all: Vec<_> = config.all_directives().collect();
+        let proxy_headers: Vec<_> = all.iter().filter(|d| d.name == "proxy_set_header").collect();
+        assert_eq!(proxy_headers.len(), 3);
+    }
+
+    #[test]
+    fn test_deeply_nested_blocks() {
+        let config = parse_string(
+            r#"http {
+    server {
+        location / {
+            if ($request_method = POST) {
+                return 405;
+            }
+        }
+    }
+}"#,
+        )
+        .unwrap();
+
+        let all: Vec<_> = config.all_directives().collect();
+        assert_eq!(all.len(), 5); // http, server, location, if, return
+    }
+
+    // ===== Argument helper method tests =====
+
+    #[test]
+    fn test_argument_is_on_off() {
+        let config = parse_string("gzip on; gzip_static off;").unwrap();
+        let directives: Vec<_> = config.directives().collect();
+
+        assert!(directives[0].args[0].is_on());
+        assert!(!directives[0].args[0].is_off());
+
+        assert!(directives[1].args[0].is_off());
+        assert!(!directives[1].args[0].is_on());
+    }
+
+    #[test]
+    fn test_argument_is_literal() {
+        let config = parse_string(r#"set $var "quoted"; set $var2 literal;"#).unwrap();
+        let directives: Vec<_> = config.directives().collect();
+
+        assert!(!directives[0].args[1].is_literal());
+        assert!(directives[1].args[1].is_literal());
+    }
+
+    // ===== Blank line handling tests =====
+
+    #[test]
+    fn test_blank_lines_preserved() {
+        let config = parse_string("worker_processes 1;\n\nerror_log /var/log/error.log;\n").unwrap();
+
+        // Should have 3 items: directive, blank line, directive
+        assert_eq!(config.items.len(), 3);
+        assert!(matches!(config.items[1], ConfigItem::BlankLine(_)));
+    }
+
+    #[test]
+    fn test_multiple_blank_lines() {
+        let config = parse_string("a 1;\n\n\nb 2;\n").unwrap();
+
+        let blank_count = config
+            .items
+            .iter()
+            .filter(|i| matches!(i, ConfigItem::BlankLine(_)))
+            .count();
+        assert_eq!(blank_count, 2);
+    }
+
+    // ===== Events block tests =====
+
+    #[test]
+    fn test_events_block() {
+        let config = parse_string(
+            r#"events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}"#,
+        )
+        .unwrap();
+
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "events");
+
+        let inner: Vec<_> = directive.block.as_ref().unwrap().directives().collect();
+        assert_eq!(inner.len(), 3);
+    }
+
+    // ===== Stream block tests =====
+
+    #[test]
+    fn test_stream_block() {
+        let config = parse_string(
+            r#"stream {
+    server {
+        listen 12345;
+        proxy_pass backend;
+    }
+}"#,
+        )
+        .unwrap();
+
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "stream");
+    }
+
+    // ===== Types block tests =====
+
+    #[test]
+    fn test_types_block() {
+        let config = parse_string(
+            r#"types {
+    text/html html htm;
+    text/css css;
+    application/javascript js;
+}"#,
+        )
+        .unwrap();
+
+        let directive = config.directives().next().unwrap();
+        assert_eq!(directive.name, "types");
+
+        let inner: Vec<_> = directive.block.as_ref().unwrap().directives().collect();
+        assert_eq!(inner.len(), 3);
+        assert_eq!(inner[0].name, "text/html");
     }
 }

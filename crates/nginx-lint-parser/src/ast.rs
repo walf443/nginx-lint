@@ -267,6 +267,34 @@ impl Argument {
     pub fn is_off(&self) -> bool {
         self.as_str() == "off"
     }
+
+    /// Check if this is a variable reference
+    pub fn is_variable(&self) -> bool {
+        matches!(self.value, ArgumentValue::Variable(_))
+    }
+
+    /// Check if this is a quoted string (single or double)
+    pub fn is_quoted(&self) -> bool {
+        matches!(
+            self.value,
+            ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_)
+        )
+    }
+
+    /// Check if this is a literal (unquoted, non-variable)
+    pub fn is_literal(&self) -> bool {
+        matches!(self.value, ArgumentValue::Literal(_))
+    }
+
+    /// Check if this is a double-quoted string
+    pub fn is_double_quoted(&self) -> bool {
+        matches!(self.value, ArgumentValue::QuotedString(_))
+    }
+
+    /// Check if this is a single-quoted string
+    pub fn is_single_quoted(&self) -> bool {
+        matches!(self.value, ArgumentValue::SingleQuotedString(_))
+    }
 }
 
 /// Type of argument value
