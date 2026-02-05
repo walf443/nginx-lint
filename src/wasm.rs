@@ -209,12 +209,15 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     // Run indentation check directly on content (always, as it doesn't need AST)
     if is_enabled("indent") {
-        let indent_size = lint_config
+        let indent_rule = if let Some(indent_size) = lint_config
             .as_ref()
             .and_then(|c| c.get_rule_config("indent"))
             .and_then(|r| r.indent_size)
-            .unwrap_or(2);
-        let indent_rule = Indent { indent_size };
+        {
+            Indent { indent_size }
+        } else {
+            Indent::default()
+        };
         errors.extend(indent_rule.check_content(content));
     }
 
