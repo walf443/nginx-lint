@@ -551,8 +551,14 @@ http {
 }
 
 #[test]
-fn test_generated_fixtures_parse_without_errors() {
-    let test_generated_dir = fixtures_base().join("test_generated");
+fn test_generated_fixtures_lint_without_errors() {
+    // Fixtures are now in the parser crate
+    let test_generated_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("crates")
+        .join("nginx-lint-parser")
+        .join("tests")
+        .join("fixtures")
+        .join("test_generated");
 
     // Skip if directory doesn't exist
     if !test_generated_dir.exists() {
