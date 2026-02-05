@@ -35,13 +35,7 @@ impl ProxySetHeaderInheritancePlugin {
     fn directive_to_text(directive: &Directive) -> String {
         let mut parts = vec![directive.name.clone()];
         for arg in &directive.args {
-            let arg_text = match &arg.value {
-                ArgumentValue::Literal(s) => s.clone(),
-                ArgumentValue::QuotedString(s) => format!("\"{}\"", s),
-                ArgumentValue::SingleQuotedString(s) => format!("'{}'", s),
-                ArgumentValue::Variable(s) => format!("${}", s),
-            };
-            parts.push(arg_text);
+            parts.push(arg.to_source());
         }
         format!("{};", parts.join(" "))
     }

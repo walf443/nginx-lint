@@ -729,6 +729,21 @@ pub trait ArgumentExt {
 
     /// Check if this is a literal value (unquoted, non-variable)
     fn is_literal(&self) -> bool;
+
+    /// Reconstruct the source representation of the argument
+    ///
+    /// This includes quotes for quoted strings and `$` prefix for variables.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // For literal "on" -> "on"
+    /// // For quoted string "value" -> "\"value\""
+    /// // For single quoted 'value' -> "'value'"
+    /// // For variable $host -> "$host"
+    /// let source = arg.to_source();
+    /// ```
+    fn to_source(&self) -> String;
 }
 
 impl ArgumentExt for Argument {
@@ -762,6 +777,15 @@ impl ArgumentExt for Argument {
 
     fn is_literal(&self) -> bool {
         matches!(self.value, ArgumentValue::Literal(_))
+    }
+
+    fn to_source(&self) -> String {
+        match &self.value {
+            ArgumentValue::Literal(s) => s.clone(),
+            ArgumentValue::QuotedString(s) => format!("\"{}\"", s),
+            ArgumentValue::SingleQuotedString(s) => format!("'{}'", s),
+            ArgumentValue::Variable(s) => format!("${}", s),
+        }
     }
 }
 
@@ -1060,5 +1084,28 @@ error_log /var/log/nginx/error.log;
 
         assert!(directive.args[1].is_quoted());
         assert_eq!(directive.args[1].as_str(), "single quoted");
+    }
+
+    #[test]
+    fn test_argument_to_source() {
+        // Literal
+        let config = parse_string("server_tokens off;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+        assert_eq!(directive.args[0].to_source(), "off");
+
+        // Double quoted
+        let config = parse_string(r#"add_header X-Custom "value";"#).unwrap();
+        let directive = config.all_directives().next().unwrap();
+        assert_eq!(directive.args[1].to_source(), "\"value\"");
+
+        // Single quoted
+        let config = parse_string("add_header X-Custom 'value';").unwrap();
+        let directive = config.all_directives().next().unwrap();
+        assert_eq!(directive.args[1].to_source(), "'value'");
+
+        // Variable
+        let config = parse_string("proxy_set_header Host $host;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+        assert_eq!(directive.args[1].to_source(), "$host");
     }
 }
