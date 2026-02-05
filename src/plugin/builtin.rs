@@ -60,6 +60,9 @@ mod embedded {
     /// unreachable-location plugin
     pub const UNREACHABLE_LOCATION: &[u8] =
         include_bytes!("../../target/builtin-plugins/unreachable_location.wasm");
+    /// missing-error-log plugin
+    pub const MISSING_ERROR_LOG: &[u8] =
+        include_bytes!("../../target/builtin-plugins/missing_error_log.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -81,6 +84,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "try-files-with-proxy",
     "if-is-evil-in-location",
     "unreachable-location",
+    "missing-error-log",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -292,6 +296,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:unreachable-location"),
         embedded::UNREACHABLE_LOCATION,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load missing-error-log
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:missing-error-log"),
+        embedded::MISSING_ERROR_LOG,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,

@@ -212,9 +212,11 @@ impl Linter {
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
-            DeprecatedSslProtocol, Indent, InvalidDirectiveContext, MissingErrorLog,
-            MissingSemicolon, UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
+            DeprecatedSslProtocol, Indent, InvalidDirectiveContext, MissingSemicolon,
+            UnclosedQuote, UnmatchedBraces, WeakSslCiphers,
         };
+        #[cfg(not(feature = "builtin-plugins"))]
+        use crate::rules::MissingErrorLog;
 
         let mut linter = Self::new();
 
@@ -279,7 +281,8 @@ impl Linter {
             };
             linter.add_rule(Box::new(rule));
         }
-        // Best practices
+        // Best practices (native implementation, used when builtin-plugins is not enabled)
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("missing-error-log") {
             linter.add_rule(Box::new(MissingErrorLog));
         }
