@@ -366,11 +366,11 @@ impl WasmLintRule {
         })
     }
 
-    /// Execute check using instance
+    /// Execute check using instance with pre-serialized config JSON
     fn execute_check_with_instance(
         &self,
         instance: &mut WasmInstance,
-        config: &Config,
+        config_json: &str,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
         // Reset fuel for this check (only if fuel metering is enabled)
@@ -379,11 +379,6 @@ impl WasmLintRule {
                 PluginError::execution_error(&self.path, format!("Failed to reset fuel: {}", e))
             })?;
         }
-
-        // Get serialized config (cached if same Config was serialized recently)
-        let config_json = get_serialized_config(config).map_err(|e| {
-            PluginError::execution_error(&self.path, format!("Failed to serialize config: {}", e))
-        })?;
 
         // Serialize path to string
         let path_str = file_path.to_string_lossy().to_string();
@@ -467,8 +462,20 @@ impl WasmLintRule {
     /// after repeated use (leading to "unreachable" errors). The performance
     /// impact is acceptable since instance creation is fast.
     fn execute_check(&self, config: &Config, file_path: &Path) -> Result<Vec<LintError>, PluginError> {
+        let config_json = get_serialized_config(config).map_err(|e| {
+            PluginError::execution_error(&self.path, format!("Failed to serialize config: {}", e))
+        })?;
+        self.execute_check_with_serialized(&config_json, file_path)
+    }
+
+    /// Execute the check function with pre-serialized config JSON
+    fn execute_check_with_serialized(
+        &self,
+        config_json: &str,
+        file_path: &Path,
+    ) -> Result<Vec<LintError>, PluginError> {
         let mut instance = self.create_instance()?;
-        self.execute_check_with_instance(&mut instance, config, file_path)
+        self.execute_check_with_instance(&mut instance, config_json, file_path)
     }
 }
 
@@ -519,6 +526,26 @@ impl LintRule for WasmLintRule {
 
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
         match self.execute_check(config, path) {
+            Ok(errors) => errors,
+            Err(e) => {
+                // Return a single error describing the plugin failure
+                vec![LintError::new(
+                    self.name,
+                    self.category,
+                    &format!("Plugin execution failed: {}", e),
+                    Severity::Error,
+                )]
+            }
+        }
+    }
+
+    fn check_with_serialized_config(
+        &self,
+        _config: &Config,
+        path: &Path,
+        serialized_config: &str,
+    ) -> Vec<LintError> {
+        match self.execute_check_with_serialized(serialized_config, path) {
             Ok(errors) => errors,
             Err(e) => {
                 // Return a single error describing the plugin failure

@@ -162,6 +162,20 @@ pub trait LintRule: Send + Sync {
     fn description(&self) -> &'static str;
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError>;
 
+    /// Check with pre-serialized config JSON (optimization for WASM plugins)
+    ///
+    /// This method allows passing a pre-serialized config JSON to avoid
+    /// repeated serialization when running multiple plugins.
+    /// Default implementation ignores the serialized config and calls check().
+    fn check_with_serialized_config(
+        &self,
+        config: &Config,
+        path: &Path,
+        _serialized_config: &str,
+    ) -> Vec<LintError> {
+        self.check(config, path)
+    }
+
     /// Get detailed explanation of why this rule exists
     fn why(&self) -> Option<&str> {
         None
@@ -309,9 +323,12 @@ impl Linter {
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
     #[cfg(feature = "cli")]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        // Pre-serialize config once for all rules (optimization for WASM plugins)
+        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+
         self.rules
             .par_iter()
-            .map(|rule| rule.check(config, path))
+            .map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
@@ -321,9 +338,12 @@ impl Linter {
     /// Run all lint rules and collect errors (sequential version for WASM)
     #[cfg(not(feature = "cli"))]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        // Pre-serialize config once for all rules (optimization for WASM plugins)
+        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+
         self.rules
             .iter()
-            .flat_map(|rule| rule.check(config, path))
+            .flat_map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
             .collect()
     }
 
@@ -382,12 +402,15 @@ impl Linter {
     ) -> (Vec<LintError>, Vec<RuleProfile>) {
         use std::time::Instant;
 
+        // Pre-serialize config once for all rules (optimization for WASM plugins)
+        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+
         let results: Vec<(Vec<LintError>, RuleProfile)> = self
             .rules
             .iter()
             .map(|rule| {
                 let start = Instant::now();
-                let errors = rule.check(config, path);
+                let errors = rule.check_with_serialized_config(config, path, &serialized_config);
                 let duration = start.elapsed();
                 let profile = RuleProfile {
                     name: rule.name().to_string(),
