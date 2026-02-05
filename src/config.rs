@@ -15,7 +15,7 @@ pub enum IndentSize {
 
 impl Default for IndentSize {
     fn default() -> Self {
-        IndentSize::Fixed(2)
+        IndentSize::Auto
     }
 }
 
@@ -158,9 +158,9 @@ required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 
 [rules.indent]
 enabled = true
-# Indentation size: number or "auto" for auto-detection (default: 2)
-# indent_size = "auto"
-indent_size = 2
+# Indentation size: number or "auto" for auto-detection (default: "auto")
+# indent_size = 4
+indent_size = "auto"
 
 [rules.trailing-whitespace]
 enabled = true

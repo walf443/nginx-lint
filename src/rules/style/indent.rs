@@ -32,7 +32,7 @@ pub struct Indent {
 impl Default for Indent {
     fn default() -> Self {
         Self {
-            indent_size: IndentSize::Fixed(2),
+            indent_size: IndentSize::Auto,
         }
     }
 }
