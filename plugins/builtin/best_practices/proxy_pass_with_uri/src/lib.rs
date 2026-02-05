@@ -63,9 +63,7 @@ impl ProxyPassWithUriPlugin {
 
     /// Check if any argument is a variable
     fn has_variable_arg(directive: &Directive) -> bool {
-        directive.args.iter().any(|arg| {
-            matches!(arg.value, ArgumentValue::Variable(_))
-        })
+        directive.args.iter().any(|arg| arg.is_variable())
     }
 
     /// Recursively check for proxy_pass with URI
