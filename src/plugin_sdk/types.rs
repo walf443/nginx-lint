@@ -720,6 +720,15 @@ pub trait ArgumentExt {
 
     /// Check if this is an "off" value
     fn is_off(&self) -> bool;
+
+    /// Check if this is a variable (e.g., $host, $request_uri)
+    fn is_variable(&self) -> bool;
+
+    /// Check if this is a quoted string (double or single quotes)
+    fn is_quoted(&self) -> bool;
+
+    /// Check if this is a literal value (unquoted, non-variable)
+    fn is_literal(&self) -> bool;
 }
 
 impl ArgumentExt for Argument {
@@ -738,6 +747,21 @@ impl ArgumentExt for Argument {
 
     fn is_off(&self) -> bool {
         self.as_str() == "off"
+    }
+
+    fn is_variable(&self) -> bool {
+        matches!(self.value, ArgumentValue::Variable(_))
+    }
+
+    fn is_quoted(&self) -> bool {
+        matches!(
+            self.value,
+            ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_)
+        )
+    }
+
+    fn is_literal(&self) -> bool {
+        matches!(self.value, ArgumentValue::Literal(_))
     }
 }
 
@@ -995,5 +1019,46 @@ error_log /var/log/nginx/error.log;
         assert_eq!(error.rule, "test-rule");
         assert_eq!(error.line, Some(1));
         assert_eq!(error.column, Some(1));
+    }
+
+    #[test]
+    fn test_argument_is_variable() {
+        let config = parse_string("proxy_set_header Host $host;").unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        // First arg "Host" is literal
+        assert!(directive.args[0].is_literal());
+        assert!(!directive.args[0].is_variable());
+        assert!(!directive.args[0].is_quoted());
+
+        // Second arg "$host" is variable
+        assert!(directive.args[1].is_variable());
+        assert!(!directive.args[1].is_literal());
+        assert!(!directive.args[1].is_quoted());
+    }
+
+    #[test]
+    fn test_argument_is_quoted() {
+        let config = parse_string(r#"add_header X-Custom "value with spaces";"#).unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        // First arg "X-Custom" is literal
+        assert!(directive.args[0].is_literal());
+        assert!(!directive.args[0].is_quoted());
+
+        // Second arg is quoted
+        assert!(directive.args[1].is_quoted());
+        assert!(!directive.args[1].is_literal());
+        assert!(!directive.args[1].is_variable());
+        assert_eq!(directive.args[1].as_str(), "value with spaces");
+    }
+
+    #[test]
+    fn test_argument_single_quoted() {
+        let config = parse_string("add_header X-Custom 'single quoted';").unwrap();
+        let directive = config.all_directives().next().unwrap();
+
+        assert!(directive.args[1].is_quoted());
+        assert_eq!(directive.args[1].as_str(), "single quoted");
     }
 }
