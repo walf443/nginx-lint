@@ -588,6 +588,50 @@ pub trait DirectiveExt {
     /// let fix = directive.insert_after("proxy_set_header Connection \"\";");
     /// ```
     fn insert_after(&self, new_text: &str) -> Fix;
+
+    /// Create a fix that inserts multiple directives after this one
+    ///
+    /// Each directive will be inserted on its own line with the same indentation
+    /// as this directive.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let fix = directive.insert_after_many(&[
+    ///     "proxy_set_header Connection \"\";",
+    ///     "proxy_set_header Upgrade $http_upgrade;",
+    /// ]);
+    /// ```
+    fn insert_after_many(&self, lines: &[&str]) -> Fix;
+
+    /// Create a fix that inserts a new directive before this one
+    ///
+    /// The new directive will be inserted on a new line before this directive,
+    /// with the same indentation.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Before "add_header X-Custom value;", insert "add_header X-Frame-Options DENY;"
+    /// let fix = directive.insert_before("add_header X-Frame-Options DENY;");
+    /// ```
+    fn insert_before(&self, new_text: &str) -> Fix;
+
+    /// Create a fix that inserts multiple directives before this one
+    ///
+    /// Each directive will be inserted on its own line with the same indentation
+    /// as this directive.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Insert multiple headers before the first add_header
+    /// let fix = directive.insert_before_many(&[
+    ///     "add_header X-Frame-Options DENY;",
+    ///     "add_header X-Content-Type-Options nosniff;",
+    /// ]);
+    /// ```
+    fn insert_before_many(&self, lines: &[&str]) -> Fix;
 }
 
 impl DirectiveExt for Directive {
@@ -635,11 +679,34 @@ impl DirectiveExt for Directive {
     }
 
     fn insert_after(&self, new_text: &str) -> Fix {
+        self.insert_after_many(&[new_text])
+    }
+
+    fn insert_after_many(&self, lines: &[&str]) -> Fix {
         // Calculate the indentation from the directive's column position
         let indent = " ".repeat(self.span.start.column.saturating_sub(1));
-        let fix_text = format!("\n{}{}", indent, new_text);
+        let fix_text: String = lines
+            .iter()
+            .map(|line| format!("\n{}{}", indent, line))
+            .collect();
         let insert_offset = self.span.end.offset;
         Fix::replace_range(insert_offset, insert_offset, &fix_text)
+    }
+
+    fn insert_before(&self, new_text: &str) -> Fix {
+        self.insert_before_many(&[new_text])
+    }
+
+    fn insert_before_many(&self, lines: &[&str]) -> Fix {
+        // Calculate the indentation from the directive's column position
+        let indent = " ".repeat(self.span.start.column.saturating_sub(1));
+        let fix_text: String = lines
+            .iter()
+            .map(|line| format!("{}{}\n", indent, line))
+            .collect();
+        // Insert at the beginning of the line (before the indentation)
+        let line_start_offset = self.span.start.offset - (self.span.start.column - 1);
+        Fix::replace_range(line_start_offset, line_start_offset, &fix_text)
     }
 }
 

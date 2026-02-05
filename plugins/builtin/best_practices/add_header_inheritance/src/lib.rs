@@ -66,11 +66,6 @@ impl AddHeaderInheritancePlugin {
         headers
     }
 
-    /// Get the indentation string for a given column (1-indexed)
-    fn get_indent(column: usize) -> String {
-        " ".repeat(column.saturating_sub(1))
-    }
-
     /// Check a block for add_header inheritance issues
     fn check_block(
         &self,
@@ -105,66 +100,49 @@ impl AddHeaderInheritancePlugin {
                                 let mut missing_sorted = missing.clone();
                                 missing_sorted.sort_by_key(|h| h.line);
 
-                                // Find the first add_header in this block for error location and indentation
-                                let first_header_info = block
+                                // Find the first add_header directive in this block
+                                let first_add_header = block
                                     .items
                                     .iter()
                                     .filter_map(|item| {
                                         if let ConfigItem::Directive(d) = item {
                                             if d.name == "add_header" {
-                                                return Some((
-                                                    d.span.start.line,
-                                                    d.span.start.column,
-                                                    d.span.start.offset,
-                                                ));
+                                                return Some(d.as_ref());
                                             }
                                         }
                                         None
                                     })
-                                    .next()
-                                    .unwrap_or((
-                                        directive.span.start.line,
-                                        directive.span.start.column,
-                                        directive.span.start.offset,
-                                    ));
+                                    .next();
 
-                                let (line, column, offset) = first_header_info;
-                                let indent = Self::get_indent(column);
+                                if let Some(first_directive) = first_add_header {
+                                    let err = PluginInfo::new(
+                                        "add-header-inheritance",
+                                        "best-practices",
+                                        "",
+                                    ).error_builder();
 
-                                // Calculate offset at the beginning of the line (before indentation)
-                                let line_start_offset = offset - (column - 1);
+                                    // Build the list of missing directive texts
+                                    let missing_texts: Vec<&str> = missing_sorted
+                                        .iter()
+                                        .map(|h| h.directive_text.as_str())
+                                        .collect();
 
-                                // Build the fix text: insert missing headers before the first add_header
-                                let fix_text: String = missing_sorted
-                                    .iter()
-                                    .map(|h| format!("{}{}\n", indent, h.directive_text))
-                                    .collect();
+                                    let error = err.warning_at(
+                                        &format!(
+                                            "add_header in this block does not include headers from parent block: {}. \
+                                             In nginx, add_header directives are not inherited - \
+                                             all headers must be explicitly repeated in child blocks",
+                                            missing_sorted
+                                                .iter()
+                                                .map(|h| format!("'{}'", h.name_lower))
+                                                .collect::<Vec<_>>()
+                                                .join(", ")
+                                        ),
+                                        first_directive,
+                                    ).with_fix(first_directive.insert_before_many(&missing_texts));
 
-                                let err = PluginInfo::new(
-                                    "add-header-inheritance",
-                                    "best-practices",
-                                    "",
-                                ).error_builder();
-
-                                let mut error = err.warning(
-                                    &format!(
-                                        "add_header in this block does not include headers from parent block: {}. \
-                                         In nginx, add_header directives are not inherited - \
-                                         all headers must be explicitly repeated in child blocks",
-                                        missing_sorted
-                                            .iter()
-                                            .map(|h| format!("'{}'", h.name_lower))
-                                            .collect::<Vec<_>>()
-                                            .join(", ")
-                                    ),
-                                    line,
-                                    column,
-                                );
-
-                                // Add fix: insert missing headers before the first add_header
-                                error = error.with_fix(Fix::replace_range(line_start_offset, line_start_offset, &fix_text));
-
-                                errors.push(error);
+                                    errors.push(error);
+                                }
                             }
                         }
 
