@@ -213,10 +213,9 @@ impl Linter {
     pub fn with_config(config: Option<&LintConfig>) -> Self {
         use crate::rules::{
             Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
-            WeakSslCiphers,
         };
         #[cfg(not(feature = "builtin-plugins"))]
-        use crate::rules::{DeprecatedSslProtocol, MissingErrorLog};
+        use crate::rules::{DeprecatedSslProtocol, MissingErrorLog, WeakSslCiphers};
 
         let mut linter = Self::new();
 
@@ -257,6 +256,7 @@ impl Linter {
             }
             linter.add_rule(Box::new(rule));
         }
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("weak-ssl-ciphers") {
             let mut rule = WeakSslCiphers::default();
             if let Some(cfg) = config.and_then(|c| c.get_rule_config("weak-ssl-ciphers")) {

@@ -66,6 +66,9 @@ mod embedded {
     /// deprecated-ssl-protocol plugin
     pub const DEPRECATED_SSL_PROTOCOL: &[u8] =
         include_bytes!("../../target/builtin-plugins/deprecated_ssl_protocol.wasm");
+    /// weak-ssl-ciphers plugin
+    pub const WEAK_SSL_CIPHERS: &[u8] =
+        include_bytes!("../../target/builtin-plugins/weak_ssl_ciphers.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -89,6 +92,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "unreachable-location",
     "missing-error-log",
     "deprecated-ssl-protocol",
+    "weak-ssl-ciphers",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -320,6 +324,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:deprecated-ssl-protocol"),
         embedded::DEPRECATED_SSL_PROTOCOL,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load weak-ssl-ciphers
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:weak-ssl-ciphers"),
+        embedded::WEAK_SSL_CIPHERS,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
