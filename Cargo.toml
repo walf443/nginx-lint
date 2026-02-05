@@ -25,15 +25,12 @@ web-server = ["tiny_http"]
 web-server-embed-wasm = ["web-server"]
 # WASM plugin support for custom lint rules
 plugins = ["wasmi"]
-# SDK for building custom WASM lint rules - use nginx-lint-plugin crate
-plugin-sdk = ["dep:nginx-lint-plugin"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
 builtin-plugins = ["plugins"]
 
 [dependencies]
 # Internal crates
 nginx-lint-common = { path = "crates/nginx-lint-common" }
-nginx-lint-plugin = { path = "crates/nginx-lint-plugin", optional = true }
 
 # CLI dependencies
 clap = { version = "4", features = ["derive"], optional = true }

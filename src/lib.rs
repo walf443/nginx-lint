@@ -22,12 +22,6 @@ pub mod wasm;
 #[cfg(feature = "plugins")]
 pub mod plugin;
 
-// Plugin SDK - re-export from nginx-lint-plugin crate
-#[cfg(feature = "plugin-sdk")]
-pub use nginx_lint_plugin as plugin_sdk;
-#[cfg(feature = "plugin-sdk")]
-pub use nginx_lint_plugin::export_plugin;
-
 // Re-export commonly used types from nginx-lint-common
 pub use nginx_lint_common::{
     Color, ColorConfig, ColorMode, LintConfig, ValidationError,

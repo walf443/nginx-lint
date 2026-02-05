@@ -325,7 +325,6 @@ dependencies = [
  "console_error_panic_hook",
  "glob",
  "nginx-lint-common",
- "nginx-lint-plugin",
  "rayon",
  "serde",
  "serde_json",
