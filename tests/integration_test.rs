@@ -22,7 +22,7 @@ enabled = true
 [rules.missing-error-log]
 enabled = true
 "#;
-        let config: LintConfig = toml::from_str(config_toml).unwrap();
+        let config: LintConfig = LintConfig::from_str(config_toml).unwrap();
         Linter::with_config(Some(&config))
     })
 }

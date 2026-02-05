@@ -331,7 +331,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tiny_http",
- "toml",
  "wasm-bindgen",
  "wasmi",
 ]
@@ -363,7 +362,6 @@ dependencies = [
  "nginx-lint-common",
  "serde",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
