@@ -231,6 +231,25 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     errors.extend(warnings_to_errors(ignore_warnings));
     errors.extend(warnings_to_errors(result.unused_warnings));
 
+    // Sort errors by line number, then by column number
+    errors.sort_by(|a, b| {
+        match (a.line, b.line) {
+            (Some(line_a), Some(line_b)) => {
+                line_a.cmp(&line_b).then_with(|| {
+                    match (a.column, b.column) {
+                        (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                })
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+
     // Convert errors to JSON
     let js_errors: Vec<JsLintError> = errors.iter().map(JsLintError::from).collect();
     let errors_json =
