@@ -1,3 +1,4 @@
+use crate::config::IndentSize;
 use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
@@ -24,13 +25,31 @@ across different environments."#,
 
 /// Check for inconsistent indentation
 pub struct Indent {
-    /// Expected spaces per indent level (default: 2)
-    pub indent_size: usize,
+    /// Indent size configuration: fixed number or auto-detect
+    pub indent_size: IndentSize,
 }
 
 impl Default for Indent {
     fn default() -> Self {
-        Self { indent_size: 2 }
+        Self {
+            indent_size: IndentSize::Fixed(2),
+        }
+    }
+}
+
+impl Indent {
+    /// Create with a specific indent size
+    pub fn with_size(size: usize) -> Self {
+        Self {
+            indent_size: IndentSize::Fixed(size),
+        }
+    }
+
+    /// Create with auto-detection
+    pub fn auto() -> Self {
+        Self {
+            indent_size: IndentSize::Auto,
+        }
     }
 }
 
@@ -40,10 +59,50 @@ impl Indent {
         self.check_content_impl(content)
     }
 
+    /// Detect indent size from the first indented line in the content
+    fn detect_indent_size(content: &str) -> Option<usize> {
+        let mut depth = 0;
+        for line in content.lines() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and comments
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+
+            // Check indentation BEFORE updating depth
+            // We want the first line that is indented at depth 1
+            if depth == 1 {
+                let leading_spaces = line.len() - line.trim_start().len();
+                if leading_spaces > 0 && !line.starts_with('\t') {
+                    // Found the first indented line at depth 1
+                    return Some(leading_spaces);
+                }
+            }
+
+            // Update depth based on braces
+            if trimmed.ends_with('{') {
+                depth += 1;
+            }
+            if trimmed.starts_with('}') {
+                depth -= 1;
+            }
+        }
+        None
+    }
+
+    /// Get the effective indent size (auto-detected or fixed)
+    fn effective_indent_size(&self, content: &str) -> usize {
+        match self.indent_size {
+            IndentSize::Fixed(size) => size,
+            IndentSize::Auto => Self::detect_indent_size(content).unwrap_or(2),
+        }
+    }
+
     fn check_content_impl(&self, content: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let mut expected_depth: i32 = 0;
-        let mut detected_indent_size: Option<usize> = None;
+        let indent_size = self.effective_indent_size(content);
         let mut in_raw_block = false;
         let mut raw_block_brace_depth = 0;
         let mut in_multiline_string = false;
@@ -87,12 +146,10 @@ impl Indent {
                         self.name(),
                         self.category(),
                         line,
-                        trimmed,
                         line_number,
                         current_line_offset,
                         expected_depth,
-                        &mut detected_indent_size,
-                        self.indent_size,
+                        indent_size,
                     );
                     continue;
                 }
@@ -105,12 +162,10 @@ impl Indent {
                     self.name(),
                     self.category(),
                     line,
-                    trimmed,
                     line_number,
                     current_line_offset,
                     expected_depth,
-                    &mut detected_indent_size,
-                    self.indent_size,
+                    indent_size,
                 );
                 continue;
             }
@@ -125,12 +180,10 @@ impl Indent {
                     self.name(),
                     self.category(),
                     line,
-                    trimmed,
                     line_number,
                     current_line_offset,
                     expected_depth,
-                    &mut detected_indent_size,
-                    self.indent_size,
+                    indent_size,
                 );
                 expected_depth += 1;
                 continue;
@@ -161,12 +214,10 @@ impl Indent {
                 self.name(),
                 self.category(),
                 line,
-                trimmed,
                 line_number,
                 current_line_offset,
                 expected_depth,
-                &mut detected_indent_size,
-                self.indent_size,
+                indent_size,
             );
 
             // Adjust expected depth after checking if line ends with {
@@ -244,24 +295,20 @@ fn track_multiline_string(
 }
 
 /// Check indentation for a single line
-#[allow(clippy::too_many_arguments)]
 fn check_line_indentation(
     errors: &mut Vec<LintError>,
     rule_name: &'static str,
     category: &'static str,
     line: &str,
-    _trimmed: &str,
     line_number: usize,
     line_start_offset: usize,
     expected_depth: i32,
-    _detected_indent_size: &mut Option<usize>,
-    default_indent_size: usize,
+    indent_size: usize,
 ) {
     // Calculate current indentation
     let leading_spaces = line.len() - line.trim_start().len();
 
-    // Always use default indent size for consistent formatting
-    let expected_spaces = (expected_depth.max(0) as usize) * default_indent_size;
+    let expected_spaces = (expected_depth.max(0) as usize) * indent_size;
 
     // Detect if line uses tabs
     if line.starts_with('\t') {
@@ -423,5 +470,62 @@ local x = 1
         let content_errors = check_content(content);
         let file_errors = check_content_with_file(content);
         assert_eq!(content_errors.len(), file_errors.len());
+    }
+
+    #[test]
+    fn test_auto_detect_indent_size_4() {
+        // File uses 4-space indentation
+        let content = r#"http {
+    server {
+        listen 80;
+    }
+}
+"#;
+        let rule = Indent::auto();
+        let errors = rule.check_content(content);
+        // With auto-detection, this should have no errors (detected as 4-space indent)
+        assert!(errors.is_empty(), "Expected no errors with auto-detection, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_auto_detect_indent_size_2() {
+        // File uses 2-space indentation
+        let content = r#"http {
+  server {
+    listen 80;
+  }
+}
+"#;
+        let rule = Indent::auto();
+        let errors = rule.check_content(content);
+        assert!(errors.is_empty(), "Expected no errors with auto-detection, got: {:?}", errors);
+    }
+
+    #[test]
+    fn test_detect_indent_size() {
+        // Test the detection function directly
+        let content_4 = "http {\n    server {\n    }\n}\n";
+        assert_eq!(Indent::detect_indent_size(content_4), Some(4));
+
+        let content_2 = "http {\n  server {\n  }\n}\n";
+        assert_eq!(Indent::detect_indent_size(content_2), Some(2));
+
+        let content_tab = "http {\n\tserver {\n\t}\n}\n";
+        // Tab indentation returns None (not space-based)
+        assert_eq!(Indent::detect_indent_size(content_tab), None);
+    }
+
+    #[test]
+    fn test_fixed_indent_size() {
+        // Using fixed 4-space setting on 2-space indented file should produce errors
+        let content = r#"http {
+  server {
+    listen 80;
+  }
+}
+"#;
+        let rule = Indent::with_size(4);
+        let errors = rule.check_content(content);
+        assert!(!errors.is_empty(), "Expected errors with mismatched indent size");
     }
 }

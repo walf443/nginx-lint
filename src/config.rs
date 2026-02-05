@@ -1,7 +1,84 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::fs;
 use std::path::Path;
+
+/// Indent size configuration: either a fixed number or "auto" for auto-detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndentSize {
+    /// Auto-detect indent size from the first indented line
+    Auto,
+    /// Fixed indent size (number of spaces)
+    Fixed(usize),
+}
+
+impl Default for IndentSize {
+    fn default() -> Self {
+        IndentSize::Fixed(2)
+    }
+}
+
+impl fmt::Display for IndentSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IndentSize::Auto => write!(f, "auto"),
+            IndentSize::Fixed(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for IndentSize {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct IndentSizeVisitor;
+
+        impl<'de> Visitor<'de> for IndentSizeVisitor {
+            type Value = IndentSize;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a positive integer or \"auto\"")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                Ok(IndentSize::Fixed(value as usize))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                if value > 0 {
+                    Ok(IndentSize::Fixed(value as usize))
+                } else {
+                    Err(de::Error::custom("indent_size must be positive"))
+                }
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                if value.eq_ignore_ascii_case("auto") {
+                    Ok(IndentSize::Auto)
+                } else {
+                    Err(de::Error::custom(
+                        "expected \"auto\" or a positive integer for indent_size",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(IndentSizeVisitor)
+    }
+}
 
 /// Default configuration template for nginx-lint
 pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# nginx-lint configuration file
@@ -81,7 +158,8 @@ required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 
 [rules.indent]
 enabled = true
-# Indentation size (default: 2)
+# Indentation size: number or "auto" for auto-detection (default: 2)
+# indent_size = "auto"
 indent_size = 2
 
 [rules.trailing-whitespace]
@@ -296,8 +374,8 @@ impl<'de> Deserialize<'de> for ColorMode {
 pub struct RuleConfig {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// For indent rule
-    pub indent_size: Option<usize>,
+    /// For indent rule: number or "auto" for auto-detection
+    pub indent_size: Option<IndentSize>,
     /// For deprecated-ssl-protocol rule: allowed protocols (default: ["TLSv1.2", "TLSv1.3"])
     pub allowed_protocols: Option<Vec<String>>,
     /// For weak-ssl-ciphers rule: weak cipher patterns to detect
@@ -793,7 +871,7 @@ enabled = false
         assert!(config.is_rule_enabled("unknown-rule"));
 
         let indent_config = config.get_rule_config("indent").unwrap();
-        assert_eq!(indent_config.indent_size, Some(2));
+        assert_eq!(indent_config.indent_size, Some(IndentSize::Fixed(2)));
     }
 
     #[test]
@@ -804,6 +882,21 @@ enabled = false
 
         let config = LintConfig::from_file(file.path()).unwrap();
         assert!(config.is_rule_enabled("any-rule"));
+    }
+
+    #[test]
+    fn test_indent_size_auto() {
+        let toml_content = r#"
+[rules.indent]
+enabled = true
+indent_size = "auto"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        let indent_config = config.get_rule_config("indent").unwrap();
+        assert_eq!(indent_config.indent_size, Some(IndentSize::Auto));
     }
 
     #[test]

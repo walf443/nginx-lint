@@ -255,13 +255,14 @@ impl Linter {
 
         // Style rules
         if is_enabled("indent") {
-            let mut rule = Indent::default();
-            if let Some(indent_size) = config
+            let rule = if let Some(indent_size) = config
                 .and_then(|c| c.get_rule_config("indent"))
                 .and_then(|cfg| cfg.indent_size)
             {
-                rule.indent_size = indent_size;
-            }
+                Indent { indent_size }
+            } else {
+                Indent::default()
+            };
             linter.add_rule(Box::new(rule));
         }
         // Best practices
