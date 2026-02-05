@@ -6,3 +6,4 @@
 /plugins/builtin/*/*/Cargo.lock
 /test_plugins
 /test_builtin_plugins
+.claude/settings.local.json
