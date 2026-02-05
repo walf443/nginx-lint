@@ -67,33 +67,20 @@ impl ProxyKeepalivePlugin {
                         if !Self::has_connection_header(block) {
                             let version = version_directive.first_arg().unwrap_or("1.1");
 
-                            // Calculate fix: add proxy_set_header Connection ""; after proxy_http_version
-                            let indent = " ".repeat(version_directive.span.start.column.saturating_sub(1));
-                            let fix_text = format!("\n{}proxy_set_header Connection \"\";", indent);
-
-                            // Insert after the proxy_http_version line (at end of directive)
-                            let insert_offset = version_directive.span.end.offset;
-
                             let err = PluginInfo::new(
                                 "proxy-keepalive",
                                 "best-practices",
                                 "",
                             ).error_builder();
 
-                            let mut error = err.warning_at(
+                            let error = err.warning_at(
                                 &format!(
                                     "proxy_http_version {} is set but proxy_set_header Connection is not configured. \
                                      For keepalive connections with upstream, add 'proxy_set_header Connection \"\";'",
                                     version
                                 ),
                                 version_directive,
-                            );
-
-                            error = error.with_fix(Fix::replace_range(
-                                insert_offset,
-                                insert_offset,
-                                &fix_text,
-                            ));
+                            ).with_fix(version_directive.insert_after("proxy_set_header Connection \"\";"));
 
                             errors.push(error);
                         }
@@ -142,30 +129,20 @@ impl ProxyKeepalivePlugin {
             if !has_connection {
                 let version = version_directive.first_arg().unwrap_or("1.1");
 
-                let indent = " ".repeat(version_directive.span.start.column.saturating_sub(1));
-                let fix_text = format!("\n{}proxy_set_header Connection \"\";", indent);
-                let insert_offset = version_directive.span.end.offset;
-
                 let err = PluginInfo::new(
                     "proxy-keepalive",
                     "best-practices",
                     "",
                 ).error_builder();
 
-                let mut error = err.warning_at(
+                let error = err.warning_at(
                     &format!(
                         "proxy_http_version {} is set but proxy_set_header Connection is not configured. \
                          For keepalive connections with upstream, add 'proxy_set_header Connection \"\";'",
                         version
                     ),
                     version_directive,
-                );
-
-                error = error.with_fix(Fix::replace_range(
-                    insert_offset,
-                    insert_offset,
-                    &fix_text,
-                ));
+                ).with_fix(version_directive.insert_after("proxy_set_header Connection \"\";"));
 
                 errors.push(error);
             }

@@ -575,6 +575,19 @@ pub trait DirectiveExt {
 
     /// Create a fix that deletes this entire directive line
     fn delete_line(&self) -> Fix;
+
+    /// Create a fix that inserts a new directive after this one
+    ///
+    /// The new directive will be inserted on a new line with the same indentation
+    /// as this directive.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // After "proxy_http_version 1.1;", insert "proxy_set_header Connection "";"
+    /// let fix = directive.insert_after("proxy_set_header Connection \"\";");
+    /// ```
+    fn insert_after(&self, new_text: &str) -> Fix;
 }
 
 impl DirectiveExt for Directive {
@@ -619,6 +632,14 @@ impl DirectiveExt for Directive {
 
     fn delete_line(&self) -> Fix {
         Fix::delete(self.span.start.line)
+    }
+
+    fn insert_after(&self, new_text: &str) -> Fix {
+        // Calculate the indentation from the directive's column position
+        let indent = " ".repeat(self.span.start.column.saturating_sub(1));
+        let fix_text = format!("\n{}{}", indent, new_text);
+        let insert_offset = self.span.end.offset;
+        Fix::replace_range(insert_offset, insert_offset, &fix_text)
     }
 }
 
