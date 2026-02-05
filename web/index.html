@@ -73,9 +73,56 @@
             resize: none;
             line-height: 1.5;
         }
-        textarea.editor {
+        .editor-wrapper {
             flex: 1;
             min-height: 200px;
+            display: flex;
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .editor-wrapper:focus-within {
+            border-color: #4fc3f7;
+        }
+        .line-numbers {
+            background: #252525;
+            color: #6e6e6e;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            padding: 12px 0;
+            text-align: right;
+            user-select: none;
+            overflow: hidden;
+            min-width: 40px;
+        }
+        .line-numbers div {
+            padding: 0 8px 0 8px;
+        }
+        .line-numbers div.error-line {
+            background: rgba(244, 67, 54, 0.3);
+            color: #f44336;
+        }
+        .line-numbers div.warning-line {
+            background: rgba(255, 193, 7, 0.3);
+            color: #ffc107;
+        }
+        .line-numbers div.info-line {
+            background: rgba(33, 150, 243, 0.3);
+            color: #2196f3;
+        }
+        textarea.editor {
+            flex: 1;
+            min-height: unset;
+            border: none;
+            border-radius: 0;
+            padding: 12px;
+            padding-left: 8px;
+        }
+        textarea.editor:focus {
+            outline: none;
+            border-color: transparent;
         }
         textarea.config {
             flex: 1;
@@ -305,7 +352,9 @@
                     <span class="panel-title">nginx.conf</span>
                     <button onclick="lintConfig()">Lint</button>
                 </div>
-                <textarea id="editor" class="editor" spellcheck="false"># Demo: Try clicking rule names for details, or "Fix All" to auto-fix issues
+                <div class="editor-wrapper">
+                    <div id="line-numbers" class="line-numbers"></div>
+                    <textarea id="editor" class="editor" spellcheck="false"># Demo: Try clicking rule names for details, or "Fix All" to auto-fix issues
 http {
   server_tokens on;
   autoindex on;
@@ -335,6 +384,7 @@ http {
     }
   }
 }</textarea>
+                </div>
             </div>
 
             <div class="panel">
@@ -375,6 +425,38 @@ http {
         let wasmReady = false;
         let currentErrors = [];
         let ruleDescriptions = {};
+        let errorLines = new Map(); // line -> severity
+
+        // Update line numbers display
+        function updateLineNumbers() {
+            const editor = document.getElementById('editor');
+            const lineNumbersDiv = document.getElementById('line-numbers');
+            const lines = editor.value.split('\n');
+            const lineCount = lines.length;
+
+            let html = '';
+            for (let i = 1; i <= lineCount; i++) {
+                const severity = errorLines.get(i);
+                const className = severity ? severity + '-line' : '';
+                html += `<div class="${className}">${i}</div>`;
+            }
+            lineNumbersDiv.innerHTML = html;
+        }
+
+        // Sync scroll between editor and line numbers
+        function syncScroll() {
+            const editor = document.getElementById('editor');
+            const lineNumbersDiv = document.getElementById('line-numbers');
+            lineNumbersDiv.scrollTop = editor.scrollTop;
+        }
+
+        // Initialize editor event listeners
+        function initEditor() {
+            const editor = document.getElementById('editor');
+            editor.addEventListener('scroll', syncScroll);
+            editor.addEventListener('input', updateLineNumbers);
+            updateLineNumbers();
+        }
 
         async function initWasm() {
             try {
@@ -390,6 +472,9 @@ http {
 
                 // Set default configuration
                 document.getElementById('config-editor').value = get_default_config();
+
+                // Initialize editor with line numbers
+                initEditor();
 
                 document.getElementById('results').innerHTML = '<div class="no-issues">Ready! Click "Lint" or start typing.</div>';
 
@@ -426,6 +511,21 @@ http {
                 const result = lint_with_config(content, configToml);
                 const errors = JSON.parse(result.errors);
                 currentErrors = errors;
+
+                // Update error lines for line number highlighting
+                errorLines.clear();
+                for (const err of errors) {
+                    if (err.line) {
+                        // Keep the highest severity for each line (error > warning > info)
+                        const current = errorLines.get(err.line);
+                        if (!current ||
+                            (err.severity === 'error') ||
+                            (err.severity === 'warning' && current !== 'error')) {
+                            errorLines.set(err.line, err.severity);
+                        }
+                    }
+                }
+                updateLineNumbers();
 
                 const fixableCount = errors.filter(e => e.fix).length;
                 fixAllBtn.style.display = fixableCount > 0 ? 'block' : 'none';
@@ -472,6 +572,8 @@ http {
                 resultsDiv.innerHTML = '<div class="error-item error"><div class="error-message">' + prefix + ': ' + errorMsg + '</div></div>';
                 summaryDiv.style.display = 'none';
                 fixAllBtn.style.display = 'none';
+                errorLines.clear();
+                updateLineNumbers();
             }
         };
 
