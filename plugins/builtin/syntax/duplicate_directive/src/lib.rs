@@ -153,7 +153,7 @@ impl Plugin for DuplicateDirectivePlugin {
         let err = self.info().error_builder();
 
         // Determine the parent context from include_context
-        let parent_context = config.include_context.last().map(|s| s.as_str());
+        let parent_context = config.immediate_parent_context();
 
         self.check_block(&config.items, parent_context, &err, &mut errors);
 

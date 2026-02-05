@@ -44,9 +44,6 @@ impl Plugin for ServerTokensEnabledPlugin {
         let mut has_server_tokens_on = false;
         let mut http_block_line: Option<usize> = None;
 
-        // Check if this config is included from within http context
-        let in_http_include_context = config.is_included_from_http();
-
         for ctx in config.all_directives_with_context() {
             // Track if we have an http block and remember its line
             if ctx.directive.is("http") {
@@ -54,8 +51,8 @@ impl Plugin for ServerTokensEnabledPlugin {
             }
 
             // Only check server_tokens in http context (http, server, location)
-            let in_http_context = ctx.is_inside("http") || in_http_include_context;
-            if !in_http_context {
+            // Note: ctx.is_inside() already includes include_context from Config
+            if !ctx.is_inside("http") {
                 continue;
             }
 

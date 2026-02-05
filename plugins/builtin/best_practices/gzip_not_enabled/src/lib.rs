@@ -41,9 +41,6 @@ impl Plugin for GzipNotEnabledPlugin {
         let mut gzip_on = false;
         let mut has_http_block = false;
 
-        // Check if this config is included from within http context
-        let in_http_include_context = config.is_included_from_http();
-
         for ctx in config.all_directives_with_context() {
             // Track if we have an http block in THIS file
             if ctx.directive.is("http") {
@@ -51,8 +48,8 @@ impl Plugin for GzipNotEnabledPlugin {
             }
 
             // Only check gzip in http context (http, server, location)
-            let in_http_context = ctx.is_inside("http") || in_http_include_context;
-            if !in_http_context {
+            // Note: ctx.is_inside() already includes include_context from Config
+            if !ctx.is_inside("http") {
                 continue;
             }
 

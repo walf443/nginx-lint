@@ -356,6 +356,19 @@ pub trait ConfigExt {
     ///
     /// Shorthand for `config.is_included_from("stream")`
     fn is_included_from_stream(&self) -> bool;
+
+    /// Get the immediate parent context (last element in include_context)
+    ///
+    /// This is useful for rules that need to know the direct parent context
+    /// of the included file, such as duplicate-directive checking.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // If include_context is ["http", "server"], returns Some("server")
+    /// let parent = config.immediate_parent_context();
+    /// ```
+    fn immediate_parent_context(&self) -> Option<&str>;
 }
 
 impl ConfigExt for Config {
@@ -395,6 +408,10 @@ impl ConfigExt for Config {
 
     fn is_included_from_stream(&self) -> bool {
         self.is_included_from("stream")
+    }
+
+    fn immediate_parent_context(&self) -> Option<&str> {
+        self.include_context.last().map(|s| s.as_str())
     }
 }
 
