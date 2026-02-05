@@ -10,7 +10,7 @@
 /// # Examples
 ///
 /// ```
-/// use nginx_lint::plugin_sdk::helpers::is_domain_name;
+/// use nginx_lint_plugin::helpers::is_domain_name;
 ///
 /// // Domain names
 /// assert!(is_domain_name("example.com"));
@@ -64,7 +64,7 @@ pub fn is_domain_name(host: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use nginx_lint::plugin_sdk::helpers::is_ipv4_address;
+/// use nginx_lint_plugin::helpers::is_ipv4_address;
 ///
 /// assert!(is_ipv4_address("127.0.0.1"));
 /// assert!(is_ipv4_address("192.168.1.1"));
@@ -91,7 +91,7 @@ pub fn is_ipv4_address(s: &str) -> bool {
 /// # Examples
 ///
 /// ```
-/// use nginx_lint::plugin_sdk::helpers::extract_host_from_url;
+/// use nginx_lint_plugin::helpers::extract_host_from_url;
 ///
 /// assert_eq!(extract_host_from_url("http://example.com"), Some("example.com"));
 /// assert_eq!(extract_host_from_url("http://example.com:8080"), Some("example.com:8080"));
@@ -133,7 +133,7 @@ pub fn extract_host_from_url(url: &str) -> Option<&str> {
 /// # Examples
 ///
 /// ```
-/// use nginx_lint::plugin_sdk::helpers::extract_domain;
+/// use nginx_lint_plugin::helpers::extract_domain;
 ///
 /// assert_eq!(extract_domain("example.com"), "example.com");
 /// assert_eq!(extract_domain("example.com:8080"), "example.com");
