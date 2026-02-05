@@ -437,7 +437,7 @@ const CONTEXT_PREFIX: &str = "nginx-lint:context";
 ///
 /// # Example
 /// ```
-/// use nginx_lint::ignore::parse_context_comment;
+/// use nginx_lint_common::ignore::parse_context_comment;
 ///
 /// let content = "# nginx-lint:context http,server\nserver { listen 80; }";
 /// let context = parse_context_comment(content);
