@@ -211,11 +211,14 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
-        use crate::rules::{
-            Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
-        };
+        use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
         #[cfg(not(feature = "builtin-plugins"))]
-        use crate::rules::{DeprecatedSslProtocol, MissingErrorLog, WeakSslCiphers};
+        use crate::rules::{
+            DeprecatedSslProtocol, InvalidDirectiveContext, MissingErrorLog, WeakSslCiphers,
+        };
+        // InvalidDirectiveContext native implementation is used when additional_contexts is configured
+        #[cfg(feature = "builtin-plugins")]
+        use crate::rules::InvalidDirectiveContext;
 
         let mut linter = Self::new();
 
@@ -235,13 +238,30 @@ impl Linter {
         if is_enabled("missing-semicolon") {
             linter.add_rule(Box::new(MissingSemicolon));
         }
+        // invalid-directive-context: use native implementation when additional_contexts is configured
+        // or when builtin-plugins is not enabled; otherwise use WASM plugin
+        #[cfg(not(feature = "builtin-plugins"))]
         if is_enabled("invalid-directive-context") {
-            let rule = if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned() {
+            let rule = if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned()
+            {
                 InvalidDirectiveContext::with_additional_contexts(additional)
             } else {
                 InvalidDirectiveContext::new()
             };
             linter.add_rule(Box::new(rule));
+        }
+        // Track whether native invalid-directive-context was added (for builtin-plugins feature)
+        #[cfg(feature = "builtin-plugins")]
+        let use_native_invalid_directive_context = config
+            .and_then(|c| c.additional_contexts())
+            .is_some_and(|additional| !additional.is_empty());
+        #[cfg(feature = "builtin-plugins")]
+        if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
+            // Use native implementation when additional_contexts is configured
+            let additional = config.and_then(|c| c.additional_contexts()).cloned().unwrap();
+            linter.add_rule(Box::new(InvalidDirectiveContext::with_additional_contexts(
+                additional,
+            )));
         }
 
         // Security rules (native implementation, used when builtin-plugins is not enabled)
@@ -295,6 +315,12 @@ impl Linter {
 
             if let Ok(plugins) = load_builtin_plugins() {
                 for plugin in plugins {
+                    // Skip invalid-directive-context if native implementation is used
+                    if plugin.name() == "invalid-directive-context"
+                        && use_native_invalid_directive_context
+                    {
+                        continue;
+                    }
                     if is_enabled(plugin.name()) {
                         linter.add_rule(Box::new(plugin));
                     }

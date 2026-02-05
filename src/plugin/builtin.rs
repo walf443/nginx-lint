@@ -69,6 +69,9 @@ mod embedded {
     /// weak-ssl-ciphers plugin
     pub const WEAK_SSL_CIPHERS: &[u8] =
         include_bytes!("../../target/builtin-plugins/weak_ssl_ciphers.wasm");
+    /// invalid-directive-context plugin
+    pub const INVALID_DIRECTIVE_CONTEXT: &[u8] =
+        include_bytes!("../../target/builtin-plugins/invalid_directive_context.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -93,6 +96,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "missing-error-log",
     "deprecated-ssl-protocol",
     "weak-ssl-ciphers",
+    "invalid-directive-context",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -334,6 +338,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:weak-ssl-ciphers"),
         embedded::WEAK_SSL_CIPHERS,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load invalid-directive-context
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:invalid-directive-context"),
+        embedded::INVALID_DIRECTIVE_CONTEXT,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
