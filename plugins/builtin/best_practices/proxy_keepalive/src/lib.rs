@@ -12,7 +12,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if proxy_http_version 1.1+ has corresponding Connection header setting
 #[derive(Default)]
@@ -186,13 +186,13 @@ impl Plugin for ProxyKeepalivePlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(ProxyKeepalivePlugin);
+nginx_lint_plugin::export_plugin!(ProxyKeepalivePlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
-    use nginx_lint::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
+    use nginx_lint_plugin::parse_string;
 
     #[test]
     fn test_missing_connection_header() {

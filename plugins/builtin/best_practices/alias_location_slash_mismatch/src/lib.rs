@@ -11,7 +11,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for alias directive without trailing slash
 #[derive(Default)]
@@ -191,13 +191,13 @@ impl Plugin for AliasLocationSlashMismatchPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(AliasLocationSlashMismatchPlugin);
+nginx_lint_plugin::export_plugin!(AliasLocationSlashMismatchPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
-    use nginx_lint::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
+    use nginx_lint_plugin::parse_string;
 
     #[test]
     fn test_alias_without_trailing_slash_warns() {

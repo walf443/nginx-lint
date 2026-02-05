@@ -9,7 +9,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for directives placed in invalid contexts
 #[derive(Default)]
@@ -137,12 +137,12 @@ fn check_context(items: &[ConfigItem], parent_stack: &[&str], errors: &mut Vec<L
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(InvalidDirectiveContextPlugin);
+nginx_lint_plugin::export_plugin!(InvalidDirectiveContextPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_valid_root_level_directives() {
@@ -471,7 +471,7 @@ mail {
     #[test]
     fn test_include_context_location_in_server() {
         // File included from server context, location is valid
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -492,7 +492,7 @@ location / {
     #[test]
     fn test_include_context_server_in_server_error() {
         // File included from server context, another server is invalid
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -514,7 +514,7 @@ server {
     #[test]
     fn test_include_context_server_in_http() {
         // File included from http context, server is valid
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"

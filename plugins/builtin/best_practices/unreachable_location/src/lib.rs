@@ -14,7 +14,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 use std::collections::HashMap;
 
 /// Check for unreachable location blocks
@@ -307,12 +307,12 @@ impl Plugin for UnreachableLocationPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(UnreachableLocationPlugin);
+nginx_lint_plugin::export_plugin!(UnreachableLocationPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_duplicate_exact_location() {
@@ -454,7 +454,7 @@ http {
     #[test]
     fn test_include_context_from_server_duplicate_location() {
         // Test that duplicate locations are detected when file is included from server
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -481,7 +481,7 @@ location /api {
     #[test]
     fn test_include_context_from_server_regex_order() {
         // Test that regex order issues are detected when file is included from server
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -508,7 +508,7 @@ location ~ /api/v1 {
     #[test]
     fn test_include_context_from_http_no_error() {
         // Test that locations at http level (not server) don't trigger
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -535,7 +535,7 @@ location /api {
     #[test]
     fn test_include_context_different_locations_ok() {
         // Test that different locations don't trigger when included from server
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"

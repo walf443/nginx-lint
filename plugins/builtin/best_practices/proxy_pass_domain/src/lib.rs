@@ -11,7 +11,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if proxy_pass uses a domain name directly
 #[derive(Default)]
@@ -72,12 +72,12 @@ impl Plugin for ProxyPassDomainPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(ProxyPassDomainPlugin);
+nginx_lint_plugin::export_plugin!(ProxyPassDomainPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_detects_domain_in_proxy_pass() {

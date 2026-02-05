@@ -9,7 +9,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if error_log is configured
 #[derive(Default)]
@@ -50,12 +50,12 @@ impl Plugin for MissingErrorLogPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(MissingErrorLogPlugin);
+nginx_lint_plugin::export_plugin!(MissingErrorLogPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_no_error_log() {

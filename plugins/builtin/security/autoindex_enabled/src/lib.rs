@@ -10,7 +10,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if autoindex is enabled
 #[derive(Default)]
@@ -61,12 +61,12 @@ impl Plugin for AutoindexEnabledPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(AutoindexEnabledPlugin);
+nginx_lint_plugin::export_plugin!(AutoindexEnabledPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::{PluginTestRunner, TestCase};
+    use nginx_lint_plugin::testing::{PluginTestRunner, TestCase};
 
     #[test]
     fn test_detects_autoindex_on() {
@@ -201,7 +201,7 @@ stream {
     #[test]
     fn test_include_context_from_http() {
         // File included from http context should be checked
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -223,7 +223,7 @@ autoindex on;
     #[test]
     fn test_include_context_from_server() {
         // File included from server context should be checked
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -246,7 +246,7 @@ location / {
     #[test]
     fn test_include_context_not_from_http() {
         // File included from non-http context should not be checked
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"

@@ -12,7 +12,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 use std::collections::HashMap;
 
 /// Information about a proxy_set_header directive
@@ -196,13 +196,13 @@ impl Plugin for ProxySetHeaderInheritancePlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(ProxySetHeaderInheritancePlugin);
+nginx_lint_plugin::export_plugin!(ProxySetHeaderInheritancePlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
-    use nginx_lint::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
+    use nginx_lint_plugin::parse_string;
 
     #[test]
     fn test_missing_parent_headers() {

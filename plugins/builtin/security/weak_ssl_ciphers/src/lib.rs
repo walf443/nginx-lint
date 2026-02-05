@@ -8,7 +8,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Default weak cipher patterns
 const DEFAULT_WEAK_CIPHERS: &[&str] = &[
@@ -181,12 +181,12 @@ fn generate_fixed_cipher_string(original: &str, missing: &[String]) -> String {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(WeakSslCiphersPlugin);
+nginx_lint_plugin::export_plugin!(WeakSslCiphersPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_weak_cipher_rc4() {

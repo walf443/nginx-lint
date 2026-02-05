@@ -10,7 +10,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for root directive inside location blocks
 #[derive(Default)]
@@ -75,13 +75,13 @@ impl Plugin for RootInLocationPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(RootInLocationPlugin);
+nginx_lint_plugin::export_plugin!(RootInLocationPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
-    use nginx_lint::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
+    use nginx_lint_plugin::parse_string;
 
     #[test]
     fn test_root_in_location_warns() {

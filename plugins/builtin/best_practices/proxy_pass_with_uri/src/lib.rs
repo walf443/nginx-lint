@@ -11,7 +11,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for proxy_pass with URI path
 #[derive(Default)]
@@ -149,13 +149,13 @@ impl Plugin for ProxyPassWithUriPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(ProxyPassWithUriPlugin);
+nginx_lint_plugin::export_plugin!(ProxyPassWithUriPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
-    use nginx_lint::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
+    use nginx_lint_plugin::parse_string;
 
     #[test]
     fn test_proxy_pass_with_trailing_slash_warns() {

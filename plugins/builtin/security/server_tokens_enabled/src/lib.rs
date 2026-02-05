@@ -11,7 +11,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if server_tokens is enabled
 #[derive(Default)]
@@ -92,12 +92,12 @@ impl Plugin for ServerTokensEnabledPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(ServerTokensEnabledPlugin);
+nginx_lint_plugin::export_plugin!(ServerTokensEnabledPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::{PluginTestRunner, TestCase};
+    use nginx_lint_plugin::testing::{PluginTestRunner, TestCase};
 
     #[test]
     fn test_detects_server_tokens_on() {
@@ -306,7 +306,7 @@ stream {
     fn test_include_context_from_http() {
         // File included from http context should NOT warn about default
         // because server_tokens should be set in the parent config's http block
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -330,7 +330,7 @@ server {
     #[test]
     fn test_include_context_from_http_with_explicit_on() {
         // Explicit 'on' should still warn even in included files
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -356,7 +356,7 @@ server {
     #[test]
     fn test_include_context_from_http_with_server_tokens_off() {
         // File included from http context with server_tokens off should be OK
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -381,7 +381,7 @@ server {
     fn test_include_context_from_server() {
         // File included from server context (within http) should NOT warn about default
         // because server_tokens is typically set at the http level in parent config
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -405,7 +405,7 @@ location / {
     #[test]
     fn test_include_context_from_server_with_explicit_on() {
         // Explicit 'on' should still warn even in nested context
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -428,7 +428,7 @@ server_tokens on;
     #[test]
     fn test_include_context_not_from_http() {
         // File included from non-http context should not be checked
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"

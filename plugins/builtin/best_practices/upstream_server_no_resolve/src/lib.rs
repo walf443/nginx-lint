@@ -15,7 +15,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 use std::collections::HashSet;
 
 /// Check if upstream server uses a domain without 'resolve' parameter,
@@ -150,12 +150,12 @@ impl Plugin for UpstreamServerNoResolvePlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(UpstreamServerNoResolvePlugin);
+nginx_lint_plugin::export_plugin!(UpstreamServerNoResolvePlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_upstream_server_without_resolve() {
@@ -200,7 +200,7 @@ http {
 
     #[test]
     fn test_upstream_server_with_resolve_but_no_zone() {
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let config = parse_string(
             r#"
@@ -303,7 +303,7 @@ http {
 
     #[test]
     fn test_upstream_multiple_servers_mixed() {
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let config = parse_string(
             r#"
@@ -329,7 +329,7 @@ http {
 
     #[test]
     fn test_upstream_multiple_servers_no_zone() {
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let config = parse_string(
             r#"
@@ -354,7 +354,7 @@ http {
 
     #[test]
     fn test_multiple_upstreams_with_different_zone_configs() {
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let config = parse_string(
             r#"

@@ -11,7 +11,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check if gzip compression is enabled
 #[derive(Default)]
@@ -71,12 +71,12 @@ impl Plugin for GzipNotEnabledPlugin {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(GzipNotEnabledPlugin);
+nginx_lint_plugin::export_plugin!(GzipNotEnabledPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_no_gzip_directive() {
@@ -227,7 +227,7 @@ stream {
     fn test_include_context_from_http() {
         // File included from http context should NOT warn
         // because gzip should be set in the parent config's http block
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -251,7 +251,7 @@ server {
     #[test]
     fn test_include_context_from_http_with_gzip() {
         // File included from http context with gzip on should be OK
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"
@@ -275,7 +275,7 @@ server {
     #[test]
     fn test_include_context_not_from_http() {
         // File included from non-http context should not be checked
-        use nginx_lint::parse_string;
+        use nginx_lint_plugin::parse_string;
 
         let mut config = parse_string(
             r#"

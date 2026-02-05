@@ -7,7 +7,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for spaces before semicolons
 #[derive(Default)]
@@ -71,12 +71,12 @@ fn create_fix(directive: &Directive) -> Fix {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(SpaceBeforeSemicolonPlugin);
+nginx_lint_plugin::export_plugin!(SpaceBeforeSemicolonPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::{PluginTestRunner, TestCase};
+    use nginx_lint_plugin::testing::{PluginTestRunner, TestCase};
 
     #[test]
     fn test_no_space_before_semicolon() {

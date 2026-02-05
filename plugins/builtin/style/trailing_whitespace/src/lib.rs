@@ -7,7 +7,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 /// Check for trailing whitespace
 #[derive(Default)]
@@ -125,12 +125,12 @@ fn create_fix_for_comment(comment: &Comment) -> Fix {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(TrailingWhitespacePlugin);
+nginx_lint_plugin::export_plugin!(TrailingWhitespacePlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_no_trailing_whitespace() {

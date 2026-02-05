@@ -8,7 +8,7 @@
 //! cargo build --target wasm32-unknown-unknown --release
 //! ```
 
-use nginx_lint::plugin_sdk::prelude::*;
+use nginx_lint_plugin::prelude::*;
 
 const DEPRECATED_PROTOCOLS: &[&str] = &["SSLv2", "SSLv3", "TLSv1", "TLSv1.1"];
 const ALLOWED_PROTOCOLS: &[&str] = &["TLSv1.2", "TLSv1.3"];
@@ -124,12 +124,12 @@ fn generate_fixed_protocols(current: &[&str]) -> String {
 }
 
 // Export the plugin
-nginx_lint::export_plugin!(DeprecatedSslProtocolPlugin);
+nginx_lint_plugin::export_plugin!(DeprecatedSslProtocolPlugin);
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint::plugin_sdk::testing::PluginTestRunner;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_deprecated_sslv3() {
