@@ -1,8 +1,11 @@
-pub mod config;
+// Re-export from nginx-lint-common
+pub use nginx_lint_common::config;
+pub use nginx_lint_common::ignore;
+pub use nginx_lint_common::parser;
+
+// Local modules with CLI-specific functionality
 pub mod docs;
-pub mod ignore;
 pub mod linter;
-pub mod parser;
 pub mod rules;
 
 // CLI-only modules (require filesystem access)
@@ -19,16 +22,24 @@ pub mod wasm;
 #[cfg(feature = "plugins")]
 pub mod plugin;
 
-// Plugin SDK (for building custom WASM lint rules)
+// Plugin SDK - re-export from nginx-lint-plugin crate
 #[cfg(feature = "plugin-sdk")]
-pub mod plugin_sdk;
+pub use nginx_lint_plugin as plugin_sdk;
+#[cfg(feature = "plugin-sdk")]
+pub use nginx_lint_plugin::export_plugin;
 
-pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
-pub use ignore::{filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning};
-pub use linter::{Fix, LintError, Linter, Severity};
+// Re-export commonly used types from nginx-lint-common
+pub use nginx_lint_common::{
+    Color, ColorConfig, ColorMode, LintConfig, ValidationError,
+    filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning,
+    parse_config, parse_string,
+};
+
+// Re-export from local modules
+pub use linter::{Fix, LintError, LintRule, Linter, Severity};
 #[cfg(feature = "cli")]
 pub use linter::RuleProfile;
-pub use parser::{parse_config, parse_string};
+pub use docs::{RuleDoc, RuleDocOwned};
 
 #[cfg(feature = "cli")]
 pub use include::{collect_included_files, collect_included_files_with_context, IncludedFile};
@@ -51,7 +62,8 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 #[cfg(feature = "cli")]
 pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-    use ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
+    use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+    use crate::ignore::known_rule_names;
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,

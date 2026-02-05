@@ -1,3 +1,13 @@
+[workspace]
+members = ["crates/*"]
+exclude = [
+    "plugins/builtin/security/*",
+    "plugins/builtin/style/*",
+    "plugins/builtin/syntax/*",
+    "plugins/builtin/best_practices/*",
+]
+resolver = "2"
+
 [package]
 name = "nginx-lint"
 version = "0.1.0"
@@ -15,21 +25,30 @@ web-server = ["tiny_http"]
 web-server-embed-wasm = ["web-server"]
 # WASM plugin support for custom lint rules
 plugins = ["wasmi"]
-# SDK for building custom WASM lint rules
-plugin-sdk = []
+# SDK for building custom WASM lint rules - use nginx-lint-plugin crate
+plugin-sdk = ["dep:nginx-lint-plugin"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
 builtin-plugins = ["plugins"]
 
 [dependencies]
+# Internal crates
+nginx-lint-common = { path = "crates/nginx-lint-common" }
+nginx-lint-plugin = { path = "crates/nginx-lint-plugin", optional = true }
+
+# CLI dependencies
 clap = { version = "4", features = ["derive"], optional = true }
 colored = { version = "2", optional = true }
 glob = { version = "0.3", optional = true }
 rayon = { version = "1", optional = true }
+
+# Core dependencies
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
-tiny_http = { version = "0.12", optional = true }
 toml = "0.8"
+
+# Web server dependencies
+tiny_http = { version = "0.12", optional = true }
 
 # WASM dependencies
 wasm-bindgen = { version = "0.2", optional = true }

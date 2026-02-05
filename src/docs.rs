@@ -171,7 +171,7 @@ mod tests {
 mod example_tests {
     use super::*;
     use crate::linter::{Fix, Linter};
-    use crate::parser::parse_string;
+    use nginx_lint_common::parse_string;
     use std::path::Path;
 
     /// Apply a single line-based fix to content and return the result

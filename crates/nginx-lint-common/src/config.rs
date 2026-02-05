@@ -1,0 +1,988 @@
+use serde::{Deserialize, Deserializer};
+use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::fs;
+use std::path::Path;
+
+/// Indent size configuration: either a fixed number or "auto" for auto-detection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndentSize {
+    /// Auto-detect indent size from the first indented line
+    Auto,
+    /// Fixed indent size (number of spaces)
+    Fixed(usize),
+}
+
+impl Default for IndentSize {
+    fn default() -> Self {
+        IndentSize::Auto
+    }
+}
+
+impl fmt::Display for IndentSize {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IndentSize::Auto => write!(f, "auto"),
+            IndentSize::Fixed(n) => write!(f, "{}", n),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for IndentSize {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct IndentSizeVisitor;
+
+        impl<'de> Visitor<'de> for IndentSizeVisitor {
+            type Value = IndentSize;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a positive integer or \"auto\"")
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                Ok(IndentSize::Fixed(value as usize))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                if value > 0 {
+                    Ok(IndentSize::Fixed(value as usize))
+                } else {
+                    Err(de::Error::custom("indent_size must be positive"))
+                }
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<IndentSize, E>
+            where
+                E: de::Error,
+            {
+                if value.eq_ignore_ascii_case("auto") {
+                    Ok(IndentSize::Auto)
+                } else {
+                    Err(de::Error::custom(
+                        "expected \"auto\" or a positive integer for indent_size",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(IndentSizeVisitor)
+    }
+}
+
+/// Default configuration template for nginx-lint
+pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# nginx-lint configuration file
+# See https://github.com/walf443/nginx-lint for documentation
+
+# Color output settings
+[color]
+# Color mode: "auto", "always", or "never"
+ui = "auto"
+# Severity colors (available: black, red, green, yellow, blue, magenta, cyan, white,
+#                  bright_black, bright_red, bright_green, bright_yellow, bright_blue,
+#                  bright_magenta, bright_cyan, bright_white)
+error = "red"
+warning = "yellow"
+info = "blue"
+
+# =============================================================================
+# Style Rules
+# =============================================================================
+
+[rules.indent]
+enabled = true
+# Indentation size: number or "auto" for auto-detection (default: "auto")
+# indent_size = 4
+indent_size = "auto"
+
+[rules.trailing-whitespace]
+enabled = true
+
+[rules.space-before-semicolon]
+enabled = true
+
+# =============================================================================
+# Syntax Rules
+# =============================================================================
+
+[rules.duplicate-directive]
+enabled = true
+
+[rules.unmatched-braces]
+enabled = true
+
+[rules.unclosed-quote]
+enabled = true
+
+[rules.missing-semicolon]
+enabled = true
+
+[rules.invalid-directive-context]
+enabled = true
+# Additional valid parent contexts for directives (for extension modules like nginx-rtmp-module)
+# Example for nginx-rtmp-module:
+# additional_contexts = { server = ["rtmp"], upstream = ["rtmp"] }
+
+# =============================================================================
+# Security Rules
+# =============================================================================
+
+[rules.deprecated-ssl-protocol]
+enabled = true
+# Allowed protocols for auto-fix (default: ["TLSv1.2", "TLSv1.3"])
+allowed_protocols = ["TLSv1.2", "TLSv1.3"]
+
+[rules.server-tokens-enabled]
+enabled = true
+
+[rules.autoindex-enabled]
+enabled = true
+
+[rules.weak-ssl-ciphers]
+enabled = true
+# Weak cipher patterns to detect
+weak_ciphers = [
+    "NULL",
+    "EXPORT",
+    "DES",
+    "RC4",
+    "MD5",
+    "aNULL",
+    "eNULL",
+    "ADH",
+    "AECDH",
+    "PSK",
+    "SRP",
+    "CAMELLIA",
+]
+# Required exclusion patterns
+required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
+
+# =============================================================================
+# Best Practices
+# =============================================================================
+
+[rules.gzip-not-enabled]
+# Disabled by default: gzip is not always appropriate (CDN, CPU constraints, BREACH attack)
+enabled = false
+
+[rules.missing-error-log]
+# Disabled by default: error_log is typically set at top level in main config
+enabled = false
+
+[rules.proxy-pass-domain]
+enabled = true
+
+[rules.upstream-server-no-resolve]
+enabled = true
+
+[rules.proxy-set-header-inheritance]
+enabled = true
+
+[rules.root-in-location]
+enabled = true
+
+[rules.alias-location-slash-mismatch]
+enabled = true
+
+[rules.proxy-pass-with-uri]
+enabled = true
+
+[rules.add-header-inheritance]
+enabled = true
+
+[rules.proxy-keepalive]
+enabled = true
+
+[rules.try-files-with-proxy]
+enabled = true
+
+[rules.if-is-evil-in-location]
+enabled = true
+
+# =============================================================================
+# Parser Settings
+# =============================================================================
+
+[parser]
+# Additional block directives for extension modules
+# These are added to the built-in list (http, server, location, etc.)
+# Example for nginx-rtmp-module:
+# block_directives = ["rtmp", "application"]
+"#;
+
+/// Configuration for nginx-lint loaded from .nginx-lint.toml
+#[derive(Debug, Default, Deserialize)]
+pub struct LintConfig {
+    #[serde(default)]
+    pub rules: HashMap<String, RuleConfig>,
+    #[serde(default)]
+    pub color: ColorConfig,
+    #[serde(default)]
+    pub parser: ParserConfig,
+}
+
+/// Parser configuration
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ParserConfig {
+    /// Additional block directives (extension modules, etc.)
+    /// These are added to the built-in list of block directives
+    #[serde(default)]
+    pub block_directives: Vec<String>,
+}
+
+/// Color output configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct ColorConfig {
+    /// Color mode: "auto" (default), "always", or "never"
+    #[serde(default)]
+    pub ui: ColorMode,
+    /// Color for error messages (default: "red")
+    #[serde(default = "default_error_color")]
+    pub error: Color,
+    /// Color for warning messages (default: "yellow")
+    #[serde(default = "default_warning_color")]
+    pub warning: Color,
+    /// Color for info messages (default: "blue")
+    #[serde(default = "default_info_color")]
+    pub info: Color,
+}
+
+impl Default for ColorConfig {
+    fn default() -> Self {
+        Self {
+            ui: ColorMode::Auto,
+            error: Color::Red,
+            warning: Color::Yellow,
+            info: Color::Blue,
+        }
+    }
+}
+
+fn default_error_color() -> Color {
+    Color::Red
+}
+
+fn default_warning_color() -> Color {
+    Color::Yellow
+}
+
+fn default_info_color() -> Color {
+    Color::Blue
+}
+
+/// Available colors for output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Color {
+    Black,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    #[default]
+    White,
+    BrightBlack,
+    BrightRed,
+    BrightGreen,
+    BrightYellow,
+    BrightBlue,
+    BrightMagenta,
+    BrightCyan,
+    BrightWhite,
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+        match s.to_lowercase().as_str() {
+            "black" => Ok(Color::Black),
+            "red" => Ok(Color::Red),
+            "green" => Ok(Color::Green),
+            "yellow" => Ok(Color::Yellow),
+            "blue" => Ok(Color::Blue),
+            "magenta" => Ok(Color::Magenta),
+            "cyan" => Ok(Color::Cyan),
+            "white" => Ok(Color::White),
+            "bright_black" | "brightblack" => Ok(Color::BrightBlack),
+            "bright_red" | "brightred" => Ok(Color::BrightRed),
+            "bright_green" | "brightgreen" => Ok(Color::BrightGreen),
+            "bright_yellow" | "brightyellow" => Ok(Color::BrightYellow),
+            "bright_blue" | "brightblue" => Ok(Color::BrightBlue),
+            "bright_magenta" | "brightmagenta" => Ok(Color::BrightMagenta),
+            "bright_cyan" | "brightcyan" => Ok(Color::BrightCyan),
+            "bright_white" | "brightwhite" => Ok(Color::BrightWhite),
+            _ => Err(D::Error::custom(format!(
+                "invalid color '{}', expected one of: black, red, green, yellow, blue, magenta, cyan, white, \
+                 bright_black, bright_red, bright_green, bright_yellow, bright_blue, bright_magenta, bright_cyan, bright_white",
+                s
+            ))),
+        }
+    }
+}
+
+/// Color mode for output
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorMode {
+    /// Automatically detect (default) - respects NO_COLOR env and terminal detection
+    #[default]
+    Auto,
+    /// Always use colors
+    Always,
+    /// Never use colors
+    Never,
+}
+
+impl<'de> Deserialize<'de> for ColorMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "auto" => Ok(ColorMode::Auto),
+            "always" => Ok(ColorMode::Always),
+            "never" => Ok(ColorMode::Never),
+            _ => Err(D::Error::custom(format!(
+                "invalid color mode '{}', expected 'auto', 'always', or 'never'",
+                s
+            ))),
+        }
+    }
+}
+
+/// Configuration for a specific lint rule
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RuleConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// For indent rule: number or "auto" for auto-detection
+    pub indent_size: Option<IndentSize>,
+    /// For deprecated-ssl-protocol rule: allowed protocols (default: ["TLSv1.2", "TLSv1.3"])
+    pub allowed_protocols: Option<Vec<String>>,
+    /// For weak-ssl-ciphers rule: weak cipher patterns to detect
+    pub weak_ciphers: Option<Vec<String>>,
+    /// For weak-ssl-ciphers rule: required exclusion patterns
+    pub required_exclusions: Option<Vec<String>>,
+    /// For invalid-directive-context rule: additional valid parent contexts
+    /// Format: { "server" = ["rtmp"], "upstream" = ["rtmp"] }
+    pub additional_contexts: Option<HashMap<String, Vec<String>>>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl LintConfig {
+    /// Load configuration from a file
+    pub fn from_file(path: &Path) -> Result<Self, ConfigError> {
+        let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        toml::from_str(&content).map_err(|e| ConfigError::ParseError {
+            path: path.to_path_buf(),
+            source: e,
+        })
+    }
+
+    /// Parse configuration from a TOML string
+    pub fn from_str(content: &str) -> Result<Self, String> {
+        toml::from_str(content).map_err(|e| e.to_string())
+    }
+
+    /// Find and load .nginx-lint.toml from the given directory or its parents
+    pub fn find_and_load(dir: &Path) -> Option<Self> {
+        let mut current = dir.to_path_buf();
+
+        loop {
+            let config_path = current.join(".nginx-lint.toml");
+            if config_path.exists() {
+                return Self::from_file(&config_path).ok();
+            }
+
+            if !current.pop() {
+                break;
+            }
+        }
+
+        None
+    }
+
+    /// Rules that are disabled by default
+    pub const DISABLED_BY_DEFAULT: &'static [&'static str] = &[
+        "gzip-not-enabled",   // gzip is not always appropriate (CDN, CPU constraints, security)
+        "missing-error-log",  // error_log is typically set at top level in main config
+    ];
+
+    /// Check if a rule is enabled
+    pub fn is_rule_enabled(&self, name: &str) -> bool {
+        self.rules
+            .get(name)
+            .map(|r| r.enabled)
+            .unwrap_or_else(|| !Self::DISABLED_BY_DEFAULT.contains(&name))
+    }
+
+    /// Get the configuration for a specific rule
+    pub fn get_rule_config(&self, name: &str) -> Option<&RuleConfig> {
+        self.rules.get(name)
+    }
+
+    /// Get the color mode setting
+    pub fn color_mode(&self) -> ColorMode {
+        self.color.ui
+    }
+
+    /// Get additional block directives from config
+    pub fn additional_block_directives(&self) -> &[String] {
+        &self.parser.block_directives
+    }
+
+    /// Get additional contexts for invalid-directive-context rule
+    pub fn additional_contexts(&self) -> Option<&HashMap<String, Vec<String>>> {
+        self.rules
+            .get("invalid-directive-context")
+            .and_then(|r| r.additional_contexts.as_ref())
+    }
+
+    /// Validate a configuration file and return any errors
+    pub fn validate_file(path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+        let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+
+        Self::validate_content(&content, path)
+    }
+
+    /// Validate configuration content and return any errors
+    fn validate_content(content: &str, path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+        let value: toml::Value =
+            toml::from_str(content).map_err(|e| ConfigError::ParseError {
+                path: path.to_path_buf(),
+                source: e,
+            })?;
+
+        let mut errors = Vec::new();
+
+        if let toml::Value::Table(root) = value {
+            // Known top-level keys
+            let known_top_level: HashSet<&str> = ["rules", "color", "parser"].into_iter().collect();
+
+            for key in root.keys() {
+                if !known_top_level.contains(key.as_str()) {
+                    let line = find_key_line(content, None, key);
+                    errors.push(ValidationError::UnknownField {
+                        path: key.clone(),
+                        line,
+                        suggestion: suggest_field(key, &known_top_level),
+                    });
+                }
+            }
+
+            // Validate [color] section
+            if let Some(toml::Value::Table(color)) = root.get("color") {
+                let known_color_keys: HashSet<&str> =
+                    ["ui", "error", "warning", "info"].into_iter().collect();
+
+                for key in color.keys() {
+                    if !known_color_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("color"), key);
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("color.{}", key),
+                            line,
+                            suggestion: suggest_field(key, &known_color_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [parser] section
+            if let Some(toml::Value::Table(parser)) = root.get("parser") {
+                let known_parser_keys: HashSet<&str> =
+                    ["block_directives"].into_iter().collect();
+
+                for key in parser.keys() {
+                    if !known_parser_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("parser"), key);
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("parser.{}", key),
+                            line,
+                            suggestion: suggest_field(key, &known_parser_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [rules.*] sections
+            if let Some(toml::Value::Table(rules)) = root.get("rules") {
+                let known_rules: HashSet<&str> = [
+                    "duplicate-directive",
+                    "unmatched-braces",
+                    "unclosed-quote",
+                    "missing-semicolon",
+                    "invalid-directive-context",
+                    "deprecated-ssl-protocol",
+                    "server-tokens-enabled",
+                    "autoindex-enabled",
+                    "weak-ssl-ciphers",
+                    "indent",
+                    "trailing-whitespace",
+                    "space-before-semicolon",
+                    "gzip-not-enabled",
+                    "missing-error-log",
+                    "proxy-pass-domain",
+                    "upstream-server-no-resolve",
+                    "proxy-set-header-inheritance",
+                    "root-in-location",
+                    "alias-location-slash-mismatch",
+                    "proxy-pass-with-uri",
+                    "add-header-inheritance",
+                    "proxy-keepalive",
+                    "try-files-with-proxy",
+                    "if-is-evil-in-location",
+                ]
+                .into_iter()
+                .collect();
+
+                for (rule_name, rule_value) in rules {
+                    if !known_rules.contains(rule_name.as_str()) {
+                        let line = find_key_line(content, Some("rules"), rule_name);
+                        errors.push(ValidationError::UnknownRule {
+                            name: rule_name.clone(),
+                            line,
+                            suggestion: suggest_field(rule_name, &known_rules),
+                        });
+                        continue;
+                    }
+
+                    // Validate rule options
+                    if let toml::Value::Table(rule_config) = rule_value {
+                        let known_rule_options = get_known_rule_options(rule_name);
+                        let section = format!("rules.{}", rule_name);
+
+                        for key in rule_config.keys() {
+                            if !known_rule_options.contains(key.as_str()) {
+                                let line = find_key_line(content, Some(&section), key);
+                                errors.push(ValidationError::UnknownRuleOption {
+                                    rule: rule_name.clone(),
+                                    option: key.clone(),
+                                    line,
+                                    suggestion: suggest_field(key, &known_rule_options),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(errors)
+    }
+}
+
+/// Find the line number where a key is defined in the TOML content
+fn find_key_line(content: &str, section: Option<&str>, key: &str) -> Option<usize> {
+    let lines: Vec<&str> = content.lines().collect();
+
+    // For top-level sections (section is None), look for [key]
+    if section.is_none() {
+        let section_header = format!("[{}]", key);
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim() == section_header {
+                return Some(i + 1);
+            }
+        }
+        return None;
+    }
+
+    let target_section = section.unwrap();
+    let mut in_section = false;
+
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+
+        // Check for section header [section] or [section.subsection]
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let section_name = &trimmed[1..trimmed.len() - 1];
+
+            // Check if this is a [rules.rule-name] style section
+            let full_section = format!("{}.{}", target_section, key);
+            if section_name == full_section {
+                return Some(i + 1);
+            }
+
+            in_section = section_name == target_section
+                || section_name.starts_with(&format!("{}.", target_section));
+            continue;
+        }
+
+        // Check for key = value within the section
+        if in_section
+            && let Some((k, _)) = trimmed.split_once('=')
+        {
+            let k = k.trim();
+            if k == key {
+                return Some(i + 1);
+            }
+        }
+    }
+
+    None
+}
+
+/// Get known options for a specific rule
+fn get_known_rule_options(rule_name: &str) -> HashSet<&'static str> {
+    let mut options: HashSet<&str> = ["enabled"].into_iter().collect();
+
+    match rule_name {
+        "indent" => {
+            options.insert("indent_size");
+        }
+        "deprecated-ssl-protocol" => {
+            options.insert("allowed_protocols");
+        }
+        "weak-ssl-ciphers" => {
+            options.insert("weak_ciphers");
+            options.insert("required_exclusions");
+        }
+        _ => {}
+    }
+
+    options
+}
+
+/// Suggest a similar field name if one exists
+fn suggest_field(input: &str, known: &HashSet<&str>) -> Option<String> {
+    let input_lower = input.to_lowercase();
+
+    // Find the closest match using simple edit distance
+    known
+        .iter()
+        .filter(|&&k| {
+            let k_lower = k.to_lowercase();
+            // Simple heuristic: check if strings are similar
+            k_lower.contains(&input_lower)
+                || input_lower.contains(&k_lower)
+                || levenshtein_distance(&input_lower, &k_lower) <= 2
+        })
+        .min_by_key(|&&k| levenshtein_distance(&input.to_lowercase(), &k.to_lowercase()))
+        .map(|&s| s.to_string())
+}
+
+/// Simple Levenshtein distance implementation
+fn levenshtein_distance(a: &str, b: &str) -> usize {
+    let a_chars: Vec<char> = a.chars().collect();
+    let b_chars: Vec<char> = b.chars().collect();
+    let a_len = a_chars.len();
+    let b_len = b_chars.len();
+
+    if a_len == 0 {
+        return b_len;
+    }
+    if b_len == 0 {
+        return a_len;
+    }
+
+    let mut matrix = vec![vec![0; b_len + 1]; a_len + 1];
+
+    for (i, row) in matrix.iter_mut().enumerate().take(a_len + 1) {
+        row[0] = i;
+    }
+    for (j, cell) in matrix[0].iter_mut().enumerate().take(b_len + 1) {
+        *cell = j;
+    }
+
+    for i in 1..=a_len {
+        for j in 1..=b_len {
+            let cost = usize::from(a_chars[i - 1] != b_chars[j - 1]);
+            matrix[i][j] = (matrix[i - 1][j] + 1)
+                .min(matrix[i][j - 1] + 1)
+                .min(matrix[i - 1][j - 1] + cost);
+        }
+    }
+
+    matrix[a_len][b_len]
+}
+
+/// Validation error for configuration files
+#[derive(Debug, Clone)]
+pub enum ValidationError {
+    UnknownField {
+        path: String,
+        line: Option<usize>,
+        suggestion: Option<String>,
+    },
+    UnknownRule {
+        name: String,
+        line: Option<usize>,
+        suggestion: Option<String>,
+    },
+    UnknownRuleOption {
+        rule: String,
+        option: String,
+        line: Option<usize>,
+        suggestion: Option<String>,
+    },
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidationError::UnknownField {
+                path,
+                line,
+                suggestion,
+            } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
+                write!(f, "unknown field '{}'", path)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+            ValidationError::UnknownRule {
+                name,
+                line,
+                suggestion,
+            } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
+                write!(f, "unknown rule '{}'", name)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+            ValidationError::UnknownRuleOption {
+                rule,
+                option,
+                line,
+                suggestion,
+            } => {
+                if let Some(l) = line {
+                    write!(f, "line {}: ", l)?;
+                }
+                write!(f, "unknown option '{}' for rule '{}'", option, rule)?;
+                if let Some(s) = suggestion {
+                    write!(f, ", did you mean '{}'?", s)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ConfigError {
+    IoError {
+        path: std::path::PathBuf,
+        source: std::io::Error,
+    },
+    ParseError {
+        path: std::path::PathBuf,
+        source: toml::de::Error,
+    },
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigError::IoError { path, source } => {
+                write!(f, "Failed to read config file '{}': {}", path.display(), source)
+            }
+            ConfigError::ParseError { path, source } => {
+                write!(f, "Failed to parse config file '{}': {}", path.display(), source)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ConfigError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ConfigError::IoError { source, .. } => Some(source),
+            ConfigError::ParseError { source, .. } => Some(source),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_default_config() {
+        let config = LintConfig::default();
+        assert!(config.is_rule_enabled("any-rule"));
+    }
+
+    #[test]
+    fn test_disabled_by_default_rules() {
+        let config = LintConfig::default();
+        // These rules should be disabled by default
+        assert!(!config.is_rule_enabled("gzip-not-enabled"));
+        assert!(!config.is_rule_enabled("missing-error-log"));
+        // Other rules should still be enabled by default
+        assert!(config.is_rule_enabled("server-tokens-enabled"));
+    }
+
+    #[test]
+    fn test_parse_config() {
+        let toml_content = r#"
+[rules.indent]
+enabled = true
+indent_size = 2
+
+[rules.server-tokens-enabled]
+enabled = false
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+
+        assert!(config.is_rule_enabled("indent"));
+        assert!(!config.is_rule_enabled("server-tokens-enabled"));
+        assert!(config.is_rule_enabled("unknown-rule"));
+
+        let indent_config = config.get_rule_config("indent").unwrap();
+        assert_eq!(indent_config.indent_size, Some(IndentSize::Fixed(2)));
+    }
+
+    #[test]
+    fn test_empty_config() {
+        let toml_content = "";
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert!(config.is_rule_enabled("any-rule"));
+    }
+
+    #[test]
+    fn test_indent_size_auto() {
+        let toml_content = r#"
+[rules.indent]
+enabled = true
+indent_size = "auto"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        let indent_config = config.get_rule_config("indent").unwrap();
+        assert_eq!(indent_config.indent_size, Some(IndentSize::Auto));
+    }
+
+    #[test]
+    fn test_color_config_default() {
+        let config = LintConfig::default();
+        assert_eq!(config.color_mode(), ColorMode::Auto);
+    }
+
+    #[test]
+    fn test_color_config_auto() {
+        let toml_content = r#"
+[color]
+ui = "auto"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Auto);
+    }
+
+    #[test]
+    fn test_color_config_never() {
+        let toml_content = r#"
+[color]
+ui = "never"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Never);
+    }
+
+    #[test]
+    fn test_color_config_always() {
+        let toml_content = r#"
+[color]
+ui = "always"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color_mode(), ColorMode::Always);
+    }
+
+    #[test]
+    fn test_color_config_default_colors() {
+        let config = LintConfig::default();
+        assert_eq!(config.color.error, Color::Red);
+        assert_eq!(config.color.warning, Color::Yellow);
+        assert_eq!(config.color.info, Color::Blue);
+    }
+
+    #[test]
+    fn test_color_config_custom_colors() {
+        let toml_content = r#"
+[color]
+error = "magenta"
+warning = "cyan"
+info = "green"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color.error, Color::Magenta);
+        assert_eq!(config.color.warning, Color::Cyan);
+        assert_eq!(config.color.info, Color::Green);
+    }
+
+    #[test]
+    fn test_color_config_bright_colors() {
+        let toml_content = r#"
+[color]
+error = "bright_red"
+warning = "bright_yellow"
+info = "bright_blue"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert_eq!(config.color.error, Color::BrightRed);
+        assert_eq!(config.color.warning, Color::BrightYellow);
+        assert_eq!(config.color.info, Color::BrightBlue);
+    }
+}
