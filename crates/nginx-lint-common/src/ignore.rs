@@ -422,6 +422,7 @@ pub fn known_rule_names() -> HashSet<String> {
         "proxy-pass-with-uri",
         "add-header-inheritance",
         "proxy-keepalive",
+        "ssl-on-deprecated",
     ]
     .iter()
     .map(|s| s.to_string())

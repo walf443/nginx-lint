@@ -75,6 +75,9 @@ mod embedded {
     /// map-missing-default plugin
     pub const MAP_MISSING_DEFAULT: &[u8] =
         include_bytes!("../../target/builtin-plugins/map_missing_default.wasm");
+    /// ssl-on-deprecated plugin
+    pub const SSL_ON_DEPRECATED: &[u8] =
+        include_bytes!("../../target/builtin-plugins/ssl_on_deprecated.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -101,6 +104,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "weak-ssl-ciphers",
     "invalid-directive-context",
     "map-missing-default",
+    "ssl-on-deprecated",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -362,6 +366,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:map-missing-default"),
         embedded::MAP_MISSING_DEFAULT,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load ssl-on-deprecated
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:ssl-on-deprecated"),
+        embedded::SSL_ON_DEPRECATED,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
