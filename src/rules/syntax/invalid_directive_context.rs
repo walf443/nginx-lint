@@ -15,7 +15,16 @@ For example, 'server' can only be inside 'http', 'stream', or 'mail' blocks,
 and 'location' can only be inside 'server' or another 'location' block.
 
 When directives are placed in the wrong context, nginx will fail to start
-with a configuration error."#,
+with a configuration error.
+
+If you are linting a file that is included from another config (e.g. sites-available),
+add a context comment at the top of the file to tell nginx-lint the parent context:
+
+  # nginx-lint:context http,server
+
+Or use the --context CLI flag:
+
+  nginx-lint --context http,server sites-available/example.conf"#,
     bad_example: include_str!("invalid_directive_context/bad.conf"),
     good_example: include_str!("invalid_directive_context/good.conf"),
     references: &["https://nginx.org/en/docs/beginners_guide.html"],
