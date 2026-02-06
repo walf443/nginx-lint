@@ -31,6 +31,7 @@ pub use nginx_lint_common::{
 
 // Re-export from local modules
 pub use linter::{Fix, LintError, LintRule, Linter, Severity};
+pub use nginx_lint_common::RULE_CATEGORIES;
 #[cfg(feature = "cli")]
 pub use linter::RuleProfile;
 pub use docs::{RuleDoc, RuleDocOwned};

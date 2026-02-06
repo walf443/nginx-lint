@@ -2,6 +2,15 @@ use crate::parser::ast::Config;
 use serde::Serialize;
 use std::path::Path;
 
+/// Display-ordered list of rule categories for UI output
+pub const RULE_CATEGORIES: &[&str] = &[
+    "style",
+    "syntax",
+    "security",
+    "best-practices",
+    "deprecation",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Severity {
     Error,
