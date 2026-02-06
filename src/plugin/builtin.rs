@@ -72,6 +72,9 @@ mod embedded {
     /// invalid-directive-context plugin
     pub const INVALID_DIRECTIVE_CONTEXT: &[u8] =
         include_bytes!("../../target/builtin-plugins/invalid_directive_context.wasm");
+    /// map-missing-default plugin
+    pub const MAP_MISSING_DEFAULT: &[u8] =
+        include_bytes!("../../target/builtin-plugins/map_missing_default.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -97,6 +100,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "deprecated-ssl-protocol",
     "weak-ssl-ciphers",
     "invalid-directive-context",
+    "map-missing-default",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -348,6 +352,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:invalid-directive-context"),
         embedded::INVALID_DIRECTIVE_CONTEXT,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load map-missing-default
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:map-missing-default"),
+        embedded::MAP_MISSING_DEFAULT,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
