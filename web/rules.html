@@ -160,6 +160,10 @@
         .detail-section pre.example-good {
             border-left: 3px solid #4caf50;
         }
+        .trailing-ws {
+            background: rgba(244, 67, 54, 0.3);
+            outline: 1px dashed rgba(244, 67, 54, 0.5);
+        }
         .detail-section a {
             color: #4fc3f7;
         }
@@ -221,6 +225,11 @@
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;');
 
+        // Make trailing whitespace visible by wrapping it in a highlighted span
+        function visualizeTrailingWhitespace(escaped) {
+            return escaped.replace(/( +)((?:\n|$))/g, '<span class="trailing-ws">$1</span>$2');
+        }
+
         function renderRules(categories, ruleInfo) {
             const contentDiv = document.getElementById('content');
             const summaryDiv = document.getElementById('summary');
@@ -272,7 +281,7 @@
                             html += `<div class="detail-section"><h4>Why</h4><p>${escapeHtml(rule.why)}</p></div>`;
                         }
                         if (rule.bad_example) {
-                            html += `<div class="detail-section"><h4>Bad Example</h4><pre class="example-bad">${escapeHtml(rule.bad_example)}</pre></div>`;
+                            html += `<div class="detail-section"><h4>Bad Example</h4><pre class="example-bad">${visualizeTrailingWhitespace(escapeHtml(rule.bad_example))}</pre></div>`;
                         }
                         if (rule.good_example) {
                             html += `<div class="detail-section"><h4>Good Example</h4><pre class="example-good">${escapeHtml(rule.good_example)}</pre></div>`;

@@ -249,6 +249,10 @@
         .rule-modal .example-good {
             border-left: 3px solid #4caf50;
         }
+        .trailing-ws {
+            background: rgba(244, 67, 54, 0.3);
+            outline: 1px dashed rgba(244, 67, 54, 0.5);
+        }
         .rule-modal a {
             color: #4fc3f7;
         }
@@ -723,6 +727,10 @@ http {
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
 
+            // Make trailing whitespace visible by wrapping it in a highlighted span
+            const visualizeTrailingWhitespace = (escaped) =>
+                escaped.replace(/( +)((?:\n|$))/g, '<span class="trailing-ws">$1</span>$2');
+
             document.getElementById('rule-modal-title').textContent = ruleName;
 
             let content = '';
@@ -745,7 +753,7 @@ http {
             if (info.bad_example) {
                 content += `<div class="rule-modal-section">
                     <h4>Bad Example</h4>
-                    <pre class="example-bad">${escapeHtml(info.bad_example)}</pre>
+                    <pre class="example-bad">${visualizeTrailingWhitespace(escapeHtml(info.bad_example))}</pre>
                 </div>`;
             }
 
