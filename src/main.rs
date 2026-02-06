@@ -806,6 +806,7 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
 
     // Embedded web HTML
     const INDEX_HTML: &str = include_str!("../web/index.html");
+    const RULES_HTML: &str = include_str!("../web/rules.html");
 
     // When web-server-embed-wasm feature is enabled, embed the WASM files
     #[cfg(feature = "web-server-embed-wasm")]
@@ -859,6 +860,12 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
         let response = match url {
             "/" | "/index.html" => {
                 Response::from_string(INDEX_HTML)
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()
+                    )
+            }
+            "/rules" | "/rules.html" => {
+                Response::from_string(RULES_HTML)
                     .with_header(
                         tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()
                     )

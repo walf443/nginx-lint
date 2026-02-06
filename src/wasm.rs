@@ -298,6 +298,8 @@ pub fn get_rule_names() -> String {
 /// Extended rule information for JavaScript
 #[derive(serde::Serialize)]
 struct JsRuleInfo {
+    category: String,
+    severity: String,
     description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     why: Option<String>,
@@ -321,6 +323,8 @@ pub fn get_rule_info() -> String {
             (
                 r.name(),
                 JsRuleInfo {
+                    category: r.category().to_string(),
+                    severity: r.severity().unwrap_or("warning").to_string(),
                     description: r.description().to_string(),
                     why: r.why().map(|s| s.to_string()),
                     bad_example: r.bad_example().map(|s| s.to_string()),
@@ -331,6 +335,13 @@ pub fn get_rule_info() -> String {
         })
         .collect();
     serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Get the ordered list of rule categories as JSON array
+#[wasm_bindgen]
+pub fn get_rule_categories() -> String {
+    use nginx_lint_common::RULE_CATEGORIES;
+    serde_json::to_string(&RULE_CATEGORIES).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Debug function to check plugin loading status

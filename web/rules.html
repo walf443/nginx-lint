@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nginx-lint - Rules</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 15px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .header {
+            display: flex;
+            align-items: baseline;
+            gap: 20px;
+            margin-bottom: 5px;
+        }
+        h1 {
+            color: #4fc3f7;
+            margin: 0;
+            font-size: 1.5em;
+        }
+        nav a {
+            color: #888;
+            text-decoration: none;
+            font-size: 0.95em;
+        }
+        nav a:hover {
+            color: #4fc3f7;
+        }
+        nav a.active {
+            color: #4fc3f7;
+            font-weight: bold;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        .category-section {
+            margin-bottom: 24px;
+        }
+        .category-title {
+            font-size: 1.1em;
+            font-weight: bold;
+            color: #4fc3f7;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #404040;
+        }
+        .rule-card {
+            background: #2d2d2d;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .rule-card-header {
+            display: flex;
+            align-items: center;
+            padding: 10px 14px;
+            cursor: pointer;
+            user-select: none;
+        }
+        .rule-card-header:hover {
+            background: #353535;
+        }
+        .rule-name {
+            font-weight: bold;
+            color: #fff;
+            margin-right: 10px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+        }
+        .severity-badge {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-weight: bold;
+            text-transform: uppercase;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        .severity-badge.error {
+            background: rgba(244, 67, 54, 0.2);
+            color: #f44336;
+            border: 1px solid rgba(244, 67, 54, 0.4);
+        }
+        .severity-badge.warning {
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            border: 1px solid rgba(255, 193, 7, 0.4);
+        }
+        .severity-badge.info {
+            background: rgba(33, 150, 243, 0.2);
+            color: #2196f3;
+            border: 1px solid rgba(33, 150, 243, 0.4);
+        }
+        .rule-description {
+            color: #aaa;
+            font-size: 13px;
+            flex: 1;
+        }
+        .rule-toggle {
+            color: #666;
+            font-size: 14px;
+            margin-left: 10px;
+            transition: transform 0.2s;
+        }
+        .rule-card.open .rule-toggle {
+            transform: rotate(90deg);
+        }
+        .rule-detail {
+            display: none;
+            padding: 0 14px 14px 14px;
+            border-top: 1px solid #404040;
+        }
+        .rule-card.open .rule-detail {
+            display: block;
+        }
+        .detail-section {
+            margin-top: 12px;
+        }
+        .detail-section h4 {
+            color: #888;
+            font-size: 12px;
+            margin: 0 0 6px 0;
+            text-transform: uppercase;
+        }
+        .detail-section p {
+            margin: 0;
+            line-height: 1.5;
+            font-size: 13px;
+        }
+        .detail-section pre {
+            background: #1e1e1e;
+            border: 1px solid #404040;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 0;
+            overflow-x: auto;
+            font-size: 12px;
+            line-height: 1.4;
+            font-family: 'Fira Code', 'Consolas', monospace;
+        }
+        .detail-section pre.example-bad {
+            border-left: 3px solid #f44336;
+        }
+        .detail-section pre.example-good {
+            border-left: 3px solid #4caf50;
+        }
+        .detail-section a {
+            color: #4fc3f7;
+        }
+        .detail-section ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+        .detail-section li {
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        .version {
+            color: #666;
+            font-size: 12px;
+        }
+        .summary-bar {
+            display: flex;
+            gap: 15px;
+            padding: 8px 10px;
+            background: #252525;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            color: #888;
+        }
+        @media (max-width: 600px) {
+            .rule-card-header {
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+            .rule-description {
+                width: 100%;
+                order: 3;
+                margin-top: 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>nginx-lint</h1>
+        <nav>
+            <a href="./index.html">Linter</a>
+            <a href="./rules.html" class="active">Rules</a>
+        </nav>
+    </div>
+    <p class="subtitle">Available lint rules - <span id="version" class="version">Loading...</span></p>
+
+    <div id="summary" class="summary-bar" style="display: none;"></div>
+    <div id="content">
+        <div class="loading">Loading WASM module...</div>
+    </div>
+
+    <script type="module">
+        import init, { version, get_rule_info, get_rule_categories } from './pkg/nginx_lint.js';
+
+        const escapeHtml = (str) => str
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+
+        function renderRules(categories, ruleInfo) {
+            const contentDiv = document.getElementById('content');
+            const summaryDiv = document.getElementById('summary');
+
+            // Build category -> rules mapping
+            const byCategory = {};
+            let totalCount = 0;
+            for (const [name, info] of Object.entries(ruleInfo)) {
+                const cat = info.category || 'other';
+                if (!byCategory[cat]) byCategory[cat] = [];
+                byCategory[cat].push({ name, ...info });
+                totalCount++;
+            }
+
+            // Sort rules within each category by name
+            for (const cat of Object.keys(byCategory)) {
+                byCategory[cat].sort((a, b) => a.name.localeCompare(b.name));
+            }
+
+            // Summary bar
+            summaryDiv.textContent = `${totalCount} rule(s) in ${categories.length} categories`;
+            summaryDiv.style.display = 'flex';
+
+            // Render categories in order
+            let html = '';
+            for (const category of categories) {
+                const rules = byCategory[category];
+                if (!rules || rules.length === 0) continue;
+
+                html += `<div class="category-section">`;
+                html += `<div class="category-title">${escapeHtml(category)} (${rules.length})</div>`;
+
+                for (const rule of rules) {
+                    const hasDetail = rule.why || rule.bad_example || rule.good_example || (rule.references && rule.references.length > 0);
+                    html += `<div class="rule-card" data-rule="${escapeHtml(rule.name)}">`;
+                    html += `<div class="rule-card-header" onclick="toggleRule(this)">`;
+                    html += `<span class="rule-name">${escapeHtml(rule.name)}</span>`;
+                    html += `<span class="severity-badge ${escapeHtml(rule.severity)}">${escapeHtml(rule.severity)}</span>`;
+                    html += `<span class="rule-description">${escapeHtml(rule.description)}</span>`;
+                    if (hasDetail) {
+                        html += `<span class="rule-toggle">&#9654;</span>`;
+                    }
+                    html += `</div>`;
+
+                    if (hasDetail) {
+                        html += `<div class="rule-detail">`;
+
+                        if (rule.why) {
+                            html += `<div class="detail-section"><h4>Why</h4><p>${escapeHtml(rule.why)}</p></div>`;
+                        }
+                        if (rule.bad_example) {
+                            html += `<div class="detail-section"><h4>Bad Example</h4><pre class="example-bad">${escapeHtml(rule.bad_example)}</pre></div>`;
+                        }
+                        if (rule.good_example) {
+                            html += `<div class="detail-section"><h4>Good Example</h4><pre class="example-good">${escapeHtml(rule.good_example)}</pre></div>`;
+                        }
+                        if (rule.references && rule.references.length > 0) {
+                            html += `<div class="detail-section"><h4>References</h4><ul>`;
+                            for (const url of rule.references) {
+                                html += `<li><a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a></li>`;
+                            }
+                            html += `</ul></div>`;
+                        }
+
+                        html += `</div>`;
+                    }
+
+                    html += `</div>`;
+                }
+
+                html += `</div>`;
+            }
+
+            contentDiv.innerHTML = html;
+        }
+
+        window.toggleRule = function(header) {
+            const card = header.closest('.rule-card');
+            card.classList.toggle('open');
+        };
+
+        async function main() {
+            try {
+                await init();
+                document.getElementById('version').textContent = 'v' + version();
+
+                const categories = JSON.parse(get_rule_categories());
+                const ruleInfo = JSON.parse(get_rule_info());
+
+                renderRules(categories, ruleInfo);
+            } catch (e) {
+                document.getElementById('content').innerHTML =
+                    '<div style="color:#f44336;padding:20px;">Failed to load WASM module: ' + (e.message || e) + '</div>';
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>
