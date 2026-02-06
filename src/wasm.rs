@@ -141,7 +141,7 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
-    use crate::ignore::{filter_errors, known_rule_names, warnings_to_errors, IgnoreTracker};
+    use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
     use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
     // Parse TOML configuration
@@ -150,10 +150,6 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     } else {
         Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
-
-    // Build ignore tracker from content with rule name validation
-    let valid_rules = known_rule_names();
-    let (mut tracker, ignore_warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
 
     // Helper to check if a rule is enabled
     let is_enabled = |rule_name: &str| {
@@ -193,13 +189,17 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     let mut errors = pre_parse_errors;
 
+    // Create linter to get rule names for ignore validation
+    let linter = Linter::with_config(lint_config.as_ref());
+
+    // Build ignore tracker with rule name validation using linter's rule names
+    let valid_rules = linter.rule_names();
+    let (mut tracker, ignore_warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+
     // Only parse and run AST-based rules if there are no syntax errors
     if !has_syntax_errors {
         // Parse the nginx configuration
         if let Ok(config) = parse_string(content) {
-            // Create linter with config
-            let linter = Linter::with_config(lint_config.as_ref());
-
             // Lint the configuration (use a dummy path since we're linting a string)
             let lint_errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
             errors.extend(lint_errors);

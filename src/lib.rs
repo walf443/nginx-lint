@@ -57,16 +57,15 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
     use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
-    use crate::ignore::known_rule_names;
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
 
-    // Build ignore tracker from content with rule name validation
-    let valid_rules = known_rule_names();
-    let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(&content, Some(&valid_rules));
+    // Build ignore tracker from content without rule name validation
+    // (rule name validation is done later in lint_with_content when all plugins are loaded)
+    let (mut tracker, warnings) = IgnoreTracker::from_content(&content);
 
     let additional_block_directives: Vec<String> = lint_config
         .map(|c| c.additional_block_directives().to_vec())

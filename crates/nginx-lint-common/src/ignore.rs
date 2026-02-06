@@ -396,39 +396,6 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
         .collect()
 }
 
-/// Get a set of all known rule names
-pub fn known_rule_names() -> HashSet<String> {
-    // All rule names that can be used with nginx-lint:ignore
-    [
-        "duplicate-directive",
-        "unmatched-braces",
-        "unclosed-quote",
-        "missing-semicolon",
-        "invalid-directive-context",
-        "deprecated-ssl-protocol",
-        "server-tokens-enabled",
-        "autoindex-enabled",
-        "weak-ssl-ciphers",
-        "indent",
-        "trailing-whitespace",
-        "space-before-semicolon",
-        "gzip-not-enabled",
-        "missing-error-log",
-        "proxy-pass-domain",
-        "upstream-server-no-resolve",
-        "proxy-set-header-inheritance",
-        "root-in-location",
-        "alias-location-slash-mismatch",
-        "proxy-pass-with-uri",
-        "add-header-inheritance",
-        "proxy-keepalive",
-        "ssl-on-deprecated",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect()
-}
-
 /// Prefix for context comments
 const CONTEXT_PREFIX: &str = "nginx-lint:context";
 
@@ -798,7 +765,10 @@ autoindex on; # nginx-lint:ignore autoindex-enabled reason for this line
 # nginx-lint:ignore unknown-rule-name some reason
 server_tokens on;
 "#;
-        let valid_rules = known_rule_names();
+        let valid_rules: HashSet<String> = ["server-tokens-enabled", "autoindex-enabled"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let (_, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("unknown rule 'unknown-rule-name'"));

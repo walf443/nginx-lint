@@ -113,6 +113,11 @@ impl Linter {
         &self.rules
     }
 
+    /// Get a set of all rule names registered in this linter
+    pub fn rule_names(&self) -> std::collections::HashSet<String> {
+        self.rules.iter().map(|r| r.name().to_string()).collect()
+    }
+
     /// Run all lint rules and collect errors
     ///
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
@@ -154,9 +159,8 @@ impl Linter {
         content: &str,
     ) -> (Vec<LintError>, usize) {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
-        use crate::ignore::known_rule_names;
 
-        let valid_rules = known_rule_names();
+        let valid_rules = self.rule_names();
         let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
@@ -175,9 +179,8 @@ impl Linter {
         content: &str,
     ) -> (Vec<LintError>, usize) {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
-        use crate::ignore::known_rule_names;
 
-        let valid_rules = known_rule_names();
+        let valid_rules = self.rule_names();
         let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
@@ -234,9 +237,8 @@ impl Linter {
         content: &str,
     ) -> (Vec<LintError>, usize, Vec<RuleProfile>) {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
-        use crate::ignore::known_rule_names;
 
-        let valid_rules = known_rule_names();
+        let valid_rules = self.rule_names();
         let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let (errors, profiles) = self.lint_with_profile(config, path);
         let result = filter_errors(errors, &mut tracker);
