@@ -624,7 +624,7 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
                 by_category.entry(doc.category.as_str()).or_default().push(doc);
             }
 
-            let categories = ["security", "syntax", "style", "best_practices", "best-practices"];
+            let categories = ["security", "syntax", "style", "best_practices", "best-practices", "deprecation"];
             for category in categories {
                 if let Some(rules) = by_category.get(category) {
                     eprintln!("  {} {}", "▸".cyan(), category.bold());
@@ -645,7 +645,7 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
                 by_category.entry(doc.category).or_default().push(doc);
             }
 
-            let categories = ["security", "syntax", "style", "best_practices"];
+            let categories = ["security", "syntax", "style", "best_practices", "deprecation"];
             for category in categories {
                 if let Some(rules) = by_category.get(category) {
                     eprintln!("  {} {}", "▸".cyan(), category.bold());
