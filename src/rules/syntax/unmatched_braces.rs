@@ -292,11 +292,11 @@ impl UnmatchedBraces {
             let closing_brace = format!("{}}}", " ".repeat(indent));
             // Find the corresponding error by matching the error's line number
             for error in &mut errors {
-                if error.fix.is_none()
+                if error.fixes.is_empty()
                     && error.message.contains("Unclosed brace")
                     && error.line == Some(error_line)
                 {
-                    error.fix = Some(Fix::insert_after(insert_after_line, &closing_brace));
+                    error.fixes.push(Fix::insert_after(insert_after_line, &closing_brace));
                     break;
                 }
             }
@@ -471,7 +471,7 @@ mod tests {
             "Expected missing opening brace error, got: {}",
             errors[0].message
         );
-        assert!(errors[0].fix.is_some(), "Expected fix to be provided");
+        assert!(!errors[0].fixes.is_empty(), "Expected fix to be provided");
     }
 
     #[test]
@@ -494,7 +494,7 @@ mod tests {
             "Expected location in error message, got: {}",
             errors[0].message
         );
-        assert!(errors[0].fix.is_some(), "Expected fix to be provided");
+        assert!(!errors[0].fixes.is_empty(), "Expected fix to be provided");
     }
 
     // =========================================================================
@@ -810,7 +810,7 @@ http {
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1);
 
-        let fix = errors[0].fix.as_ref().expect("Expected fix");
+        let fix = errors[0].fixes.first().expect("Expected fix");
         // Range-based fix appends " {" to the line
         assert!(
             fix.new_text.contains("{"),

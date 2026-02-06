@@ -282,10 +282,10 @@ server {
             .unwrap();
 
         // Find the error with fix
-        let error_with_fix = errors.iter().find(|e| e.fix.is_some());
+        let error_with_fix = errors.iter().find(|e| !e.fixes.is_empty());
         assert!(error_with_fix.is_some(), "Expected an error with fix");
 
-        let fix = error_with_fix.unwrap().fix.as_ref().unwrap();
+        let fix = &error_with_fix.unwrap().fixes[0];
         assert!(fix.new_text.contains("!aNULL"));
         assert!(fix.new_text.contains("!eNULL"));
         assert!(fix.new_text.contains("!EXPORT"));

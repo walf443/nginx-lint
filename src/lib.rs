@@ -102,7 +102,7 @@ pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig
 #[cfg(feature = "cli")]
 pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> {
     let content = fs::read_to_string(path)?;
-    let fixes: Vec<_> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
+    let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
 
     let (result, fix_count) = apply_fixes_to_content(&content, &fixes);
 

@@ -30,8 +30,8 @@ pub struct IgnoreWarning {
     pub line: usize,
     /// Warning message
     pub message: String,
-    /// Optional fix for the warning
-    pub fix: Option<Fix>,
+    /// Fixes for the warning
+    pub fixes: Vec<Fix>,
 }
 
 /// Information about a single ignore directive
@@ -129,7 +129,7 @@ impl IgnoreTracker {
                                     "unknown rule '{}' in nginx-lint:ignore comment",
                                     parsed.rule_name
                                 ),
-                                fix: None,
+                                fixes: Vec::new(),
                             });
                         }
                     }
@@ -159,7 +159,7 @@ impl IgnoreTracker {
                                     "unknown rule '{}' in nginx-lint:ignore comment",
                                     parsed.rule_name
                                 ),
-                                fix: None,
+                                fixes: Vec::new(),
                             });
                         }
                     }
@@ -204,14 +204,15 @@ impl IgnoreTracker {
             .filter(|d| !d.used)
             .map(|d| {
                 // Provide fix for both comment-only lines and inline comments
-                let fix = if d.is_inline {
+                let fixes = if d.is_inline {
                     // For inline comments, replace line with just the content before the comment
                     d.content_before_comment
                         .as_ref()
-                        .map(|content| Fix::replace_line(d.comment_line, content))
+                        .map(|content| vec![Fix::replace_line(d.comment_line, content)])
+                        .unwrap_or_default()
                 } else {
                     // For comment-only lines, delete the entire line
-                    Some(Fix::delete(d.comment_line))
+                    vec![Fix::delete(d.comment_line)]
                 };
 
                 IgnoreWarning {
@@ -220,7 +221,7 @@ impl IgnoreTracker {
                         "unused nginx-lint:ignore comment for rule '{}'",
                         d.rule_name
                     ),
-                    fix,
+                    fixes,
                 }
             })
             .collect()
@@ -296,7 +297,7 @@ fn parse_ignore_comment(
         return Some(Err(IgnoreWarning {
             line: line_number,
             message: "nginx-lint:ignore requires a rule name".to_string(),
-            fix: None,
+            fixes: Vec::new(),
         }));
     }
 
@@ -310,7 +311,7 @@ fn parse_ignore_comment(
                 "nginx-lint:ignore {} requires a reason",
                 rule_name
             ),
-            fix: None,
+            fixes: Vec::new(),
         }));
     }
 
@@ -386,7 +387,7 @@ pub fn warnings_to_errors(warnings: Vec<IgnoreWarning>) -> Vec<LintError> {
             )
             .with_location(warning.line, 1);
 
-            if let Some(fix) = warning.fix {
+            for fix in warning.fixes {
                 error = error.with_fix(fix);
             }
 
@@ -693,7 +694,7 @@ server_tokens on;
         let warnings = vec![IgnoreWarning {
             line: 5,
             message: "test warning".to_string(),
-            fix: None,
+            fixes: Vec::new(),
         }];
 
         let errors = warnings_to_errors(warnings);
@@ -703,7 +704,7 @@ server_tokens on;
         assert_eq!(errors[0].message, "test warning");
         assert_eq!(errors[0].severity, Severity::Warning);
         assert_eq!(errors[0].line, Some(5));
-        assert!(errors[0].fix.is_none());
+        assert!(errors[0].fixes.is_empty());
     }
 
     #[test]
@@ -711,13 +712,13 @@ server_tokens on;
         let warnings = vec![IgnoreWarning {
             line: 5,
             message: "test warning".to_string(),
-            fix: Some(Fix::delete(5)),
+            fixes: vec![Fix::delete(5)],
         }];
 
         let errors = warnings_to_errors(warnings);
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].fix.is_some());
-        let fix = errors[0].fix.as_ref().unwrap();
+        assert!(!errors[0].fixes.is_empty());
+        let fix = &errors[0].fixes[0];
         assert_eq!(fix.line, 5);
         assert!(fix.delete_line);
     }
@@ -857,7 +858,7 @@ server_tokens off;
 
         // Should have unused warning with delete fix
         assert_eq!(result.unused_warnings.len(), 1);
-        let fix = result.unused_warnings[0].fix.as_ref().unwrap();
+        let fix = &result.unused_warnings[0].fixes[0];
         assert_eq!(fix.line, 2); // Line of comment
         assert!(fix.delete_line);
     }
@@ -874,7 +875,7 @@ server_tokens off; # nginx-lint:ignore server-tokens-enabled reason
 
         // Should have unused warning with replace_line fix
         assert_eq!(result.unused_warnings.len(), 1);
-        let fix = result.unused_warnings[0].fix.as_ref().unwrap();
+        let fix = &result.unused_warnings[0].fixes[0];
         assert_eq!(fix.line, 2); // Line of inline comment
         assert!(!fix.delete_line); // Not deleting entire line
         assert!(fix.old_text.is_none()); // replace_line uses None for old_text

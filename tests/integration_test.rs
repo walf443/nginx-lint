@@ -698,7 +698,7 @@ fn test_all_rule_fixtures() {
 
                             let rule_errors_with_fixes: Vec<_> = all_errors
                                 .iter()
-                                .filter(|e| e.rule == tc.rule_name && e.fix.is_some())
+                                .filter(|e| e.rule == tc.rule_name && !e.fixes.is_empty())
                                 .cloned()
                                 .collect();
 
@@ -1229,7 +1229,7 @@ http {
     );
 
     // The fix should replace the line with just the directive (preserving indentation)
-    let fix = result.unused_warnings[0].fix.as_ref().expect("Expected a fix");
+    let fix = result.unused_warnings[0].fixes.first().expect("Expected a fix");
     assert_eq!(fix.line, 4, "Fix should be on line 4");
     assert!(!fix.delete_line, "Should not delete entire line");
     assert_eq!(fix.new_text, "        server_tokens off;", "Fix should preserve indentation");

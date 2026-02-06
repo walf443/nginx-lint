@@ -202,7 +202,7 @@ mod example_tests {
 
     /// Apply all fixes to content (supports both range-based and line-based fixes)
     fn apply_fixes(content: &str, errors: &[crate::linter::LintError]) -> String {
-        let fixes: Vec<&Fix> = errors.iter().filter_map(|e| e.fix.as_ref()).collect();
+        let fixes: Vec<&Fix> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
 
         // Separate range-based and line-based fixes
         let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
@@ -492,7 +492,7 @@ mod example_tests {
             let doc = get_rule_doc("indent").unwrap();
             let rule = Indent::default();
             let errors = rule.check_content(doc.bad_example);
-            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+            if !errors.is_empty() && errors.iter().all(|e| !e.fixes.is_empty()) {
                 let fixed = apply_fixes(doc.bad_example, &errors);
                 let expected = doc.good_example.trim_end();
                 let actual = fixed.trim_end();
@@ -522,7 +522,7 @@ mod example_tests {
             let doc = get_rule_doc("unmatched-braces").unwrap();
             let rule = UnmatchedBraces;
             let errors = rule.check_content(doc.bad_example);
-            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+            if !errors.is_empty() && errors.iter().all(|e| !e.fixes.is_empty()) {
                 let fixed = apply_fixes(doc.bad_example, &errors);
                 let expected = doc.good_example.trim_end();
                 let actual = fixed.trim_end();
@@ -543,7 +543,7 @@ mod example_tests {
             let doc = get_rule_doc("unclosed-quote").unwrap();
             let rule = UnclosedQuote;
             let errors = rule.check_content(doc.bad_example);
-            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+            if !errors.is_empty() && errors.iter().all(|e| !e.fixes.is_empty()) {
                 let fixed = apply_fixes(doc.bad_example, &errors);
                 let expected = doc.good_example.trim_end();
                 let actual = fixed.trim_end();
@@ -563,7 +563,7 @@ mod example_tests {
             let doc = get_rule_doc("missing-semicolon").unwrap();
             let rule = MissingSemicolon;
             let errors = rule.check_content(doc.bad_example);
-            if !errors.is_empty() && errors.iter().all(|e| e.fix.is_some()) {
+            if !errors.is_empty() && errors.iter().all(|e| !e.fixes.is_empty()) {
                 let fixed = apply_fixes(doc.bad_example, &errors);
                 let expected = doc.good_example.trim_end();
                 let actual = fixed.trim_end();

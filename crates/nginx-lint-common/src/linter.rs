@@ -124,8 +124,8 @@ pub struct LintError {
     pub severity: Severity,
     pub line: Option<usize>,
     pub column: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fix: Option<Fix>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixes: Vec<Fix>,
 }
 
 impl LintError {
@@ -137,7 +137,7 @@ impl LintError {
             severity,
             line: None,
             column: None,
-            fix: None,
+            fixes: Vec::new(),
         }
     }
 
@@ -148,7 +148,12 @@ impl LintError {
     }
 
     pub fn with_fix(mut self, fix: Fix) -> Self {
-        self.fix = Some(fix);
+        self.fixes.push(fix);
+        self
+    }
+
+    pub fn with_fixes(mut self, fixes: Vec<Fix>) -> Self {
+        self.fixes.extend(fixes);
         self
     }
 }

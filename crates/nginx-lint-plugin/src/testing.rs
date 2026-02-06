@@ -222,7 +222,7 @@ impl<P: Plugin> PluginTestRunner<P> {
             .filter(|e| e.rule == plugin_info.name)
             .collect();
 
-        let has_fix = rule_errors.iter().any(|e| e.fix.is_some());
+        let has_fix = rule_errors.iter().any(|e| !e.fixes.is_empty());
 
         assert!(
             has_fix,
@@ -242,7 +242,7 @@ impl<P: Plugin> PluginTestRunner<P> {
         let fixes: Vec<_> = errors
             .iter()
             .filter(|e| e.rule == plugin_info.name)
-            .filter_map(|e| e.fix.as_ref())
+            .flat_map(|e| e.fixes.iter())
             .collect();
 
         assert!(
@@ -315,7 +315,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
         let fixes: Vec<_> = rule_errors
             .iter()
-            .filter_map(|e| e.fix.as_ref())
+            .flat_map(|e| e.fixes.iter())
             .collect();
         assert!(
             !fixes.is_empty(),
@@ -459,7 +459,7 @@ impl TestCase {
         }
 
         if self.expect_has_fix {
-            let has_fix = rule_errors.iter().any(|e| e.fix.is_some());
+            let has_fix = rule_errors.iter().any(|e| !e.fixes.is_empty());
             assert!(
                 has_fix,
                 "Expected at least one error with fix, got errors: {:?}",
@@ -470,7 +470,7 @@ impl TestCase {
         for expected_line in &self.expected_fix_on_lines {
             let has_fix_on_line = rule_errors
                 .iter()
-                .filter_map(|e| e.fix.as_ref())
+                .flat_map(|e| e.fixes.iter())
                 .any(|f| {
                     if f.is_range_based() {
                         let start = f.start_offset.unwrap_or(0);
@@ -486,7 +486,7 @@ impl TestCase {
                 expected_line,
                 rule_errors
                     .iter()
-                    .filter_map(|e| e.fix.as_ref().map(|f| {
+                    .flat_map(|e| e.fixes.iter().map(|f| {
                         if f.is_range_based() {
                             let start = f.start_offset.unwrap_or(0);
                             offset_to_line(&self.content, start)
@@ -501,7 +501,7 @@ impl TestCase {
         if let Some(expected_output) = &self.expected_fix_output {
             let fixes: Vec<_> = rule_errors
                 .iter()
-                .filter_map(|e| e.fix.as_ref())
+                .flat_map(|e| e.fixes.iter())
                 .collect();
 
             assert!(

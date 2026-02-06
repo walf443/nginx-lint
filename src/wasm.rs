@@ -88,8 +88,8 @@ struct JsLintError {
     severity: String,
     line: Option<usize>,
     column: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    fix: Option<JsFix>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    fixes: Vec<JsFix>,
 }
 
 impl From<&LintError> for JsLintError {
@@ -105,7 +105,7 @@ impl From<&LintError> for JsLintError {
             },
             line: error.line,
             column: error.column,
-            fix: error.fix.as_ref().map(|f| JsFix {
+            fixes: error.fixes.iter().map(|f| JsFix {
                 line: f.line,
                 old_text: f.old_text.clone(),
                 new_text: f.new_text.clone(),
@@ -113,7 +113,7 @@ impl From<&LintError> for JsLintError {
                 insert_after: f.insert_after,
                 start_offset: f.start_offset,
                 end_offset: f.end_offset,
-            }),
+            }).collect(),
         }
     }
 }

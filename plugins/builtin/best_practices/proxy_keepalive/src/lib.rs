@@ -238,9 +238,9 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
-        assert!(errors[0].fix.is_some());
+        assert!(!errors[0].fixes.is_empty());
 
-        let fix = errors[0].fix.as_ref().unwrap();
+        let fix = &errors[0].fixes[0];
         assert!(
             fix.new_text.contains("proxy_set_header Connection"),
             "Fix should contain Connection header: {}",

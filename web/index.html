@@ -527,7 +527,7 @@ http {
                 }
                 updateLineNumbers();
 
-                const fixableCount = errors.filter(e => e.fix).length;
+                const fixableCount = errors.filter(e => e.fixes && e.fixes.length > 0).length;
                 fixAllBtn.style.display = fixableCount > 0 ? 'block' : 'none';
 
                 if (errors.length === 0) {
@@ -538,7 +538,7 @@ http {
                     let html = '';
                     errors.forEach((err, index) => {
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
-                        const fixBtn = err.fix ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
+                        const fixBtn = err.fixes && err.fixes.length > 0 ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
                         const ignoreBtn = err.line ? `<button class="ignore-btn" onclick="ignoreError(${index})">Ignore</button>` : '';
                         const ruleInfo = ruleDescriptions[err.rule];
                         const hasDetails = ruleInfo && (ruleInfo.why || ruleInfo.bad_example || ruleInfo.good_example);
@@ -577,78 +577,86 @@ http {
             }
         };
 
-        // Apply a single fix
+        // Apply a single fix (applies all fixes for a single error)
         window.applyFix = function(index) {
             const error = currentErrors[index];
-            if (!error || !error.fix) return;
-
-            const editor = document.getElementById('editor');
-            const content = editor.value;
-            const fix = error.fix;
-
-            // Check if this is a range-based fix
-            if (fix.start_offset !== null && fix.start_offset !== undefined &&
-                fix.end_offset !== null && fix.end_offset !== undefined) {
-                // Range-based fix: replace bytes from start_offset to end_offset
-                const before = content.substring(0, fix.start_offset);
-                const after = content.substring(fix.end_offset);
-                editor.value = before + fix.new_text + after;
-                lintConfig();
-                return;
-            }
-
-            // Line-based fix
-            const lines = content.split('\n');
-            const lineIndex = fix.line - 1;
-            if (lineIndex < 0 || lineIndex >= lines.length + 1) return;
-
-            if (fix.delete_line) {
-                // Delete the line
-                lines.splice(lineIndex, 1);
-            } else if (fix.insert_after) {
-                // Insert new line after
-                lines.splice(lineIndex + 1, 0, fix.new_text);
-            } else if (fix.old_text !== null && fix.old_text !== undefined) {
-                // Replace specific text on the line
-                lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
-            } else {
-                // Replace entire line
-                lines[lineIndex] = fix.new_text;
-            }
-
-            editor.value = lines.join('\n');
-            lintConfig();
-        };
-
-        // Apply all fixes (in reverse order to maintain offsets/line numbers)
-        window.applyAllFixes = function() {
-            const fixableErrors = currentErrors
-                .map((err, index) => ({ err, index }))
-                .filter(item => item.err.fix);
-
-            // Separate range-based and line-based fixes
-            const rangeFixes = fixableErrors.filter(item =>
-                item.err.fix.start_offset !== null && item.err.fix.start_offset !== undefined);
-            const lineFixes = fixableErrors.filter(item =>
-                item.err.fix.start_offset === null || item.err.fix.start_offset === undefined);
+            if (!error || !error.fixes || error.fixes.length === 0) return;
 
             const editor = document.getElementById('editor');
             let content = editor.value;
 
+            // Separate range-based and line-based fixes
+            const rangeFixes = error.fixes.filter(f =>
+                f.start_offset !== null && f.start_offset !== undefined);
+            const lineFixes = error.fixes.filter(f =>
+                f.start_offset === null || f.start_offset === undefined);
+
             // Apply range-based fixes first (sorted by start_offset descending)
-            rangeFixes.sort((a, b) => b.err.fix.start_offset - a.err.fix.start_offset);
-            for (const { err } of rangeFixes) {
-                const fix = err.fix;
+            rangeFixes.sort((a, b) => b.start_offset - a.start_offset);
+            for (const fix of rangeFixes) {
                 const before = content.substring(0, fix.start_offset);
                 const after = content.substring(fix.end_offset);
                 content = before + fix.new_text + after;
             }
 
             // Apply line-based fixes (sorted by line descending)
-            lineFixes.sort((a, b) => b.err.fix.line - a.err.fix.line);
+            lineFixes.sort((a, b) => b.line - a.line);
+            if (lineFixes.length > 0) {
+                const lines = content.split('\n');
+                for (const fix of lineFixes) {
+                    const lineIndex = fix.line - 1;
+                    if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;
+
+                    if (fix.delete_line) {
+                        lines.splice(lineIndex, 1);
+                    } else if (fix.insert_after) {
+                        lines.splice(lineIndex + 1, 0, fix.new_text);
+                    } else if (fix.old_text !== null && fix.old_text !== undefined) {
+                        lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
+                    } else {
+                        lines[lineIndex] = fix.new_text;
+                    }
+                }
+                content = lines.join('\n');
+            }
+
+            editor.value = content;
+            lintConfig();
+        };
+
+        // Apply all fixes (in reverse order to maintain offsets/line numbers)
+        window.applyAllFixes = function() {
+            // Collect all individual fixes from all errors
+            const allFixes = [];
+            for (const err of currentErrors) {
+                if (err.fixes && err.fixes.length > 0) {
+                    for (const fix of err.fixes) {
+                        allFixes.push(fix);
+                    }
+                }
+            }
+
+            // Separate range-based and line-based fixes
+            const rangeFixes = allFixes.filter(f =>
+                f.start_offset !== null && f.start_offset !== undefined);
+            const lineFixes = allFixes.filter(f =>
+                f.start_offset === null || f.start_offset === undefined);
+
+            const editor = document.getElementById('editor');
+            let content = editor.value;
+
+            // Apply range-based fixes first (sorted by start_offset descending)
+            rangeFixes.sort((a, b) => b.start_offset - a.start_offset);
+            for (const fix of rangeFixes) {
+                const before = content.substring(0, fix.start_offset);
+                const after = content.substring(fix.end_offset);
+                content = before + fix.new_text + after;
+            }
+
+            // Apply line-based fixes (sorted by line descending)
+            lineFixes.sort((a, b) => b.line - a.line);
             let lines = content.split('\n');
-            for (const { err } of lineFixes) {
-                const fix = err.fix;
+            for (const fix of lineFixes) {
                 const lineIndex = fix.line - 1;
                 if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;
 

@@ -239,7 +239,7 @@ server {
 
         assert!(!errors.is_empty());
         // First error should have a fix
-        let fix = errors[0].fix.as_ref().expect("Expected fix on first error");
+        let fix = errors[0].fixes.first().expect("Expected fix on first error");
         assert!(fix.new_text.contains("TLSv1.2"));
         assert!(fix.new_text.contains("TLSv1.3"));
         assert!(!fix.new_text.contains("SSLv3"));

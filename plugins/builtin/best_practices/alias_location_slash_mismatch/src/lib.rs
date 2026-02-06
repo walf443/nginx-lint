@@ -330,7 +330,7 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].fix.is_some(), "Expected fix to be present");
+        assert!(!errors[0].fixes.is_empty(), "Expected fix to be present");
     }
 
     #[test]

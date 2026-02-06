@@ -83,7 +83,7 @@ struct PluginLintError {
     #[serde(default)]
     pub column: Option<usize>,
     #[serde(default)]
-    pub fix: Option<PluginFix>,
+    pub fixes: Vec<PluginFix>,
 }
 
 impl PluginLintError {
@@ -102,7 +102,7 @@ impl PluginLintError {
             error = error.with_location(line, 1);
         }
 
-        if let Some(fix) = self.fix {
+        for fix in self.fixes {
             error = error.with_fix(fix.into_fix());
         }
 

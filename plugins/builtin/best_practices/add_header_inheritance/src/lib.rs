@@ -255,9 +255,9 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].fix.is_some(), "Expected fix to be present");
+        assert!(!errors[0].fixes.is_empty(), "Expected fix to be present");
 
-        let fix = errors[0].fix.as_ref().unwrap();
+        let fix = &errors[0].fixes[0];
         assert!(
             fix.new_text.contains("add_header X-Frame-Options"),
             "Fix should contain X-Frame-Options header: {}",
@@ -488,9 +488,9 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].fix.is_some());
+        assert!(!errors[0].fixes.is_empty());
 
-        let fix = errors[0].fix.as_ref().unwrap();
+        let fix = &errors[0].fixes[0];
         // Check that quoted value is preserved in fix
         assert!(
             fix.new_text.contains("\"default-src 'self'\""),
