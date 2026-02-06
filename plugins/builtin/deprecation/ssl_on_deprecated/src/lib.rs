@@ -24,10 +24,10 @@ impl Plugin for SslOnDeprecatedPlugin {
         )
         .with_severity("warning")
         .with_why(
-            "The 'ssl on;' directive was deprecated in nginx 1.15.0. \
-             Use the 'ssl' parameter on the 'listen' directive instead \
-             (e.g., 'listen 443 ssl;'). The deprecated directive may be \
-             removed in a future version of nginx.",
+            "The 'ssl on;' directive was deprecated in nginx 1.15.0 and \
+             removed in nginx 1.25.1. Use the 'ssl' parameter on the \
+             'listen' directive instead (e.g., 'listen 443 ssl;'). \
+             Using 'ssl on;' on nginx 1.25.1+ will cause a configuration error.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
