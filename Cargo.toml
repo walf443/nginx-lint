@@ -45,7 +45,7 @@ rayon = { version = "1", optional = true }
 # Core dependencies
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "1"
+thiserror = "2"
 
 # Web server dependencies
 tiny_http = { version = "0.12", optional = true }
