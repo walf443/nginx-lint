@@ -20,8 +20,27 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  build-plugins:
+    name: Build Plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "plugins"
+      - run: make -j4 collect-plugins
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
+          retention-days: 1
+
   clippy:
     name: Clippy
+    needs: build-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +49,15 @@ jobs:
           components: clippy
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make -j4 collect-plugins
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
       - run: cargo clippy -- -D warnings
 
   test:
     name: Test
+    needs: build-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,5 +65,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make -j4 collect-plugins
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
       - run: cargo test
