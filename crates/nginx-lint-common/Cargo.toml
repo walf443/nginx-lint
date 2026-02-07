@@ -5,6 +5,7 @@ edition = "2024"
 description = "Common types and parser for nginx-lint"
 license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
+authors = ["walf443"]
 
 [dependencies]
 nginx-lint-parser = { path = "../nginx-lint-parser" }

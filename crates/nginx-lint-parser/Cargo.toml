@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "nginx configuration file parser"
 license = "MIT"
+repository = "https://github.com/walf443/nginx-lint"
+authors = ["walf443"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

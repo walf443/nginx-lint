@@ -5,6 +5,7 @@ edition = "2024"
 description = "Plugin SDK for nginx-lint"
 license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
+authors = ["walf443"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -12,7 +12,10 @@ resolver = "2"
 name = "nginx-lint"
 version = "0.1.0"
 edition = "2024"
+description = "A linter for nginx configuration files with WASM plugin support"
 license = "MIT"
+repository = "https://github.com/walf443/nginx-lint"
+authors = ["walf443"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
