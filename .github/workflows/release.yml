@@ -7,6 +7,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   build:
@@ -31,7 +33,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build WASM plugins
-        run: make build-plugins
+        run: make -j4 build-plugins
 
       - name: Build binary
         run: make build

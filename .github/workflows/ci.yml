@@ -8,6 +8,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   check:
@@ -20,8 +22,72 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  build-plugins:
+    name: Build Plugins (${{ matrix.chunk }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "plugins-${{ matrix.chunk }}"
+      - name: Build plugin chunk
+        run: |
+          plugins=(plugins/builtin/*/*/)
+          total=${#plugins[@]}
+          chunks=8
+          chunk=${{ matrix.chunk }}
+          start=$(( chunk * total / chunks ))
+          end=$(( (chunk + 1) * total / chunks ))
+
+          mkdir -p target/builtin-plugins
+          for (( i=start; i<end; i++ )); do
+            dir="${plugins[$i]}"
+            if [ -f "$dir/Cargo.toml" ]; then
+              name=$(basename "$dir")
+              echo "Building $name..."
+              cargo build --manifest-path "$dir/Cargo.toml" \
+                --target wasm32-unknown-unknown \
+                --target-dir "$dir/target" \
+                --release
+              wasm_file="$dir/target/wasm32-unknown-unknown/release/$(echo $name | tr '-' '_')_plugin.wasm"
+              if [ -f "$wasm_file" ]; then
+                cp "$wasm_file" "target/builtin-plugins/${name}.wasm"
+                echo "  Collected ${name}.wasm"
+              fi
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins-${{ matrix.chunk }}
+          path: target/builtin-plugins/
+          retention-days: 1
+          if-no-files-found: ignore
+
+  merge-plugins:
+    name: Merge Plugins
+    needs: build-plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: builtin-plugins-*
+          path: target/builtin-plugins/
+          merge-multiple: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
+          retention-days: 1
+
   clippy:
     name: Clippy
+    needs: merge-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +96,15 @@ jobs:
           components: clippy
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make collect-plugins
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
       - run: cargo clippy -- -D warnings
 
   test:
     name: Test
+    needs: merge-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,5 +112,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make collect-plugins
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
       - run: cargo test

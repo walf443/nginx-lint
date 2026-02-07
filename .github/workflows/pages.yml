@@ -16,6 +16,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
   build:
@@ -32,7 +34,7 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
 
       - name: Build WASM plugins
-        run: make collect-plugins
+        run: make -j4 collect-plugins
 
       - name: Build WASM for web
         run: wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
