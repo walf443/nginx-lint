@@ -16,6 +16,8 @@ A linter for nginx configuration files with WASM plugin support, autofix, and a 
 
 ## Quick Start
 
+You can also try it in the browser: [Demo](https://walf443.github.io/nginx-lint/)
+
 ```bash
 # Lint a configuration file
 nginx-lint /etc/nginx/nginx.conf
@@ -137,7 +139,9 @@ This is equivalent to `--context http,server` on the command line.
 
 ## Web UI
 
-Start the browser-based linting interface:
+Try the Web UI online without installation: [Demo](https://walf443.github.io/nginx-lint/)
+
+Start the browser-based linting interface locally:
 
 ```bash
 nginx-lint web --open
