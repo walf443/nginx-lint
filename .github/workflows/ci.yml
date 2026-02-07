@@ -42,10 +42,8 @@ jobs:
           total=${#plugins[@]}
           chunks=6
           chunk=${{ matrix.chunk }}
-          per_chunk=$(( (total + chunks - 1) / chunks ))
-          start=$(( chunk * per_chunk ))
-          end=$(( start + per_chunk ))
-          if [ $end -gt $total ]; then end=$total; fi
+          start=$(( chunk * total / chunks ))
+          end=$(( (chunk + 1) * total / chunks ))
 
           mkdir -p target/builtin-plugins
           for (( i=start; i<end; i++ )); do
