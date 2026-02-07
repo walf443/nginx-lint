@@ -123,6 +123,34 @@ fn format_duration(d: std::time::Duration) -> String {
     }
 }
 
+/// Run linter on a parsed config and return a FileResult
+fn run_lint_on_config(
+    config: &nginx_lint::parser::ast::Config,
+    path: &Path,
+    content: &str,
+    linter: &Linter,
+    profile: bool,
+) -> FileResult {
+    if profile {
+        let (errors, ignored_count, profiles) =
+            linter.lint_with_content_and_profile(config, path, content);
+        FileResult::LintErrors {
+            path: path.to_path_buf(),
+            errors,
+            ignored_count,
+            profiles: Some(profiles),
+        }
+    } else {
+        let (errors, ignored_count) = linter.lint_with_content(config, path, content);
+        FileResult::LintErrors {
+            path: path.to_path_buf(),
+            errors,
+            ignored_count,
+            profiles: None,
+        }
+    }
+}
+
 /// Lint a single included file and return the result
 fn lint_file(
     included: &IncludedFile,
@@ -154,29 +182,10 @@ fn lint_file(
         };
     }
 
-    // Read file content for ignore comment support
-    let content = std::fs::read_to_string(path).unwrap_or_default();
-
     // Lint the parsed config
     if let Some(ref config) = included.config {
-        if profile {
-            let (errors, ignored_count, profiles) =
-                linter.lint_with_content_and_profile(config, path, &content);
-            FileResult::LintErrors {
-                path: path.clone(),
-                errors,
-                ignored_count,
-                profiles: Some(profiles),
-            }
-        } else {
-            let (errors, ignored_count) = linter.lint_with_content(config, path, &content);
-            FileResult::LintErrors {
-                path: path.clone(),
-                errors,
-                ignored_count,
-                profiles: None,
-            }
-        }
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        run_lint_on_config(config, path, &content, linter, profile)
     } else {
         FileResult::LintErrors {
             path: path.clone(),
@@ -185,6 +194,153 @@ fn lint_file(
             profiles: None,
         }
     }
+}
+
+/// Process lint results: report errors, apply fixes, and determine exit code
+fn process_results(
+    results: Vec<FileResult>,
+    fix: bool,
+    no_fail_on_warnings: bool,
+    profile: bool,
+    reporter: &Reporter,
+    stdin_content: Option<&str>,
+) -> ExitCode {
+    let mut all_errors = Vec::new();
+    let mut has_fatal_error = false;
+    let mut all_profiles: Vec<RuleProfile> = Vec::new();
+
+    for result in results {
+        match result {
+            FileResult::PreParseErrors { path, errors } => {
+                if fix {
+                    if let Some(content) = stdin_content {
+                        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+                        let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
+                        if count > 0 {
+                            print!("{}", fixed_content);
+                        } else {
+                            reporter.report(&errors, &path, 0);
+                        }
+                    } else {
+                        match apply_fixes(&path, &errors) {
+                            Ok(count) => {
+                                if count > 0 {
+                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
+                            }
+                        }
+                    }
+                } else {
+                    reporter.report(&errors, &path, 0);
+                }
+                has_fatal_error = true;
+            }
+            FileResult::ParseError { path, error } => {
+                eprintln!("Error parsing {}: {}", path.display(), error);
+                has_fatal_error = true;
+            }
+            FileResult::LintErrors {
+                path,
+                errors,
+                ignored_count,
+                profiles,
+            } => {
+                if fix {
+                    if let Some(content) = stdin_content {
+                        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+                        let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
+                        if count > 0 {
+                            print!("{}", fixed_content);
+                        } else {
+                            print!("{}", content);
+                        }
+                    } else {
+                        match apply_fixes(&path, &errors) {
+                            Ok(count) => {
+                                if count > 0 {
+                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
+                            }
+                        }
+                    }
+                } else {
+                    reporter.report(&errors, &path, ignored_count);
+                }
+                all_errors.extend(errors);
+                if let Some(p) = profiles {
+                    all_profiles.extend(p);
+                }
+            }
+        }
+    }
+
+    // Display profile results if requested
+    if profile && !all_profiles.is_empty() {
+        display_profile(&all_profiles);
+    }
+
+    if has_fatal_error {
+        return ExitCode::from(1);
+    }
+
+    let has_issues = if no_fail_on_warnings {
+        all_errors.iter().any(|e| e.severity == Severity::Error)
+    } else {
+        !all_errors.is_empty()
+    };
+
+    if has_issues {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Lint in-memory content (stdin mode) and return the result
+fn lint_content(
+    content: &str,
+    path: &Path,
+    linter: &Linter,
+    lint_config: Option<&LintConfig>,
+    profile: bool,
+    initial_context: Vec<String>,
+) -> FileResult {
+    // Run pre-parse checks on the content
+    let pre_parse_errors = pre_parse_checks_from_content(content, lint_config);
+
+    if pre_parse_errors
+        .iter()
+        .any(|e| e.severity == Severity::Error)
+    {
+        return FileResult::PreParseErrors {
+            path: path.to_path_buf(),
+            errors: pre_parse_errors,
+        };
+    }
+
+    // Parse the content
+    let mut parse_result = match parse_string(content) {
+        Ok(config) => config,
+        Err(e) => {
+            return FileResult::ParseError {
+                path: path.to_path_buf(),
+                error: e.to_string(),
+            };
+        }
+    };
+
+    // Set context if specified
+    if !initial_context.is_empty() {
+        parse_result.include_context = initial_context;
+    }
+
+    run_lint_on_config(&parse_result, path, content, linter, profile)
 }
 
 pub fn run_lint(cli: Cli) -> ExitCode {
@@ -339,77 +495,17 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
-    // 8. Branch: stdin mode vs file mode
-    if let Some(ref content) = stdin_content {
-        // --- stdin mode ---
-        let stdin_path = Path::new("<stdin>");
-
-        // Run pre-parse checks on the content
-        let pre_parse_errors = pre_parse_checks_from_content(content, lint_config.as_ref());
-
-        if pre_parse_errors
-            .iter()
-            .any(|e| e.severity == Severity::Error)
-        {
-            if cli.fix {
-                let fixes: Vec<_> = pre_parse_errors
-                    .iter()
-                    .flat_map(|e| e.fixes.iter())
-                    .collect();
-                let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
-                if count > 0 {
-                    print!("{}", fixed_content);
-                } else {
-                    reporter.report(&pre_parse_errors, stdin_path, 0);
-                }
-            } else {
-                reporter.report(&pre_parse_errors, stdin_path, 0);
-            }
-            return ExitCode::from(1);
-        }
-
-        // Parse the content
-        let mut parse_result = match parse_string(content) {
-            Ok(config) => config,
-            Err(e) => {
-                eprintln!("Error parsing stdin: {}", e);
-                return ExitCode::from(1);
-            }
-        };
-
-        // Set context if specified
-        if !initial_context.is_empty() {
-            parse_result.include_context = initial_context;
-        }
-
-        let (errors, ignored_count) = linter.lint_with_content(&parse_result, stdin_path, content);
-
-        if cli.fix {
-            let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
-            let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
-            if count > 0 {
-                print!("{}", fixed_content);
-            } else {
-                print!("{}", content);
-            }
-        } else {
-            reporter.report(&errors, stdin_path, ignored_count);
-        }
-
-        let has_issues = if cli.no_fail_on_warnings {
-            errors.iter().any(|e| e.severity == Severity::Error)
-        } else {
-            !errors.is_empty()
-        };
-
-        if has_issues {
-            ExitCode::from(1)
-        } else {
-            ExitCode::SUCCESS
-        }
+    // 8. Build results: stdin mode vs file mode
+    let results: Vec<FileResult> = if let Some(ref content) = stdin_content {
+        vec![lint_content(
+            content,
+            Path::new("<stdin>"),
+            &linter,
+            lint_config.as_ref(),
+            cli.profile,
+            initial_context,
+        )]
     } else {
-        // --- file mode ---
-
         // Collect all files to lint (including files referenced by include directives)
         let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         let mut included_files: Vec<IncludedFile> = Vec::new();
@@ -444,7 +540,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
 
         // Lint files (parallel when not fixing and not profiling, sequential otherwise)
-        let results: Vec<FileResult> = if cli.fix || cli.profile {
+        if cli.fix || cli.profile {
             included_files
                 .iter()
                 .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), cli.profile))
@@ -454,83 +550,16 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                 .par_iter()
                 .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), false))
                 .collect()
-        };
-
-        // Process results sequentially (for consistent output ordering)
-        let mut all_errors = Vec::new();
-        let mut has_fatal_error = false;
-        let mut all_profiles: Vec<RuleProfile> = Vec::new();
-
-        for result in results {
-            match result {
-                FileResult::PreParseErrors { path, errors } => {
-                    if cli.fix {
-                        match apply_fixes(&path, &errors) {
-                            Ok(count) => {
-                                if count > 0 {
-                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                            }
-                        }
-                    } else {
-                        reporter.report(&errors, &path, 0);
-                    }
-                    has_fatal_error = true;
-                }
-                FileResult::ParseError { path, error } => {
-                    eprintln!("Error parsing {}: {}", path.display(), error);
-                    has_fatal_error = true;
-                }
-                FileResult::LintErrors {
-                    path,
-                    errors,
-                    ignored_count,
-                    profiles,
-                } => {
-                    if cli.fix {
-                        match apply_fixes(&path, &errors) {
-                            Ok(count) => {
-                                if count > 0 {
-                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                            }
-                        }
-                    } else {
-                        reporter.report(&errors, &path, ignored_count);
-                    }
-                    all_errors.extend(errors);
-                    if let Some(p) = profiles {
-                        all_profiles.extend(p);
-                    }
-                }
-            }
         }
+    };
 
-        // Display profile results if requested
-        if cli.profile && !all_profiles.is_empty() {
-            display_profile(&all_profiles);
-        }
-
-        if has_fatal_error {
-            return ExitCode::from(1);
-        }
-
-        let has_issues = if cli.no_fail_on_warnings {
-            all_errors.iter().any(|e| e.severity == Severity::Error)
-        } else {
-            !all_errors.is_empty()
-        };
-
-        if has_issues {
-            ExitCode::from(1)
-        } else {
-            ExitCode::SUCCESS
-        }
-    }
+    // 9. Process results (report/fix/exit code)
+    process_results(
+        results,
+        cli.fix,
+        cli.no_fail_on_warnings,
+        cli.profile,
+        &reporter,
+        stdin_content.as_deref(),
+    )
 }
