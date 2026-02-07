@@ -24,7 +24,7 @@ impl Plugin for GzipNotEnabledPlugin {
             "best-practices",
             "Suggests enabling gzip compression for better performance",
         )
-        .with_severity("info")
+        .with_severity("warning")
         .with_why(
             "Gzip compression can significantly reduce the size of HTTP responses, often by \
              60-80% for text-based content like HTML, CSS, and JavaScript. This improves page \
@@ -63,7 +63,7 @@ impl Plugin for GzipNotEnabledPlugin {
         // Don't warn for included files - gzip should be set in the main config
         if has_http_block && !gzip_on {
             let err = self.info().error_builder();
-            vec![err.info("Consider enabling gzip compression for better performance", 0, 0)]
+            vec![err.warning("Consider enabling gzip compression for better performance", 0, 0)]
         } else {
             vec![]
         }

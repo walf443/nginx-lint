@@ -68,7 +68,6 @@ impl Reporter {
             let severity_str = match error.severity {
                 Severity::Error => apply_color(&format!("[{}]", error.severity), self.colors.error).bold(),
                 Severity::Warning => apply_color(&format!("[{}]", error.severity), self.colors.warning).bold(),
-                Severity::Info => apply_color(&format!("[{}]", error.severity), self.colors.info).bold(),
             };
 
             let rule_str = format!("[{}/{}]", error.category, error.rule).dimmed();
@@ -80,7 +79,6 @@ impl Reporter {
             println!();
             let error_count = errors.iter().filter(|e| e.severity == Severity::Error).count();
             let warning_count = errors.iter().filter(|e| e.severity == Severity::Warning).count();
-            let info_count = errors.iter().filter(|e| e.severity == Severity::Info).count();
 
             let mut parts = Vec::new();
             if error_count > 0 {
@@ -88,9 +86,6 @@ impl Reporter {
             }
             if warning_count > 0 {
                 parts.push(format!("{} warning(s)", warning_count));
-            }
-            if info_count > 0 {
-                parts.push(format!("{} info(s)", info_count));
             }
             if ignored_count > 0 {
                 parts.push(format!("{} ignored", ignored_count));
@@ -114,7 +109,6 @@ impl Reporter {
         struct Summary {
             errors: usize,
             warnings: usize,
-            infos: usize,
             ignored: usize,
         }
 
@@ -144,7 +138,6 @@ impl Reporter {
             summary: Summary {
                 errors: errors.iter().filter(|e| e.severity == Severity::Error).count(),
                 warnings: errors.iter().filter(|e| e.severity == Severity::Warning).count(),
-                infos: errors.iter().filter(|e| e.severity == Severity::Info).count(),
                 ignored: ignored_count,
             },
         };

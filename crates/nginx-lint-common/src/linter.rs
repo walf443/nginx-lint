@@ -15,7 +15,6 @@ pub const RULE_CATEGORIES: &[&str] = &[
 pub enum Severity {
     Error,
     Warning,
-    Info,
 }
 
 impl std::fmt::Display for Severity {
@@ -23,7 +22,6 @@ impl std::fmt::Display for Severity {
         match self {
             Severity::Error => write!(f, "ERROR"),
             Severity::Warning => write!(f, "WARNING"),
-            Severity::Info => write!(f, "INFO"),
         }
     }
 }

@@ -22,7 +22,6 @@ pub struct WasmLintResult {
     errors_json: String,
     error_count: usize,
     warning_count: usize,
-    info_count: usize,
     ignored_count: usize,
 }
 
@@ -46,12 +45,6 @@ impl WasmLintResult {
         self.warning_count
     }
 
-    /// Get the number of info messages
-    #[wasm_bindgen(getter)]
-    pub fn info_count(&self) -> usize {
-        self.info_count
-    }
-
     /// Get the number of ignored errors
     #[wasm_bindgen(getter)]
     pub fn ignored_count(&self) -> usize {
@@ -61,7 +54,7 @@ impl WasmLintResult {
     /// Check if there are any issues
     #[wasm_bindgen]
     pub fn has_issues(&self) -> bool {
-        self.error_count > 0 || self.warning_count > 0 || self.info_count > 0
+        self.error_count > 0 || self.warning_count > 0
     }
 }
 
@@ -101,7 +94,6 @@ impl From<&LintError> for JsLintError {
             severity: match error.severity {
                 Severity::Error => "error".to_string(),
                 Severity::Warning => "warning".to_string(),
-                Severity::Info => "info".to_string(),
             },
             line: error.line,
             column: error.column,
@@ -267,16 +259,11 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         .iter()
         .filter(|e| e.severity == Severity::Warning)
         .count();
-    let info_count = errors
-        .iter()
-        .filter(|e| e.severity == Severity::Info)
-        .count();
 
     Ok(WasmLintResult {
         errors_json,
         error_count,
         warning_count,
-        info_count,
         ignored_count,
     })
 }

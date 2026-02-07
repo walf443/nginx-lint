@@ -36,7 +36,7 @@ Then open http://localhost:8080/web/ in your browser.
 ## Features
 
 - Real-time linting as you type
-- Color-coded results (errors, warnings, info)
+- Color-coded results (errors, warnings)
 - Line number references
 - All lint rules available in the CLI are also available here
 

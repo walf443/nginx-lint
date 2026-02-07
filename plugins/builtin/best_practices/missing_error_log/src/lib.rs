@@ -22,7 +22,7 @@ impl Plugin for MissingErrorLogPlugin {
             "best-practices",
             "Suggests configuring error_log for debugging",
         )
-        .with_severity("info")
+        .with_severity("warning")
         .with_why(
             "Configuring error_log allows you to record errors and issues in log files for \
              troubleshooting purposes. Setting an appropriate log level helps capture necessary \
@@ -45,7 +45,7 @@ impl Plugin for MissingErrorLogPlugin {
 
         // No error_log found
         let err = self.info().error_builder();
-        vec![err.info("Consider configuring error_log for debugging", 0, 0)]
+        vec![err.warning("Consider configuring error_log for debugging", 0, 0)]
     }
 }
 

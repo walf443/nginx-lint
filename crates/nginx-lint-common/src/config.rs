@@ -94,7 +94,6 @@ ui = "auto"
 #                  bright_magenta, bright_cyan, bright_white)
 error = "red"
 warning = "yellow"
-info = "blue"
 
 # =============================================================================
 # Style Rules
@@ -254,9 +253,6 @@ pub struct ColorConfig {
     /// Color for warning messages (default: "yellow")
     #[serde(default = "default_warning_color")]
     pub warning: Color,
-    /// Color for info messages (default: "blue")
-    #[serde(default = "default_info_color")]
-    pub info: Color,
 }
 
 impl Default for ColorConfig {
@@ -265,7 +261,6 @@ impl Default for ColorConfig {
             ui: ColorMode::Auto,
             error: Color::Red,
             warning: Color::Yellow,
-            info: Color::Blue,
         }
     }
 }
@@ -276,10 +271,6 @@ fn default_error_color() -> Color {
 
 fn default_warning_color() -> Color {
     Color::Yellow
-}
-
-fn default_info_color() -> Color {
-    Color::Blue
 }
 
 /// Available colors for output
@@ -503,7 +494,7 @@ impl LintConfig {
             // Validate [color] section
             if let Some(toml::Value::Table(color)) = root.get("color") {
                 let known_color_keys: HashSet<&str> =
-                    ["ui", "error", "warning", "info"].into_iter().collect();
+                    ["ui", "error", "warning"].into_iter().collect();
 
                 for key in color.keys() {
                     if !known_color_keys.contains(key.as_str()) {
@@ -950,7 +941,6 @@ ui = "always"
         let config = LintConfig::default();
         assert_eq!(config.color.error, Color::Red);
         assert_eq!(config.color.warning, Color::Yellow);
-        assert_eq!(config.color.info, Color::Blue);
     }
 
     #[test]
@@ -959,7 +949,6 @@ ui = "always"
 [color]
 error = "magenta"
 warning = "cyan"
-info = "green"
 "#;
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", toml_content).unwrap();
@@ -967,7 +956,6 @@ info = "green"
         let config = LintConfig::from_file(file.path()).unwrap();
         assert_eq!(config.color.error, Color::Magenta);
         assert_eq!(config.color.warning, Color::Cyan);
-        assert_eq!(config.color.info, Color::Green);
     }
 
     #[test]
@@ -976,7 +964,6 @@ info = "green"
 [color]
 error = "bright_red"
 warning = "bright_yellow"
-info = "bright_blue"
 "#;
         let mut file = NamedTempFile::new().unwrap();
         write!(file, "{}", toml_content).unwrap();
@@ -984,6 +971,5 @@ info = "bright_blue"
         let config = LintConfig::from_file(file.path()).unwrap();
         assert_eq!(config.color.error, Color::BrightRed);
         assert_eq!(config.color.warning, Color::BrightYellow);
-        assert_eq!(config.color.info, Color::BrightBlue);
     }
 }

@@ -48,7 +48,7 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Do not exit with non-zero code on warnings and info (only fail on errors)
+    /// Do not exit with non-zero code on warnings (only fail on errors)
     #[arg(long)]
     no_fail_on_warnings: bool,
 
@@ -596,7 +596,7 @@ fn run_lint(cli: Cli) -> ExitCode {
         // Only fail on errors
         all_errors.iter().any(|e| e.severity == Severity::Error)
     } else {
-        // Default: fail on any issue (errors, warnings, or info)
+        // Default: fail on any issue (errors or warnings)
         !all_errors.is_empty()
     };
 

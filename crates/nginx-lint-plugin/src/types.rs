@@ -18,7 +18,7 @@ pub struct PluginInfo {
     pub description: String,
     /// API version the plugin uses for input/output format
     pub api_version: String,
-    /// Severity level (error, warning, info)
+    /// Severity level (error, warning)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
     /// Why this rule exists (detailed explanation)
@@ -124,11 +124,6 @@ impl ErrorBuilder {
         LintError::warning(&self.rule, &self.category, message, line, column)
     }
 
-    /// Create an error with Info severity
-    pub fn info(&self, message: &str, line: usize, column: usize) -> LintError {
-        LintError::info(&self.rule, &self.category, message, line, column)
-    }
-
     /// Create an error from a directive's location
     pub fn error_at(&self, message: &str, directive: &Directive) -> LintError {
         self.error(message, directive.span.start.line, directive.span.start.column)
@@ -139,10 +134,6 @@ impl ErrorBuilder {
         self.warning(message, directive.span.start.line, directive.span.start.column)
     }
 
-    /// Create an info from a directive's location
-    pub fn info_at(&self, message: &str, directive: &Directive) -> LintError {
-        self.info(message, directive.span.start.line, directive.span.start.column)
-    }
 }
 
 /// Severity level for lint errors
@@ -151,7 +142,6 @@ impl ErrorBuilder {
 pub enum Severity {
     Error,
     Warning,
-    Info,
 }
 
 /// Represents a fix that can be applied to resolve a lint error
@@ -262,19 +252,6 @@ impl LintError {
             category: category.to_string(),
             message: message.to_string(),
             severity: Severity::Warning,
-            line: if line > 0 { Some(line) } else { None },
-            column: if column > 0 { Some(column) } else { None },
-            fixes: Vec::new(),
-        }
-    }
-
-    /// Create a new error with Info severity
-    pub fn info(rule: &str, category: &str, message: &str, line: usize, column: usize) -> Self {
-        Self {
-            rule: rule.to_string(),
-            category: category.to_string(),
-            message: message.to_string(),
-            severity: Severity::Info,
             line: if line > 0 { Some(line) } else { None },
             column: if column > 0 { Some(column) } else { None },
             fixes: Vec::new(),

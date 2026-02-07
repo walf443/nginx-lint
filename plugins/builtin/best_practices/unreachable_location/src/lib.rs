@@ -202,7 +202,7 @@ impl UnreachableLocationPlugin {
         for regex_loc in &regex_locations {
             for prefix_loc in &prefix_no_regex {
                 if self.prefix_might_shadow_regex(prefix_loc, regex_loc) {
-                    errors.push(err.info(
+                    errors.push(err.warning(
                         &format!(
                             "Location '{}' may not match paths under '{}' due to ^~ modifier (line {})",
                             regex_loc.display, prefix_loc.pattern, prefix_loc.line

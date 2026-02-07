@@ -19,7 +19,7 @@ pub struct PluginInfo {
     /// API version the plugin uses (defaults to "1.0" for backward compatibility)
     #[serde(default = "default_api_version")]
     pub api_version: String,
-    /// Severity level (error, warning, info)
+    /// Severity level (error, warning)
     #[serde(default)]
     pub severity: Option<String>,
     /// Why this rule exists (detailed explanation)
@@ -90,8 +90,7 @@ impl PluginLintError {
     fn into_lint_error(self) -> LintError {
         let severity = match self.severity.to_lowercase().as_str() {
             "error" => Severity::Error,
-            "warning" => Severity::Warning,
-            _ => Severity::Info,
+            _ => Severity::Warning,
         };
 
         let mut error = LintError::new(&self.rule, &self.category, &self.message, severity);

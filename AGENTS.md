@@ -139,8 +139,7 @@ nginx_lint_plugin::export_plugin!(MyPlugin);
 ### Severity Levels
 
 - `Error`: Configuration will not work, or critical security issue
-- `Warning`: Discouraged settings, potential problems
-- `Info`: Improvement suggestions, best practices
+- `Warning`: Discouraged settings, potential problems, improvement suggestions
 
 ### Test File Organization
 

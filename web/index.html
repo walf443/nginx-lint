@@ -108,10 +108,6 @@
             background: rgba(255, 193, 7, 0.3);
             color: #ffc107;
         }
-        .line-numbers div.info-line {
-            background: rgba(33, 150, 243, 0.3);
-            color: #2196f3;
-        }
         textarea.editor {
             flex: 1;
             min-height: unset;
@@ -155,10 +151,6 @@
         .error-item.warning {
             background: rgba(255, 193, 7, 0.2);
             border-left: 3px solid #ffc107;
-        }
-        .error-item.info {
-            background: rgba(33, 150, 243, 0.2);
-            border-left: 3px solid #2196f3;
         }
         .error-location {
             color: #888;
@@ -281,7 +273,6 @@
         }
         .summary-item.errors { color: #f44336; }
         .summary-item.warnings { color: #ffc107; }
-        .summary-item.infos { color: #2196f3; }
         .summary-item.ignored { color: #9e9e9e; }
         .no-issues {
             color: #4caf50;
@@ -408,7 +399,6 @@ http {
                 <div id="summary" class="summary" style="display: none;">
                     <span id="error-count" class="summary-item errors"></span>
                     <span id="warning-count" class="summary-item warnings"></span>
-                    <span id="info-count" class="summary-item infos"></span>
                     <span id="ignored-count" class="summary-item ignored"></span>
                 </div>
 
@@ -526,7 +516,7 @@ http {
                 errorLines.clear();
                 for (const err of errors) {
                     if (err.line) {
-                        // Keep the highest severity for each line (error > warning > info)
+                        // Keep the highest severity for each line (error > warning)
                         const current = errorLines.get(err.line);
                         if (!current ||
                             (err.severity === 'error') ||
@@ -571,7 +561,6 @@ http {
 
                     document.getElementById('error-count').textContent = result.error_count > 0 ? result.error_count + ' error(s)' : '';
                     document.getElementById('warning-count').textContent = result.warning_count > 0 ? result.warning_count + ' warning(s)' : '';
-                    document.getElementById('info-count').textContent = result.info_count > 0 ? result.info_count + ' info(s)' : '';
                     document.getElementById('ignored-count').textContent = result.ignored_count > 0 ? result.ignored_count + ' ignored' : '';
                     summaryDiv.style.display = 'flex';
                 }

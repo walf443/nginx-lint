@@ -77,7 +77,7 @@ fn test_minimal_config() {
     let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
-    // Should have no errors (info-level rules like gzip-not-enabled and missing-error-log
+    // Should have no errors (gzip-not-enabled and missing-error-log
     // are disabled by default)
     let error_count = errors
         .iter()
@@ -113,7 +113,7 @@ fn test_with_include_config() {
     let linter = get_default_linter();
     let errors = linter.lint(&config, &path);
 
-    // Main config has gzip and error_log, so no info messages for those
+    // Main config has gzip and error_log, so no warnings for those
     // But includes are not resolved, so we just check it parses
     let error_count = errors
         .iter()
@@ -484,16 +484,10 @@ fn test_severity_counts() {
         .iter()
         .filter(|e| e.severity == Severity::Warning)
         .count();
-    let info_count = errors
-        .iter()
-        .filter(|e| e.severity == Severity::Info)
-        .count();
-
     assert_eq!(error_count, 0, "Expected 0 errors");
     assert_eq!(warning_count, 4, "Expected 4 warnings");
     // Note: gzip-not-enabled and missing-error-log are disabled by default
     // Warnings: server-tokens-enabled x2, root-in-location x2
-    assert_eq!(info_count, 0, "Expected 0 infos");
 }
 
 #[test]
@@ -749,7 +743,6 @@ fn test_config_validate_valid() {
 ui = "auto"
 error = "red"
 warning = "yellow"
-info = "blue"
 
 [rules.weak-ssl-ciphers]
 enabled = true
