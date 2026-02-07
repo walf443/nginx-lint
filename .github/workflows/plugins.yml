@@ -1,0 +1,46 @@
+name: Plugins
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "plugins/**"
+      - "crates/**"
+      - "Cargo.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "plugins/**"
+      - "crates/**"
+      - "Cargo.toml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-plugins:
+    name: Build WASM Plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: make build-plugins
+
+  test-plugins:
+    name: Test Plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test all plugins
+        run: |
+          for dir in plugins/builtin/*/*/; do
+            if [ -f "$dir/Cargo.toml" ]; then
+              echo "Testing $(basename $dir)..."
+              (cd "$dir" && cargo test)
+            fi
+          done
