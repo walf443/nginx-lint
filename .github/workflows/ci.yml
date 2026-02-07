@@ -21,8 +21,11 @@ jobs:
       - run: cargo fmt --check
 
   build-plugins:
-    name: Build Plugins
+    name: Build Plugins (${{ matrix.chunk }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [0, 1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,8 +33,51 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "plugins"
-      - run: make -j4 collect-plugins
+          shared-key: "plugins-${{ matrix.chunk }}"
+      - name: Build plugin chunk
+        run: |
+          plugins=(plugins/builtin/*/*/)
+          total=${#plugins[@]}
+          chunks=3
+          chunk=${{ matrix.chunk }}
+          per_chunk=$(( (total + chunks - 1) / chunks ))
+          start=$(( chunk * per_chunk ))
+          end=$(( start + per_chunk ))
+          if [ $end -gt $total ]; then end=$total; fi
+
+          mkdir -p target/builtin-plugins
+          for (( i=start; i<end; i++ )); do
+            dir="${plugins[$i]}"
+            if [ -f "$dir/Cargo.toml" ]; then
+              name=$(basename "$dir")
+              echo "Building $name..."
+              cargo build --manifest-path "$dir/Cargo.toml" \
+                --target wasm32-unknown-unknown \
+                --target-dir "$dir/target" \
+                --release
+              wasm_file="$dir/target/wasm32-unknown-unknown/release/$(echo $name | tr '-' '_')_plugin.wasm"
+              if [ -f "$wasm_file" ]; then
+                cp "$wasm_file" "target/builtin-plugins/${name}.wasm"
+                echo "  Collected ${name}.wasm"
+              fi
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins-${{ matrix.chunk }}
+          path: target/builtin-plugins/
+          retention-days: 1
+
+  merge-plugins:
+    name: Merge Plugins
+    needs: build-plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: builtin-plugins-*
+          path: target/builtin-plugins/
+          merge-multiple: true
       - uses: actions/upload-artifact@v4
         with:
           name: builtin-plugins
@@ -40,7 +86,7 @@ jobs:
 
   clippy:
     name: Clippy
-    needs: build-plugins
+    needs: merge-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -57,7 +103,7 @@ jobs:
 
   test:
     name: Test
-    needs: build-plugins
+    needs: merge-plugins
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
