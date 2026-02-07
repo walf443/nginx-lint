@@ -78,6 +78,9 @@ mod embedded {
     /// ssl-on-deprecated plugin
     pub const SSL_ON_DEPRECATED: &[u8] =
         include_bytes!("../../target/builtin-plugins/ssl_on_deprecated.wasm");
+    /// listen-http2-deprecated plugin
+    pub const LISTEN_HTTP2_DEPRECATED: &[u8] =
+        include_bytes!("../../target/builtin-plugins/listen_http2_deprecated.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -105,6 +108,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "invalid-directive-context",
     "map-missing-default",
     "ssl-on-deprecated",
+    "listen-http2-deprecated",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -376,6 +380,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:ssl-on-deprecated"),
         embedded::SSL_ON_DEPRECATED,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load listen-http2-deprecated
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:listen-http2-deprecated"),
+        embedded::LISTEN_HTTP2_DEPRECATED,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
