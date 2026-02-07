@@ -27,7 +27,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make build-plugins
+      - run: make -j4 build-plugins
 
   test-plugins:
     name: Test Plugins

@@ -30,7 +30,7 @@ jobs:
           components: clippy
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make collect-plugins
+      - run: make -j4 collect-plugins
       - run: cargo clippy -- -D warnings
 
   test:
@@ -42,5 +42,5 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - run: make collect-plugins
+      - run: make -j4 collect-plugins
       - run: cargo test
