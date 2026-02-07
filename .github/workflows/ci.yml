@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [0, 1, 2, 3, 4, 5, 6, 7]
+        chunk: [0, 1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -40,7 +40,7 @@ jobs:
         run: |
           plugins=(plugins/builtin/*/*/)
           total=${#plugins[@]}
-          chunks=8
+          chunks=6
           chunk=${{ matrix.chunk }}
           per_chunk=$(( (total + chunks - 1) / chunks ))
           start=$(( chunk * per_chunk ))
@@ -69,6 +69,7 @@ jobs:
           name: builtin-plugins-${{ matrix.chunk }}
           path: target/builtin-plugins/
           retention-days: 1
+          if-no-files-found: ignore
 
   merge-plugins:
     name: Merge Plugins
