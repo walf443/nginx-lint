@@ -58,17 +58,26 @@ pub fn pre_parse_checks_with_config(
     path: &Path,
     lint_config: Option<&LintConfig>,
 ) -> Vec<LintError> {
-    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
-    use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
 
+    pre_parse_checks_from_content(&content, lint_config)
+}
+
+/// Run pre-parse checks on string content with optional LintConfig
+#[cfg(feature = "cli")]
+pub fn pre_parse_checks_from_content(
+    content: &str,
+    lint_config: Option<&LintConfig>,
+) -> Vec<LintError> {
+    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
+    use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
+
     // Build ignore tracker from content without rule name validation
     // (rule name validation is done later in lint_with_content when all plugins are loaded)
-    let (mut tracker, warnings) = IgnoreTracker::from_content(&content);
+    let (mut tracker, warnings) = IgnoreTracker::from_content(content);
 
     let additional_block_directives: Vec<String> = lint_config
         .map(|c| c.additional_block_directives().to_vec())
@@ -78,15 +87,15 @@ pub fn pre_parse_checks_with_config(
 
     // Check for unmatched braces
     let brace_rule = UnmatchedBraces;
-    errors.extend(brace_rule.check_content_with_extras(&content, &additional_block_directives));
+    errors.extend(brace_rule.check_content_with_extras(content, &additional_block_directives));
 
     // Check for unclosed quotes
     let quote_rule = UnclosedQuote;
-    errors.extend(quote_rule.check_content(&content));
+    errors.extend(quote_rule.check_content(content));
 
     // Check for missing semicolons
     let semicolon_rule = MissingSemicolon;
-    errors.extend(semicolon_rule.check_content_with_extras(&content, &additional_block_directives));
+    errors.extend(semicolon_rule.check_content_with_extras(content, &additional_block_directives));
 
     // Filter ignored errors
     let result = filter_errors(errors, &mut tracker);

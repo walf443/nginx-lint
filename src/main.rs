@@ -4,13 +4,15 @@ use colored::control;
 use nginx_lint::linter::LintRule;
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, OutputFormat, Reporter, RuleProfile,
-    Severity, apply_fixes, collect_included_files, collect_included_files_with_context,
-    parse_config, pre_parse_checks_with_config,
+    Severity, apply_fixes, apply_fixes_to_content, collect_included_files,
+    collect_included_files_with_context, parse_config, parse_string, pre_parse_checks_from_content,
+    pre_parse_checks_with_config,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
@@ -357,7 +359,158 @@ fn lint_file(
     }
 }
 
+/// Check if the CLI arguments indicate stdin mode (single "-" argument)
+fn is_stdin_mode(files: &[PathBuf]) -> bool {
+    files.len() == 1 && files[0].as_os_str() == "-"
+}
+
+/// Lint content from stdin
+fn run_lint_stdin(cli: &Cli) -> ExitCode {
+    let mut content = String::new();
+    if let Err(e) = std::io::stdin().read_to_string(&mut content) {
+        eprintln!("Error reading from stdin: {}", e);
+        return ExitCode::from(2);
+    }
+
+    // Load configuration
+    let lint_config = if let Some(config_path) = &cli.config {
+        match LintConfig::from_file(config_path) {
+            Ok(cfg) => Some(cfg),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        LintConfig::find_and_load(Path::new("."))
+    };
+
+    // Configure color output
+    if cli.color {
+        control::set_override(true);
+    } else if cli.no_color {
+        control::set_override(false);
+    } else if let Some(ref config) = lint_config {
+        match config.color_mode() {
+            ColorMode::Always => control::set_override(true),
+            ColorMode::Never => control::set_override(false),
+            ColorMode::Auto => {}
+        }
+    }
+
+    let color_config = lint_config
+        .as_ref()
+        .map(|c| c.color.clone())
+        .unwrap_or_default();
+    let reporter = Reporter::with_colors(cli.format.into(), color_config);
+
+    let stdin_path = Path::new("<stdin>");
+
+    // Parse context option
+    let initial_context: Vec<String> = cli
+        .context
+        .as_ref()
+        .map(|s| s.split(',').map(|c| c.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    // Run pre-parse checks on the content
+    let pre_parse_errors = pre_parse_checks_from_content(&content, lint_config.as_ref());
+
+    if pre_parse_errors
+        .iter()
+        .any(|e| e.severity == Severity::Error)
+    {
+        if cli.fix {
+            let fixes: Vec<_> = pre_parse_errors
+                .iter()
+                .flat_map(|e| e.fixes.iter())
+                .collect();
+            let (fixed_content, count) = apply_fixes_to_content(&content, &fixes);
+            if count > 0 {
+                print!("{}", fixed_content);
+            } else {
+                reporter.report(&pre_parse_errors, stdin_path, 0);
+            }
+        } else {
+            reporter.report(&pre_parse_errors, stdin_path, 0);
+        }
+        return ExitCode::from(1);
+    }
+
+    // Parse the content
+    let mut parse_result = match parse_string(&content) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Error parsing stdin: {}", e);
+            return ExitCode::from(1);
+        }
+    };
+
+    // Set context if specified (same approach as collect_included_files_with_context)
+    if !initial_context.is_empty() {
+        parse_result.include_context = initial_context;
+    }
+
+    // Lint the parsed config
+    #[allow(unused_mut)]
+    let mut linter = Linter::with_config(lint_config.as_ref());
+
+    #[cfg(feature = "plugins")]
+    if let Some(ref plugins_dir) = cli.plugins {
+        use nginx_lint::plugin::PluginLoader;
+        match PluginLoader::new() {
+            Ok(loader) => match loader.load_plugins(plugins_dir) {
+                Ok(plugins) => {
+                    for plugin in plugins {
+                        linter.add_rule(Box::new(plugin));
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error loading plugins: {}", e);
+                    return ExitCode::from(2);
+                }
+            },
+            Err(e) => {
+                eprintln!("Error initializing plugin loader: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    let (errors, ignored_count) = linter.lint_with_content(&parse_result, stdin_path, &content);
+
+    if cli.fix {
+        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+        let (fixed_content, count) = apply_fixes_to_content(&content, &fixes);
+        if count > 0 {
+            print!("{}", fixed_content);
+        } else {
+            // No fixes to apply, output original content
+            print!("{}", content);
+        }
+    } else {
+        reporter.report(&errors, stdin_path, ignored_count);
+    }
+
+    let has_issues = if cli.no_fail_on_warnings {
+        errors.iter().any(|e| e.severity == Severity::Error)
+    } else {
+        !errors.is_empty()
+    };
+
+    if has_issues {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
 fn run_lint(cli: Cli) -> ExitCode {
+    // Handle stdin mode
+    if is_stdin_mode(&cli.files) {
+        return run_lint_stdin(&cli);
+    }
+
     if cli.files.is_empty() {
         let _ = Cli::command().print_help();
         eprintln!();
