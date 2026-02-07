@@ -2,7 +2,7 @@ FROM rust:1-bookworm AS builder
 RUN rustup target add wasm32-unknown-unknown
 WORKDIR /app
 COPY . .
-RUN make -j$(nproc) build-plugins
+RUN make -j"$(nproc)" build-plugins
 RUN make build
 
 FROM debian:bookworm-slim
