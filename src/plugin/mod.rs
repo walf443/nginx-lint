@@ -3,10 +3,10 @@
 //! This module provides support for loading and executing custom lint rules
 //! implemented as WebAssembly modules.
 
+pub mod builtin;
 mod error;
 mod loader;
 mod wasm_rule;
-pub mod builtin;
 
 pub use error::PluginError;
 pub use loader::PluginLoader;

@@ -61,11 +61,7 @@ impl PluginLoader {
 
     /// Get the fuel limit for CPU metering
     pub fn fuel_limit(&self) -> u64 {
-        if self.fuel_enabled {
-            FUEL_LIMIT
-        } else {
-            0
-        }
+        if self.fuel_enabled { FUEL_LIMIT } else { 0 }
     }
 
     /// Check if fuel metering is enabled

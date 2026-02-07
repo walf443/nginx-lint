@@ -110,9 +110,9 @@ impl IgnoreTracker {
                     let mut target_idx = line_idx + 1;
                     while target_idx < lines.len() {
                         // Check if this line is also a ignore comment
-                        let is_ignore_comment = parsed_comments
-                            .iter()
-                            .any(|(idx, r)| *idx == target_idx && matches!(r, Ok(p) if !p.is_inline));
+                        let is_ignore_comment = parsed_comments.iter().any(|(idx, r)| {
+                            *idx == target_idx && matches!(r, Ok(p) if !p.is_inline)
+                        });
                         if !is_ignore_comment {
                             break;
                         }
@@ -121,17 +121,17 @@ impl IgnoreTracker {
                     let actual_target_line = target_idx + 1; // Convert to 1-indexed
 
                     // Check if rule name is valid
-                    if let Some(valid) = valid_rules {
-                        if !valid.contains(&parsed.rule_name) {
-                            warnings.push(IgnoreWarning {
-                                line: parsed.comment_line,
-                                message: format!(
-                                    "unknown rule '{}' in nginx-lint:ignore comment",
-                                    parsed.rule_name
-                                ),
-                                fixes: Vec::new(),
-                            });
-                        }
+                    if let Some(valid) = valid_rules
+                        && !valid.contains(&parsed.rule_name)
+                    {
+                        warnings.push(IgnoreWarning {
+                            line: parsed.comment_line,
+                            message: format!(
+                                "unknown rule '{}' in nginx-lint:ignore comment",
+                                parsed.rule_name
+                            ),
+                            fixes: Vec::new(),
+                        });
                     }
 
                     tracker
@@ -151,17 +151,17 @@ impl IgnoreTracker {
                 }
                 Ok(parsed) => {
                     // Inline comment - targets current line
-                    if let Some(valid) = valid_rules {
-                        if !valid.contains(&parsed.rule_name) {
-                            warnings.push(IgnoreWarning {
-                                line: parsed.comment_line,
-                                message: format!(
-                                    "unknown rule '{}' in nginx-lint:ignore comment",
-                                    parsed.rule_name
-                                ),
-                                fixes: Vec::new(),
-                            });
-                        }
+                    if let Some(valid) = valid_rules
+                        && !valid.contains(&parsed.rule_name)
+                    {
+                        warnings.push(IgnoreWarning {
+                            line: parsed.comment_line,
+                            message: format!(
+                                "unknown rule '{}' in nginx-lint:ignore comment",
+                                parsed.rule_name
+                            ),
+                            fixes: Vec::new(),
+                        });
                     }
 
                     tracker
@@ -307,10 +307,7 @@ fn parse_ignore_comment(
     if parts.len() < 2 || parts[1].trim().is_empty() {
         return Some(Err(IgnoreWarning {
             line: line_number,
-            message: format!(
-                "nginx-lint:ignore {} requires a reason",
-                rule_name
-            ),
+            message: format!("nginx-lint:ignore {} requires a reason", rule_name),
             fixes: Vec::new(),
         }));
     }
@@ -475,10 +472,8 @@ mod tests {
 
     #[test]
     fn test_parse_ignore_comment_with_japanese_reason() {
-        let result = parse_ignore_comment(
-            "# nginx-lint:ignore server-tokens-enabled 開発環境用",
-            5,
-        );
+        let result =
+            parse_ignore_comment("# nginx-lint:ignore server-tokens-enabled 開発環境用", 5);
         assert!(result.is_some());
         let parsed = result.unwrap().unwrap();
         assert_eq!(parsed.rule_name, "server-tokens-enabled");
@@ -494,9 +489,11 @@ mod tests {
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
-        assert!(warning
-            .message
-            .contains("nginx-lint:ignore requires a rule name"));
+        assert!(
+            warning
+                .message
+                .contains("nginx-lint:ignore requires a rule name")
+        );
     }
 
     #[test]
@@ -505,9 +502,11 @@ mod tests {
         assert!(result.is_some());
         let warning = result.unwrap().unwrap_err();
         assert_eq!(warning.line, 5);
-        assert!(warning
-            .message
-            .contains("nginx-lint:ignore server-tokens-enabled requires a reason"));
+        assert!(
+            warning
+                .message
+                .contains("nginx-lint:ignore server-tokens-enabled requires a reason")
+        );
     }
 
     #[test]
@@ -583,10 +582,12 @@ server_tokens on;
         assert_eq!(result.errors.len(), 2);
         assert_eq!(result.ignored_count, 1);
         // Line 5 server-tokens-enabled should be filtered out
-        assert!(result
-            .errors
-            .iter()
-            .all(|e| !(e.rule == "server-tokens-enabled" && e.line == Some(5))));
+        assert!(
+            result
+                .errors
+                .iter()
+                .all(|e| !(e.rule == "server-tokens-enabled" && e.line == Some(5)))
+        );
         // The used directive should have no unused warnings for that rule
         assert!(result.unused_warnings.is_empty());
     }
@@ -703,7 +704,10 @@ server_tokens on;
         assert_eq!(parsed.target_line, 5); // Same line (inline)
         assert_eq!(parsed.comment_line, 5);
         assert!(parsed.is_inline);
-        assert_eq!(parsed.content_before_comment, Some("server_tokens on;".to_string()));
+        assert_eq!(
+            parsed.content_before_comment,
+            Some("server_tokens on;".to_string())
+        );
     }
 
     #[test]
@@ -718,7 +722,10 @@ server_tokens on;
         assert_eq!(parsed.target_line, 5); // Same line (inline)
         assert_eq!(parsed.comment_line, 5);
         assert!(parsed.is_inline);
-        assert_eq!(parsed.content_before_comment, Some("server_tokens on;".to_string()));
+        assert_eq!(
+            parsed.content_before_comment,
+            Some("server_tokens on;".to_string())
+        );
     }
 
     #[test]
@@ -771,7 +778,11 @@ server_tokens on;
             .collect();
         let (_, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].message.contains("unknown rule 'unknown-rule-name'"));
+        assert!(
+            warnings[0]
+                .message
+                .contains("unknown rule 'unknown-rule-name'")
+        );
     }
 
     #[test]
@@ -788,8 +799,16 @@ server_tokens off;
 
         // Should have unused warning
         assert_eq!(result.unused_warnings.len(), 1);
-        assert!(result.unused_warnings[0].message.contains("unused nginx-lint:ignore"));
-        assert!(result.unused_warnings[0].message.contains("server-tokens-enabled"));
+        assert!(
+            result.unused_warnings[0]
+                .message
+                .contains("unused nginx-lint:ignore")
+        );
+        assert!(
+            result.unused_warnings[0]
+                .message
+                .contains("server-tokens-enabled")
+        );
     }
 
     #[test]
@@ -801,13 +820,15 @@ server_tokens on;
         let (mut tracker, _) = IgnoreTracker::from_content(content);
 
         // Create an error that will be filtered
-        let errors = vec![LintError::new(
-            "server-tokens-enabled",
-            "security",
-            "test error",
-            Severity::Warning,
-        )
-        .with_location(3, 1)];
+        let errors = vec![
+            LintError::new(
+                "server-tokens-enabled",
+                "security",
+                "test error",
+                Severity::Warning,
+            )
+            .with_location(3, 1),
+        ];
 
         let result = filter_errors(errors, &mut tracker);
 
@@ -866,14 +887,20 @@ server_tokens off; # nginx-lint:ignore server-tokens-enabled reason
     fn test_parse_context_comment_multiple() {
         let content = "# nginx-lint:context http,server\nlocation / { }";
         let context = parse_context_comment(content);
-        assert_eq!(context, Some(vec!["http".to_string(), "server".to_string()]));
+        assert_eq!(
+            context,
+            Some(vec!["http".to_string(), "server".to_string()])
+        );
     }
 
     #[test]
     fn test_parse_context_comment_with_spaces() {
         let content = "# nginx-lint:context http, server\nlocation / { }";
         let context = parse_context_comment(content);
-        assert_eq!(context, Some(vec!["http".to_string(), "server".to_string()]));
+        assert_eq!(
+            context,
+            Some(vec!["http".to_string(), "server".to_string()])
+        );
     }
 
     #[test]

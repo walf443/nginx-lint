@@ -23,12 +23,17 @@ fn main() {
     let wasm_path = Path::new(&manifest_dir).join("web/pkg/nginx_lint_bg.wasm");
 
     // Check if WASM already exists and has a reasonable size (> 10KB means it's not a stub)
-    if let Ok(metadata) = wasm_path.metadata() {
-        if metadata.len() > 10_000 {
-            eprintln!("WASM file already exists ({}KB), skipping build", metadata.len() / 1024);
-            eprintln!("To rebuild, run: wasm-pack build --target web --out-dir web/pkg --features wasm");
-            return;
-        }
+    if let Ok(metadata) = wasm_path.metadata()
+        && metadata.len() > 10_000
+    {
+        eprintln!(
+            "WASM file already exists ({}KB), skipping build",
+            metadata.len() / 1024
+        );
+        eprintln!(
+            "To rebuild, run: wasm-pack build --target web --out-dir web/pkg --features wasm"
+        );
+        return;
     }
 
     // Check if wasm-pack is available

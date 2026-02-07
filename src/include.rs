@@ -61,7 +61,13 @@ where
     let mut visited: HashSet<PathBuf> = HashSet::new();
     let mut result: Vec<IncludedFile> = Vec::new();
 
-    collect_recursive(root_path, &mut visited, &mut result, parse_fn, initial_context);
+    collect_recursive(
+        root_path,
+        &mut visited,
+        &mut result,
+        parse_fn,
+        initial_context,
+    );
 
     result
 }
@@ -170,12 +176,12 @@ fn find_includes_recursive(
 
     for item in items {
         if let ConfigItem::Directive(directive) = item {
-            if directive.is("include") {
-                if let Some(pattern) = directive.first_arg() {
-                    let resolved = resolve_include_pattern(pattern, parent_dir);
-                    for path in resolved {
-                        results.push((path, context.to_vec()));
-                    }
+            if directive.is("include")
+                && let Some(pattern) = directive.first_arg()
+            {
+                let resolved = resolve_include_pattern(pattern, parent_dir);
+                for path in resolved {
+                    results.push((path, context.to_vec()));
                 }
             }
 

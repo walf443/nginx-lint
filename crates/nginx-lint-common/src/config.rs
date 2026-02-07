@@ -5,18 +5,13 @@ use std::fs;
 use std::path::Path;
 
 /// Indent size configuration: either a fixed number or "auto" for auto-detection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IndentSize {
     /// Auto-detect indent size from the first indented line
+    #[default]
     Auto,
     /// Fixed indent size (number of spaces)
     Fixed(usize),
-}
-
-impl Default for IndentSize {
-    fn default() -> Self {
-        IndentSize::Auto
-    }
 }
 
 impl fmt::Display for IndentSize {
@@ -398,7 +393,7 @@ impl LintConfig {
     }
 
     /// Parse configuration from a TOML string
-    pub fn from_str(content: &str) -> Result<Self, String> {
+    pub fn parse(content: &str) -> Result<Self, String> {
         toml::from_str(content).map_err(|e| e.to_string())
     }
 
@@ -422,8 +417,8 @@ impl LintConfig {
 
     /// Rules that are disabled by default
     pub const DISABLED_BY_DEFAULT: &'static [&'static str] = &[
-        "gzip-not-enabled",   // gzip is not always appropriate (CDN, CPU constraints, security)
-        "missing-error-log",  // error_log is typically set at top level in main config
+        "gzip-not-enabled", // gzip is not always appropriate (CDN, CPU constraints, security)
+        "missing-error-log", // error_log is typically set at top level in main config
     ];
 
     /// Check if a rule is enabled
@@ -468,11 +463,10 @@ impl LintConfig {
 
     /// Validate configuration content and return any errors
     fn validate_content(content: &str, path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
-        let value: toml::Value =
-            toml::from_str(content).map_err(|e| ConfigError::ParseError {
-                path: path.to_path_buf(),
-                source: e,
-            })?;
+        let value: toml::Value = toml::from_str(content).map_err(|e| ConfigError::ParseError {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
 
         let mut errors = Vec::new();
 
@@ -510,8 +504,7 @@ impl LintConfig {
 
             // Validate [parser] section
             if let Some(toml::Value::Table(parser)) = root.get("parser") {
-                let known_parser_keys: HashSet<&str> =
-                    ["block_directives"].into_iter().collect();
+                let known_parser_keys: HashSet<&str> = ["block_directives"].into_iter().collect();
 
                 for key in parser.keys() {
                     if !known_parser_keys.contains(key.as_str()) {
@@ -629,9 +622,7 @@ fn find_key_line(content: &str, section: Option<&str>, key: &str) -> Option<usiz
         }
 
         // Check for key = value within the section
-        if in_section
-            && let Some((k, _)) = trimmed.split_once('=')
-        {
+        if in_section && let Some((k, _)) = trimmed.split_once('=') {
             let k = k.trim();
             if k == key {
                 return Some(i + 1);
@@ -803,10 +794,20 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigError::IoError { path, source } => {
-                write!(f, "Failed to read config file '{}': {}", path.display(), source)
+                write!(
+                    f,
+                    "Failed to read config file '{}': {}",
+                    path.display(),
+                    source
+                )
             }
             ConfigError::ParseError { path, source } => {
-                write!(f, "Failed to parse config file '{}': {}", path.display(), source)
+                write!(
+                    f,
+                    "Failed to parse config file '{}': {}",
+                    path.display(),
+                    source
+                )
             }
         }
     }

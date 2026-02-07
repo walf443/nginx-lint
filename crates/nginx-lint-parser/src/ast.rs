@@ -131,8 +131,8 @@ pub struct Directive {
     pub name_span: Span,
     pub args: Vec<Argument>,
     pub block: Option<Block>,
-    pub span: Span,                         // Entire directive range
-    pub trailing_comment: Option<Comment>,  // Comment at end of line
+    pub span: Span,                        // Entire directive range
+    pub trailing_comment: Option<Comment>, // Comment at end of line
     /// Leading whitespace before the directive name (for indentation checking)
     #[serde(default)]
     pub leading_whitespace: String,
@@ -370,39 +370,37 @@ mod tests {
                     name_span: Span::default(),
                     args: vec![],
                     block: Some(Block {
-                        items: vec![
-                            ConfigItem::Directive(Box::new(Directive {
-                                name: "server".to_string(),
-                                name_span: Span::default(),
-                                args: vec![],
-                                block: Some(Block {
-                                    items: vec![ConfigItem::Directive(Box::new(Directive {
-                                        name: "listen".to_string(),
-                                        name_span: Span::default(),
-                                        args: vec![Argument {
-                                            value: ArgumentValue::Literal("80".to_string()),
-                                            span: Span::default(),
-                                            raw: "80".to_string(),
-                                        }],
-                                        block: None,
+                        items: vec![ConfigItem::Directive(Box::new(Directive {
+                            name: "server".to_string(),
+                            name_span: Span::default(),
+                            args: vec![],
+                            block: Some(Block {
+                                items: vec![ConfigItem::Directive(Box::new(Directive {
+                                    name: "listen".to_string(),
+                                    name_span: Span::default(),
+                                    args: vec![Argument {
+                                        value: ArgumentValue::Literal("80".to_string()),
                                         span: Span::default(),
-                                        trailing_comment: None,
-                                        leading_whitespace: String::new(),
-                                        space_before_terminator: String::new(),
-                                        trailing_whitespace: String::new(),
-                                    }))],
+                                        raw: "80".to_string(),
+                                    }],
+                                    block: None,
                                     span: Span::default(),
-                                    raw_content: None,
-                                    closing_brace_leading_whitespace: String::new(),
+                                    trailing_comment: None,
+                                    leading_whitespace: String::new(),
+                                    space_before_terminator: String::new(),
                                     trailing_whitespace: String::new(),
-                                }),
+                                }))],
                                 span: Span::default(),
-                                trailing_comment: None,
-                                leading_whitespace: String::new(),
-                                space_before_terminator: String::new(),
+                                raw_content: None,
+                                closing_brace_leading_whitespace: String::new(),
                                 trailing_whitespace: String::new(),
-                            })),
-                        ],
+                            }),
+                            span: Span::default(),
+                            trailing_comment: None,
+                            leading_whitespace: String::new(),
+                            space_before_terminator: String::new(),
+                            trailing_whitespace: String::new(),
+                        }))],
                         span: Span::default(),
                         raw_content: None,
                         closing_brace_leading_whitespace: String::new(),

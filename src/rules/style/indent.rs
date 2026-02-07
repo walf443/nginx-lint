@@ -295,6 +295,7 @@ fn track_multiline_string(
 }
 
 /// Check indentation for a single line
+#[allow(clippy::too_many_arguments)]
 fn check_line_indentation(
     errors: &mut Vec<LintError>,
     rule_name: &'static str,
@@ -314,7 +315,11 @@ fn check_line_indentation(
     if line.starts_with('\t') {
         let correct_indent = " ".repeat(expected_spaces);
         // Use range-based fix to replace only the leading whitespace
-        let fix = Fix::replace_range(line_start_offset, line_start_offset + leading_spaces, &correct_indent);
+        let fix = Fix::replace_range(
+            line_start_offset,
+            line_start_offset + leading_spaces,
+            &correct_indent,
+        );
         errors.push(
             LintError::new(
                 rule_name,
@@ -336,7 +341,11 @@ fn check_line_indentation(
         );
         let correct_indent = " ".repeat(expected_spaces);
         // Use range-based fix to replace only the leading whitespace
-        let fix = Fix::replace_range(line_start_offset, line_start_offset + leading_spaces, &correct_indent);
+        let fix = Fix::replace_range(
+            line_start_offset,
+            line_start_offset + leading_spaces,
+            &correct_indent,
+        );
         errors.push(
             LintError::new(rule_name, category, &message, Severity::Warning)
                 .with_location(line_number, 1)
@@ -484,7 +493,11 @@ local x = 1
         let rule = Indent::auto();
         let errors = rule.check_content(content);
         // With auto-detection, this should have no errors (detected as 4-space indent)
-        assert!(errors.is_empty(), "Expected no errors with auto-detection, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors with auto-detection, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -498,7 +511,11 @@ local x = 1
 "#;
         let rule = Indent::auto();
         let errors = rule.check_content(content);
-        assert!(errors.is_empty(), "Expected no errors with auto-detection, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors with auto-detection, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -526,6 +543,9 @@ local x = 1
 "#;
         let rule = Indent::with_size(4);
         let errors = rule.check_content(content);
-        assert!(!errors.is_empty(), "Expected errors with mismatched indent size");
+        assert!(
+            !errors.is_empty(),
+            "Expected errors with mismatched indent size"
+        );
     }
 }

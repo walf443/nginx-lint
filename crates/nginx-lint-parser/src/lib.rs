@@ -8,7 +8,10 @@ pub mod ast;
 pub mod error;
 pub mod lexer;
 
-use ast::{Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Position, Span};
+use ast::{
+    Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Position,
+    Span,
+};
 use error::{ParseError, ParseResult};
 use lexer::{Lexer, Token, TokenKind};
 use std::fs;
@@ -136,14 +139,30 @@ impl Parser {
 
         // Get directive name (can be identifier, argument, or quoted string for map blocks)
         let (name, name_span, name_raw) = match &self.current().kind {
-            TokenKind::Ident(name) => (name.clone(), self.current().span, self.current().raw.clone()),
-            TokenKind::Argument(name) => (name.clone(), self.current().span, self.current().raw.clone()),
-            TokenKind::SingleQuotedString(name) => (name.clone(), self.current().span, self.current().raw.clone()),
-            TokenKind::DoubleQuotedString(name) => (name.clone(), self.current().span, self.current().raw.clone()),
+            TokenKind::Ident(name) => (
+                name.clone(),
+                self.current().span,
+                self.current().raw.clone(),
+            ),
+            TokenKind::Argument(name) => (
+                name.clone(),
+                self.current().span,
+                self.current().raw.clone(),
+            ),
+            TokenKind::SingleQuotedString(name) => (
+                name.clone(),
+                self.current().span,
+                self.current().raw.clone(),
+            ),
+            TokenKind::DoubleQuotedString(name) => (
+                name.clone(),
+                self.current().span,
+                self.current().raw.clone(),
+            ),
             _ => {
                 return Err(ParseError::ExpectedDirectiveName {
                     position: self.current().span.start,
-                })
+                });
             }
         };
         let _ = name_raw; // Used for potential future raw reconstruction
@@ -177,10 +196,10 @@ impl Parser {
                         });
                         self.advance();
                         // Capture comment's trailing whitespace from next newline token
-                        if let TokenKind::Newline = &self.current().kind {
-                            if let Some(ref mut tc) = trailing_comment {
-                                tc.trailing_whitespace = self.current().leading_whitespace.clone();
-                            }
+                        if let TokenKind::Newline = &self.current().kind
+                            && let Some(ref mut tc) = trailing_comment
+                        {
+                            tc.trailing_whitespace = self.current().leading_whitespace.clone();
                         }
                     } else if let TokenKind::Newline = &self.current().kind {
                         trailing_whitespace = self.current().leading_whitespace.clone();
@@ -258,7 +277,8 @@ impl Parser {
                             position: block_start,
                         });
                     }
-                    let closing_brace_leading_whitespace = self.current().leading_whitespace.clone();
+                    let closing_brace_leading_whitespace =
+                        self.current().leading_whitespace.clone();
                     let block_end = self.current().span.end;
                     self.advance();
 
@@ -275,10 +295,10 @@ impl Parser {
                         });
                         self.advance();
                         // Capture comment's trailing whitespace
-                        if let TokenKind::Newline = &self.current().kind {
-                            if let Some(ref mut tc) = trailing_comment {
-                                tc.trailing_whitespace = self.current().leading_whitespace.clone();
-                            }
+                        if let TokenKind::Newline = &self.current().kind
+                            && let Some(ref mut tc) = trailing_comment
+                        {
+                            tc.trailing_whitespace = self.current().leading_whitespace.clone();
                         }
                     } else if let TokenKind::Newline = &self.current().kind {
                         block_trailing_whitespace = self.current().leading_whitespace.clone();
@@ -353,10 +373,10 @@ impl Parser {
                     });
                     self.advance();
                     // Capture trailing whitespace
-                    if let TokenKind::Newline = &self.current().kind {
-                        if let Some(ref mut tc) = trailing_comment {
-                            tc.trailing_whitespace = self.current().leading_whitespace.clone();
-                        }
+                    if let TokenKind::Newline = &self.current().kind
+                        && let Some(ref mut tc) = trailing_comment
+                    {
+                        tc.trailing_whitespace = self.current().leading_whitespace.clone();
                     }
                     // Skip to next line
                     self.skip_newlines();
@@ -682,8 +702,7 @@ http {
 
     #[test]
     fn test_gzip_types() {
-        let config =
-            parse_string("gzip_types text/plain text/css application/json;").unwrap();
+        let config = parse_string("gzip_types text/plain text/css application/json;").unwrap();
         let directive = config.directives().next().unwrap();
         assert_eq!(directive.name, "gzip_types");
         assert_eq!(directive.args.len(), 3);
@@ -1117,7 +1136,10 @@ http {
         .unwrap();
 
         let all: Vec<_> = config.all_directives().collect();
-        let proxy_headers: Vec<_> = all.iter().filter(|d| d.name == "proxy_set_header").collect();
+        let proxy_headers: Vec<_> = all
+            .iter()
+            .filter(|d| d.name == "proxy_set_header")
+            .collect();
         assert_eq!(proxy_headers.len(), 3);
     }
 
@@ -1167,7 +1189,8 @@ http {
 
     #[test]
     fn test_blank_lines_preserved() {
-        let config = parse_string("worker_processes 1;\n\nerror_log /var/log/error.log;\n").unwrap();
+        let config =
+            parse_string("worker_processes 1;\n\nerror_log /var/log/error.log;\n").unwrap();
 
         // Should have 3 items: directive, blank line, directive
         assert_eq!(config.items.len(), 3);

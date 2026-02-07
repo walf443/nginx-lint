@@ -138,9 +138,8 @@ pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
     }
 
     // Get or create the loader (use trusted mode for builtin plugins - no fuel metering)
-    let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
-        PluginLoader::new_trusted().expect("Failed to create PluginLoader")
-    });
+    let loader = PLUGIN_LOADER_CACHE
+        .get_or_init(|| PluginLoader::new_trusted().expect("Failed to create PluginLoader"));
 
     // Compile plugins
     let plugins = compile_builtin_plugins(loader)?;

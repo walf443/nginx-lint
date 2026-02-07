@@ -1,6 +1,6 @@
 // Re-export core types from nginx-lint-common
-pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::config::LintConfig;
+pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
 use rayon::prelude::*;
@@ -52,12 +52,12 @@ impl Linter {
         let use_native_invalid_directive_context = true;
 
         if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
-            let rule = if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned()
-            {
-                InvalidDirectiveContext::with_additional_contexts(additional)
-            } else {
-                InvalidDirectiveContext::new()
-            };
+            let rule =
+                if let Some(additional) = config.and_then(|c| c.additional_contexts()).cloned() {
+                    InvalidDirectiveContext::with_additional_contexts(additional)
+                } else {
+                    InvalidDirectiveContext::new()
+                };
             linter.add_rule(Box::new(rule));
         }
 
@@ -158,10 +158,11 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
         let valid_rules = self.rule_names();
-        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) =
+            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -178,10 +179,11 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
         let valid_rules = self.rule_names();
-        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) =
+            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -236,10 +238,11 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize, Vec<RuleProfile>) {
-        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
         let valid_rules = self.rule_names();
-        let (mut tracker, warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) =
+            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
         let (errors, profiles) = self.lint_with_profile(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;

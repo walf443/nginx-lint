@@ -36,8 +36,8 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Run the plugin check on a config string
     pub fn check_string(&self, content: &str) -> Result<Vec<LintError>, String> {
-        let config: Config =
-            nginx_lint_common::parse_string(content).map_err(|e| format!("Failed to parse config: {}", e))?;
+        let config: Config = nginx_lint_common::parse_string(content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
         Ok(self.plugin.check(&config, "test.conf"))
     }
 
@@ -45,8 +45,8 @@ impl<P: Plugin> PluginTestRunner<P> {
     pub fn check_file(&self, path: &Path) -> Result<Vec<LintError>, String> {
         let content =
             std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
-        let config: Config =
-            nginx_lint_common::parse_string(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
+        let config: Config = nginx_lint_common::parse_string(&content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?;
         Ok(self.plugin.check(&config, path.to_string_lossy().as_ref()))
     }
 
@@ -122,9 +122,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Assert that a config string produces specific errors
     pub fn assert_errors(&self, content: &str, expected_count: usize) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
@@ -149,9 +147,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Assert that a config string produces at least one error
     pub fn assert_has_errors(&self, content: &str) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
@@ -167,9 +163,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Assert that a config string produces an error on a specific line
     pub fn assert_error_on_line(&self, content: &str, expected_line: usize) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
@@ -189,9 +183,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Assert that errors contain a specific message substring
     pub fn assert_error_message_contains(&self, content: &str, expected_substring: &str) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
@@ -213,9 +205,7 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Assert that errors have fixes
     pub fn assert_has_fix(&self, content: &str) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
@@ -227,16 +217,13 @@ impl<P: Plugin> PluginTestRunner<P> {
         assert!(
             has_fix,
             "Expected at least one error with fix from {}, got errors: {:?}",
-            plugin_spec.name,
-            rule_errors
+            plugin_spec.name, rule_errors
         );
     }
 
     /// Assert that applying fixes produces the expected output
     pub fn assert_fix_produces(&self, content: &str, expected: &str) {
-        let errors = self
-            .check_string(content)
-            .expect("Failed to check config");
+        let errors = self.check_string(content).expect("Failed to check config");
         let plugin_spec = self.plugin.spec();
 
         let fixes: Vec<_> = errors
@@ -256,11 +243,9 @@ impl<P: Plugin> PluginTestRunner<P> {
         let result_normalized = result.trim();
 
         assert_eq!(
-            result_normalized,
-            expected_normalized,
+            result_normalized, expected_normalized,
             "Fix did not produce expected output.\nExpected:\n{}\n\nGot:\n{}",
-            expected_normalized,
-            result_normalized
+            expected_normalized, result_normalized
         );
     }
 
@@ -313,10 +298,7 @@ impl<P: Plugin> PluginTestRunner<P> {
             plugin_spec.name
         );
 
-        let fixes: Vec<_> = rule_errors
-            .iter()
-            .flat_map(|e| e.fixes.iter())
-            .collect();
+        let fixes: Vec<_> = rule_errors.iter().flat_map(|e| e.fixes.iter()).collect();
         assert!(
             !fixes.is_empty(),
             "bad.conf errors should have fixes, got none"
@@ -468,18 +450,15 @@ impl TestCase {
         }
 
         for expected_line in &self.expected_fix_on_lines {
-            let has_fix_on_line = rule_errors
-                .iter()
-                .flat_map(|e| e.fixes.iter())
-                .any(|f| {
-                    if f.is_range_based() {
-                        let start = f.start_offset.unwrap_or(0);
-                        let line = offset_to_line(&self.content, start);
-                        line == *expected_line
-                    } else {
-                        f.line == *expected_line
-                    }
-                });
+            let has_fix_on_line = rule_errors.iter().flat_map(|e| e.fixes.iter()).any(|f| {
+                if f.is_range_based() {
+                    let start = f.start_offset.unwrap_or(0);
+                    let line = offset_to_line(&self.content, start);
+                    line == *expected_line
+                } else {
+                    f.line == *expected_line
+                }
+            });
             assert!(
                 has_fix_on_line,
                 "Expected fix on line {}, got fixes on lines: {:?}",
@@ -499,10 +478,7 @@ impl TestCase {
         }
 
         if let Some(expected_output) = &self.expected_fix_output {
-            let fixes: Vec<_> = rule_errors
-                .iter()
-                .flat_map(|e| e.fixes.iter())
-                .collect();
+            let fixes: Vec<_> = rule_errors.iter().flat_map(|e| e.fixes.iter()).collect();
 
             assert!(
                 !fixes.is_empty(),
@@ -514,11 +490,9 @@ impl TestCase {
             let result_normalized = result.trim();
 
             assert_eq!(
-                result_normalized,
-                expected_normalized,
+                result_normalized, expected_normalized,
                 "Fix did not produce expected output.\nExpected:\n{}\n\nGot:\n{}",
-                expected_normalized,
-                result_normalized
+                expected_normalized, result_normalized
             );
         }
     }
@@ -532,16 +506,15 @@ fn offset_to_line(content: &str, offset: usize) -> usize {
 
 /// Apply fixes to content and return the result
 fn apply_fixes(content: &str, fixes: &[&Fix]) -> String {
-    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
-        fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
+    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) = fixes
+        .iter()
+        .partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
 
     let mut result = content.to_string();
 
     if !range_fixes.is_empty() {
         let mut sorted_range_fixes = range_fixes;
-        sorted_range_fixes.sort_by(|a, b| {
-            b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
-        });
+        sorted_range_fixes.sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
 
         let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
 

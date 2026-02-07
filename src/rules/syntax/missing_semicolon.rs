@@ -146,11 +146,7 @@ impl MissingSemicolon {
                     };
 
                     if !is_continuation {
-                        let fix = Fix::replace(
-                            line_number,
-                            code_part,
-                            &format!("{};", code_part),
-                        );
+                        let fix = Fix::replace(line_number, code_part, &format!("{};", code_part));
                         errors.push(
                             LintError::new(
                                 self.name(),
@@ -232,7 +228,7 @@ fn strip_inline_comment(line: &str) -> &str {
         // Check for comment start (only if not in a string and preceded by whitespace)
         // In nginx, # only starts a comment when preceded by whitespace
         if ch == '#' && !in_string {
-            let preceded_by_whitespace = prev_char.map_or(true, |c| c.is_whitespace());
+            let preceded_by_whitespace = prev_char.is_none_or(|c| c.is_whitespace());
             if preceded_by_whitespace {
                 return &line[..i];
             }
@@ -560,6 +556,9 @@ worker_processes auto;
         assert_eq!(strip_inline_comment("listen 80; # port"), "listen 80; ");
         assert_eq!(strip_inline_comment("listen 80;"), "listen 80;");
         // Hash not preceded by whitespace should not be treated as comment
-        assert_eq!(strip_inline_comment("location ~* foo#bar {"), "location ~* foo#bar {");
+        assert_eq!(
+            strip_inline_comment("location ~* foo#bar {"),
+            "location ~* foo#bar {"
+        );
     }
 }
