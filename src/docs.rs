@@ -108,7 +108,9 @@ pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
         return Some(doc.into());
     }
     // Then check builtin plugins
-    get_builtin_plugin_docs().into_iter().find(|d| d.name == name)
+    get_builtin_plugin_docs()
+        .into_iter()
+        .find(|d| d.name == name)
 }
 
 /// Get documentation from builtin plugins
@@ -205,17 +207,17 @@ mod example_tests {
         let fixes: Vec<&Fix> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
 
         // Separate range-based and line-based fixes
-        let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
-            fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
+        let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) = fixes
+            .iter()
+            .partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
 
         let mut result = content.to_string();
 
         // Apply range-based fixes first (sort by start_offset descending)
         if !range_fixes.is_empty() {
             let mut sorted_range_fixes = range_fixes;
-            sorted_range_fixes.sort_by(|a, b| {
-                b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
-            });
+            sorted_range_fixes
+                .sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
 
             let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
 
@@ -238,15 +240,13 @@ mod example_tests {
         // Apply line-based fixes
         if !line_fixes.is_empty() {
             let mut sorted_line_fixes = line_fixes;
-            sorted_line_fixes.sort_by(|a, b| {
-                match b.line.cmp(&a.line) {
-                    std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
-                        let a_indent = a.new_text.len() - a.new_text.trim_start().len();
-                        let b_indent = b.new_text.len() - b.new_text.trim_start().len();
-                        a_indent.cmp(&b_indent)
-                    }
-                    other => other,
+            sorted_line_fixes.sort_by(|a, b| match b.line.cmp(&a.line) {
+                std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                    let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                    let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                    a_indent.cmp(&b_indent)
                 }
+                other => other,
             });
 
             for fix in sorted_line_fixes {
@@ -391,8 +391,7 @@ mod example_tests {
     #[test]
     fn test_syntax_bad_examples() {
         use crate::rules::syntax::{
-            missing_semicolon::MissingSemicolon,
-            unclosed_quote::UnclosedQuote,
+            missing_semicolon::MissingSemicolon, unclosed_quote::UnclosedQuote,
             unmatched_braces::UnmatchedBraces,
         };
 
@@ -437,8 +436,7 @@ mod example_tests {
     #[test]
     fn test_syntax_good_examples() {
         use crate::rules::syntax::{
-            missing_semicolon::MissingSemicolon,
-            unclosed_quote::UnclosedQuote,
+            missing_semicolon::MissingSemicolon, unclosed_quote::UnclosedQuote,
             unmatched_braces::UnmatchedBraces,
         };
 
@@ -512,8 +510,7 @@ mod example_tests {
     #[test]
     fn test_syntax_fixes_produce_good_examples() {
         use crate::rules::syntax::{
-            missing_semicolon::MissingSemicolon,
-            unclosed_quote::UnclosedQuote,
+            missing_semicolon::MissingSemicolon, unclosed_quote::UnclosedQuote,
             unmatched_braces::UnmatchedBraces,
         };
 

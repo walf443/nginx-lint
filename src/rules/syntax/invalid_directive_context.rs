@@ -46,7 +46,9 @@ impl InvalidDirectiveContext {
 
     /// Create a new rule with additional contexts
     pub fn with_additional_contexts(additional_contexts: HashMap<String, Vec<String>>) -> Self {
-        Self { additional_contexts }
+        Self {
+            additional_contexts,
+        }
     }
 
     /// Define valid parent contexts for each block directive
@@ -97,11 +99,9 @@ impl InvalidDirectiveContext {
             }
             None => {
                 // Check if there are additional contexts for unknown directives
-                if let Some(additional) = self.additional_contexts.get(directive_name) {
-                    Some(additional.iter().map(|s| s.as_str()).collect())
-                } else {
-                    None
-                }
+                self.additional_contexts
+                    .get(directive_name)
+                    .map(|additional| additional.iter().map(|s| s.as_str()).collect())
             }
         }
     }
@@ -149,16 +149,11 @@ impl InvalidDirectiveContext {
                         };
 
                         errors.push(
-                            LintError::new(
-                                self.name(),
-                                self.category(),
-                                &message,
-                                Severity::Error,
-                            )
-                            .with_location(
-                                directive.span.start.line,
-                                directive.span.start.column,
-                            ),
+                            LintError::new(self.name(), self.category(), &message, Severity::Error)
+                                .with_location(
+                                    directive.span.start.line,
+                                    directive.span.start.column,
+                                ),
                         );
                     }
                 }
@@ -276,7 +271,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'server' directive cannot be inside 'server'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'server' directive cannot be inside 'server'")
+        );
     }
 
     #[test]
@@ -290,7 +289,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'location' directive cannot be inside 'http'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'location' directive cannot be inside 'http'")
+        );
     }
 
     #[test]
@@ -340,7 +343,9 @@ http {
 "#;
         let errors = check_config(content);
         assert!(
-            errors.iter().any(|e| e.message.contains("'http' directive must be in main context")),
+            errors.iter().any(|e| e
+                .message
+                .contains("'http' directive must be in main context")),
             "Expected http context error, got: {:?}",
             errors
         );
@@ -357,7 +362,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'events' directive must be in main context"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'events' directive must be in main context")
+        );
     }
 
     #[test]
@@ -388,7 +397,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'upstream' directive cannot be inside 'location'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'upstream' directive cannot be inside 'location'")
+        );
     }
 
     #[test]
@@ -419,7 +432,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'if' directive cannot be inside 'http'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'if' directive cannot be inside 'http'")
+        );
     }
 
     #[test]
@@ -452,7 +469,11 @@ http {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'limit_except' directive cannot be inside 'server'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'limit_except' directive cannot be inside 'server'")
+        );
     }
 
     #[test]
@@ -490,7 +511,11 @@ server {
 "#;
         let errors = check_config(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'server' directive must be inside one of:"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'server' directive must be inside one of:")
+        );
         assert!(errors[0].message.contains("not in main context"));
     }
 
@@ -546,7 +571,11 @@ server {
         let context = vec!["http".to_string(), "server".to_string()];
         let errors = check_config_with_context(content, context);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'server' directive cannot be inside 'server'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'server' directive cannot be inside 'server'")
+        );
     }
 
     #[test]
@@ -560,7 +589,11 @@ location / {
         let context = vec!["http".to_string()];
         let errors = check_config_with_context(content, context);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'location' directive cannot be inside 'http'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'location' directive cannot be inside 'http'")
+        );
     }
 
     #[test]
@@ -607,14 +640,27 @@ rtmp {
 }
 "#;
         let errors = check_config(content);
-        assert_eq!(errors.len(), 1, "Expected 1 error without additional_contexts, got: {:?}", errors);
-        assert!(errors[0].message.contains("'server' directive cannot be inside 'rtmp'"));
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error without additional_contexts, got: {:?}",
+            errors
+        );
+        assert!(
+            errors[0]
+                .message
+                .contains("'server' directive cannot be inside 'rtmp'")
+        );
 
         // With additional_contexts, server inside rtmp should be valid
         let mut additional = HashMap::new();
         additional.insert("server".to_string(), vec!["rtmp".to_string()]);
         let errors = check_config_with_additional_contexts(content, additional);
-        assert!(errors.is_empty(), "Expected no errors with additional_contexts, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors with additional_contexts, got: {:?}",
+            errors
+        );
     }
 
     #[test]

@@ -37,7 +37,11 @@ pub struct PluginSpec {
 
 impl PluginSpec {
     /// Create a new PluginSpec with the current API version
-    pub fn new(name: impl Into<String>, category: impl Into<String>, description: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        category: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             category: category.into(),
@@ -126,14 +130,21 @@ impl ErrorBuilder {
 
     /// Create an error from a directive's location
     pub fn error_at(&self, message: &str, directive: &Directive) -> LintError {
-        self.error(message, directive.span.start.line, directive.span.start.column)
+        self.error(
+            message,
+            directive.span.start.line,
+            directive.span.start.column,
+        )
     }
 
     /// Create a warning from a directive's location
     pub fn warning_at(&self, message: &str, directive: &Directive) -> LintError {
-        self.warning(message, directive.span.start.line, directive.span.start.column)
+        self.warning(
+            message,
+            directive.span.start.line,
+            directive.span.start.column,
+        )
     }
-
 }
 
 /// Severity level for lint errors

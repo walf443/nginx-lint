@@ -1,14 +1,14 @@
 use clap::{CommandFactory, Parser, Subcommand};
 use colored::control;
-use nginx_lint::{
-    apply_fixes, collect_included_files, collect_included_files_with_context, parse_config,
-    pre_parse_checks_with_config, ColorMode, IncludedFile, LintConfig, LintError, Linter,
-    OutputFormat, Reporter, RuleProfile, Severity,
-};
 #[cfg(feature = "plugins")]
 use nginx_lint::linter::LintRule;
-use std::collections::HashMap;
+use nginx_lint::{
+    ColorMode, IncludedFile, LintConfig, LintError, Linter, OutputFormat, Reporter, RuleProfile,
+    Severity, apply_fixes, collect_included_files, collect_included_files_with_context,
+    parse_config, pre_parse_checks_with_config,
+};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -211,16 +211,17 @@ fn display_profile(profiles: &[RuleProfile]) {
     // Aggregate profiles by rule name (sum durations across files)
     let mut aggregated: HashMap<String, (Duration, String, usize)> = HashMap::new();
     for p in profiles {
-        let entry = aggregated
-            .entry(p.name.clone())
-            .or_insert((Duration::ZERO, p.category.clone(), 0));
+        let entry =
+            aggregated
+                .entry(p.name.clone())
+                .or_insert((Duration::ZERO, p.category.clone(), 0));
         entry.0 += p.duration;
         entry.2 += p.error_count;
     }
 
     // Convert to vec and sort by duration (descending)
     let mut sorted: Vec<_> = aggregated.into_iter().collect();
-    sorted.sort_by(|a, b| b.1 .0.cmp(&a.1 .0));
+    sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
 
     // Calculate total time
     let total_time: Duration = sorted.iter().map(|(_, (d, _, _))| *d).sum();
@@ -305,7 +306,10 @@ fn lint_file(
     let pre_parse_errors = pre_parse_checks_with_config(path, lint_config);
 
     // If there are pre-parse errors (like unmatched braces), return them
-    if pre_parse_errors.iter().any(|e| e.severity == Severity::Error) {
+    if pre_parse_errors
+        .iter()
+        .any(|e| e.severity == Severity::Error)
+    {
         return FileResult::PreParseErrors {
             path: path.clone(),
             errors: pre_parse_errors,
@@ -447,9 +451,11 @@ fn run_lint(cli: Cli) -> ExitCode {
                 parse_config(path).map_err(|e| e.to_string())
             })
         } else {
-            collect_included_files_with_context(file_path, |path| {
-                parse_config(path).map_err(|e| e.to_string())
-            }, initial_context.clone())
+            collect_included_files_with_context(
+                file_path,
+                |path| parse_config(path).map_err(|e| e.to_string()),
+                initial_context.clone(),
+            )
         };
 
         for inc in files_for_path {
@@ -469,6 +475,7 @@ fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
+    #[allow(unused_mut)]
     let mut linter = Linter::with_config(lint_config.as_ref());
 
     // Show builtin plugins in verbose mode
@@ -490,7 +497,11 @@ fn run_lint(cli: Cli) -> ExitCode {
             Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {
-                        eprintln!("Loaded {} plugin(s) from {}", plugins.len(), plugins_dir.display());
+                        eprintln!(
+                            "Loaded {} plugin(s) from {}",
+                            plugins.len(),
+                            plugins_dir.display()
+                        );
                     }
                     for plugin in plugins {
                         if cli.verbose {
@@ -619,9 +630,13 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
         {
             use nginx_lint::docs::all_rule_docs_with_plugins;
             let docs = all_rule_docs_with_plugins();
-            let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
+            let mut by_category: std::collections::HashMap<&str, Vec<_>> =
+                std::collections::HashMap::new();
             for doc in &docs {
-                by_category.entry(doc.category.as_str()).or_default().push(doc);
+                by_category
+                    .entry(doc.category.as_str())
+                    .or_default()
+                    .push(doc);
             }
 
             for category in nginx_lint::RULE_CATEGORIES {
@@ -629,7 +644,12 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
                     eprintln!("  {} {}", "▸".cyan(), category.bold());
                     for doc in rules {
                         let suffix = if doc.is_plugin { " (plugin)" } else { "" };
-                        eprintln!("    {} - {}{}", doc.name.yellow(), doc.description, suffix.dimmed());
+                        eprintln!(
+                            "    {} - {}{}",
+                            doc.name.yellow(),
+                            doc.description,
+                            suffix.dimmed()
+                        );
                     }
                     eprintln!();
                 }
@@ -639,7 +659,8 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
         {
             use nginx_lint::docs::all_rule_docs;
             let docs = all_rule_docs();
-            let mut by_category: std::collections::HashMap<&str, Vec<_>> = std::collections::HashMap::new();
+            let mut by_category: std::collections::HashMap<&str, Vec<_>> =
+                std::collections::HashMap::new();
             for doc in docs {
                 by_category.entry(doc.category).or_default().push(doc);
             }
@@ -655,7 +676,10 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
             }
         }
 
-        eprintln!("Use {} to see detailed documentation.", "nginx-lint why <rule-name>".cyan());
+        eprintln!(
+            "Use {} to see detailed documentation.",
+            "nginx-lint why <rule-name>".cyan()
+        );
         return ExitCode::SUCCESS;
     }
 
@@ -681,7 +705,10 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
             None => {
                 eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
                 eprintln!();
-                eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
+                eprintln!(
+                    "Use {} to see all available rules.",
+                    "nginx-lint why --list".cyan()
+                );
                 ExitCode::from(1)
             }
         }
@@ -697,7 +724,10 @@ fn run_why(rule: Option<String>, list: bool) -> ExitCode {
             None => {
                 eprintln!("{} Unknown rule: {}", "Error:".red().bold(), rule_name);
                 eprintln!();
-                eprintln!("Use {} to see all available rules.", "nginx-lint why --list".cyan());
+                eprintln!(
+                    "Use {} to see all available rules.",
+                    "nginx-lint why --list".cyan()
+                );
                 ExitCode::from(1)
             }
         }
@@ -747,7 +777,16 @@ fn print_rule_doc_owned(doc: &nginx_lint::docs::RuleDocOwned) {
     use colored::Colorize;
 
     eprintln!();
-    eprintln!("{} {}{}", "Rule:".bold(), doc.name.yellow(), if doc.is_plugin { " (plugin)".dimmed().to_string() } else { "".to_string() });
+    eprintln!(
+        "{} {}{}",
+        "Rule:".bold(),
+        doc.name.yellow(),
+        if doc.is_plugin {
+            " (plugin)".dimmed().to_string()
+        } else {
+            "".to_string()
+        }
+    );
     eprintln!("{} {}", "Category:".bold(), doc.category);
     eprintln!("{} {}", "Severity:".bold(), doc.severity);
     eprintln!();
@@ -822,10 +861,14 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
             eprintln!("Error: pkg/ directory not found.");
             eprintln!();
             eprintln!("Please build the WASM package first:");
-            eprintln!("  wasm-pack build --target web --out-dir pkg --no-default-features --features wasm");
+            eprintln!(
+                "  wasm-pack build --target web --out-dir pkg --no-default-features --features wasm"
+            );
             eprintln!();
             eprintln!("Or rebuild with embedded WASM:");
-            eprintln!("  wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm");
+            eprintln!(
+                "  wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm"
+            );
             eprintln!("  cargo build --features web-server-embed-wasm");
             return ExitCode::from(2);
         }
@@ -852,31 +895,38 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
         #[cfg(target_os = "linux")]
         let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
         #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("cmd").args(["/C", "start", &url]).spawn();
+        let _ = std::process::Command::new("cmd")
+            .args(["/C", "start", &url])
+            .spawn();
     }
 
     for request in server.incoming_requests() {
         let url = request.url();
         let response = match url {
-            "/" | "/index.html" => {
-                Response::from_string(INDEX_HTML)
-                    .with_header(
-                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()
-                    )
-            }
-            "/rules" | "/rules.html" => {
-                Response::from_string(RULES_HTML)
-                    .with_header(
-                        tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap()
-                    )
-            }
+            "/" | "/index.html" => Response::from_string(INDEX_HTML).with_header(
+                tiny_http::Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"text/html; charset=utf-8"[..],
+                )
+                .unwrap(),
+            ),
+            "/rules" | "/rules.html" => Response::from_string(RULES_HTML).with_header(
+                tiny_http::Header::from_bytes(
+                    &b"Content-Type"[..],
+                    &b"text/html; charset=utf-8"[..],
+                )
+                .unwrap(),
+            ),
             "/pkg/nginx_lint.js" => {
                 #[cfg(feature = "web-server-embed-wasm")]
                 {
-                    Response::from_string(NGINX_LINT_JS)
-                        .with_header(
-                            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/javascript"[..]).unwrap()
+                    Response::from_string(NGINX_LINT_JS).with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/javascript"[..],
                         )
+                        .unwrap(),
+                    )
                 }
                 #[cfg(not(feature = "web-server-embed-wasm"))]
                 {
@@ -886,10 +936,13 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
             "/pkg/nginx_lint_bg.wasm" => {
                 #[cfg(feature = "web-server-embed-wasm")]
                 {
-                    Response::from_data(NGINX_LINT_WASM.to_vec())
-                        .with_header(
-                            tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/wasm"[..]).unwrap()
+                    Response::from_data(NGINX_LINT_WASM.to_vec()).with_header(
+                        tiny_http::Header::from_bytes(
+                            &b"Content-Type"[..],
+                            &b"application/wasm"[..],
                         )
+                        .unwrap(),
+                    )
                 }
                 #[cfg(not(feature = "web-server-embed-wasm"))]
                 {
@@ -927,16 +980,18 @@ fn run_web(port: u16, open_browser: bool) -> ExitCode {
 }
 
 #[cfg(all(feature = "web-server", not(feature = "web-server-embed-wasm")))]
-fn serve_file_from_disk(file_path: &str, content_type: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+fn serve_file_from_disk(
+    file_path: &str,
+    content_type: &str,
+) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     use tiny_http::Response;
     match std::fs::read(file_path) {
-        Ok(content) => {
-            Response::from_data(content)
-                .with_header(
-                    tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap()
-                )
-        }
-        Err(_) => Response::from_string("Not Found").with_status_code(404).into(),
+        Ok(content) => Response::from_data(content).with_header(
+            tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
+        ),
+        Err(_) => Response::from_string("Not Found")
+            .with_status_code(404)
+            .into(),
     }
 }
 

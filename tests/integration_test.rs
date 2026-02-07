@@ -1,4 +1,6 @@
-use nginx_lint::{apply_fixes, parse_config, parse_string, pre_parse_checks, LintConfig, Linter, Severity};
+use nginx_lint::{
+    LintConfig, Linter, Severity, apply_fixes, parse_config, parse_string, pre_parse_checks,
+};
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -22,7 +24,7 @@ enabled = true
 [rules.missing-error-log]
 enabled = true
 "#;
-        let config: LintConfig = LintConfig::from_str(config_toml).unwrap();
+        let config: LintConfig = LintConfig::parse(config_toml).unwrap();
         Linter::with_config(Some(&config))
     })
 }
@@ -34,16 +36,11 @@ fn fixtures_base() -> PathBuf {
 }
 
 fn parser_fixture(name: &str) -> PathBuf {
-    fixtures_base()
-        .join("parser")
-        .join(name)
-        .join("nginx.conf")
+    fixtures_base().join("parser").join(name).join("nginx.conf")
 }
 
 fn misc_fixture(name: &str) -> PathBuf {
-    fixtures_base()
-        .join(name)
-        .join("nginx.conf")
+    fixtures_base().join(name).join("nginx.conf")
 }
 
 // ============================================================================
@@ -267,7 +264,9 @@ http {
         "Expected 1 server-tokens-enabled warning for http block without server_tokens"
     );
     assert!(
-        server_tokens_warnings[0].message.contains("defaults to 'on'"),
+        server_tokens_warnings[0]
+            .message
+            .contains("defaults to 'on'"),
         "Expected 'defaults to on' message"
     );
 }
@@ -336,7 +335,9 @@ server {
         "Expected 1 server-tokens-enabled warning for explicit 'on'"
     );
     assert!(
-        server_tokens_warnings[0].message.contains("should be 'off'"),
+        server_tokens_warnings[0]
+            .message
+            .contains("should be 'off'"),
         "Expected 'should be off' message for explicit on"
     );
 }
@@ -512,7 +513,11 @@ server {
         .filter(|e| e.rule == "deprecated-ssl-protocol")
         .collect();
 
-    assert_eq!(ssl_warnings.len(), 2, "Expected 2 deprecated protocol warnings (SSLv3 and TLSv1)");
+    assert_eq!(
+        ssl_warnings.len(),
+        2,
+        "Expected 2 deprecated protocol warnings (SSLv3 and TLSv1)"
+    );
 }
 
 #[test]
@@ -585,7 +590,12 @@ fn test_all_rule_fixtures() {
         if !category_path.is_dir() {
             continue;
         }
-        let category = category_path.file_name().unwrap().to_str().unwrap().to_string();
+        let category = category_path
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
 
         for rule_entry in fs::read_dir(&category_path).expect("Failed to read category directory") {
             let rule_entry = rule_entry.expect("Failed to read rule entry");
@@ -1129,7 +1139,8 @@ http {
 "#;
     let config = parse_string(content).expect("Failed to parse config");
     let linter = get_default_linter();
-    let (errors, ignored_count) = linter.lint_with_content(&config, std::path::Path::new("test.conf"), content);
+    let (errors, ignored_count) =
+        linter.lint_with_content(&config, std::path::Path::new("test.conf"), content);
 
     // server-tokens-enabled should be ignored
     let server_tokens_errors: Vec<_> = errors
@@ -1216,16 +1227,24 @@ http {
     // Should have an unused warning with a fix
     assert_eq!(result.unused_warnings.len(), 1, "Expected 1 unused warning");
     assert!(
-        result.unused_warnings[0].message.contains("unused nginx-lint:ignore"),
+        result.unused_warnings[0]
+            .message
+            .contains("unused nginx-lint:ignore"),
         "Expected unused warning, got: {}",
         result.unused_warnings[0].message
     );
 
     // The fix should replace the line with just the directive (preserving indentation)
-    let fix = result.unused_warnings[0].fixes.first().expect("Expected a fix");
+    let fix = result.unused_warnings[0]
+        .fixes
+        .first()
+        .expect("Expected a fix");
     assert_eq!(fix.line, 4, "Fix should be on line 4");
     assert!(!fix.delete_line, "Should not delete entire line");
-    assert_eq!(fix.new_text, "        server_tokens off;", "Fix should preserve indentation");
+    assert_eq!(
+        fix.new_text, "        server_tokens off;",
+        "Fix should preserve indentation"
+    );
 }
 
 // ============================================================================
@@ -1259,7 +1278,9 @@ http {
         context_errors
     );
     assert!(
-        context_errors[0].message.contains("'server' directive cannot be inside 'server'"),
+        context_errors[0]
+            .message
+            .contains("'server' directive cannot be inside 'server'"),
         "Expected server in server error, got: {}",
         context_errors[0].message
     );
@@ -1290,7 +1311,9 @@ http {
         context_errors
     );
     assert!(
-        context_errors[0].message.contains("'location' directive cannot be inside 'http'"),
+        context_errors[0]
+            .message
+            .contains("'location' directive cannot be inside 'http'"),
         "Expected location in http error, got: {}",
         context_errors[0].message
     );
@@ -1316,7 +1339,9 @@ http {
         .collect();
 
     assert!(
-        context_errors.iter().any(|e| e.message.contains("'http' directive must be in main context")),
+        context_errors.iter().any(|e| e
+            .message
+            .contains("'http' directive must be in main context")),
         "Expected http not at root error, got: {:?}",
         context_errors
     );
@@ -1345,7 +1370,9 @@ server {
         context_errors
     );
     assert!(
-        context_errors[0].message.contains("'server' directive must be inside one of:"),
+        context_errors[0]
+            .message
+            .contains("'server' directive must be inside one of:"),
         "Expected server at root error, got: {}",
         context_errors[0].message
     );
@@ -1400,11 +1427,14 @@ http {
 #[test]
 fn test_include_context_propagation() {
     // Simulate a config included from server context - location should be valid
-    let mut config = parse_string(r#"
+    let mut config = parse_string(
+        r#"
 location / {
     root /var/www;
 }
-"#).expect("Failed to parse config");
+"#,
+    )
+    .expect("Failed to parse config");
 
     // Set include context as if this file was included from http { server { ... } }
     config.include_context = vec!["http".to_string(), "server".to_string()];
@@ -1427,11 +1457,14 @@ location / {
 #[test]
 fn test_include_context_error() {
     // Simulate a config included from http context (not inside server) - location should error
-    let mut config = parse_string(r#"
+    let mut config = parse_string(
+        r#"
 location / {
     root /var/www;
 }
-"#).expect("Failed to parse config");
+"#,
+    )
+    .expect("Failed to parse config");
 
     // Set include context as if this file was included from http { ... } (no server)
     config.include_context = vec!["http".to_string()];
@@ -1451,7 +1484,9 @@ location / {
         context_errors
     );
     assert!(
-        context_errors[0].message.contains("'location' directive cannot be inside 'http'"),
+        context_errors[0]
+            .message
+            .contains("'location' directive cannot be inside 'http'"),
         "Expected location in http error, got: {}",
         context_errors[0].message
     );

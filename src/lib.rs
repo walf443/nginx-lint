@@ -24,20 +24,19 @@ pub mod plugin;
 
 // Re-export commonly used types from nginx-lint-common
 pub use nginx_lint_common::{
-    Color, ColorConfig, ColorMode, LintConfig, ValidationError,
-    filter_errors, parse_context_comment, FilterResult, IgnoreTracker, IgnoreWarning,
-    parse_config, parse_string,
+    Color, ColorConfig, ColorMode, FilterResult, IgnoreTracker, IgnoreWarning, LintConfig,
+    ValidationError, filter_errors, parse_config, parse_context_comment, parse_string,
 };
 
 // Re-export from local modules
-pub use linter::{Fix, LintError, LintRule, Linter, Severity};
-pub use nginx_lint_common::RULE_CATEGORIES;
+pub use docs::{RuleDoc, RuleDocOwned};
 #[cfg(feature = "cli")]
 pub use linter::RuleProfile;
-pub use docs::{RuleDoc, RuleDocOwned};
+pub use linter::{Fix, LintError, LintRule, Linter, Severity};
+pub use nginx_lint_common::RULE_CATEGORIES;
 
 #[cfg(feature = "cli")]
-pub use include::{collect_included_files, collect_included_files_with_context, IncludedFile};
+pub use include::{IncludedFile, collect_included_files, collect_included_files_with_context};
 #[cfg(feature = "cli")]
 pub use reporter::{OutputFormat, Reporter};
 
@@ -55,9 +54,12 @@ pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
 
 /// Run pre-parse checks with optional LintConfig
 #[cfg(feature = "cli")]
-pub fn pre_parse_checks_with_config(path: &Path, lint_config: Option<&LintConfig>) -> Vec<LintError> {
+pub fn pre_parse_checks_with_config(
+    path: &Path,
+    lint_config: Option<&LintConfig>,
+) -> Vec<LintError> {
+    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-    use nginx_lint_common::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
 
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -118,8 +120,9 @@ pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> 
 #[cfg(feature = "cli")]
 pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) {
     // Separate range-based and line-based fixes
-    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) =
-        fixes.iter().partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
+    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) = fixes
+        .iter()
+        .partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
 
     let mut fix_count = 0;
     let mut result = content.to_string();
@@ -127,9 +130,7 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
     // Apply range-based fixes first (sort by start_offset descending to avoid shifts)
     if !range_fixes.is_empty() {
         let mut sorted_range_fixes = range_fixes;
-        sorted_range_fixes.sort_by(|a, b| {
-            b.start_offset.unwrap().cmp(&a.start_offset.unwrap())
-        });
+        sorted_range_fixes.sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
 
         // Check for overlapping ranges and skip overlapping fixes
         let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
@@ -162,15 +163,13 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
 
         // Sort by line number descending, with special handling for insert_after
         let mut sorted_line_fixes = line_fixes;
-        sorted_line_fixes.sort_by(|a, b| {
-            match b.line.cmp(&a.line) {
-                std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
-                    let a_indent = a.new_text.len() - a.new_text.trim_start().len();
-                    let b_indent = b.new_text.len() - b.new_text.trim_start().len();
-                    a_indent.cmp(&b_indent)
-                }
-                other => other,
+        sorted_line_fixes.sort_by(|a, b| match b.line.cmp(&a.line) {
+            std::cmp::Ordering::Equal if a.insert_after && b.insert_after => {
+                let a_indent = a.new_text.len() - a.new_text.trim_start().len();
+                let b_indent = b.new_text.len() - b.new_text.trim_start().len();
+                a_indent.cmp(&b_indent)
             }
+            other => other,
         });
 
         for fix in sorted_line_fixes {

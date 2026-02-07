@@ -17,9 +17,7 @@ This rule checks that opening braces '{' and closing braces '}'
 are balanced, and that block directives have their opening brace."#,
     bad_example: include_str!("unmatched_braces/bad.conf"),
     good_example: include_str!("unmatched_braces/good.conf"),
-    references: &[
-        "https://nginx.org/en/docs/beginners_guide.html",
-    ],
+    references: &["https://nginx.org/en/docs/beginners_guide.html"],
 };
 
 /// Check for unmatched braces
@@ -33,7 +31,6 @@ struct BraceInfo {
     /// Indentation of the line containing the opening brace (for fix generation)
     indent: usize,
 }
-
 
 impl UnmatchedBraces {
     /// Strip trailing comment from a line (# preceded by whitespace)
@@ -56,7 +53,11 @@ impl UnmatchedBraces {
                 // Check if preceded by whitespace
                 if i == 0 || chars[i - 1].is_whitespace() {
                     // Found comment start, return everything before it (trimmed)
-                    return line[..line.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(line.len())]
+                    return line[..line
+                        .char_indices()
+                        .nth(i)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(line.len())]
                         .trim_end();
                 }
             }
@@ -108,13 +109,13 @@ impl UnmatchedBraces {
             let trimmed = line.trim_start();
 
             // Check if we're entering a raw block (like lua_block)
-            if !in_raw_block {
-                if let Some(first_word) = trimmed.split_whitespace().next() {
-                    if crate::parser::is_raw_block_directive(first_word) && trimmed.contains('{') {
-                        in_raw_block = true;
-                        raw_block_depth = 1;
-                    }
-                }
+            if !in_raw_block
+                && let Some(first_word) = trimmed.split_whitespace().next()
+                && crate::parser::is_raw_block_directive(first_word)
+                && trimmed.contains('{')
+            {
+                in_raw_block = true;
+                raw_block_depth = 1;
             }
 
             // Track brace depth inside raw blocks
@@ -142,7 +143,8 @@ impl UnmatchedBraces {
                 // Handle comments (only outside strings and when preceded by whitespace)
                 // In nginx, # only starts a comment when preceded by whitespace
                 if ch == '#' && string_char.is_none() && !in_comment {
-                    let preceded_by_whitespace = col == 0 || chars.get(col - 1).map_or(true, |c| c.is_whitespace());
+                    let preceded_by_whitespace =
+                        col == 0 || chars.get(col - 1).is_none_or(|c| c.is_whitespace());
                     if preceded_by_whitespace {
                         in_comment = true;
                     }
@@ -222,48 +224,48 @@ impl UnmatchedBraces {
                     && !trimmed_no_comment.ends_with('}')
                 {
                     // Get the first word (directive name)
-                    if let Some(first_word) = trimmed.split_whitespace().next() {
-                        if crate::parser::is_block_directive_with_extras(
+                    if let Some(first_word) = trimmed.split_whitespace().next()
+                        && crate::parser::is_block_directive_with_extras(
                             first_word,
                             additional_block_directives,
-                        ) {
-                            // Check if next non-empty, non-comment line starts with '{'
-                            // This allows brace-on-next-line style
-                            let next_has_brace = lines
-                                .iter()
-                                .skip(line_num + 1)
-                                .map(|l| l.trim())
-                                .find(|l| !l.is_empty() && !l.starts_with('#'))
-                                .map_or(false, |l| l.starts_with('{'));
+                        )
+                    {
+                        // Check if next non-empty, non-comment line starts with '{'
+                        // This allows brace-on-next-line style
+                        let next_has_brace = lines
+                            .iter()
+                            .skip(line_num + 1)
+                            .map(|l| l.trim())
+                            .find(|l| !l.is_empty() && !l.starts_with('#'))
+                            .is_some_and(|l| l.starts_with('{'));
 
-                            if !next_has_brace {
-                                // This is a block directive missing its opening brace
-                                // Use range-based fix: replace trailing whitespace with " {"
-                                let line_start = line_offsets[line_num];
-                                let content_end = line_start + line.trim_end().len();
-                                let line_end = line_start + line.len();
-                                // Replace from end of content to end of line with " {"
-                                let fix = Fix::replace_range(content_end, line_end, " {");
-                                errors.push(
-                                    LintError::new(
-                                        self.name(),
-                                        self.category(),
-                                        &format!(
-                                            "Block directive '{}' is missing opening brace '{{'",
-                                            first_word
-                                        ),
-                                        Severity::Error,
-                                    )
-                                    .with_location(line_number, trimmed.len())
-                                    .with_fix(fix),
-                                );
-                                // Add virtual opening brace to stack so the closing brace matches
-                                brace_stack.push(BraceInfo {
-                                    line: line_number,
-                                    column: trimmed.len(),
-                                    indent: line_indent,
-                                });
-                            }
+                        if !next_has_brace {
+                            // This is a block directive missing its opening brace
+                            // Use range-based fix: replace trailing whitespace with " {"
+                            let line_start = line_offsets[line_num];
+                            let content_end = line_start + line.trim_end().len();
+                            let line_end = line_start + line.len();
+                            // Replace from end of content to end of line with " {"
+                            let fix = Fix::replace_range(content_end, line_end, " {");
+                            errors.push(
+                                LintError::new(
+                                    self.name(),
+                                    self.category(),
+                                    &format!(
+                                        "Block directive '{}' is missing opening brace '{{'",
+                                        first_word
+                                    ),
+                                    Severity::Error,
+                                )
+                                .with_location(line_number, trimmed.len())
+                                .with_fix(fix),
+                            );
+                            // Add virtual opening brace to stack so the closing brace matches
+                            brace_stack.push(BraceInfo {
+                                line: line_number,
+                                column: trimmed.len(),
+                                indent: line_indent,
+                            });
                         }
                     }
                 }
@@ -296,7 +298,9 @@ impl UnmatchedBraces {
                     && error.message.contains("Unclosed brace")
                     && error.line == Some(error_line)
                 {
-                    error.fixes.push(Fix::insert_after(insert_after_line, &closing_brace));
+                    error
+                        .fixes
+                        .push(Fix::insert_after(insert_after_line, &closing_brace));
                     break;
                 }
             }
@@ -837,7 +841,9 @@ http {
         let errors = check_braces(content);
         // Should not detect listen or root as block directives
         assert!(
-            !errors.iter().any(|e| e.message.contains("listen") || e.message.contains("root")),
+            !errors
+                .iter()
+                .any(|e| e.message.contains("listen") || e.message.contains("root")),
             "Should not detect non-block directives: {:?}",
             errors
         );
@@ -910,12 +916,24 @@ http {
     #[test]
     fn test_strip_trailing_comment() {
         // Basic comment stripping
-        assert_eq!(UnmatchedBraces::strip_trailing_comment("server 127.0.0.1:8080; # comment"), "server 127.0.0.1:8080;");
+        assert_eq!(
+            UnmatchedBraces::strip_trailing_comment("server 127.0.0.1:8080; # comment"),
+            "server 127.0.0.1:8080;"
+        );
         // No comment
-        assert_eq!(UnmatchedBraces::strip_trailing_comment("listen 80;"), "listen 80;");
+        assert_eq!(
+            UnmatchedBraces::strip_trailing_comment("listen 80;"),
+            "listen 80;"
+        );
         // Hash in string should not be treated as comment
-        assert_eq!(UnmatchedBraces::strip_trailing_comment(r#"return 200 "test#value";"#), r#"return 200 "test#value";"#);
+        assert_eq!(
+            UnmatchedBraces::strip_trailing_comment(r#"return 200 "test#value";"#),
+            r#"return 200 "test#value";"#
+        );
         // Hash not preceded by whitespace (e.g., in regex)
-        assert_eq!(UnmatchedBraces::strip_trailing_comment("location ~* foo#bar {"), "location ~* foo#bar {");
+        assert_eq!(
+            UnmatchedBraces::strip_trailing_comment("location ~* foo#bar {"),
+            "location ~* foo#bar {"
+        );
     }
 }

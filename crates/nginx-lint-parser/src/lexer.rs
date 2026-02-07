@@ -52,7 +52,7 @@ impl TokenKind {
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
-    pub raw: String, // Original source text
+    pub raw: String,                // Original source text
     pub leading_whitespace: String, // Whitespace before this token (on same line)
 }
 
@@ -207,12 +207,20 @@ impl<'a> Lexer<'a> {
                             value.push(c);
                         }
                         None => {
-                            return Err(LexerError::UnterminatedString { position: start_pos }.into())
+                            return Err(LexerError::UnterminatedString {
+                                position: start_pos,
+                            }
+                            .into());
                         }
                     }
                 }
                 Some((_, ch)) => value.push(ch),
-                None => return Err(LexerError::UnterminatedString { position: start_pos }.into()),
+                None => {
+                    return Err(LexerError::UnterminatedString {
+                        position: start_pos,
+                    }
+                    .into());
+                }
             }
         }
 
@@ -236,12 +244,20 @@ impl<'a> Lexer<'a> {
                             value.push(c);
                         }
                         None => {
-                            return Err(LexerError::UnterminatedString { position: start_pos }.into())
+                            return Err(LexerError::UnterminatedString {
+                                position: start_pos,
+                            }
+                            .into());
                         }
                     }
                 }
                 Some((_, ch)) => value.push(ch),
-                None => return Err(LexerError::UnterminatedString { position: start_pos }.into()),
+                None => {
+                    return Err(LexerError::UnterminatedString {
+                        position: start_pos,
+                    }
+                    .into());
+                }
             }
         }
 
@@ -309,7 +325,9 @@ impl<'a> Lexer<'a> {
         while let Some(ch) = self.peek() {
             if is_argument_char(ch) || is_ident_continue(ch) {
                 // Check for escaped brace: if current char is '\' and next is '{' or '}'
-                if ch == '\\' && let Some(escaped) = self.peek_escaped_brace() {
+                if ch == '\\'
+                    && let Some(escaped) = self.peek_escaped_brace()
+                {
                     value.push('\\');
                     self.advance(); // consume '\'
                     value.push(escaped);
@@ -356,12 +374,12 @@ impl<'a> Lexer<'a> {
 
         // Check what follows $
         match chars.next() {
-            None => true,                          // End of input
-            Some(c) if c.is_whitespace() => true,  // Followed by whitespace
-            Some('{') => false,                    // Followed by '{' - this is ${var} syntax, not end anchor
+            None => true,                            // End of input
+            Some(c) if c.is_whitespace() => true,    // Followed by whitespace
+            Some('{') => false, // Followed by '{' - this is ${var} syntax, not end anchor
             Some(c) if c.is_alphanumeric() => false, // Followed by variable name
-            Some('_') => false,                    // Followed by variable name
-            _ => true,                             // Other chars - treat as end anchor
+            Some('_') => false, // Followed by variable name
+            _ => true,          // Other chars - treat as end anchor
         }
     }
 

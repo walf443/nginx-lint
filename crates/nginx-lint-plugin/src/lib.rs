@@ -45,22 +45,22 @@
 //! export_plugin!(MyRule);
 //! ```
 
-mod types;
 pub mod helpers;
 pub mod testing;
+mod types;
 
 pub use types::*;
 
 // Re-export common types from nginx-lint-common
-pub use nginx_lint_common::parser;
 pub use nginx_lint_common::parse_string;
+pub use nginx_lint_common::parser;
 
 /// Prelude module for convenient imports
 pub mod prelude {
-    pub use super::types::*;
     pub use super::export_plugin;
-    pub use super::types::API_VERSION;
     pub use super::helpers;
+    pub use super::types::API_VERSION;
+    pub use super::types::*;
 }
 
 /// Macro to export a plugin implementation

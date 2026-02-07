@@ -97,15 +97,19 @@ impl From<&LintError> for JsLintError {
             },
             line: error.line,
             column: error.column,
-            fixes: error.fixes.iter().map(|f| JsFix {
-                line: f.line,
-                old_text: f.old_text.clone(),
-                new_text: f.new_text.clone(),
-                delete_line: f.delete_line,
-                insert_after: f.insert_after,
-                start_offset: f.start_offset,
-                end_offset: f.end_offset,
-            }).collect(),
+            fixes: error
+                .fixes
+                .iter()
+                .map(|f| JsFix {
+                    line: f.line,
+                    old_text: f.old_text.clone(),
+                    new_text: f.new_text.clone(),
+                    delete_line: f.delete_line,
+                    insert_after: f.insert_after,
+                    start_offset: f.start_offset,
+                    end_offset: f.end_offset,
+                })
+                .collect(),
         }
     }
 }
@@ -133,14 +137,14 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
     use crate::config::LintConfig;
-    use crate::ignore::{filter_errors, warnings_to_errors, IgnoreTracker};
+    use crate::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
     use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
     // Parse TOML configuration
     let lint_config = if config_toml.is_empty() {
         None
     } else {
-        Some(LintConfig::from_str(config_toml).map_err(|e| JsValue::from_str(&e))?)
+        Some(LintConfig::parse(config_toml).map_err(|e| JsValue::from_str(&e))?)
     };
 
     // Helper to check if a rule is enabled
@@ -162,7 +166,8 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     if is_enabled("unmatched-braces") {
         let rule = UnmatchedBraces;
-        pre_parse_errors.extend(rule.check_content_with_extras(content, &additional_block_directives));
+        pre_parse_errors
+            .extend(rule.check_content_with_extras(content, &additional_block_directives));
     }
 
     if is_enabled("unclosed-quote") {
@@ -172,12 +177,15 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     if is_enabled("missing-semicolon") {
         let rule = MissingSemicolon;
-        pre_parse_errors.extend(rule.check_content_with_extras(content, &additional_block_directives));
+        pre_parse_errors
+            .extend(rule.check_content_with_extras(content, &additional_block_directives));
     }
 
     // If there are pre-parse errors with Severity::Error, return them
     // (don't try to parse, as it will likely fail)
-    let has_syntax_errors = pre_parse_errors.iter().any(|e| e.severity == Severity::Error);
+    let has_syntax_errors = pre_parse_errors
+        .iter()
+        .any(|e| e.severity == Severity::Error);
 
     let mut errors = pre_parse_errors;
 
@@ -186,7 +194,8 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
 
     // Build ignore tracker with rule name validation using linter's rule names
     let valid_rules = linter.rule_names();
-    let (mut tracker, ignore_warnings) = IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+    let (mut tracker, ignore_warnings) =
+        IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
 
     // Only parse and run AST-based rules if there are no syntax errors
     if !has_syntax_errors {
@@ -227,22 +236,20 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     errors.extend(warnings_to_errors(result.unused_warnings));
 
     // Sort errors by line number, then by column number
-    errors.sort_by(|a, b| {
-        match (a.line, b.line) {
-            (Some(line_a), Some(line_b)) => {
-                line_a.cmp(&line_b).then_with(|| {
-                    match (a.column, b.column) {
-                        (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    }
+    errors.sort_by(|a, b| match (a.line, b.line) {
+        (Some(line_a), Some(line_b)) => {
+            line_a
+                .cmp(&line_b)
+                .then_with(|| match (a.column, b.column) {
+                    (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
                 })
-            }
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
         }
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
     });
 
     // Convert errors to JSON
@@ -339,7 +346,11 @@ pub fn debug_plugin_status() -> String {
         use crate::linter::LintRule;
         use crate::plugin::builtin::load_builtin_plugins;
         match load_builtin_plugins() {
-            Ok(plugins) => format!("Loaded {} plugins: {:?}", plugins.len(), plugins.iter().map(|p| p.name()).collect::<Vec<_>>()),
+            Ok(plugins) => format!(
+                "Loaded {} plugins: {:?}",
+                plugins.len(),
+                plugins.iter().map(|p| p.name()).collect::<Vec<_>>()
+            ),
             Err(e) => format!("Failed to load plugins: {}", e),
         }
     }
