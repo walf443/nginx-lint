@@ -96,7 +96,7 @@ impl ProxyPassWithUriPlugin {
                                 )
                             };
 
-                            let err = PluginInfo::new(
+                            let err = PluginSpec::new(
                                 "proxy-pass-with-uri",
                                 "best-practices",
                                 "",
@@ -117,8 +117,8 @@ impl ProxyPassWithUriPlugin {
 }
 
 impl Plugin for ProxyPassWithUriPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "proxy-pass-with-uri",
             "best-practices",
             "Warns when proxy_pass has a URI path that causes URI rewriting",

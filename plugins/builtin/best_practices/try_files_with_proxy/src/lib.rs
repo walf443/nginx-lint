@@ -85,7 +85,7 @@ impl TryFilesWithProxyPlugin {
                 .map(|arg| arg.as_str().starts_with('='))
                 .unwrap_or(false);
 
-            let err = PluginInfo::new(
+            let err = PluginSpec::new(
                 "try-files-with-proxy",
                 "best-practices",
                 "",
@@ -106,8 +106,8 @@ impl TryFilesWithProxyPlugin {
 }
 
 impl Plugin for TryFilesWithProxyPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "try-files-with-proxy",
             "best-practices",
             "Warns when try_files and proxy_pass are used in the same location block",

@@ -35,8 +35,8 @@ const DEFAULT_REQUIRED_EXCLUSIONS: &[&str] =
 pub struct WeakSslCiphersPlugin;
 
 impl Plugin for WeakSslCiphersPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "weak-ssl-ciphers",
             "security",
             "Detects weak or insecure SSL/TLS cipher suites",
@@ -58,7 +58,7 @@ impl Plugin for WeakSslCiphersPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for directive in config.all_directives() {
             if !directive.is("ssl_ciphers") {

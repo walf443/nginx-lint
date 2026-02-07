@@ -18,8 +18,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct GzipNotEnabledPlugin;
 
 impl Plugin for GzipNotEnabledPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "gzip-not-enabled",
             "best-practices",
             "Suggests enabling gzip compression for better performance",
@@ -62,7 +62,7 @@ impl Plugin for GzipNotEnabledPlugin {
         // Only warn if THIS file has an http block but no gzip on
         // Don't warn for included files - gzip should be set in the main config
         if has_http_block && !gzip_on {
-            let err = self.info().error_builder();
+            let err = self.spec().error_builder();
             vec![err.warning("Consider enabling gzip compression for better performance", 0, 0)]
         } else {
             vec![]

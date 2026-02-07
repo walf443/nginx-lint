@@ -16,8 +16,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct MapMissingDefaultPlugin;
 
 impl Plugin for MapMissingDefaultPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "map-missing-default",
             "best-practices",
             "Warns when a map block does not have a default entry",
@@ -38,7 +38,7 @@ impl Plugin for MapMissingDefaultPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for ctx in config.all_directives_with_context() {
             if !ctx.directive.is("map") {

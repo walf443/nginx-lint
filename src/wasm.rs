@@ -282,9 +282,9 @@ pub fn get_rule_names() -> String {
     serde_json::to_string(&names).unwrap_or_else(|_| "[]".to_string())
 }
 
-/// Extended rule information for JavaScript
+/// Extended rule spec for JavaScript
 #[derive(serde::Serialize)]
-struct JsRuleInfo {
+struct JsRuleSpec {
     category: String,
     severity: String,
     description: String,
@@ -298,18 +298,18 @@ struct JsRuleInfo {
     references: Option<Vec<String>>,
 }
 
-/// Get rule information (name -> extended info mapping) as JSON
+/// Get rule spec (name -> extended spec mapping) as JSON
 #[wasm_bindgen]
-pub fn get_rule_info() -> String {
+pub fn get_rule_spec() -> String {
     use std::collections::HashMap;
     let linter = Linter::with_default_rules();
-    let info: HashMap<&str, JsRuleInfo> = linter
+    let spec: HashMap<&str, JsRuleSpec> = linter
         .rules()
         .iter()
         .map(|r| {
             (
                 r.name(),
-                JsRuleInfo {
+                JsRuleSpec {
                     category: r.category().to_string(),
                     severity: r.severity().unwrap_or("warning").to_string(),
                     description: r.description().to_string(),
@@ -321,7 +321,7 @@ pub fn get_rule_info() -> String {
             )
         })
         .collect();
-    serde_json::to_string(&info).unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&spec).unwrap_or_else(|_| "{}".to_string())
 }
 
 /// Get the ordered list of rule categories as JSON array

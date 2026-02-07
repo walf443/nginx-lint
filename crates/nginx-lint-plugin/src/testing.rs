@@ -2,7 +2,7 @@
 //!
 //! This module provides helper functions for testing plugins with fixture files.
 
-use super::types::{Config, Fix, LintError, Plugin, PluginInfo};
+use super::types::{Config, Fix, LintError, Plugin, PluginSpec};
 use std::path::{Path, PathBuf};
 
 /// Macro to get the fixtures directory path relative to the plugin's Cargo.toml
@@ -29,9 +29,9 @@ impl<P: Plugin> PluginTestRunner<P> {
         Self { plugin }
     }
 
-    /// Get plugin info
-    pub fn info(&self) -> PluginInfo {
-        self.plugin.info()
+    /// Get plugin spec
+    pub fn spec(&self) -> PluginSpec {
+        self.plugin.spec()
     }
 
     /// Run the plugin check on a config string
@@ -57,8 +57,8 @@ impl<P: Plugin> PluginTestRunner<P> {
             panic!("Fixtures directory not found: {}", fixtures_dir);
         }
 
-        let plugin_info = self.plugin.info();
-        let rule_name = &plugin_info.name;
+        let plugin_spec = self.plugin.spec();
+        let rule_name = &plugin_spec.name;
 
         let entries = std::fs::read_dir(&fixtures_path)
             .unwrap_or_else(|e| panic!("Failed to read fixtures directory: {}", e));
@@ -125,10 +125,10 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         assert_eq!(
@@ -136,7 +136,7 @@ impl<P: Plugin> PluginTestRunner<P> {
             expected_count,
             "Expected {} errors from {}, got {}: {:?}",
             expected_count,
-            plugin_info.name,
+            plugin_spec.name,
             rule_errors.len(),
             rule_errors
         );
@@ -152,16 +152,16 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         assert!(
             !rule_errors.is_empty(),
             "Expected at least one error from {}, got none",
-            plugin_info.name
+            plugin_spec.name
         );
     }
 
@@ -170,10 +170,10 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         let has_error_on_line = rule_errors.iter().any(|e| e.line == Some(expected_line));
@@ -181,7 +181,7 @@ impl<P: Plugin> PluginTestRunner<P> {
         assert!(
             has_error_on_line,
             "Expected error from {} on line {}, got errors on lines: {:?}",
-            plugin_info.name,
+            plugin_spec.name,
             expected_line,
             rule_errors.iter().map(|e| e.line).collect::<Vec<_>>()
         );
@@ -192,10 +192,10 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         let has_message = rule_errors
@@ -206,7 +206,7 @@ impl<P: Plugin> PluginTestRunner<P> {
             has_message,
             "Expected error message containing '{}' from {}, got messages: {:?}",
             expected_substring,
-            plugin_info.name,
+            plugin_spec.name,
             rule_errors.iter().map(|e| &e.message).collect::<Vec<_>>()
         );
     }
@@ -216,10 +216,10 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         let has_fix = rule_errors.iter().any(|e| !e.fixes.is_empty());
@@ -227,7 +227,7 @@ impl<P: Plugin> PluginTestRunner<P> {
         assert!(
             has_fix,
             "Expected at least one error with fix from {}, got errors: {:?}",
-            plugin_info.name,
+            plugin_spec.name,
             rule_errors
         );
     }
@@ -237,18 +237,18 @@ impl<P: Plugin> PluginTestRunner<P> {
         let errors = self
             .check_string(content)
             .expect("Failed to check config");
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
 
         let fixes: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .flat_map(|e| e.fixes.iter())
             .collect();
 
         assert!(
             !fixes.is_empty(),
             "Expected at least one fix from {}, got none",
-            plugin_info.name
+            plugin_spec.name
         );
 
         let result = apply_fixes(content, &fixes);
@@ -266,19 +266,19 @@ impl<P: Plugin> PluginTestRunner<P> {
 
     /// Test using bad.conf and good.conf example content
     pub fn test_examples(&self, bad_conf: &str, good_conf: &str) {
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
 
         let errors = self
             .check_string(bad_conf)
             .expect("Failed to parse bad.conf");
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
         assert!(
             !rule_errors.is_empty(),
             "bad.conf should produce at least one {} error, got none",
-            plugin_info.name
+            plugin_spec.name
         );
 
         let errors = self
@@ -286,31 +286,31 @@ impl<P: Plugin> PluginTestRunner<P> {
             .expect("Failed to parse good.conf");
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
         assert!(
             rule_errors.is_empty(),
             "good.conf should not produce {} errors, got: {:?}",
-            plugin_info.name,
+            plugin_spec.name,
             rule_errors
         );
     }
 
     /// Test using bad.conf and good.conf, and verify fix converts bad to good
     pub fn test_examples_with_fix(&self, bad_conf: &str, good_conf: &str) {
-        let plugin_info = self.plugin.info();
+        let plugin_spec = self.plugin.spec();
 
         let errors = self
             .check_string(bad_conf)
             .expect("Failed to parse bad.conf");
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
         assert!(
             !rule_errors.is_empty(),
             "bad.conf should produce at least one {} error, got none",
-            plugin_info.name
+            plugin_spec.name
         );
 
         let fixes: Vec<_> = rule_errors
@@ -327,12 +327,12 @@ impl<P: Plugin> PluginTestRunner<P> {
             .expect("Failed to parse good.conf");
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
         assert!(
             rule_errors.is_empty(),
             "good.conf should not produce {} errors, got: {:?}",
-            plugin_info.name,
+            plugin_spec.name,
             rule_errors
         );
 
@@ -421,10 +421,10 @@ impl TestCase {
             .unwrap_or_else(|e| panic!("Failed to parse test config: {}", e));
 
         let errors = plugin.check(&config, "test.conf");
-        let plugin_info = plugin.info();
+        let plugin_spec = plugin.spec();
         let rule_errors: Vec<_> = errors
             .iter()
-            .filter(|e| e.rule == plugin_info.name)
+            .filter(|e| e.rule == plugin_spec.name)
             .collect();
 
         if let Some(expected_count) = self.expected_error_count {

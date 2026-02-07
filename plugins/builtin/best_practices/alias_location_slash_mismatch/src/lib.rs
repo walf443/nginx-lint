@@ -99,7 +99,7 @@ impl AliasLocationSlashMismatchPlugin {
                             continue;
                         }
 
-                        let err = PluginInfo::new(
+                        let err = PluginSpec::new(
                             "alias-location-slash-mismatch",
                             "best-practices",
                             "",
@@ -156,8 +156,8 @@ impl AliasLocationSlashMismatchPlugin {
 }
 
 impl Plugin for AliasLocationSlashMismatchPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "alias-location-slash-mismatch",
             "best-practices",
             "Warns when alias path doesn't end with '/' when location ends with '/'",

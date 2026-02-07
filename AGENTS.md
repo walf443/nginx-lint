@@ -107,8 +107,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct MyPlugin;
 
 impl Plugin for MyPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new("my-rule", "category", "Description")
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new("my-rule", "category", "Description")
             .with_severity("warning")
             .with_bad_example(include_str!("../examples/bad.conf").trim())
             .with_good_example(include_str!("../examples/good.conf").trim())
@@ -116,7 +116,7 @@ impl Plugin for MyPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for ctx in config.all_directives_with_context() {
             if ctx.directive.is("some_directive") {
@@ -199,7 +199,7 @@ arg.is_literal()       // Check if unquoted literal
 
 The plugin SDK provides:
 - `Plugin` trait for implementing rules
-- `PluginInfo` for metadata
+- `PluginSpec` for metadata
 - `LintError` for reporting issues
 - `Fix` for autofix support
 - Testing utilities (`PluginTestRunner`, `TestCase`)

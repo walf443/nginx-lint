@@ -18,8 +18,8 @@ const ALLOWED_PROTOCOLS: &[&str] = &["TLSv1.2", "TLSv1.3"];
 pub struct DeprecatedSslProtocolPlugin;
 
 impl Plugin for DeprecatedSslProtocolPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "deprecated-ssl-protocol",
             "security",
             "Detects usage of deprecated SSL/TLS protocols (SSLv3, TLSv1, TLSv1.1)",
@@ -40,7 +40,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for directive in config.all_directives() {
             if !directive.is("ssl_protocols") {

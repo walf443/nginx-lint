@@ -109,7 +109,7 @@ impl AddHeaderInheritancePlugin {
                                     .next();
 
                                 if let Some(first_directive) = first_add_header {
-                                    let err = PluginInfo::new(
+                                    let err = PluginSpec::new(
                                         "add-header-inheritance",
                                         "best-practices",
                                         "",
@@ -163,8 +163,8 @@ impl AddHeaderInheritancePlugin {
 }
 
 impl Plugin for AddHeaderInheritancePlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "add-header-inheritance",
             "best-practices",
             "Warns when add_header in child blocks doesn't include parent headers",

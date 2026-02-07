@@ -16,8 +16,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct ListenHttp2DeprecatedPlugin;
 
 impl Plugin for ListenHttp2DeprecatedPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "listen-http2-deprecated",
             "deprecation",
             "Detects the deprecated 'http2' parameter in 'listen' directive (use 'http2 on;' instead)",
@@ -37,7 +37,7 @@ impl Plugin for ListenHttp2DeprecatedPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         check_items(&config.items, &err, &mut errors);
 

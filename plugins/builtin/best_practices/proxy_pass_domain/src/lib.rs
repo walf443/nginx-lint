@@ -18,8 +18,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct ProxyPassDomainPlugin;
 
 impl Plugin for ProxyPassDomainPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "proxy-pass-domain",
             "best-practices",
             "Warns when proxy_pass uses a domain name directly without proper DNS handling",
@@ -43,7 +43,7 @@ impl Plugin for ProxyPassDomainPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for directive in config.all_directives() {
             // Check proxy_pass directive

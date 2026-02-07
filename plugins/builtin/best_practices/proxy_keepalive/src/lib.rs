@@ -67,7 +67,7 @@ impl ProxyKeepalivePlugin {
                         if !Self::has_connection_header(block) {
                             let version = version_directive.first_arg().unwrap_or("1.1");
 
-                            let err = PluginInfo::new(
+                            let err = PluginSpec::new(
                                 "proxy-keepalive",
                                 "best-practices",
                                 "",
@@ -129,7 +129,7 @@ impl ProxyKeepalivePlugin {
             if !has_connection {
                 let version = version_directive.first_arg().unwrap_or("1.1");
 
-                let err = PluginInfo::new(
+                let err = PluginSpec::new(
                     "proxy-keepalive",
                     "best-practices",
                     "",
@@ -151,8 +151,8 @@ impl ProxyKeepalivePlugin {
 }
 
 impl Plugin for ProxyKeepalivePlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "proxy-keepalive",
             "best-practices",
             "Warns when proxy_http_version 1.1+ is set without proxy_set_header Connection",

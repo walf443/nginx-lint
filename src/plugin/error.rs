@@ -22,8 +22,8 @@ pub enum PluginError {
     #[error("Missing required export '{export}' in plugin '{path}'")]
     MissingExport { path: PathBuf, export: String },
 
-    #[error("Invalid plugin info from '{path}': {message}")]
-    InvalidPluginInfo { path: PathBuf, message: String },
+    #[error("Invalid plugin spec from '{path}': {message}")]
+    InvalidPluginSpec { path: PathBuf, message: String },
 
     #[error("Plugin execution error in '{path}': {message}")]
     ExecutionError { path: PathBuf, message: String },
@@ -73,8 +73,8 @@ impl PluginError {
         }
     }
 
-    pub fn invalid_plugin_info(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
-        Self::InvalidPluginInfo {
+    pub fn invalid_plugin_spec(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self::InvalidPluginSpec {
             path: path.into(),
             message: message.into(),
         }

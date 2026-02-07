@@ -17,8 +17,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct AutoindexEnabledPlugin;
 
 impl Plugin for AutoindexEnabledPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "autoindex-enabled",
             "security",
             "Detects when autoindex is enabled (can expose directory contents)",
@@ -38,7 +38,7 @@ impl Plugin for AutoindexEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         for ctx in config.all_directives_with_context() {
             // Only check autoindex in http context (http, server, location)

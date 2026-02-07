@@ -41,8 +41,8 @@ impl RootInLocationPlugin {
 }
 
 impl Plugin for RootInLocationPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "root-in-location",
             "best-practices",
             "Warns when root directive is used inside location blocks",
@@ -66,7 +66,7 @@ impl Plugin for RootInLocationPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
         // Check if this file is included from within a location context
         let in_location = config.is_included_from_http_location();
         self.check_items(&config.items, in_location, &err, &mut errors);

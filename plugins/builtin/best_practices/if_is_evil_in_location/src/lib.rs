@@ -61,7 +61,7 @@ impl IfIsEvilInLocationPlugin {
 
         if !unsafe_directives.is_empty() {
             let unsafe_list = unsafe_directives.join(", ");
-            let err = PluginInfo::new(
+            let err = PluginSpec::new(
                 "if-is-evil-in-location",
                 "best-practices",
                 "",
@@ -107,8 +107,8 @@ impl IfIsEvilInLocationPlugin {
 }
 
 impl Plugin for IfIsEvilInLocationPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "if-is-evil-in-location",
             "best-practices",
             "Warns when 'if' blocks in location context contain unsafe directives",

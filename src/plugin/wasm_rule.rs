@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmi::{Engine, Linker, Memory, Module, Store, TypedFunc};
 
-/// Plugin info returned by the plugin_info export
+/// Plugin spec returned by the plugin_spec export
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginInfo {
+pub struct PluginSpec {
     pub name: String,
     pub category: String,
     pub description: String,
@@ -160,7 +160,7 @@ pub struct WasmLintRule {
     /// Path to the WASM file (for error reporting)
     path: PathBuf,
     /// Plugin metadata
-    info: PluginInfo,
+    spec: PluginSpec,
     /// Compiled WASM module (shared across threads)
     module: Arc<Module>,
     /// WASM engine reference (shared across threads)
@@ -194,18 +194,18 @@ impl WasmLintRule {
         // Validate required exports exist
         Self::validate_exports(&module, &path)?;
 
-        // Get plugin info by instantiating temporarily
-        let info = Self::get_plugin_info(engine, &module, &path, fuel_limit, fuel_enabled)?;
+        // Get plugin spec by instantiating temporarily
+        let spec = Self::get_plugin_spec(engine, &module, &path, fuel_limit, fuel_enabled)?;
 
         // Leak strings for 'static lifetime (these live for the program duration)
-        let name: &'static str = Box::leak(info.name.clone().into_boxed_str());
-        let category: &'static str = Box::leak(info.category.clone().into_boxed_str());
-        let description: &'static str = Box::leak(info.description.clone().into_boxed_str());
-        let api_version = info.api_version.clone();
+        let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
+        let category: &'static str = Box::leak(spec.category.clone().into_boxed_str());
+        let description: &'static str = Box::leak(spec.description.clone().into_boxed_str());
+        let api_version = spec.api_version.clone();
 
         Ok(Self {
             path,
-            info,
+            spec,
             module: Arc::new(module),
             engine: engine.clone(),
             fuel_limit,
@@ -220,8 +220,8 @@ impl WasmLintRule {
     /// Validate that the WASM module has all required exports
     fn validate_exports(module: &Module, path: &Path) -> Result<(), PluginError> {
         let required_exports = [
-            "plugin_info",
-            "plugin_info_len",
+            "plugin_spec",
+            "plugin_spec_len",
             "check",
             "check_result_len",
             "alloc",
@@ -239,14 +239,14 @@ impl WasmLintRule {
         Ok(())
     }
 
-    /// Get plugin info by calling the plugin_info export
-    fn get_plugin_info(
+    /// Get plugin spec by calling the plugin_spec export
+    fn get_plugin_spec(
         engine: &Engine,
         module: &Module,
         path: &Path,
         fuel_limit: u64,
         fuel_enabled: bool,
-    ) -> Result<PluginInfo, PluginError> {
+    ) -> Result<PluginSpec, PluginError> {
         let mut store = Store::new(engine, StoreData::default());
         if fuel_enabled {
             store.set_fuel(fuel_limit).map_err(|e| {
@@ -265,33 +265,33 @@ impl WasmLintRule {
             .ok_or_else(|| PluginError::missing_export(path, "memory"))?;
 
         // Get functions
-        let plugin_info_len = instance
-            .get_typed_func::<(), u32>(&store, "plugin_info_len")
-            .map_err(|e| PluginError::missing_export(path, format!("plugin_info_len: {}", e)))?;
+        let plugin_spec_len = instance
+            .get_typed_func::<(), u32>(&store, "plugin_spec_len")
+            .map_err(|e| PluginError::missing_export(path, format!("plugin_spec_len: {}", e)))?;
 
-        let plugin_info = instance
-            .get_typed_func::<(), u32>(&store, "plugin_info")
-            .map_err(|e| PluginError::missing_export(path, format!("plugin_info: {}", e)))?;
+        let plugin_spec = instance
+            .get_typed_func::<(), u32>(&store, "plugin_spec")
+            .map_err(|e| PluginError::missing_export(path, format!("plugin_spec: {}", e)))?;
 
-        // Call plugin_info_len to get the length
-        let len = plugin_info_len.call(&mut store, ()).map_err(|e| {
-            PluginError::execution_error(path, format!("plugin_info_len failed: {}", e))
+        // Call plugin_spec_len to get the length
+        let len = plugin_spec_len.call(&mut store, ()).map_err(|e| {
+            PluginError::execution_error(path, format!("plugin_spec_len failed: {}", e))
         })? as usize;
 
-        // Call plugin_info to get the pointer
-        let ptr = plugin_info.call(&mut store, ()).map_err(|e| {
-            PluginError::execution_error(path, format!("plugin_info failed: {}", e))
+        // Call plugin_spec to get the pointer
+        let ptr = plugin_spec.call(&mut store, ()).map_err(|e| {
+            PluginError::execution_error(path, format!("plugin_spec failed: {}", e))
         })? as usize;
 
         // Read the JSON string from memory
         let json_str = Self::read_string_from_memory(&store, &memory, ptr, len, path)?;
 
         // Parse the JSON
-        let info: PluginInfo = serde_json::from_str(&json_str).map_err(|e| {
-            PluginError::invalid_plugin_info(path, format!("Invalid JSON: {}", e))
+        let spec: PluginSpec = serde_json::from_str(&json_str).map_err(|e| {
+            PluginError::invalid_plugin_spec(path, format!("Invalid JSON: {}", e))
         })?;
 
-        Ok(info)
+        Ok(spec)
     }
 
     /// Read a string from WASM memory
@@ -484,29 +484,29 @@ impl WasmLintRule {
         &self.api_version
     }
 
-    /// Get the severity level from plugin info
+    /// Get the severity level from plugin spec
     pub fn severity(&self) -> Option<&str> {
-        self.info.severity.as_deref()
+        self.spec.severity.as_deref()
     }
 
-    /// Get the why documentation from plugin info
+    /// Get the why documentation from plugin spec
     pub fn why(&self) -> Option<&str> {
-        self.info.why.as_deref()
+        self.spec.why.as_deref()
     }
 
-    /// Get the bad example from plugin info
+    /// Get the bad example from plugin spec
     pub fn bad_example(&self) -> Option<&str> {
-        self.info.bad_example.as_deref()
+        self.spec.bad_example.as_deref()
     }
 
-    /// Get the good example from plugin info
+    /// Get the good example from plugin spec
     pub fn good_example(&self) -> Option<&str> {
-        self.info.good_example.as_deref()
+        self.spec.good_example.as_deref()
     }
 
-    /// Get the references from plugin info
+    /// Get the references from plugin spec
     pub fn references(&self) -> Option<Vec<String>> {
-        self.info.references.clone()
+        self.spec.references.clone()
     }
 }
 
@@ -559,19 +559,19 @@ impl LintRule for WasmLintRule {
     }
 
     fn why(&self) -> Option<&str> {
-        self.info.why.as_deref()
+        self.spec.why.as_deref()
     }
 
     fn bad_example(&self) -> Option<&str> {
-        self.info.bad_example.as_deref()
+        self.spec.bad_example.as_deref()
     }
 
     fn good_example(&self) -> Option<&str> {
-        self.info.good_example.as_deref()
+        self.spec.good_example.as_deref()
     }
 
     fn references(&self) -> Option<Vec<String>> {
-        self.info.references.clone()
+        self.spec.references.clone()
     }
 }
 

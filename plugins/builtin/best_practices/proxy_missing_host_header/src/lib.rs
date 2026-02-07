@@ -62,7 +62,7 @@ impl ProxyMissingHostHeaderPlugin {
                     // If we found proxy_pass, check for Host header
                     if let Some(pass_directive) = proxy_pass_directive {
                         if !effective_has_host {
-                            let err = PluginInfo::new(
+                            let err = PluginSpec::new(
                                 "proxy-missing-host-header",
                                 "best-practices",
                                 "",
@@ -116,7 +116,7 @@ impl ProxyMissingHostHeaderPlugin {
             });
 
             if !has_host {
-                let err = PluginInfo::new(
+                let err = PluginSpec::new(
                     "proxy-missing-host-header",
                     "best-practices",
                     "",
@@ -136,8 +136,8 @@ impl ProxyMissingHostHeaderPlugin {
 }
 
 impl Plugin for ProxyMissingHostHeaderPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "proxy-missing-host-header",
             "best-practices",
             "Warns when proxy_pass is used without proxy_set_header Host",

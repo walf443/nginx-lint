@@ -103,7 +103,7 @@ impl UnreachableLocationPlugin {
     /// Check for duplicate location paths (same modifier and pattern)
     fn check_duplicate_locations(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
         let mut seen: HashMap<String, &LocationInfo> = HashMap::new();
-        let err = PluginInfo::new(
+        let err = PluginSpec::new(
             "unreachable-location",
             "best-practices",
             "",
@@ -129,7 +129,7 @@ impl UnreachableLocationPlugin {
     /// Check for regex locations that will never match due to order
     fn check_regex_order(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
         let regex_locations: Vec<&LocationInfo> = locations.iter().filter(|l| l.is_regex()).collect();
-        let err = PluginInfo::new(
+        let err = PluginSpec::new(
             "unreachable-location",
             "best-practices",
             "",
@@ -193,7 +193,7 @@ impl UnreachableLocationPlugin {
             .filter(|l| l.is_regex())
             .collect();
 
-        let err = PluginInfo::new(
+        let err = PluginSpec::new(
             "unreachable-location",
             "best-practices",
             "",
@@ -267,8 +267,8 @@ impl UnreachableLocationPlugin {
 }
 
 impl Plugin for UnreachableLocationPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "unreachable-location",
             "best-practices",
             "Detects location blocks that may never be evaluated",

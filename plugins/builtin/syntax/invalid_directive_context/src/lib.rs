@@ -16,8 +16,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct InvalidDirectiveContextPlugin;
 
 impl Plugin for InvalidDirectiveContextPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "invalid-directive-context",
             "syntax",
             "Detects directives placed in invalid parent contexts",
@@ -116,7 +116,7 @@ fn check_context(items: &[ConfigItem], parent_stack: &[&str], errors: &mut Vec<L
                         )
                     };
 
-                    let err = PluginInfo::new(
+                    let err = PluginSpec::new(
                         "invalid-directive-context",
                         "syntax",
                         "",

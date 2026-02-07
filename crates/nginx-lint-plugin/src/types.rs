@@ -9,7 +9,7 @@ pub const API_VERSION: &str = "1.0";
 
 /// Plugin metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginInfo {
+pub struct PluginSpec {
     /// Unique name for the rule (e.g., "my-custom-rule")
     pub name: String,
     /// Category (e.g., "security", "style", "best_practices", "custom")
@@ -35,8 +35,8 @@ pub struct PluginInfo {
     pub references: Option<Vec<String>>,
 }
 
-impl PluginInfo {
-    /// Create a new PluginInfo with the current API version
+impl PluginSpec {
+    /// Create a new PluginSpec with the current API version
     pub fn new(name: impl Into<String>, category: impl Into<String>, description: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -89,8 +89,8 @@ impl PluginInfo {
     ///
     /// ```rust,ignore
     /// fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
-    ///     let info = self.info();
-    ///     let error = info.error_builder();
+    ///     let spec = self.spec();
+    ///     let error = spec.error_builder();
     ///
     ///     // Instead of:
     ///     // LintError::warning("my-rule", "security", "message", line, col)
@@ -274,7 +274,7 @@ impl LintError {
 /// Trait that plugins must implement
 pub trait Plugin: Default {
     /// Return plugin metadata
-    fn info(&self) -> PluginInfo;
+    fn spec(&self) -> PluginSpec;
 
     /// Check the configuration and return any lint errors
     fn check(&self, config: &Config, path: &str) -> Vec<LintError>;

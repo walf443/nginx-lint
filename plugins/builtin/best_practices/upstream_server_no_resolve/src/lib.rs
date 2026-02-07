@@ -57,8 +57,8 @@ impl UpstreamServerNoResolvePlugin {
 }
 
 impl Plugin for UpstreamServerNoResolvePlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "upstream-server-no-resolve",
             "best-practices",
             "Warns when upstream server uses a domain without 'resolve' or when 'resolve' is used without 'zone'",
@@ -85,7 +85,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         // First pass: collect upstream names that have 'zone' directive
         let upstreams_with_zone = Self::collect_upstreams_with_zone(config);

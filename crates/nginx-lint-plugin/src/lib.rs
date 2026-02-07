@@ -4,9 +4,9 @@
 //!
 //! # API Versioning
 //!
-//! Plugins declare the API version they use via `PluginInfo::api_version`.
+//! Plugins declare the API version they use via `PluginSpec::api_version`.
 //! This allows the host to support multiple output formats for backward compatibility.
-//! Use `PluginInfo::new()` to automatically set the current API version.
+//! Use `PluginSpec::new()` to automatically set the current API version.
 //!
 //! # Example
 //!
@@ -16,8 +16,8 @@
 //! struct MyRule;
 //!
 //! impl Plugin for MyRule {
-//!     fn info(&self) -> PluginInfo {
-//!         PluginInfo::new(
+//!     fn spec(&self) -> PluginSpec {
+//!         PluginSpec::new(
 //!             "my-custom-rule",
 //!             "custom",
 //!             "My custom lint rule",
@@ -75,8 +75,8 @@ pub mod prelude {
 /// struct MyPlugin;
 ///
 /// impl Plugin for MyPlugin {
-///     fn info(&self) -> PluginInfo {
-///         PluginInfo::new("my-plugin", "custom", "My plugin")
+///     fn spec(&self) -> PluginSpec {
+///         PluginSpec::new("my-plugin", "custom", "My plugin")
 ///     }
 ///
 ///     fn check(&self, config: &Config, path: &str) -> Vec<LintError> {
@@ -90,7 +90,7 @@ pub mod prelude {
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
         static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
-        static PLUGIN_INFO_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        static PLUGIN_SPEC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
         static CHECK_RESULT_CACHE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
         fn get_plugin() -> &'static $plugin_type {
@@ -111,23 +111,23 @@ macro_rules! export_plugin {
             unsafe { std::alloc::dealloc(ptr, layout) }
         }
 
-        /// Get the length of the plugin info JSON
+        /// Get the length of the plugin spec JSON
         #[unsafe(no_mangle)]
-        pub extern "C" fn plugin_info_len() -> u32 {
-            let info = PLUGIN_INFO_CACHE.get_or_init(|| {
+        pub extern "C" fn plugin_spec_len() -> u32 {
+            let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
                 let plugin = get_plugin();
-                let info = $crate::Plugin::info(plugin);
+                let info = $crate::Plugin::spec(plugin);
                 serde_json::to_string(&info).unwrap_or_default()
             });
             info.len() as u32
         }
 
-        /// Get the plugin info JSON pointer
+        /// Get the plugin spec JSON pointer
         #[unsafe(no_mangle)]
-        pub extern "C" fn plugin_info() -> *const u8 {
-            let info = PLUGIN_INFO_CACHE.get_or_init(|| {
+        pub extern "C" fn plugin_spec() -> *const u8 {
+            let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
                 let plugin = get_plugin();
-                let info = $crate::Plugin::info(plugin);
+                let info = $crate::Plugin::spec(plugin);
                 serde_json::to_string(&info).unwrap_or_default()
             });
             info.as_ptr()

@@ -109,7 +109,7 @@ impl ProxySetHeaderInheritancePlugin {
                                     .next();
 
                                 if let Some(first_directive) = first_proxy_set_header {
-                                    let err = PluginInfo::new(
+                                    let err = PluginSpec::new(
                                         "proxy-set-header-inheritance",
                                         "best-practices",
                                         "",
@@ -163,8 +163,8 @@ impl ProxySetHeaderInheritancePlugin {
 }
 
 impl Plugin for ProxySetHeaderInheritancePlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "proxy-set-header-inheritance",
             "best-practices",
             "Warns when proxy_set_header in child blocks doesn't include parent headers",

@@ -18,8 +18,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct ServerTokensEnabledPlugin;
 
 impl Plugin for ServerTokensEnabledPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "server-tokens-enabled",
             "security",
             "Detects when server_tokens is enabled (exposes nginx version)",
@@ -39,7 +39,7 @@ impl Plugin for ServerTokensEnabledPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
         let mut has_server_tokens_off = false;
         let mut has_server_tokens_on = false;
         let mut http_block_line: Option<usize> = None;

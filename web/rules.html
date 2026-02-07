@@ -213,7 +213,7 @@
     </div>
 
     <script type="module">
-        import init, { version, get_rule_info, get_rule_categories } from './pkg/nginx_lint.js';
+        import init, { version, get_rule_spec, get_rule_categories } from './pkg/nginx_lint.js';
 
         const escapeHtml = (str) => str
             .replace(/&/g, '&amp;')
@@ -225,14 +225,14 @@
             return escaped.replace(/( +)((?:\n|$))/g, '<span class="trailing-ws">$1</span>$2');
         }
 
-        function renderRules(categories, ruleInfo) {
+        function renderRules(categories, ruleSpec) {
             const contentDiv = document.getElementById('content');
             const summaryDiv = document.getElementById('summary');
 
             // Build category -> rules mapping
             const byCategory = {};
             let totalCount = 0;
-            for (const [name, info] of Object.entries(ruleInfo)) {
+            for (const [name, info] of Object.entries(ruleSpec)) {
                 const cat = info.category || 'other';
                 if (!byCategory[cat]) byCategory[cat] = [];
                 byCategory[cat].push({ name, ...info });
@@ -312,9 +312,9 @@
                 document.getElementById('version').textContent = 'v' + version();
 
                 const categories = JSON.parse(get_rule_categories());
-                const ruleInfo = JSON.parse(get_rule_info());
+                const ruleSpec = JSON.parse(get_rule_spec());
 
-                renderRules(categories, ruleInfo);
+                renderRules(categories, ruleSpec);
             } catch (e) {
                 document.getElementById('content').innerHTML =
                     '<div style="color:#f44336;padding:20px;">Failed to load WASM module: ' + (e.message || e) + '</div>';

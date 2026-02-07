@@ -16,8 +16,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct MissingErrorLogPlugin;
 
 impl Plugin for MissingErrorLogPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "missing-error-log",
             "best-practices",
             "Suggests configuring error_log for debugging",
@@ -44,7 +44,7 @@ impl Plugin for MissingErrorLogPlugin {
         }
 
         // No error_log found
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
         vec![err.warning("Consider configuring error_log for debugging", 0, 0)]
     }
 }

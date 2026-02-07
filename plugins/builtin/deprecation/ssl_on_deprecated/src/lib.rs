@@ -16,8 +16,8 @@ use nginx_lint_plugin::prelude::*;
 pub struct SslOnDeprecatedPlugin;
 
 impl Plugin for SslOnDeprecatedPlugin {
-    fn info(&self) -> PluginInfo {
-        PluginInfo::new(
+    fn spec(&self) -> PluginSpec {
+        PluginSpec::new(
             "ssl-on-deprecated",
             "deprecation",
             "Detects the deprecated 'ssl on;' directive (use 'listen ... ssl;' instead)",
@@ -38,7 +38,7 @@ impl Plugin for SslOnDeprecatedPlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let err = self.info().error_builder();
+        let err = self.spec().error_builder();
 
         check_items(&config.items, &err, &mut errors);
 

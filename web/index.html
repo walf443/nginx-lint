@@ -410,7 +410,7 @@ http {
         </div>
     </div>
 
-    <!-- Rule Info Modal -->
+    <!-- Rule Spec Modal -->
     <div id="rule-modal-overlay" class="rule-modal-overlay" onclick="closeRuleModal()">
         <div class="rule-modal" onclick="event.stopPropagation()">
             <button class="rule-modal-close" onclick="closeRuleModal()">&times;</button>
@@ -420,7 +420,7 @@ http {
     </div>
 
     <script type="module">
-        import init, { lint_with_config, version, get_rule_names, get_rule_info, get_default_config, debug_plugin_status } from '/pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names, get_rule_spec, get_default_config, debug_plugin_status } from '/pkg/nginx_lint.js';
 
         let wasmReady = false;
         let currentErrors = [];
@@ -464,9 +464,9 @@ http {
                 wasmReady = true;
                 document.getElementById('version').textContent = 'v' + version();
 
-                // Load rule information
+                // Load rule specs
                 const ruleNames = JSON.parse(get_rule_names());
-                ruleDescriptions = JSON.parse(get_rule_info());
+                ruleDescriptions = JSON.parse(get_rule_spec());
                 console.log('Available rules:', ruleNames.length);
                 console.log('Plugin status:', debug_plugin_status());
 
@@ -540,8 +540,8 @@ http {
                         const location = err.line ? `Line ${err.line}${err.column ? ':' + err.column : ''}` : '';
                         const fixBtn = err.fixes && err.fixes.length > 0 ? `<button class="fix-btn" onclick="applyFix(${index})">Fix</button>` : '';
                         const ignoreBtn = err.line ? `<button class="ignore-btn" onclick="ignoreError(${index})">Ignore</button>` : '';
-                        const ruleInfo = ruleDescriptions[err.rule];
-                        const hasDetails = ruleInfo && (ruleInfo.why || ruleInfo.bad_example || ruleInfo.good_example);
+                        const ruleSpec = ruleDescriptions[err.rule];
+                        const hasDetails = ruleSpec && (ruleSpec.why || ruleSpec.bad_example || ruleSpec.good_example);
                         const ruleClick = hasDetails ? `onclick="showRuleModal('${err.rule}')"` : '';
                         html += `
                             <div class="error-item ${err.severity}">
@@ -706,7 +706,7 @@ http {
             lintConfig();
         };
 
-        // Show rule info modal
+        // Show rule spec modal
         window.showRuleModal = function(ruleName) {
             const info = ruleDescriptions[ruleName];
             if (!info) return;
@@ -766,7 +766,7 @@ http {
             document.getElementById('rule-modal-overlay').style.display = 'block';
         };
 
-        // Close rule info modal
+        // Close rule spec modal
         window.closeRuleModal = function() {
             document.getElementById('rule-modal-overlay').style.display = 'none';
         };
