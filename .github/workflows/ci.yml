@@ -31,6 +31,15 @@ jobs:
           components: rustfmt
       - run: cargo fmt --check
 
+  hadolint:
+    name: Dockerfile Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+
   build-plugins:
     name: Build Plugins (${{ matrix.chunk }})
     runs-on: ubuntu-latest
