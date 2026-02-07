@@ -81,6 +81,9 @@ mod embedded {
     /// listen-http2-deprecated plugin
     pub const LISTEN_HTTP2_DEPRECATED: &[u8] =
         include_bytes!("../../target/builtin-plugins/listen_http2_deprecated.wasm");
+    /// proxy-missing-host-header plugin
+    pub const PROXY_MISSING_HOST_HEADER: &[u8] =
+        include_bytes!("../../target/builtin-plugins/proxy_missing_host_header.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -109,6 +112,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "map-missing-default",
     "ssl-on-deprecated",
     "listen-http2-deprecated",
+    "proxy-missing-host-header",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -390,6 +394,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:listen-http2-deprecated"),
         embedded::LISTEN_HTTP2_DEPRECATED,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load proxy-missing-host-header
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:proxy-missing-host-header"),
+        embedded::PROXY_MISSING_HOST_HEADER,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
