@@ -486,9 +486,9 @@ fn test_severity_counts() {
         .filter(|e| e.severity == Severity::Warning)
         .count();
     assert_eq!(error_count, 0, "Expected 0 errors");
-    assert_eq!(warning_count, 4, "Expected 4 warnings");
+    assert_eq!(warning_count, 5, "Expected 5 warnings");
     // Note: gzip-not-enabled and missing-error-log are disabled by default
-    // Warnings: server-tokens-enabled x2, root-in-location x2
+    // Warnings: server-tokens-enabled x2, root-in-location x2, client-max-body-size-not-set x1
 }
 
 #[test]
