@@ -84,6 +84,9 @@ mod embedded {
     /// proxy-missing-host-header plugin
     pub const PROXY_MISSING_HOST_HEADER: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_missing_host_header.wasm");
+    /// client-max-body-size-not-set plugin
+    pub const CLIENT_MAX_BODY_SIZE_NOT_SET: &[u8] =
+        include_bytes!("../../target/builtin-plugins/client_max_body_size_not_set.wasm");
 }
 
 /// Names of builtin plugins (used to skip native rules when builtin is enabled)
@@ -113,6 +116,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "ssl-on-deprecated",
     "listen-http2-deprecated",
     "proxy-missing-host-header",
+    "client-max-body-size-not-set",
 ];
 
 /// Global cache for the plugin loader (Engine is expensive to create)
@@ -403,6 +407,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-missing-host-header"),
         embedded::PROXY_MISSING_HOST_HEADER,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load client-max-body-size-not-set
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:client-max-body-size-not-set"),
+        embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
