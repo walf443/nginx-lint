@@ -21,15 +21,28 @@ env:
 
 jobs:
   test-plugins:
-    name: Test Plugins
+    name: Test Plugins (${{ matrix.chunk }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Test all plugins
+        with:
+          shared-key: "test-plugins-${{ matrix.chunk }}"
+      - name: Test plugin chunk
         run: |
-          for dir in plugins/builtin/*/*/; do
+          plugins=(plugins/builtin/*/*/)
+          total=${#plugins[@]}
+          chunks=4
+          chunk=${{ matrix.chunk }}
+          start=$(( chunk * total / chunks ))
+          end=$(( (chunk + 1) * total / chunks ))
+
+          for (( i=start; i<end; i++ )); do
+            dir="${plugins[$i]}"
             if [ -f "$dir/Cargo.toml" ]; then
               echo "Testing $(basename $dir)..."
               (cd "$dir" && cargo test)
