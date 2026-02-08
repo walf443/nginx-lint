@@ -20,17 +20,6 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  build-plugins:
-    name: Build WASM Plugins
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - run: make -j4 build-plugins
-
   test-plugins:
     name: Test Plugins
     runs-on: ubuntu-latest
