@@ -32,6 +32,16 @@ nginx-lint why server-tokens-enabled
 nginx-lint why --list
 ```
 
+### Docker
+
+```bash
+# Lint a configuration file (replace TARGET_PATH with your config path)
+TARGET_PATH=/etc/nginx/nginx.conf docker run --rm -v "$(dirname "$TARGET_PATH"):$(dirname "$TARGET_PATH"):ro" ghcr.io/walf443/nginx-lint:latest "$TARGET_PATH"
+
+# Automatically fix problems (mount as read-write)
+TARGET_PATH=/etc/nginx/nginx.conf docker run --rm -v "$(dirname "$TARGET_PATH"):$(dirname "$TARGET_PATH")" ghcr.io/walf443/nginx-lint:latest --fix "$TARGET_PATH"
+```
+
 ## Usage
 
 ```
