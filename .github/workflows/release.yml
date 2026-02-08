@@ -62,6 +62,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: nginx-lint-*
           merge-multiple: true
 
       - name: Create GitHub Release
