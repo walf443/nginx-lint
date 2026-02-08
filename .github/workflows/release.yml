@@ -11,8 +11,70 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
+  build-plugins:
+    name: Build Plugins (${{ matrix.chunk }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: plugins-${{ matrix.chunk }}
+      - name: Build plugin chunk
+        run: |
+          plugins=(plugins/builtin/*/*/)
+          total=${#plugins[@]}
+          chunks=4
+          chunk=${{ matrix.chunk }}
+          start=$(( chunk * total / chunks ))
+          end=$(( (chunk + 1) * total / chunks ))
+
+          mkdir -p target/builtin-plugins
+          for (( i=start; i<end; i++ )); do
+            dir="${plugins[$i]}"
+            if [ -f "$dir/Cargo.toml" ]; then
+              name=$(basename "$dir")
+              echo "Building $name..."
+              cargo build --manifest-path "$dir/Cargo.toml" \
+                --target wasm32-unknown-unknown \
+                --target-dir "$dir/target" \
+                --release
+              wasm_file="$dir/target/wasm32-unknown-unknown/release/$(echo $name | tr '-' '_')_plugin.wasm"
+              if [ -f "$wasm_file" ]; then
+                cp "$wasm_file" "target/builtin-plugins/${name}.wasm"
+                echo "  Collected ${name}.wasm"
+              fi
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins-${{ matrix.chunk }}
+          path: target/builtin-plugins/
+          if-no-files-found: ignore
+
+  merge-plugins:
+    name: Merge Plugins
+    needs: build-plugins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: builtin-plugins-*
+          path: target/builtin-plugins/
+          merge-multiple: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins/
+
   build:
     name: Build (${{ matrix.target }})
+    needs: merge-plugins
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -27,16 +89,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }},wasm32-unknown-unknown
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
-
-      - name: Build WASM plugins
-        run: make -j4 build-plugins
+      - uses: actions/download-artifact@v4
+        with:
+          name: builtin-plugins
+          path: target/builtin-plugins
 
       - name: Build binary
-        run: make build
+        run: cargo build --release --features builtin-plugins
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
 
