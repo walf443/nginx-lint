@@ -111,32 +111,32 @@ wasmi = { version = "1.0", optional = true }
 
 # Native plugin dependencies
 nginx-lint-plugin = { path = "crates/nginx-lint-plugin", optional = true }
-server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_enabled", optional = true }
-autoindex-enabled-plugin = { path = "plugins/builtin/security/autoindex_enabled", optional = true }
-deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_ssl_protocol", optional = true }
-weak-ssl-ciphers-plugin = { path = "plugins/builtin/security/weak_ssl_ciphers", optional = true }
-space-before-semicolon-plugin = { path = "plugins/builtin/style/space_before_semicolon", optional = true }
-trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace", optional = true }
-duplicate-directive-plugin = { path = "plugins/builtin/syntax/duplicate_directive", optional = true }
-invalid-directive-context-plugin = { path = "plugins/builtin/syntax/invalid_directive_context", optional = true }
-add-header-inheritance-plugin = { path = "plugins/builtin/best_practices/add_header_inheritance", optional = true }
-alias-location-slash-mismatch-plugin = { path = "plugins/builtin/best_practices/alias_location_slash_mismatch", optional = true }
-client-max-body-size-not-set-plugin = { path = "plugins/builtin/best_practices/client_max_body_size_not_set", optional = true }
-gzip-not-enabled-plugin = { path = "plugins/builtin/best_practices/gzip_not_enabled", optional = true }
-if-is-evil-in-location-plugin = { path = "plugins/builtin/best_practices/if_is_evil_in_location", optional = true }
-map-missing-default-plugin = { path = "plugins/builtin/best_practices/map_missing_default", optional = true }
-missing-error-log-plugin = { path = "plugins/builtin/best_practices/missing_error_log", optional = true }
-proxy-keepalive-plugin = { path = "plugins/builtin/best_practices/proxy_keepalive", optional = true }
-proxy-missing-host-header-plugin = { path = "plugins/builtin/best_practices/proxy_missing_host_header", optional = true }
-proxy-pass-domain-plugin = { path = "plugins/builtin/best_practices/proxy_pass_domain", optional = true }
-proxy-pass-with-uri-plugin = { path = "plugins/builtin/best_practices/proxy_pass_with_uri", optional = true }
-proxy-set-header-inheritance-plugin = { path = "plugins/builtin/best_practices/proxy_set_header_inheritance", optional = true }
-root-in-location-plugin = { path = "plugins/builtin/best_practices/root_in_location", optional = true }
-try-files-with-proxy-plugin = { path = "plugins/builtin/best_practices/try_files_with_proxy", optional = true }
-unreachable-location-plugin = { path = "plugins/builtin/best_practices/unreachable_location", optional = true }
-upstream-server-no-resolve-plugin = { path = "plugins/builtin/best_practices/upstream_server_no_resolve", optional = true }
-listen-http2-deprecated-plugin = { path = "plugins/builtin/deprecation/listen_http2_deprecated", optional = true }
-ssl-on-deprecated-plugin = { path = "plugins/builtin/deprecation/ssl_on_deprecated", optional = true }
+server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_enabled", optional = true, default-features = false }
+autoindex-enabled-plugin = { path = "plugins/builtin/security/autoindex_enabled", optional = true, default-features = false }
+deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_ssl_protocol", optional = true, default-features = false }
+weak-ssl-ciphers-plugin = { path = "plugins/builtin/security/weak_ssl_ciphers", optional = true, default-features = false }
+space-before-semicolon-plugin = { path = "plugins/builtin/style/space_before_semicolon", optional = true, default-features = false }
+trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace", optional = true, default-features = false }
+duplicate-directive-plugin = { path = "plugins/builtin/syntax/duplicate_directive", optional = true, default-features = false }
+invalid-directive-context-plugin = { path = "plugins/builtin/syntax/invalid_directive_context", optional = true, default-features = false }
+add-header-inheritance-plugin = { path = "plugins/builtin/best_practices/add_header_inheritance", optional = true, default-features = false }
+alias-location-slash-mismatch-plugin = { path = "plugins/builtin/best_practices/alias_location_slash_mismatch", optional = true, default-features = false }
+client-max-body-size-not-set-plugin = { path = "plugins/builtin/best_practices/client_max_body_size_not_set", optional = true, default-features = false }
+gzip-not-enabled-plugin = { path = "plugins/builtin/best_practices/gzip_not_enabled", optional = true, default-features = false }
+if-is-evil-in-location-plugin = { path = "plugins/builtin/best_practices/if_is_evil_in_location", optional = true, default-features = false }
+map-missing-default-plugin = { path = "plugins/builtin/best_practices/map_missing_default", optional = true, default-features = false }
+missing-error-log-plugin = { path = "plugins/builtin/best_practices/missing_error_log", optional = true, default-features = false }
+proxy-keepalive-plugin = { path = "plugins/builtin/best_practices/proxy_keepalive", optional = true, default-features = false }
+proxy-missing-host-header-plugin = { path = "plugins/builtin/best_practices/proxy_missing_host_header", optional = true, default-features = false }
+proxy-pass-domain-plugin = { path = "plugins/builtin/best_practices/proxy_pass_domain", optional = true, default-features = false }
+proxy-pass-with-uri-plugin = { path = "plugins/builtin/best_practices/proxy_pass_with_uri", optional = true, default-features = false }
+proxy-set-header-inheritance-plugin = { path = "plugins/builtin/best_practices/proxy_set_header_inheritance", optional = true, default-features = false }
+root-in-location-plugin = { path = "plugins/builtin/best_practices/root_in_location", optional = true, default-features = false }
+try-files-with-proxy-plugin = { path = "plugins/builtin/best_practices/try_files_with_proxy", optional = true, default-features = false }
+unreachable-location-plugin = { path = "plugins/builtin/best_practices/unreachable_location", optional = true, default-features = false }
+upstream-server-no-resolve-plugin = { path = "plugins/builtin/best_practices/upstream_server_no_resolve", optional = true, default-features = false }
+listen-http2-deprecated-plugin = { path = "plugins/builtin/deprecation/listen_http2_deprecated", optional = true, default-features = false }
+ssl-on-deprecated-plugin = { path = "plugins/builtin/deprecation/ssl_on_deprecated", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
