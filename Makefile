@@ -14,8 +14,8 @@ build-wasm:
 	wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
 
 # Build WASM module with builtin plugins (for web)
-build-wasm-with-plugins: collect-plugins
-	wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm,wasm-builtin-plugins
+build-wasm-with-plugins:
+	wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm,native-builtin-plugins
 
 # Build web server with embedded WASM (builds WASM first, then embeds it)
 build-web: build-wasm-with-plugins
