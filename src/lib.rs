@@ -18,8 +18,8 @@ pub mod reporter;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
-// Plugin system (for loading custom WASM lint rules)
-#[cfg(feature = "plugins")]
+// Plugin system (for loading custom WASM lint rules or native plugin adapters)
+#[cfg(any(feature = "plugins", feature = "native-plugins"))]
 pub mod plugin;
 
 // Re-export commonly used types from nginx-lint-common

@@ -1,15 +1,24 @@
-//! WASM plugin system for custom lint rules
+//! Plugin system for custom lint rules
 //!
 //! This module provides support for loading and executing custom lint rules
-//! implemented as WebAssembly modules.
+//! implemented as WebAssembly modules or native Rust plugins.
 
+#[cfg(feature = "plugins")]
 pub mod builtin;
+#[cfg(feature = "native-plugins")]
+pub mod native_builtin;
+#[cfg(feature = "plugins")]
 mod error;
+#[cfg(feature = "plugins")]
 mod loader;
+#[cfg(feature = "plugins")]
 mod wasm_rule;
 
+#[cfg(feature = "plugins")]
 pub use error::PluginError;
+#[cfg(feature = "plugins")]
 pub use loader::PluginLoader;
+#[cfg(feature = "plugins")]
 pub use wasm_rule::WasmLintRule;
 
 /// Current API version for the plugin interface.

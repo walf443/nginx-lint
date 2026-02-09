@@ -93,7 +93,7 @@ pub fn all_rule_names() -> Vec<&'static str> {
 }
 
 /// Get all rule documentation including plugins (owned version)
-#[cfg(feature = "builtin-plugins")]
+#[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
 pub fn all_rule_docs_with_plugins() -> Vec<RuleDocOwned> {
     let mut docs: Vec<RuleDocOwned> = all_rule_docs().iter().map(|d| (*d).into()).collect();
     docs.extend(get_builtin_plugin_docs());
@@ -101,7 +101,7 @@ pub fn all_rule_docs_with_plugins() -> Vec<RuleDocOwned> {
 }
 
 /// Get documentation for a rule by name, including plugins
-#[cfg(feature = "builtin-plugins")]
+#[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
 pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
     // First check native rules
     if let Some(doc) = get_rule_doc(name) {
@@ -113,8 +113,31 @@ pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
         .find(|d| d.name == name)
 }
 
-/// Get documentation from builtin plugins
-#[cfg(feature = "builtin-plugins")]
+/// Get documentation from native plugins
+#[cfg(feature = "native-plugins")]
+fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
+    use crate::linter::LintRule;
+    use crate::plugin::native_builtin::load_native_builtin_plugins;
+
+    let plugins: Vec<Box<dyn LintRule>> = load_native_builtin_plugins();
+    plugins
+        .into_iter()
+        .map(|rule| RuleDocOwned {
+            name: rule.name().to_string(),
+            category: rule.category().to_string(),
+            description: rule.description().to_string(),
+            severity: rule.severity().unwrap_or("warning").to_string(),
+            why: rule.why().unwrap_or("").to_string(),
+            bad_example: rule.bad_example().unwrap_or("").to_string(),
+            good_example: rule.good_example().unwrap_or("").to_string(),
+            references: rule.references().unwrap_or_default(),
+            is_plugin: true,
+        })
+        .collect()
+}
+
+/// Get documentation from WASM builtin plugins
+#[cfg(all(feature = "builtin-plugins", not(feature = "native-plugins")))]
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
     use crate::linter::LintRule;
     use crate::plugin::builtin::load_builtin_plugins;
