@@ -8,7 +8,7 @@ pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
         eprintln!("{}", "Available rules:".bold());
         eprintln!();
 
-        #[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
+        #[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
         {
             use nginx_lint::docs::all_rule_docs_with_plugins;
             let docs = all_rule_docs_with_plugins();
@@ -37,7 +37,7 @@ pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
                 }
             }
         }
-        #[cfg(not(any(feature = "builtin-plugins", feature = "native-plugins")))]
+        #[cfg(not(any(feature = "builtin-plugins", feature = "native-builtin-plugins")))]
         {
             use nginx_lint::docs::all_rule_docs;
             let docs = all_rule_docs();
@@ -76,7 +76,7 @@ pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
         }
     };
 
-    #[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
+    #[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
     {
         use nginx_lint::docs::get_rule_doc_with_plugins;
         match get_rule_doc_with_plugins(&rule_name) {
@@ -95,7 +95,7 @@ pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
             }
         }
     }
-    #[cfg(not(any(feature = "builtin-plugins", feature = "native-plugins")))]
+    #[cfg(not(any(feature = "builtin-plugins", feature = "native-builtin-plugins")))]
     {
         use nginx_lint::docs::get_rule_doc;
         match get_rule_doc(&rule_name) {
@@ -116,7 +116,7 @@ pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
     }
 }
 
-#[cfg(not(any(feature = "builtin-plugins", feature = "native-plugins")))]
+#[cfg(not(any(feature = "builtin-plugins", feature = "native-builtin-plugins")))]
 fn print_rule_doc(doc: &nginx_lint::docs::RuleDoc) {
     use colored::Colorize;
 
@@ -154,7 +154,7 @@ fn print_rule_doc(doc: &nginx_lint::docs::RuleDoc) {
     eprintln!();
 }
 
-#[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
+#[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
 fn print_rule_doc_owned(doc: &nginx_lint::docs::RuleDocOwned) {
     use colored::Colorize;
 

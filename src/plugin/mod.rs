@@ -9,7 +9,7 @@ pub mod builtin;
 mod error;
 #[cfg(feature = "plugins")]
 mod loader;
-#[cfg(feature = "native-plugins")]
+#[cfg(feature = "native-builtin-plugins")]
 pub mod native_builtin;
 #[cfg(feature = "plugins")]
 mod wasm_rule;

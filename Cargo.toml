@@ -43,7 +43,7 @@ authors = ["walf443"]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["cli", "native-plugins"]
+default = ["cli", "native-builtin-plugins"]
 cli = ["clap", "colored", "glob", "rayon"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
@@ -54,7 +54,7 @@ plugins = ["wasmi"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
 builtin-plugins = ["plugins"]
 # Native plugin support (compile plugins as native Rust instead of WASM)
-native-plugins = [
+native-builtin-plugins = [
     "dep:nginx-lint-plugin",
     "dep:server-tokens-enabled-plugin",
     "dep:autoindex-enabled-plugin",
@@ -148,4 +148,4 @@ required-features = ["cli"]
 [[bench]]
 name = "native_vs_wasm"
 harness = false
-required-features = ["builtin-plugins", "native-plugins"]
+required-features = ["builtin-plugins", "native-builtin-plugins"]

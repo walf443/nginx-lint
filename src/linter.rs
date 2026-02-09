@@ -44,11 +44,11 @@ impl Linter {
         }
         // invalid-directive-context: use native implementation when additional_contexts is configured
         // (for extension modules like nginx-rtmp-module); otherwise use WASM/native plugin
-        #[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
+        #[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
         let use_native_invalid_directive_context = config
             .and_then(|c| c.additional_contexts())
             .is_some_and(|additional| !additional.is_empty());
-        #[cfg(not(any(feature = "builtin-plugins", feature = "native-plugins")))]
+        #[cfg(not(any(feature = "builtin-plugins", feature = "native-builtin-plugins")))]
         let use_native_invalid_directive_context = true;
 
         if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
@@ -73,8 +73,8 @@ impl Linter {
             };
             linter.add_rule(Box::new(rule));
         }
-        // Load native plugins when native-plugins feature is enabled
-        #[cfg(feature = "native-plugins")]
+        // Load native plugins when native-builtin-plugins feature is enabled
+        #[cfg(feature = "native-builtin-plugins")]
         {
             use crate::plugin::native_builtin::load_native_builtin_plugins;
 
@@ -92,8 +92,8 @@ impl Linter {
             }
         }
 
-        // Load WASM builtin plugins when builtin-plugins is enabled but native-plugins is not
-        #[cfg(all(feature = "builtin-plugins", not(feature = "native-plugins")))]
+        // Load WASM builtin plugins when builtin-plugins is enabled but native-builtin-plugins is not
+        #[cfg(all(feature = "builtin-plugins", not(feature = "native-builtin-plugins")))]
         {
             use crate::plugin::builtin::load_builtin_plugins;
 
