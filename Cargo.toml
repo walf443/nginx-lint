@@ -1,13 +1,32 @@
 [workspace]
-members = ["crates/*", "plugins/builtin/security/server_tokens_enabled"]
-exclude = [
+members = [
+    "crates/*",
+    "plugins/builtin/security/server_tokens_enabled",
     "plugins/builtin/security/autoindex_enabled",
     "plugins/builtin/security/deprecated_ssl_protocol",
     "plugins/builtin/security/weak_ssl_ciphers",
-    "plugins/builtin/style/*",
-    "plugins/builtin/syntax/*",
-    "plugins/builtin/best_practices/*",
-    "plugins/builtin/deprecation/*",
+    "plugins/builtin/style/space_before_semicolon",
+    "plugins/builtin/style/trailing_whitespace",
+    "plugins/builtin/syntax/duplicate_directive",
+    "plugins/builtin/syntax/invalid_directive_context",
+    "plugins/builtin/best_practices/add_header_inheritance",
+    "plugins/builtin/best_practices/alias_location_slash_mismatch",
+    "plugins/builtin/best_practices/client_max_body_size_not_set",
+    "plugins/builtin/best_practices/gzip_not_enabled",
+    "plugins/builtin/best_practices/if_is_evil_in_location",
+    "plugins/builtin/best_practices/map_missing_default",
+    "plugins/builtin/best_practices/missing_error_log",
+    "plugins/builtin/best_practices/proxy_keepalive",
+    "plugins/builtin/best_practices/proxy_missing_host_header",
+    "plugins/builtin/best_practices/proxy_pass_domain",
+    "plugins/builtin/best_practices/proxy_pass_with_uri",
+    "plugins/builtin/best_practices/proxy_set_header_inheritance",
+    "plugins/builtin/best_practices/root_in_location",
+    "plugins/builtin/best_practices/try_files_with_proxy",
+    "plugins/builtin/best_practices/unreachable_location",
+    "plugins/builtin/best_practices/upstream_server_no_resolve",
+    "plugins/builtin/deprecation/listen_http2_deprecated",
+    "plugins/builtin/deprecation/ssl_on_deprecated",
 ]
 resolver = "2"
 
@@ -35,7 +54,35 @@ plugins = ["wasmi"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
 builtin-plugins = ["plugins"]
 # Native plugin support (compile plugins as native Rust instead of WASM)
-native-plugins = ["dep:nginx-lint-plugin", "dep:server-tokens-enabled-plugin"]
+native-plugins = [
+    "dep:nginx-lint-plugin",
+    "dep:server-tokens-enabled-plugin",
+    "dep:autoindex-enabled-plugin",
+    "dep:deprecated-ssl-protocol-plugin",
+    "dep:weak-ssl-ciphers-plugin",
+    "dep:space-before-semicolon-plugin",
+    "dep:trailing-whitespace-plugin",
+    "dep:duplicate-directive-plugin",
+    "dep:invalid-directive-context-plugin",
+    "dep:add-header-inheritance-plugin",
+    "dep:alias-location-slash-mismatch-plugin",
+    "dep:client-max-body-size-not-set-plugin",
+    "dep:gzip-not-enabled-plugin",
+    "dep:if-is-evil-in-location-plugin",
+    "dep:map-missing-default-plugin",
+    "dep:missing-error-log-plugin",
+    "dep:proxy-keepalive-plugin",
+    "dep:proxy-missing-host-header-plugin",
+    "dep:proxy-pass-domain-plugin",
+    "dep:proxy-pass-with-uri-plugin",
+    "dep:proxy-set-header-inheritance-plugin",
+    "dep:root-in-location-plugin",
+    "dep:try-files-with-proxy-plugin",
+    "dep:unreachable-location-plugin",
+    "dep:upstream-server-no-resolve-plugin",
+    "dep:listen-http2-deprecated-plugin",
+    "dep:ssl-on-deprecated-plugin",
+]
 
 [dependencies]
 # Internal crates
@@ -65,6 +112,31 @@ wasmi = { version = "1.0", optional = true }
 # Native plugin dependencies
 nginx-lint-plugin = { path = "crates/nginx-lint-plugin", optional = true }
 server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_enabled", optional = true }
+autoindex-enabled-plugin = { path = "plugins/builtin/security/autoindex_enabled", optional = true }
+deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_ssl_protocol", optional = true }
+weak-ssl-ciphers-plugin = { path = "plugins/builtin/security/weak_ssl_ciphers", optional = true }
+space-before-semicolon-plugin = { path = "plugins/builtin/style/space_before_semicolon", optional = true }
+trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace", optional = true }
+duplicate-directive-plugin = { path = "plugins/builtin/syntax/duplicate_directive", optional = true }
+invalid-directive-context-plugin = { path = "plugins/builtin/syntax/invalid_directive_context", optional = true }
+add-header-inheritance-plugin = { path = "plugins/builtin/best_practices/add_header_inheritance", optional = true }
+alias-location-slash-mismatch-plugin = { path = "plugins/builtin/best_practices/alias_location_slash_mismatch", optional = true }
+client-max-body-size-not-set-plugin = { path = "plugins/builtin/best_practices/client_max_body_size_not_set", optional = true }
+gzip-not-enabled-plugin = { path = "plugins/builtin/best_practices/gzip_not_enabled", optional = true }
+if-is-evil-in-location-plugin = { path = "plugins/builtin/best_practices/if_is_evil_in_location", optional = true }
+map-missing-default-plugin = { path = "plugins/builtin/best_practices/map_missing_default", optional = true }
+missing-error-log-plugin = { path = "plugins/builtin/best_practices/missing_error_log", optional = true }
+proxy-keepalive-plugin = { path = "plugins/builtin/best_practices/proxy_keepalive", optional = true }
+proxy-missing-host-header-plugin = { path = "plugins/builtin/best_practices/proxy_missing_host_header", optional = true }
+proxy-pass-domain-plugin = { path = "plugins/builtin/best_practices/proxy_pass_domain", optional = true }
+proxy-pass-with-uri-plugin = { path = "plugins/builtin/best_practices/proxy_pass_with_uri", optional = true }
+proxy-set-header-inheritance-plugin = { path = "plugins/builtin/best_practices/proxy_set_header_inheritance", optional = true }
+root-in-location-plugin = { path = "plugins/builtin/best_practices/root_in_location", optional = true }
+try-files-with-proxy-plugin = { path = "plugins/builtin/best_practices/try_files_with_proxy", optional = true }
+unreachable-location-plugin = { path = "plugins/builtin/best_practices/unreachable_location", optional = true }
+upstream-server-no-resolve-plugin = { path = "plugins/builtin/best_practices/upstream_server_no_resolve", optional = true }
+listen-http2-deprecated-plugin = { path = "plugins/builtin/deprecation/listen_http2_deprecated", optional = true }
+ssl-on-deprecated-plugin = { path = "plugins/builtin/deprecation/ssl_on_deprecated", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

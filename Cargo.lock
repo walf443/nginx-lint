@@ -3,6 +3,24 @@
 version = 4
 
 [[package]]
+name = "add-header-inheritance-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "alias-location-slash-mismatch-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -57,6 +75,15 @@ name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
+
+[[package]]
+name = "autoindex-enabled-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "bitflags"
@@ -123,6 +150,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3e64b0cc0439b12df2fa678eae89a1c56a529fd067a9115f7827f1fffd22b32"
 
 [[package]]
+name = "client-max-body-size-not-set-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "colorchoice"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -172,6 +208,24 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "deprecated-ssl-protocol-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "duplicate-directive-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "either"
@@ -226,6 +280,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
+name = "gzip-not-enabled-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,6 +316,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "if-is-evil-in-location-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "indexmap"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -260,6 +332,15 @@ checksum = "7714e70437a7dc3ac8eb7e6f8df75fd8eb422675fc7678aff7364301092b1017"
 dependencies = [
  "equivalent",
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "invalid-directive-context-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -305,10 +386,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039"
 
 [[package]]
+name = "listen-http2-deprecated-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "log"
 version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
+
+[[package]]
+name = "map-missing-default-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "memchr"
@@ -317,24 +416,58 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
+name = "missing-error-log-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nginx-lint"
 version = "0.1.0"
 dependencies = [
+ "add-header-inheritance-plugin",
+ "alias-location-slash-mismatch-plugin",
+ "autoindex-enabled-plugin",
  "clap",
+ "client-max-body-size-not-set-plugin",
  "colored",
  "console_error_panic_hook",
+ "deprecated-ssl-protocol-plugin",
+ "duplicate-directive-plugin",
  "glob",
+ "gzip-not-enabled-plugin",
+ "if-is-evil-in-location-plugin",
+ "invalid-directive-context-plugin",
+ "listen-http2-deprecated-plugin",
+ "map-missing-default-plugin",
+ "missing-error-log-plugin",
  "nginx-lint-common",
  "nginx-lint-plugin",
+ "proxy-keepalive-plugin",
+ "proxy-missing-host-header-plugin",
+ "proxy-pass-domain-plugin",
+ "proxy-pass-with-uri-plugin",
+ "proxy-set-header-inheritance-plugin",
  "rayon",
+ "root-in-location-plugin",
  "serde",
  "serde_json",
  "server-tokens-enabled-plugin",
+ "space-before-semicolon-plugin",
+ "ssl-on-deprecated-plugin",
  "tempfile",
  "thiserror",
  "tiny_http",
+ "trailing-whitespace-plugin",
+ "try-files-with-proxy-plugin",
+ "unreachable-location-plugin",
+ "upstream-server-no-resolve-plugin",
  "wasm-bindgen",
  "wasmi",
+ "weak-ssl-ciphers-plugin",
 ]
 
 [[package]]
@@ -388,6 +521,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "proxy-keepalive-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "proxy-missing-host-header-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "proxy-pass-domain-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "proxy-pass-with-uri-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "proxy-set-header-inheritance-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,6 +598,15 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "root-in-location-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -503,10 +690,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "space-before-semicolon-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+
+[[package]]
+name = "ssl-on-deprecated-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "string-interner"
@@ -622,6 +827,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
+name = "trailing-whitespace-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "try-files-with-proxy-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -632,6 +855,24 @@ name = "unicode-width"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
+
+[[package]]
+name = "unreachable-location-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "upstream-server-no-resolve-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "utf8parse"
@@ -784,6 +1025,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbf35b87ed352f9ab6cd0732abde5a67dd6153dfd02c493e61459218b19456fa"
 dependencies = [
  "wast",
+]
+
+[[package]]
+name = "weak-ssl-ciphers-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
