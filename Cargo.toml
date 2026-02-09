@@ -32,7 +32,7 @@ resolver = "2"
 
 [package]
 name = "nginx-lint"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "A linter for nginx configuration files with WASM plugin support"
 license = "MIT"
