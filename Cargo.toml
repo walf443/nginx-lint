@@ -1,10 +1,13 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "plugins/builtin/security/server_tokens_enabled"]
 exclude = [
-    "plugins/builtin/security/*",
+    "plugins/builtin/security/autoindex_enabled",
+    "plugins/builtin/security/deprecated_ssl_protocol",
+    "plugins/builtin/security/weak_ssl_ciphers",
     "plugins/builtin/style/*",
     "plugins/builtin/syntax/*",
     "plugins/builtin/best_practices/*",
+    "plugins/builtin/deprecation/*",
 ]
 resolver = "2"
 
@@ -31,6 +34,8 @@ web-server-embed-wasm = ["web-server"]
 plugins = ["wasmi"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
 builtin-plugins = ["plugins"]
+# Native plugin support (compile plugins as native Rust instead of WASM)
+native-plugins = ["dep:nginx-lint-plugin", "dep:server-tokens-enabled-plugin"]
 
 [dependencies]
 # Internal crates
@@ -57,9 +62,18 @@ console_error_panic_hook = { version = "0.1", optional = true }
 # Plugin system dependencies
 wasmi = { version = "1.0", optional = true }
 
+# Native plugin dependencies
+nginx-lint-plugin = { path = "crates/nginx-lint-plugin", optional = true }
+server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_enabled", optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 
 [[bin]]
 name = "nginx-lint"
 required-features = ["cli"]
+
+[[bench]]
+name = "native_vs_wasm"
+harness = false
+required-features = ["builtin-plugins", "native-plugins"]

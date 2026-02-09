@@ -325,9 +325,11 @@ dependencies = [
  "console_error_panic_hook",
  "glob",
  "nginx-lint-common",
+ "nginx-lint-plugin",
  "rayon",
  "serde",
  "serde_json",
+ "server-tokens-enabled-plugin",
  "tempfile",
  "thiserror",
  "tiny_http",
@@ -489,6 +491,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "server-tokens-enabled-plugin"
+version = "0.1.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

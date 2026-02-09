@@ -46,6 +46,7 @@
 //! ```
 
 pub mod helpers;
+pub mod native;
 pub mod testing;
 mod types;
 
@@ -89,104 +90,108 @@ pub mod prelude {
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
-        static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
-        static PLUGIN_SPEC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-        static CHECK_RESULT_CACHE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+        #[cfg(target_arch = "wasm32")]
+        const _: () = {
+            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
+            static PLUGIN_SPEC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+            static CHECK_RESULT_CACHE: std::sync::Mutex<String> =
+                std::sync::Mutex::new(String::new());
 
-        fn get_plugin() -> &'static $plugin_type {
-            PLUGIN.get_or_init(|| <$plugin_type>::default())
-        }
+            fn get_plugin() -> &'static $plugin_type {
+                PLUGIN.get_or_init(|| <$plugin_type>::default())
+            }
 
-        /// Allocate memory for the host to write data
-        #[unsafe(no_mangle)]
-        pub extern "C" fn alloc(size: u32) -> *mut u8 {
-            let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
-            unsafe { std::alloc::alloc(layout) }
-        }
+            /// Allocate memory for the host to write data
+            #[unsafe(no_mangle)]
+            pub extern "C" fn alloc(size: u32) -> *mut u8 {
+                let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
+                unsafe { std::alloc::alloc(layout) }
+            }
 
-        /// Deallocate memory
-        #[unsafe(no_mangle)]
-        pub extern "C" fn dealloc(ptr: *mut u8, size: u32) {
-            let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
-            unsafe { std::alloc::dealloc(ptr, layout) }
-        }
+            /// Deallocate memory
+            #[unsafe(no_mangle)]
+            pub extern "C" fn dealloc(ptr: *mut u8, size: u32) {
+                let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
+                unsafe { std::alloc::dealloc(ptr, layout) }
+            }
 
-        /// Get the length of the plugin spec JSON
-        #[unsafe(no_mangle)]
-        pub extern "C" fn plugin_spec_len() -> u32 {
-            let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
+            /// Get the length of the plugin spec JSON
+            #[unsafe(no_mangle)]
+            pub extern "C" fn plugin_spec_len() -> u32 {
+                let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
+                    let plugin = get_plugin();
+                    let info = $crate::Plugin::spec(plugin);
+                    serde_json::to_string(&info).unwrap_or_default()
+                });
+                info.len() as u32
+            }
+
+            /// Get the plugin spec JSON pointer
+            #[unsafe(no_mangle)]
+            pub extern "C" fn plugin_spec() -> *const u8 {
+                let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
+                    let plugin = get_plugin();
+                    let info = $crate::Plugin::spec(plugin);
+                    serde_json::to_string(&info).unwrap_or_default()
+                });
+                info.as_ptr()
+            }
+
+            /// Run the lint check
+            #[unsafe(no_mangle)]
+            pub extern "C" fn check(
+                config_ptr: *const u8,
+                config_len: u32,
+                path_ptr: *const u8,
+                path_len: u32,
+            ) -> *const u8 {
+                // Read config JSON from memory
+                let config_json = unsafe {
+                    let slice = std::slice::from_raw_parts(config_ptr, config_len as usize);
+                    std::str::from_utf8_unchecked(slice)
+                };
+
+                // Read path from memory
+                let path = unsafe {
+                    let slice = std::slice::from_raw_parts(path_ptr, path_len as usize);
+                    std::str::from_utf8_unchecked(slice)
+                };
+
+                // Parse config
+                let config: $crate::Config = match serde_json::from_str(config_json) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let errors = vec![$crate::LintError::error(
+                            "plugin-error",
+                            "plugin",
+                            &format!("Failed to parse config: {}", e),
+                            0,
+                            0,
+                        )];
+                        let result = serde_json::to_string(&errors).unwrap_or_default();
+                        let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
+                        *cache = result;
+                        return cache.as_ptr();
+                    }
+                };
+
+                // Run the check
                 let plugin = get_plugin();
-                let info = $crate::Plugin::spec(plugin);
-                serde_json::to_string(&info).unwrap_or_default()
-            });
-            info.len() as u32
-        }
+                let errors = $crate::Plugin::check(plugin, &config, path);
 
-        /// Get the plugin spec JSON pointer
-        #[unsafe(no_mangle)]
-        pub extern "C" fn plugin_spec() -> *const u8 {
-            let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
-                let plugin = get_plugin();
-                let info = $crate::Plugin::spec(plugin);
-                serde_json::to_string(&info).unwrap_or_default()
-            });
-            info.as_ptr()
-        }
+                // Serialize result
+                let result = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
+                let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
+                *cache = result;
+                cache.as_ptr()
+            }
 
-        /// Run the lint check
-        #[unsafe(no_mangle)]
-        pub extern "C" fn check(
-            config_ptr: *const u8,
-            config_len: u32,
-            path_ptr: *const u8,
-            path_len: u32,
-        ) -> *const u8 {
-            // Read config JSON from memory
-            let config_json = unsafe {
-                let slice = std::slice::from_raw_parts(config_ptr, config_len as usize);
-                std::str::from_utf8_unchecked(slice)
-            };
-
-            // Read path from memory
-            let path = unsafe {
-                let slice = std::slice::from_raw_parts(path_ptr, path_len as usize);
-                std::str::from_utf8_unchecked(slice)
-            };
-
-            // Parse config
-            let config: $crate::Config = match serde_json::from_str(config_json) {
-                Ok(c) => c,
-                Err(e) => {
-                    let errors = vec![$crate::LintError::error(
-                        "plugin-error",
-                        "plugin",
-                        &format!("Failed to parse config: {}", e),
-                        0,
-                        0,
-                    )];
-                    let result = serde_json::to_string(&errors).unwrap_or_default();
-                    let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
-                    *cache = result;
-                    return cache.as_ptr();
-                }
-            };
-
-            // Run the check
-            let plugin = get_plugin();
-            let errors = $crate::Plugin::check(plugin, &config, path);
-
-            // Serialize result
-            let result = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
-            let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
-            *cache = result;
-            cache.as_ptr()
-        }
-
-        /// Get the length of the check result
-        #[unsafe(no_mangle)]
-        pub extern "C" fn check_result_len() -> u32 {
-            let cache = CHECK_RESULT_CACHE.lock().unwrap();
-            cache.len() as u32
-        }
+            /// Get the length of the check result
+            #[unsafe(no_mangle)]
+            pub extern "C" fn check_result_len() -> u32 {
+                let cache = CHECK_RESULT_CACHE.lock().unwrap();
+                cache.len() as u32
+            }
+        };
     };
 }
