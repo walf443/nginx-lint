@@ -30,3 +30,38 @@ pub use wasm_rule::WasmLintRule;
 /// Plugins declare which API version they use, and the host can support
 /// multiple versions for backward compatibility.
 pub const API_VERSION: &str = "1.0";
+
+/// Names of builtin plugins
+pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
+    "server-tokens-enabled",
+    "autoindex-enabled",
+    "gzip-not-enabled",
+    "duplicate-directive",
+    "space-before-semicolon",
+    "trailing-whitespace",
+    "proxy-pass-domain",
+    "upstream-server-no-resolve",
+    "proxy-set-header-inheritance",
+    "root-in-location",
+    "alias-location-slash-mismatch",
+    "proxy-pass-with-uri",
+    "add-header-inheritance",
+    "proxy-keepalive",
+    "try-files-with-proxy",
+    "if-is-evil-in-location",
+    "unreachable-location",
+    "missing-error-log",
+    "deprecated-ssl-protocol",
+    "weak-ssl-ciphers",
+    "invalid-directive-context",
+    "map-missing-default",
+    "ssl-on-deprecated",
+    "listen-http2-deprecated",
+    "proxy-missing-host-header",
+    "client-max-body-size-not-set",
+];
+
+/// Check if a rule name is a builtin plugin
+pub fn is_builtin_plugin(name: &str) -> bool {
+    BUILTIN_PLUGIN_NAMES.contains(&name)
+}

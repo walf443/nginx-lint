@@ -89,35 +89,8 @@ mod embedded {
         include_bytes!("../../target/builtin-plugins/client_max_body_size_not_set.wasm");
 }
 
-/// Names of builtin plugins (used to skip native rules when builtin is enabled)
-pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
-    "server-tokens-enabled",
-    "autoindex-enabled",
-    "gzip-not-enabled",
-    "duplicate-directive",
-    "space-before-semicolon",
-    "trailing-whitespace",
-    "proxy-pass-domain",
-    "upstream-server-no-resolve",
-    "proxy-set-header-inheritance",
-    "root-in-location",
-    "alias-location-slash-mismatch",
-    "proxy-pass-with-uri",
-    "add-header-inheritance",
-    "proxy-keepalive",
-    "try-files-with-proxy",
-    "if-is-evil-in-location",
-    "unreachable-location",
-    "missing-error-log",
-    "deprecated-ssl-protocol",
-    "weak-ssl-ciphers",
-    "invalid-directive-context",
-    "map-missing-default",
-    "ssl-on-deprecated",
-    "listen-http2-deprecated",
-    "proxy-missing-host-header",
-    "client-max-body-size-not-set",
-];
+// Re-export from parent module for backward compatibility
+pub use super::{BUILTIN_PLUGIN_NAMES, is_builtin_plugin};
 
 /// Global cache for the plugin loader (Engine is expensive to create)
 #[cfg(feature = "builtin-plugins")]
@@ -423,9 +396,4 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
     )?);
 
     Ok(plugins)
-}
-
-/// Check if a rule name is a builtin plugin
-pub fn is_builtin_plugin(name: &str) -> bool {
-    BUILTIN_PLUGIN_NAMES.contains(&name)
 }

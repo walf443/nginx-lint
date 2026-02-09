@@ -452,9 +452,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     let mut linter = Linter::with_config(lint_config.as_ref());
 
     // Show builtin plugins in verbose mode
-    #[cfg(feature = "builtin-plugins")]
+    #[cfg(any(feature = "builtin-plugins", feature = "native-plugins"))]
     if cli.verbose {
-        use nginx_lint::plugin::builtin::BUILTIN_PLUGIN_NAMES;
+        use nginx_lint::plugin::BUILTIN_PLUGIN_NAMES;
         eprintln!("Loaded {} builtin plugin(s)", BUILTIN_PLUGIN_NAMES.len());
         for name in BUILTIN_PLUGIN_NAMES {
             eprintln!("  - {}", name);
