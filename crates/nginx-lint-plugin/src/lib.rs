@@ -90,7 +90,7 @@ pub mod prelude {
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(all(target_arch = "wasm32", feature = "wasm-export"))]
         const _: () = {
             static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
             static PLUGIN_SPEC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
