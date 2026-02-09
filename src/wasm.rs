@@ -223,7 +223,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     }
 
     // Note: trailing-whitespace and space-before-semicolon are now WASM plugins.
-    // They are loaded through Linter::with_config() above when builtin-plugins feature is enabled,
+    // They are loaded through Linter::with_config() above when wasm-builtin-plugins feature is enabled,
     // and executed via wasmi interpreter (which works inside browser WASM).
 
     // Filter ignored errors and track count
@@ -341,7 +341,7 @@ pub fn get_rule_categories() -> String {
 /// Debug function to check plugin loading status
 #[wasm_bindgen]
 pub fn debug_plugin_status() -> String {
-    #[cfg(feature = "builtin-plugins")]
+    #[cfg(feature = "wasm-builtin-plugins")]
     {
         use crate::linter::LintRule;
         use crate::plugin::builtin::load_builtin_plugins;
@@ -354,9 +354,9 @@ pub fn debug_plugin_status() -> String {
             Err(e) => format!("Failed to load plugins: {}", e),
         }
     }
-    #[cfg(not(feature = "builtin-plugins"))]
+    #[cfg(not(feature = "wasm-builtin-plugins"))]
     {
-        "builtin-plugins feature not enabled".to_string()
+        "wasm-builtin-plugins feature not enabled".to_string()
     }
 }
 

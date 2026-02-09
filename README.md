@@ -189,7 +189,7 @@ cargo install --path . --features web-server
 
 # Build with embedded WASM plugins instead of native (requires WASM toolchain)
 make build-plugins
-cargo install --path . --no-default-features --features cli,builtin-plugins
+cargo install --path . --no-default-features --features cli,wasm-builtin-plugins
 ```
 
 ### Cargo features
@@ -198,7 +198,7 @@ cargo install --path . --no-default-features --features cli,builtin-plugins
 |---------|-------------|
 | `cli` | Command-line interface (default) |
 | `native-builtin-plugins` | Compile builtin plugins as native Rust (default) |
-| `builtin-plugins` | Embed builtin WASM plugins in the binary (requires `make build-plugins`) |
+| `wasm-builtin-plugins` | Embed builtin WASM plugins in the binary (requires `make build-plugins`) |
 | `plugins` | Support loading external WASM plugins |
 | `web-server` | Built-in web server for browser UI |
 | `wasm` | WebAssembly target support |

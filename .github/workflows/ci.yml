@@ -143,7 +143,7 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM for web
-        run: wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
+        run: wasm-pack build --target web --out-dir web/pkg --features wasm,wasm-builtin-plugins
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v4
       - name: Upload Pages artifact

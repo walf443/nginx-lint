@@ -15,7 +15,7 @@ build-wasm:
 
 # Build WASM module with builtin plugins (for web)
 build-wasm-with-plugins: collect-plugins
-	wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
+	wasm-pack build --target web --out-dir web/pkg --features wasm,wasm-builtin-plugins
 
 # Build web server with embedded WASM (builds WASM first, then embeds it)
 build-web: build-wasm-with-plugins
@@ -63,7 +63,7 @@ collect-plugins: build-plugins
 # Build binary with embedded WASM builtin plugins (instead of native)
 build-with-wasm-plugins: collect-plugins
 	@echo "Building nginx-lint with embedded WASM builtin plugins..."
-	cargo build --release --no-default-features --features cli,builtin-plugins
+	cargo build --release --no-default-features --features cli,wasm-builtin-plugins
 	@echo "Done."
 
 # Run tests

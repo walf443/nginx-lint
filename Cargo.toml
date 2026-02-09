@@ -52,7 +52,7 @@ web-server-embed-wasm = ["web-server"]
 # WASM plugin support for custom lint rules
 plugins = ["wasmi"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
-builtin-plugins = ["plugins"]
+wasm-builtin-plugins = ["plugins"]
 # Native plugin support (compile plugins as native Rust instead of WASM)
 native-builtin-plugins = [
     "dep:nginx-lint-plugin",
@@ -148,4 +148,4 @@ required-features = ["cli"]
 [[bench]]
 name = "native_vs_wasm"
 harness = false
-required-features = ["builtin-plugins", "native-builtin-plugins"]
+required-features = ["wasm-builtin-plugins", "native-builtin-plugins"]

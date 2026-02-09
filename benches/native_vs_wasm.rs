@@ -4,7 +4,7 @@
 //! versus running the same logic natively via NativePluginRule.
 //!
 //! Run with:
-//!   cargo bench --features "builtin-plugins,native-builtin-plugins" --bench native_vs_wasm
+//!   cargo bench --features "wasm-builtin-plugins,native-builtin-plugins" --bench native_vs_wasm
 
 use nginx_lint::LintRule;
 use nginx_lint::parser::parse_string;

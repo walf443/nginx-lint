@@ -44,11 +44,11 @@ impl Linter {
         }
         // invalid-directive-context: use native implementation when additional_contexts is configured
         // (for extension modules like nginx-rtmp-module); otherwise use WASM/native plugin
-        #[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
+        #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
         let use_native_invalid_directive_context = config
             .and_then(|c| c.additional_contexts())
             .is_some_and(|additional| !additional.is_empty());
-        #[cfg(not(any(feature = "builtin-plugins", feature = "native-builtin-plugins")))]
+        #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
         let use_native_invalid_directive_context = true;
 
         if is_enabled("invalid-directive-context") && use_native_invalid_directive_context {
@@ -92,8 +92,11 @@ impl Linter {
             }
         }
 
-        // Load WASM builtin plugins when builtin-plugins is enabled but native-builtin-plugins is not
-        #[cfg(all(feature = "builtin-plugins", not(feature = "native-builtin-plugins")))]
+        // Load WASM builtin plugins when wasm-builtin-plugins is enabled but native-builtin-plugins is not
+        #[cfg(all(
+            feature = "wasm-builtin-plugins",
+            not(feature = "native-builtin-plugins")
+        ))]
         {
             use crate::plugin::builtin::load_builtin_plugins;
 

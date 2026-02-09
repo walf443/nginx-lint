@@ -93,7 +93,7 @@ pub fn all_rule_names() -> Vec<&'static str> {
 }
 
 /// Get all rule documentation including plugins (owned version)
-#[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
+#[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
 pub fn all_rule_docs_with_plugins() -> Vec<RuleDocOwned> {
     let mut docs: Vec<RuleDocOwned> = all_rule_docs().iter().map(|d| (*d).into()).collect();
     docs.extend(get_builtin_plugin_docs());
@@ -101,7 +101,7 @@ pub fn all_rule_docs_with_plugins() -> Vec<RuleDocOwned> {
 }
 
 /// Get documentation for a rule by name, including plugins
-#[cfg(any(feature = "builtin-plugins", feature = "native-builtin-plugins"))]
+#[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
 pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
     // First check native rules
     if let Some(doc) = get_rule_doc(name) {
@@ -137,7 +137,10 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
 }
 
 /// Get documentation from WASM builtin plugins
-#[cfg(all(feature = "builtin-plugins", not(feature = "native-builtin-plugins")))]
+#[cfg(all(
+    feature = "wasm-builtin-plugins",
+    not(feature = "native-builtin-plugins")
+))]
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
     use crate::linter::LintRule;
     use crate::plugin::builtin::load_builtin_plugins;
