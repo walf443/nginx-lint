@@ -5,12 +5,12 @@
 
 #[cfg(feature = "plugins")]
 pub mod builtin;
-#[cfg(feature = "native-plugins")]
-pub mod native_builtin;
 #[cfg(feature = "plugins")]
 mod error;
 #[cfg(feature = "plugins")]
 mod loader;
+#[cfg(feature = "native-plugins")]
+pub mod native_builtin;
 #[cfg(feature = "plugins")]
 mod wasm_rule;
 
