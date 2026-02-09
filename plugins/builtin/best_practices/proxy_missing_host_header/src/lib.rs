@@ -39,7 +39,12 @@ impl ProxyMissingHostHeaderPlugin {
     ///
     /// `parent_has_host` indicates whether any ancestor block already has
     /// `proxy_set_header Host`, so child blocks can inherit it.
-    fn check_block(&self, items: &[ConfigItem], parent_has_host: bool, errors: &mut Vec<LintError>) {
+    fn check_block(
+        &self,
+        items: &[ConfigItem],
+        parent_has_host: bool,
+        errors: &mut Vec<LintError>,
+    ) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
                 // Check if this directive has a block
@@ -62,11 +67,9 @@ impl ProxyMissingHostHeaderPlugin {
                     // If we found proxy_pass, check for Host header
                     if let Some(pass_directive) = proxy_pass_directive {
                         if !effective_has_host {
-                            let err = PluginSpec::new(
-                                "proxy-missing-host-header",
-                                "best-practices",
-                                "",
-                            ).error_builder();
+                            let err =
+                                PluginSpec::new("proxy-missing-host-header", "best-practices", "")
+                                    .error_builder();
 
                             let error = err.warning_at(
                                 "proxy_pass is set but proxy_set_header Host is not configured. \
@@ -116,18 +119,17 @@ impl ProxyMissingHostHeaderPlugin {
             });
 
             if !has_host {
-                let err = PluginSpec::new(
-                    "proxy-missing-host-header",
-                    "best-practices",
-                    "",
-                ).error_builder();
+                let err = PluginSpec::new("proxy-missing-host-header", "best-practices", "")
+                    .error_builder();
 
-                let error = err.warning_at(
-                    "proxy_pass is set but proxy_set_header Host is not configured. \
+                let error = err
+                    .warning_at(
+                        "proxy_pass is set but proxy_set_header Host is not configured. \
                      Without the Host header, the backend may not receive the correct \
                      hostname. Add 'proxy_set_header Host $host;'",
-                    pass_directive,
-                ).with_fix(pass_directive.insert_after("proxy_set_header Host $host;"));
+                        pass_directive,
+                    )
+                    .with_fix(pass_directive.insert_after("proxy_set_header Host $host;"));
 
                 errors.push(error);
             }
@@ -155,7 +157,8 @@ impl Plugin for ProxyMissingHostHeaderPlugin {
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
-            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header".to_string(),
+            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header"
+                .to_string(),
         ])
     }
 
@@ -178,8 +181,8 @@ nginx_lint_plugin::export_plugin!(ProxyMissingHostHeaderPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_missing_host_header() {
@@ -468,7 +471,12 @@ proxy_pass http://backend;
         let plugin = ProxyMissingHostHeaderPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for proxy_pass without Host, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for proxy_pass without Host, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("proxy_pass"));
         assert!(errors[0].message.contains("Host"));
     }
@@ -494,7 +502,11 @@ proxy_set_header Host $host;
         let plugin = ProxyMissingHostHeaderPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors when Host header is set, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors when Host header is set, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -510,7 +522,11 @@ proxy_pass http://backend;
         let plugin = ProxyMissingHostHeaderPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors without include context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors without include context, got: {:?}",
+            errors
+        );
     }
 
     #[test]

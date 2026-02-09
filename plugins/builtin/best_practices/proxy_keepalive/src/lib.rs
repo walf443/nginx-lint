@@ -67,11 +67,8 @@ impl ProxyKeepalivePlugin {
                         if !Self::has_connection_header(block) {
                             let version = version_directive.first_arg().unwrap_or("1.1");
 
-                            let err = PluginSpec::new(
-                                "proxy-keepalive",
-                                "best-practices",
-                                "",
-                            ).error_builder();
+                            let err = PluginSpec::new("proxy-keepalive", "best-practices", "")
+                                .error_builder();
 
                             let error = err.warning_at(
                                 &format!(
@@ -129,11 +126,7 @@ impl ProxyKeepalivePlugin {
             if !has_connection {
                 let version = version_directive.first_arg().unwrap_or("1.1");
 
-                let err = PluginSpec::new(
-                    "proxy-keepalive",
-                    "best-practices",
-                    "",
-                ).error_builder();
+                let err = PluginSpec::new("proxy-keepalive", "best-practices", "").error_builder();
 
                 let error = err.warning_at(
                     &format!(
@@ -167,7 +160,8 @@ impl Plugin for ProxyKeepalivePlugin {
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
-            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_http_version".to_string(),
+            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_http_version"
+                .to_string(),
             "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#keepalive".to_string(),
         ])
     }
@@ -191,8 +185,8 @@ nginx_lint_plugin::export_plugin!(ProxyKeepalivePlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_missing_connection_header() {
@@ -499,7 +493,12 @@ proxy_pass http://backend;
         let plugin = ProxyKeepalivePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("proxy_http_version 1.1"));
         assert!(errors[0].message.contains("Connection"));
     }
@@ -520,7 +519,12 @@ proxy_http_version 1.1;
         let plugin = ProxyKeepalivePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for proxy_http_version 1.1 without Connection, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -545,7 +549,11 @@ proxy_pass http://backend;
         let plugin = ProxyKeepalivePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors when Connection header is set, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors when Connection header is set, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -569,7 +577,11 @@ proxy_pass http://backend;
         let plugin = ProxyKeepalivePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for HTTP/1.0, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for HTTP/1.0, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -586,6 +598,10 @@ proxy_http_version 1.1;
         let plugin = ProxyKeepalivePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors without include context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors without include context, got: {:?}",
+            errors
+        );
     }
 }

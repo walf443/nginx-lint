@@ -59,8 +59,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             }
 
             // Generate the fixed protocol list
-            let current_protocols: Vec<&str> =
-                directive.args.iter().map(|a| a.as_str()).collect();
+            let current_protocols: Vec<&str> = directive.args.iter().map(|a| a.as_str()).collect();
             let fixed_protocols = generate_fixed_protocols(&current_protocols);
 
             // Use range-based fix to replace the directive content
@@ -174,16 +173,22 @@ server {
     fn test_multiple_deprecated() {
         let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
 
-        let errors = runner.check_string(
-            r#"
+        let errors = runner
+            .check_string(
+                r#"
 server {
     ssl_protocols SSLv3 TLSv1 TLSv1.1 TLSv1.2;
 }
 "#,
-        ).unwrap();
+            )
+            .unwrap();
 
         // Should have 3 errors (one for each deprecated protocol)
-        assert_eq!(errors.len(), 3, "Expected 3 errors for SSLv3, TLSv1, TLSv1.1");
+        assert_eq!(
+            errors.len(),
+            3,
+            "Expected 3 errors for SSLv3, TLSv1, TLSv1.1"
+        );
     }
 
     #[test]
@@ -229,17 +234,22 @@ server {
     fn test_fix_generates_safe_protocols() {
         let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
 
-        let errors = runner.check_string(
-            r#"
+        let errors = runner
+            .check_string(
+                r#"
 server {
     ssl_protocols SSLv3 TLSv1;
 }
 "#,
-        ).unwrap();
+            )
+            .unwrap();
 
         assert!(!errors.is_empty());
         // First error should have a fix
-        let fix = errors[0].fixes.first().expect("Expected fix on first error");
+        let fix = errors[0]
+            .fixes
+            .first()
+            .expect("Expected fix on first error");
         assert!(fix.new_text.contains("TLSv1.2"));
         assert!(fix.new_text.contains("TLSv1.3"));
         assert!(!fix.new_text.contains("SSLv3"));
@@ -270,10 +280,7 @@ server {
         );
 
         // Only TLSv1.2 -> add TLSv1.3
-        assert_eq!(
-            generate_fixed_protocols(&["TLSv1.2"]),
-            "TLSv1.2 TLSv1.3"
-        );
+        assert_eq!(generate_fixed_protocols(&["TLSv1.2"]), "TLSv1.2 TLSv1.3");
     }
 
     #[test]

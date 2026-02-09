@@ -99,11 +99,9 @@ impl AliasLocationSlashMismatchPlugin {
                             continue;
                         }
 
-                        let err = PluginSpec::new(
-                            "alias-location-slash-mismatch",
-                            "best-practices",
-                            "",
-                        ).error_builder();
+                        let err =
+                            PluginSpec::new("alias-location-slash-mismatch", "best-practices", "")
+                                .error_builder();
 
                         let mut error = err.warning_at(
                             &format!(
@@ -117,11 +115,13 @@ impl AliasLocationSlashMismatchPlugin {
                         if !is_regex_location {
                             if let Some(arg) = directive.args.first() {
                                 match &arg.value {
-                                    ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_) => {
+                                    ArgumentValue::QuotedString(_)
+                                    | ArgumentValue::SingleQuotedString(_) => {
                                         // Insert before closing quote
                                         let fix_start = arg.span.end.offset - 1;
                                         let fix_end = arg.span.end.offset - 1;
-                                        error = error.with_fix(Fix::replace_range(fix_start, fix_end, "/"));
+                                        error = error
+                                            .with_fix(Fix::replace_range(fix_start, fix_end, "/"));
                                     }
                                     ArgumentValue::Literal(_) => {
                                         // Append at end of literal
@@ -147,7 +147,12 @@ impl AliasLocationSlashMismatchPlugin {
                         let is_regex = Self::is_regex_location(directive);
                         self.check_items(&block.items, ends_with_slash, is_regex, errors);
                     } else {
-                        self.check_items(&block.items, location_ends_with_slash, is_regex_location, errors);
+                        self.check_items(
+                            &block.items,
+                            location_ends_with_slash,
+                            is_regex_location,
+                            errors,
+                        );
                     }
                 }
             }
@@ -196,8 +201,8 @@ nginx_lint_plugin::export_plugin!(AliasLocationSlashMismatchPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_alias_without_trailing_slash_warns() {

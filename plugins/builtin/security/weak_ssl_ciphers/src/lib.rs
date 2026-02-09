@@ -75,7 +75,11 @@ impl Plugin for WeakSslCiphersPlugin {
             let weak_ciphers = find_weak_ciphers(cipher_string);
             for weak in &weak_ciphers {
                 let message = format!("Weak cipher suite '{}' should not be used", weak);
-                errors.push(err.warning(&message, cipher_arg.span.start.line, cipher_arg.span.start.column));
+                errors.push(err.warning(
+                    &message,
+                    cipher_arg.span.start.line,
+                    cipher_arg.span.start.column,
+                ));
             }
 
             // Check for missing exclusions
@@ -105,8 +109,12 @@ impl Plugin for WeakSslCiphersPlugin {
                     missing_exclusions.join(", ")
                 );
                 errors.push(
-                    err.warning(&message, cipher_arg.span.start.line, cipher_arg.span.start.column)
-                        .with_fix(fix),
+                    err.warning(
+                        &message,
+                        cipher_arg.span.start.line,
+                        cipher_arg.span.start.column,
+                    )
+                    .with_fix(fix),
                 );
             }
         }

@@ -65,7 +65,10 @@ impl Plugin for ServerTokensEnabledPlugin {
                     // Explicit 'on' - warn with fix
                     let directive = ctx.directive;
                     let error = err
-                        .warning_at("server_tokens should be 'off' to hide nginx version", directive)
+                        .warning_at(
+                            "server_tokens should be 'off' to hide nginx version",
+                            directive,
+                        )
                         .with_fix(directive.replace_with("server_tokens off;"));
                     errors.push(error);
                 }
@@ -324,7 +327,11 @@ server {
         let errors = plugin.check(&config, "test.conf");
 
         // Should NOT warn - parent config should set server_tokens
-        assert!(errors.is_empty(), "Expected no errors for included file, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for included file, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -399,7 +406,11 @@ location / {
         let errors = plugin.check(&config, "test.conf");
 
         // Should NOT warn - server_tokens is expected to be set at http level in parent
-        assert!(errors.is_empty(), "Expected no errors for nested include context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for nested include context, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -445,7 +456,11 @@ server {
         let plugin = ServerTokensEnabledPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for stream context, got: {:?}",
+            errors
+        );
     }
 
     #[test]

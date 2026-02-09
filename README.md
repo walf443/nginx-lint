@@ -184,12 +184,12 @@ Each `.wasm` file in the directory is loaded as a plugin. See the `plugins/built
 # Default build (CLI + builtin plugins)
 cargo install --path .
 
-# Build WASM plugins first, then build with them embedded
-make build-plugins
-cargo install --path . --features builtin-plugins
-
 # With web server support
 cargo install --path . --features web-server
+
+# Build with embedded WASM plugins instead of native (requires WASM toolchain)
+make build-plugins
+cargo install --path . --no-default-features --features cli,wasm-builtin-plugins
 ```
 
 ### Cargo features
@@ -197,7 +197,8 @@ cargo install --path . --features web-server
 | Feature | Description |
 |---------|-------------|
 | `cli` | Command-line interface (default) |
-| `builtin-plugins` | Embed builtin WASM plugins in the binary (default) |
+| `native-builtin-plugins` | Compile builtin plugins as native Rust (default) |
+| `wasm-builtin-plugins` | Embed builtin WASM plugins in the binary (requires `make build-plugins`) |
 | `plugins` | Support loading external WASM plugins |
 | `web-server` | Built-in web server for browser UI |
 | `wasm` | WebAssembly target support |

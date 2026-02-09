@@ -96,11 +96,8 @@ impl ProxyPassWithUriPlugin {
                                 )
                             };
 
-                            let err = PluginSpec::new(
-                                "proxy-pass-with-uri",
-                                "best-practices",
-                                "",
-                            ).error_builder();
+                            let err = PluginSpec::new("proxy-pass-with-uri", "best-practices", "")
+                                .error_builder();
 
                             errors.push(err.warning_at(&message, directive));
                         }
@@ -154,8 +151,8 @@ nginx_lint_plugin::export_plugin!(ProxyPassWithUriPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_proxy_pass_with_trailing_slash_warns() {

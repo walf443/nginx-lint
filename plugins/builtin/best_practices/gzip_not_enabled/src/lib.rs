@@ -63,7 +63,11 @@ impl Plugin for GzipNotEnabledPlugin {
         // Don't warn for included files - gzip should be set in the main config
         if has_http_block && !gzip_on {
             let err = self.spec().error_builder();
-            vec![err.warning("Consider enabling gzip compression for better performance", 0, 0)]
+            vec![err.warning(
+                "Consider enabling gzip compression for better performance",
+                0,
+                0,
+            )]
         } else {
             vec![]
         }
@@ -245,7 +249,11 @@ server {
         let errors = plugin.check(&config, "test.conf");
 
         // Should NOT warn - parent config should set gzip
-        assert!(errors.is_empty(), "Expected no errors for included file, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for included file, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -292,7 +300,11 @@ server {
         let plugin = GzipNotEnabledPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for stream context, got: {:?}",
+            errors
+        );
     }
 
     #[test]

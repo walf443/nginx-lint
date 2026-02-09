@@ -1,21 +1,21 @@
-# Plugin directories (for parallel builds)
+# Plugin directories (for parallel WASM builds)
 PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-plugins clean test lint lint-plugin-examples help $(PLUGIN_NAMES)
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples help $(PLUGIN_NAMES)
 
-# Build CLI with builtin plugins (release)
-build: collect-plugins
-	cargo build --release --features builtin-plugins
+# Build CLI with native plugins (release, default)
+build:
+	cargo build --release
 
 # Build WASM module (for web, without builtin plugins)
 build-wasm:
-	wasm-pack build --target web --out-dir web/pkg --features wasm
+	wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
 
 # Build WASM module with builtin plugins (for web)
 build-wasm-with-plugins: collect-plugins
-	wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
+	wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm,wasm-builtin-plugins
 
 # Build web server with embedded WASM (builds WASM first, then embeds it)
 build-web: build-wasm-with-plugins
@@ -29,7 +29,7 @@ run-web:
 run-web-embed: build-web
 	cargo run --release --features web-server-embed-wasm -- web
 
-# Build all builtin plugins (use -j for parallel builds: make -j8 build-plugins)
+# Build all WASM builtin plugins (use -j for parallel builds: make -j8 build-plugins)
 build-plugins: $(PLUGIN_NAMES)
 	@echo "Done building plugins."
 
@@ -60,10 +60,10 @@ collect-plugins: build-plugins
 	done
 	@echo "Done collecting plugins."
 
-# Build binary with embedded builtin plugins
-build-with-plugins: collect-plugins
-	@echo "Building nginx-lint with embedded builtin plugins..."
-	cargo build --release --features builtin-plugins
+# Build binary with embedded WASM builtin plugins (instead of native)
+build-with-wasm-plugins: collect-plugins
+	@echo "Building nginx-lint with embedded WASM builtin plugins..."
+	cargo build --release --no-default-features --features cli,wasm-builtin-plugins
 	@echo "Done."
 
 # Run tests
@@ -122,9 +122,9 @@ clean:
 help:
 	@echo "nginx-lint build targets:"
 	@echo ""
-	@echo "  make build              - Build CLI with builtin plugins (release)"
+	@echo "  make build              - Build CLI with native plugins (release, default)"
 	@echo "  make build-plugins      - Build WASM builtin plugins (use -j for parallel)"
-	@echo "  make build-with-plugins - Build CLI with embedded builtin plugins"
+	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"
 	@echo "  make build-web          - Build web server with embedded WASM (with plugins)"

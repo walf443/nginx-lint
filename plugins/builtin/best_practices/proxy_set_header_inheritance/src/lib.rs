@@ -113,7 +113,8 @@ impl ProxySetHeaderInheritancePlugin {
                                         "proxy-set-header-inheritance",
                                         "best-practices",
                                         "",
-                                    ).error_builder();
+                                    )
+                                    .error_builder();
 
                                     // Build the list of missing directive texts
                                     let missing_texts: Vec<&str> = missing_sorted
@@ -181,7 +182,8 @@ impl Plugin for ProxySetHeaderInheritancePlugin {
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
-            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header".to_string(),
+            "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header"
+                .to_string(),
         ])
     }
 
@@ -201,8 +203,8 @@ nginx_lint_plugin::export_plugin!(ProxySetHeaderInheritancePlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_missing_parent_headers() {

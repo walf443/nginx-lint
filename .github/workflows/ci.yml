@@ -40,8 +40,29 @@ jobs:
         with:
           dockerfile: Dockerfile
 
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p nginx-lint -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin --no-default-features --features cli,native-builtin-plugins -- -W clippy::all
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+
   build-plugins:
     name: Build Plugins (${{ matrix.chunk }})
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -90,6 +111,7 @@ jobs:
   merge-plugins:
     name: Merge Plugins
     needs: build-plugins
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -102,39 +124,6 @@ jobs:
           name: builtin-plugins
           path: target/builtin-plugins/
           retention-days: 1
-
-  clippy:
-    name: Clippy
-    needs: merge-plugins
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v4
-        with:
-          name: builtin-plugins
-          path: target/builtin-plugins/
-      - run: cargo clippy -- -D warnings
-
-  test:
-    name: Test
-    needs: merge-plugins
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/download-artifact@v4
-        with:
-          name: builtin-plugins
-          path: target/builtin-plugins/
-      - run: cargo test
 
   pages-build:
     name: Pages Build
@@ -154,7 +143,7 @@ jobs:
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM for web
-        run: wasm-pack build --target web --out-dir web/pkg --features wasm,builtin-plugins
+        run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm,wasm-builtin-plugins
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v4
       - name: Upload Pages artifact

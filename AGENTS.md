@@ -67,7 +67,7 @@ cargo clippy                   # Lint
 
 # Build with embedded WASM plugins
 make build-plugins             # Build all WASM plugins
-cargo build --features builtin-plugins
+cargo build --features wasm-builtin-plugins
 ```
 
 ### Crate-Specific Testing

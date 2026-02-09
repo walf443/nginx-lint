@@ -50,7 +50,10 @@ impl Plugin for AutoindexEnabledPlugin {
             if ctx.directive.is("autoindex") && ctx.directive.first_arg_is("on") {
                 let directive = ctx.directive;
                 let error = err
-                    .warning_at("autoindex is enabled, which can expose directory contents", directive)
+                    .warning_at(
+                        "autoindex is enabled, which can expose directory contents",
+                        directive,
+                    )
                     .with_fix(directive.replace_with("autoindex off;"));
                 errors.push(error);
             }
@@ -261,7 +264,11 @@ autoindex on;
         let plugin = AutoindexEnabledPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for stream context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for stream context, got: {:?}",
+            errors
+        );
     }
 
     #[test]

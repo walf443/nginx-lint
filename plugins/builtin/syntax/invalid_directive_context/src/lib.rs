@@ -116,11 +116,8 @@ fn check_context(items: &[ConfigItem], parent_stack: &[&str], errors: &mut Vec<L
                         )
                     };
 
-                    let err = PluginSpec::new(
-                        "invalid-directive-context",
-                        "syntax",
-                        "",
-                    ).error_builder();
+                    let err =
+                        PluginSpec::new("invalid-directive-context", "syntax", "").error_builder();
 
                     errors.push(err.error_at(&message, directive));
                 }
@@ -508,7 +505,11 @@ server {
         let plugin = InvalidDirectiveContextPlugin;
         let errors = plugin.check(&config, "test.conf");
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("'server' directive cannot be inside 'server'"));
+        assert!(
+            errors[0]
+                .message
+                .contains("'server' directive cannot be inside 'server'")
+        );
     }
 
     #[test]

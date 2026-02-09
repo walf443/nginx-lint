@@ -18,7 +18,13 @@ pub struct RootInLocationPlugin;
 
 impl RootInLocationPlugin {
     /// Recursively check for root directives inside location blocks
-    fn check_items(&self, items: &[ConfigItem], in_location: bool, err: &ErrorBuilder, errors: &mut Vec<LintError>) {
+    fn check_items(
+        &self,
+        items: &[ConfigItem],
+        in_location: bool,
+        err: &ErrorBuilder,
+        errors: &mut Vec<LintError>,
+    ) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
                 // Check if we're in a location block and found a root directive
@@ -80,8 +86,8 @@ nginx_lint_plugin::export_plugin!(RootInLocationPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_root_in_location_warns() {
@@ -253,7 +259,12 @@ root /var/www/html;
         let plugin = RootInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for root in included file from location, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for root in included file from location, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("root directive inside location"));
     }
 
@@ -273,7 +284,11 @@ root /var/www/html;
         let plugin = RootInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for root in server context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for root in server context, got: {:?}",
+            errors
+        );
     }
 
     #[test]

@@ -85,11 +85,7 @@ impl TryFilesWithProxyPlugin {
                 .map(|arg| arg.as_str().starts_with('='))
                 .unwrap_or(false);
 
-            let err = PluginSpec::new(
-                "try-files-with-proxy",
-                "best-practices",
-                "",
-            ).error_builder();
+            let err = PluginSpec::new("try-files-with-proxy", "best-practices", "").error_builder();
 
             errors.push(err.warning_at(
                 if ends_with_error_code {
@@ -150,8 +146,8 @@ nginx_lint_plugin::export_plugin!(TryFilesWithProxyPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_try_files_with_proxy_pass() {
@@ -336,7 +332,12 @@ proxy_pass http://backend;
         let plugin = TryFilesWithProxyPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for try_files+proxy_pass in included file from location, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for try_files+proxy_pass in included file from location, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("try_files"));
         assert!(errors[0].message.contains("proxy_pass"));
     }
@@ -360,7 +361,11 @@ proxy_pass http://backend;
         let errors = plugin.check(&config, "test.conf");
 
         // This should NOT trigger because we're not in a location context
-        assert!(errors.is_empty(), "Expected no errors for try_files+proxy_pass in server context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for try_files+proxy_pass in server context, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -383,6 +388,10 @@ try_files $uri $uri/ @backend;
         let plugin = TryFilesWithProxyPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for try_files with named location, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for try_files with named location, got: {:?}",
+            errors
+        );
     }
 }
