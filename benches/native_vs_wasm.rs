@@ -6,8 +6,8 @@
 //! Run with:
 //!   cargo bench --features "builtin-plugins,native-plugins" --bench native_vs_wasm
 
-use nginx_lint::parser::parse_string;
 use nginx_lint::LintRule;
+use nginx_lint::parser::parse_string;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -55,7 +55,10 @@ http {
 
 const ITERATIONS: u32 = 1000;
 
-fn bench_wasm(config: &nginx_lint::parser::ast::Config, path: &Path) -> (Duration, Duration, usize) {
+fn bench_wasm(
+    config: &nginx_lint::parser::ast::Config,
+    path: &Path,
+) -> (Duration, Duration, usize) {
     // Cold start: includes loading/compiling the WASM module
     let cold_start = Instant::now();
     let plugins = load_builtin_plugins().expect("Failed to load builtin plugins");
@@ -137,7 +140,10 @@ fn main() {
     let native_per_iter = native_warm / ITERATIONS;
 
     println!("--- Warm Iterations ({} runs) ---", ITERATIONS);
-    println!("  WASM:   {:>10.3?} total, {:>10.3?}/iter", wasm_warm, wasm_per_iter);
+    println!(
+        "  WASM:   {:>10.3?} total, {:>10.3?}/iter",
+        wasm_warm, wasm_per_iter
+    );
     println!(
         "  Native: {:>10.3?} total, {:>10.3?}/iter",
         native_warm, native_per_iter

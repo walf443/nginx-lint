@@ -53,10 +53,8 @@ impl Plugin for MapMissingDefaultPlugin {
                 .unwrap_or(false);
 
             if !has_default {
-                errors.push(err.warning_at(
-                    "map block is missing a `default` entry",
-                    ctx.directive,
-                ));
+                errors
+                    .push(err.warning_at("map block is missing a `default` entry", ctx.directive));
             }
         }
 
@@ -109,8 +107,9 @@ http {
     fn test_multiple_maps() {
         let runner = PluginTestRunner::new(MapMissingDefaultPlugin);
 
-        let errors = runner.check_string(
-            r#"
+        let errors = runner
+            .check_string(
+                r#"
 http {
     map $uri $new {
         default /;
@@ -121,7 +120,8 @@ http {
     }
 }
 "#,
-        ).unwrap();
+            )
+            .unwrap();
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
     }

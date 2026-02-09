@@ -113,7 +113,8 @@ impl AddHeaderInheritancePlugin {
                                         "add-header-inheritance",
                                         "best-practices",
                                         "",
-                                    ).error_builder();
+                                    )
+                                    .error_builder();
 
                                     // Build the list of missing directive texts
                                     let missing_texts: Vec<&str> = missing_sorted
@@ -202,8 +203,8 @@ nginx_lint_plugin::export_plugin!(AddHeaderInheritancePlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_missing_parent_headers() {

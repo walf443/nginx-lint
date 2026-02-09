@@ -4,7 +4,9 @@
 //! into a `LintRule`, allowing WASM plugins to be run natively without
 //! serialization overhead.
 
-use crate::types::{Fix as PluginFix, LintError as PluginLintError, Plugin, Severity as PluginSeverity};
+use crate::types::{
+    Fix as PluginFix, LintError as PluginLintError, Plugin, Severity as PluginSeverity,
+};
 use nginx_lint_common::linter::{
     Fix as CommonFix, LintError as CommonLintError, LintRule, Severity as CommonSeverity,
 };
@@ -77,8 +79,7 @@ impl<P: Plugin> NativePluginRule<P> {
         let name: &'static str = Box::leak(spec.name.into_boxed_str());
         let category: &'static str = Box::leak(spec.category.into_boxed_str());
         let description: &'static str = Box::leak(spec.description.into_boxed_str());
-        let severity: Option<&'static str> =
-            spec.severity.map(|s| &*Box::leak(s.into_boxed_str()));
+        let severity: Option<&'static str> = spec.severity.map(|s| &*Box::leak(s.into_boxed_str()));
         let why: Option<&'static str> = spec.why.map(|s| &*Box::leak(s.into_boxed_str()));
         let bad_example: Option<&'static str> =
             spec.bad_example.map(|s| &*Box::leak(s.into_boxed_str()));

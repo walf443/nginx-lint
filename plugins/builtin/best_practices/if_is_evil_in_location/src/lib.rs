@@ -61,11 +61,8 @@ impl IfIsEvilInLocationPlugin {
 
         if !unsafe_directives.is_empty() {
             let unsafe_list = unsafe_directives.join(", ");
-            let err = PluginSpec::new(
-                "if-is-evil-in-location",
-                "best-practices",
-                "",
-            ).error_builder();
+            let err =
+                PluginSpec::new("if-is-evil-in-location", "best-practices", "").error_builder();
 
             errors.push(err.warning_at(
                 &format!(
@@ -151,8 +148,8 @@ nginx_lint_plugin::export_plugin!(IfIsEvilInLocationPlugin);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nginx_lint_plugin::testing::PluginTestRunner;
     use nginx_lint_plugin::parse_string;
+    use nginx_lint_plugin::testing::PluginTestRunner;
 
     #[test]
     fn test_unsafe_proxy_pass_in_if() {
@@ -881,8 +878,14 @@ http {
         assert!(errors[0].message.contains("limit_rate"));
         // Check that 'set' and 'return' are not in the unsafe directives list (before "inside 'if'")
         let unsafe_part = errors[0].message.split("inside 'if'").next().unwrap();
-        assert!(!unsafe_part.contains("'set'"), "set should not be reported as unsafe");
-        assert!(!unsafe_part.contains("'return'"), "return should not be reported as unsafe");
+        assert!(
+            !unsafe_part.contains("'set'"),
+            "set should not be reported as unsafe"
+        );
+        assert!(
+            !unsafe_part.contains("'return'"),
+            "return should not be reported as unsafe"
+        );
     }
 
     #[test]
@@ -931,7 +934,12 @@ if ($slow) {
         let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for unsafe if in included file from location, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for unsafe if in included file from location, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("proxy_pass"));
     }
 
@@ -953,7 +961,11 @@ if ($slow) {
         let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for if in server context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for if in server context, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -978,6 +990,10 @@ if ($mobile) {
         let plugin = IfIsEvilInLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for safe return in if, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for safe return in if, got: {:?}",
+            errors
+        );
     }
 }

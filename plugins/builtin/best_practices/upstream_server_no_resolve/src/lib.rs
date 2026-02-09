@@ -105,9 +105,11 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                     // The address is already just the host (first_arg returns only the first argument)
                     if helpers::is_domain_name(address) {
                         // Check if 'resolve' parameter is present in any argument
-                        let has_resolve = ctx.directive.args.iter().any(|arg| {
-                            arg.as_str() == "resolve"
-                        });
+                        let has_resolve = ctx
+                            .directive
+                            .args
+                            .iter()
+                            .any(|arg| arg.as_str() == "resolve");
 
                         let domain = helpers::extract_domain(address);
 
@@ -216,8 +218,17 @@ http {
         let plugin = UpstreamServerNoResolvePlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for missing zone, got: {:?}", errors);
-        assert!(errors[0].message.contains("zone"), "Expected warning about missing zone, got: {}", errors[0].message);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for missing zone, got: {:?}",
+            errors
+        );
+        assert!(
+            errors[0].message.contains("zone"),
+            "Expected warning about missing zone, got: {}",
+            errors[0].message
+        );
     }
 
     #[test]

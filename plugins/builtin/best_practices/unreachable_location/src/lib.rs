@@ -42,7 +42,11 @@ impl LocationInfo {
             return None;
         }
 
-        let args: Vec<String> = directive.args.iter().map(|a| a.as_str().to_string()).collect();
+        let args: Vec<String> = directive
+            .args
+            .iter()
+            .map(|a| a.as_str().to_string())
+            .collect();
         if args.is_empty() {
             return None;
         }
@@ -103,11 +107,7 @@ impl UnreachableLocationPlugin {
     /// Check for duplicate location paths (same modifier and pattern)
     fn check_duplicate_locations(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
         let mut seen: HashMap<String, &LocationInfo> = HashMap::new();
-        let err = PluginSpec::new(
-            "unreachable-location",
-            "best-practices",
-            "",
-        ).error_builder();
+        let err = PluginSpec::new("unreachable-location", "best-practices", "").error_builder();
 
         for loc in locations {
             let key = format!("{}:{}", loc.modifier, loc.pattern);
@@ -128,12 +128,9 @@ impl UnreachableLocationPlugin {
 
     /// Check for regex locations that will never match due to order
     fn check_regex_order(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
-        let regex_locations: Vec<&LocationInfo> = locations.iter().filter(|l| l.is_regex()).collect();
-        let err = PluginSpec::new(
-            "unreachable-location",
-            "best-practices",
-            "",
-        ).error_builder();
+        let regex_locations: Vec<&LocationInfo> =
+            locations.iter().filter(|l| l.is_regex()).collect();
+        let err = PluginSpec::new("unreachable-location", "best-practices", "").error_builder();
 
         for (i, loc) in regex_locations.iter().enumerate() {
             for earlier in &regex_locations[..i] {
@@ -162,18 +159,25 @@ impl UnreachableLocationPlugin {
 
         // If later pattern is more specific version of earlier
         // e.g., earlier: /api/.* later: /api/v1/.*
-        if later.pattern.starts_with(&earlier.pattern.trim_end_matches(".*"))
+        if later
+            .pattern
+            .starts_with(&earlier.pattern.trim_end_matches(".*"))
             && earlier.pattern.ends_with(".*")
-            && later.pattern.len() > earlier.pattern.len() {
+            && later.pattern.len() > earlier.pattern.len()
+        {
             return true;
         }
 
         // Check for prefix patterns like /foo vs /foo/bar
         // Earlier: ~ /api  Later: ~ /api/v1
-        let earlier_base = earlier.pattern.trim_start_matches('^').trim_end_matches('$');
+        let earlier_base = earlier
+            .pattern
+            .trim_start_matches('^')
+            .trim_end_matches('$');
         let later_base = later.pattern.trim_start_matches('^').trim_end_matches('$');
 
-        if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?') {
+        if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?')
+        {
             // Earlier is a literal pattern
             if later_base.starts_with(earlier_base) && later_base.len() > earlier_base.len() {
                 return true;
@@ -184,20 +188,20 @@ impl UnreachableLocationPlugin {
     }
 
     /// Check if ^~ prefix locations shadow regex locations
-    fn check_prefix_no_regex_shadowing(&self, locations: &[LocationInfo], errors: &mut Vec<LintError>) {
-        let prefix_no_regex: Vec<&LocationInfo> = locations.iter()
+    fn check_prefix_no_regex_shadowing(
+        &self,
+        locations: &[LocationInfo],
+        errors: &mut Vec<LintError>,
+    ) {
+        let prefix_no_regex: Vec<&LocationInfo> = locations
+            .iter()
             .filter(|l| l.is_prefix_no_regex())
             .collect();
 
-        let regex_locations: Vec<&LocationInfo> = locations.iter()
-            .filter(|l| l.is_regex())
-            .collect();
+        let regex_locations: Vec<&LocationInfo> =
+            locations.iter().filter(|l| l.is_regex()).collect();
 
-        let err = PluginSpec::new(
-            "unreachable-location",
-            "best-practices",
-            "",
-        ).error_builder();
+        let err = PluginSpec::new("unreachable-location", "best-practices", "").error_builder();
 
         for regex_loc in &regex_locations {
             for prefix_loc in &prefix_no_regex {
@@ -474,7 +478,12 @@ location /api {
         let plugin = UnreachableLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for duplicate location, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for duplicate location, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("Duplicate location"));
     }
 
@@ -501,7 +510,12 @@ location ~ /api/v1 {
         let plugin = UnreachableLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert_eq!(errors.len(), 1, "Expected 1 error for shadowed regex location, got: {:?}", errors);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Expected 1 error for shadowed regex location, got: {:?}",
+            errors
+        );
         assert!(errors[0].message.contains("may never match"));
     }
 
@@ -529,7 +543,11 @@ location /api {
         let errors = plugin.check(&config, "test.conf");
 
         // Should NOT trigger because we're not in a server context
-        assert!(errors.is_empty(), "Expected no errors for locations in http context, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for locations in http context, got: {:?}",
+            errors
+        );
     }
 
     #[test]
@@ -555,6 +573,10 @@ location /api {
         let plugin = UnreachableLocationPlugin;
         let errors = plugin.check(&config, "test.conf");
 
-        assert!(errors.is_empty(), "Expected no errors for different locations, got: {:?}", errors);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for different locations, got: {:?}",
+            errors
+        );
     }
 }

@@ -45,7 +45,11 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
                 // Check trailing whitespace after the directive terminator (; or {)
                 if !directive.trailing_whitespace.is_empty() {
                     let error = err
-                        .warning("trailing whitespace at end of line", directive.span.start.line, 1)
+                        .warning(
+                            "trailing whitespace at end of line",
+                            directive.span.start.line,
+                            1,
+                        )
                         .with_fix(create_fix_for_directive(directive));
                     errors.push(error);
                 }
@@ -68,7 +72,11 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
             ConfigItem::Comment(comment) => {
                 if !comment.trailing_whitespace.is_empty() {
                     let error = err
-                        .warning("trailing whitespace at end of line", comment.span.start.line, 1)
+                        .warning(
+                            "trailing whitespace at end of line",
+                            comment.span.start.line,
+                            1,
+                        )
                         .with_fix(create_fix_for_comment(comment));
                     errors.push(error);
                 }
@@ -80,7 +88,11 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
                     let start = blank.span.start.offset;
                     let end = start + blank.content.len();
                     let error = err
-                        .warning("trailing whitespace at end of line", blank.span.start.line, 1)
+                        .warning(
+                            "trailing whitespace at end of line",
+                            blank.span.start.line,
+                            1,
+                        )
                         .with_fix(Fix::replace_range(start, end, ""));
                     errors.push(error);
                 }
