@@ -199,6 +199,7 @@ cargo install --path . --features web-server
 | `cli` | Command-line interface (default) |
 | `builtin-plugins` | Embed builtin WASM plugins in the binary (default) |
 | `plugins` | Support loading external WASM plugins |
+| `native-plugins` | Compile builtin plugins as native Rust instead of WASM |
 | `web-server` | Built-in web server for browser UI |
 | `wasm` | WebAssembly target support |
 
