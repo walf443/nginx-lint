@@ -5,6 +5,8 @@ on:
   push:
     paths:
       - ".github/workflows/container-tests.yml"
+      - "plugins/builtin/**/tests/container_test.rs"
+      - "crates/nginx-lint-plugin/src/container_testing.rs"
 
 env:
   CARGO_TERM_COLOR: always
