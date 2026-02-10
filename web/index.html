@@ -115,6 +115,10 @@
             border-radius: 0;
             padding: 12px;
             padding-left: 8px;
+            white-space: pre;
+            overflow-wrap: normal;
+            word-break: normal;
+            overflow-x: auto;
         }
         textarea.editor:focus {
             outline: none;
@@ -356,7 +360,7 @@
                 </div>
                 <div class="editor-wrapper">
                     <div id="line-numbers" class="line-numbers"></div>
-                    <textarea id="editor" class="editor" spellcheck="false"># Demo: Try clicking rule names for details, or "Fix All" to auto-fix issues
+                    <textarea id="editor" class="editor" spellcheck="false" wrap="off"># Demo: Try clicking rule names for details, or "Fix All" to auto-fix issues
 http {
   server_tokens on;
   autoindex on;
