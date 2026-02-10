@@ -1677,6 +1677,7 @@ dependencies = [
  "nginx-lint-plugin",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -2801,6 +2802,7 @@ dependencies = [
  "nginx-lint-plugin",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]

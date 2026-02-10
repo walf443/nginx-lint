@@ -31,6 +31,9 @@ jobs:
       - name: Pull image
         run: docker pull ${{ matrix.nginx-image }}
 
+      - name: Pull CoreDNS image
+        run: docker pull coredns/coredns:latest
+
       - name: Run container tests
         env:
           NGINX_IMAGE: ${{ matrix.nginx-image }}

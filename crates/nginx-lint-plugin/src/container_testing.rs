@@ -132,6 +132,21 @@ pub fn nginx_version() -> String {
     std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string())
 }
 
+/// Get the (image_name, image_tag) for creating a [`GenericImage`] directly.
+///
+/// This is useful when you need full control over container creation
+/// (e.g., custom networks, multiple containers) instead of using [`NginxContainer`].
+pub fn nginx_image() -> (String, String) {
+    let cfg = nginx_image_config();
+    (cfg.image_name, cfg.image_tag)
+}
+
+/// Get the full path to nginx.conf inside the container.
+pub fn nginx_conf_path() -> String {
+    let cfg = nginx_image_config();
+    cfg.conf_path
+}
+
 /// A running nginx container for integration testing.
 ///
 /// The container is automatically stopped and removed when this value is dropped.
