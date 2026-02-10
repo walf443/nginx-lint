@@ -156,7 +156,10 @@ http {
 
     // Unmatched value: header has empty value (or may be omitted)
     let resp = reqwest::get(nginx.url("/?key=unknown")).await.unwrap();
-    let header_value = resp.headers().get("X-Mapped").map(|v| v.to_str().unwrap().to_string());
+    let header_value = resp
+        .headers()
+        .get("X-Mapped")
+        .map(|v| v.to_str().unwrap().to_string());
     // nginx may include the header with empty value or omit it entirely
     assert!(
         header_value.is_none() || header_value.as_deref() == Some(""),
