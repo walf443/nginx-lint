@@ -155,6 +155,43 @@ impl NginxConfigTestResult {
             self.output
         );
     }
+
+    /// Assert that `nginx -t` succeeded but emitted a warning containing the expected message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed or the output does not contain `expected`.
+    pub fn assert_warns_with(&self, expected: &str) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed with warnings, but it failed. Output:\n{}",
+            self.output
+        );
+        assert!(
+            self.output.contains(expected),
+            "Expected output to contain {:?}, got:\n{}",
+            expected,
+            self.output
+        );
+    }
+
+    /// Assert that `nginx -t` succeeded without any warnings (`[warn]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed or the output contains `[warn]`.
+    pub fn assert_success_without_warnings(&self) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed, but it failed. Output:\n{}",
+            self.output
+        );
+        assert!(
+            !self.output.contains("[warn]"),
+            "Expected no warnings, but got:\n{}",
+            self.output
+        );
+    }
 }
 
 /// Run `nginx -t` on a configuration string and return the result.
@@ -189,8 +226,9 @@ pub fn nginx_config_test(config: &str) -> NginxConfigTestResult {
 
     let mut tmpfile = std::env::temp_dir();
     tmpfile.push(format!(
-        "nginx-lint-container-test-{}.conf",
-        std::process::id()
+        "nginx-lint-container-test-{}-{:?}.conf",
+        std::process::id(),
+        std::thread::current().id()
     ));
     std::fs::write(&tmpfile, config).expect("Failed to write temp nginx config");
 
