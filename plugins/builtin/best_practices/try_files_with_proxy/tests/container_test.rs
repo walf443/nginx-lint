@@ -8,8 +8,8 @@
 //! - Port 8080 (backend): echoes the request URI via `return 200 $request_uri`
 //! - Port 80 (frontend): serves static files and/or proxies to the backend
 //!
-//! The default nginx container has `/usr/share/nginx/html/index.html` and
-//! `/usr/share/nginx/html/50x.html` which are used as known static files.
+//! The default container has `{html_root}/index.html` and
+//! `{html_root}/50x.html` which are used as known static files.
 //!
 //! Run with:
 //!   cargo test -p try-files-with-proxy-plugin --test container_test -- --ignored
@@ -17,39 +17,40 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p try-files-with-proxy-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
+use nginx_lint_plugin::container_testing::{NginxContainer, nginx_html_root, reqwest};
 
 /// When try_files and proxy_pass are in the same block, proxy_pass handles
 /// all requests. try_files only rewrites URIs - files are never served locally.
 #[tokio::test]
 #[ignore]
 async fn try_files_with_proxy_pass_never_serves_files() {
-    let nginx = NginxContainer::start(
-        br#"
-events {
+    let html_root = nginx_html_root();
+    let config = format!(
+        r#"
+events {{
     worker_connections 1024;
-}
-http {
-    server {
+}}
+http {{
+    server {{
         listen 8080;
-        location / {
+        location / {{
             return 200 "uri=$request_uri";
-        }
-    }
+        }}
+    }}
 
-    server {
+    server {{
         listen 80;
-        root /usr/share/nginx/html;
+        root {html_root};
 
-        location / {
+        location / {{
             try_files $uri $uri/ /index.html;
             proxy_pass http://127.0.0.1:8080;
-        }
-    }
-}
-"#,
-    )
-    .await;
+        }}
+    }}
+}}
+"#
+    );
+    let nginx = NginxContainer::start(config.as_bytes()).await;
 
     // Even for existing file (50x.html), proxy_pass handles the request
     let resp = reqwest::get(nginx.url("/50x.html")).await.unwrap();
@@ -73,41 +74,42 @@ http {
 #[tokio::test]
 #[ignore]
 async fn named_location_fallback_serves_files_and_proxies() {
-    let nginx = NginxContainer::start(
-        br#"
-events {
+    let html_root = nginx_html_root();
+    let config = format!(
+        r#"
+events {{
     worker_connections 1024;
-}
-http {
-    server {
+}}
+http {{
+    server {{
         listen 8080;
-        location / {
+        location / {{
             return 200 'from-proxy';
-        }
-    }
+        }}
+    }}
 
-    server {
+    server {{
         listen 80;
-        root /usr/share/nginx/html;
+        root {html_root};
 
-        location / {
+        location / {{
             try_files $uri @backend;
-        }
+        }}
 
-        location @backend {
+        location @backend {{
             proxy_pass http://127.0.0.1:8080;
-        }
-    }
-}
-"#,
-    )
-    .await;
+        }}
+    }}
+}}
+"#
+    );
+    let nginx = NginxContainer::start(config.as_bytes()).await;
 
     // Existing file: served directly from disk (not proxied)
     let resp = reqwest::get(nginx.url("/index.html")).await.unwrap();
     let body = resp.text().await.unwrap();
     assert!(
-        body.contains("Welcome to nginx"),
+        body.contains("Welcome to") || body.contains("welcome to"),
         "Expected existing file to be served locally, not proxied"
     );
 

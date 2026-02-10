@@ -84,6 +84,48 @@ fn nginx_image_config() -> NginxImageConfig {
     }
 }
 
+fn is_openresty_image() -> bool {
+    std::env::var("NGINX_IMAGE")
+        .map(|v| v.contains("openresty"))
+        .unwrap_or(false)
+}
+
+/// Get the default HTML document root for the current container image.
+///
+/// - nginx: `/usr/share/nginx/html`
+/// - openresty: `/usr/local/openresty/nginx/html`
+pub fn nginx_html_root() -> &'static str {
+    if is_openresty_image() {
+        "/usr/local/openresty/nginx/html"
+    } else {
+        "/usr/share/nginx/html"
+    }
+}
+
+/// Get the configuration directory for the current container image.
+///
+/// - nginx: `/etc/nginx`
+/// - openresty: `/usr/local/openresty/nginx/conf`
+pub fn nginx_conf_dir() -> &'static str {
+    if is_openresty_image() {
+        "/usr/local/openresty/nginx/conf"
+    } else {
+        "/etc/nginx"
+    }
+}
+
+/// Get the server software name for the current container image.
+///
+/// - nginx: `"nginx"`
+/// - openresty: `"openresty"`
+pub fn nginx_server_name() -> &'static str {
+    if is_openresty_image() {
+        "openresty"
+    } else {
+        "nginx"
+    }
+}
+
 /// Get the nginx image tag from the `NGINX_VERSION` environment variable.
 /// Defaults to `"1.27"` if not set.
 pub fn nginx_version() -> String {

@@ -12,42 +12,42 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p alias-location-slash-mismatch-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
+use nginx_lint_plugin::container_testing::{NginxContainer, nginx_conf_dir, reqwest};
 
 #[tokio::test]
 #[ignore]
 async fn mismatch_causes_404() {
     // location ends with / but alias does NOT
-    // /files/mime.types → strip "/files/" → "mime.types" → "/etc/nginx" + "mime.types"
-    //   = "/etc/nginxmime.types" → 404!
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
-events {
+    // /files/mime.types → strip "/files/" → "mime.types" → "{conf_dir}" + "mime.types"
+    //   = "{conf_dir}mime.types" → 404!
+    let conf_dir = nginx_conf_dir();
+    let config = format!(
+        r#"
+events {{
     worker_connections 1024;
-}
-http {
-    server {
+}}
+http {{
+    server {{
         listen 80;
 
-        location /healthz {
+        location /healthz {{
             return 200 'OK';
-        }
+        }}
 
-        location /files/ {
-            alias /etc/nginx;
-        }
-    }
-}
-"#,
-        "/healthz",
-    )
-    .await;
+        location /files/ {{
+            alias {conf_dir};
+        }}
+    }}
+}}
+"#
+    );
+    let nginx = NginxContainer::start_with_health_path(config.as_bytes(), "/healthz").await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(
         resp.status(),
         404,
-        "Expected 404 because alias path becomes /etc/nginxmime.types (missing slash)"
+        "Expected 404 because alias path becomes {conf_dir}mime.types (missing slash)"
     );
 }
 
@@ -55,36 +55,36 @@ http {
 #[ignore]
 async fn matching_slash_serves_file() {
     // location ends with / and alias also ends with /
-    // /files/mime.types → strip "/files/" → "mime.types" → "/etc/nginx/" + "mime.types"
-    //   = "/etc/nginx/mime.types" → 200
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
-events {
+    // /files/mime.types → strip "/files/" → "mime.types" → "{conf_dir}/" + "mime.types"
+    //   = "{conf_dir}/mime.types" → 200
+    let conf_dir = nginx_conf_dir();
+    let config = format!(
+        r#"
+events {{
     worker_connections 1024;
-}
-http {
-    server {
+}}
+http {{
+    server {{
         listen 80;
 
-        location /healthz {
+        location /healthz {{
             return 200 'OK';
-        }
+        }}
 
-        location /files/ {
-            alias /etc/nginx/;
-        }
-    }
-}
-"#,
-        "/healthz",
-    )
-    .await;
+        location /files/ {{
+            alias {conf_dir}/;
+        }}
+    }}
+}}
+"#
+    );
+    let nginx = NginxContainer::start_with_health_path(config.as_bytes(), "/healthz").await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(
         resp.status(),
         200,
-        "Expected 200 because alias path correctly becomes /etc/nginx/mime.types"
+        "Expected 200 because alias path correctly becomes {conf_dir}/mime.types"
     );
 }
 
@@ -92,31 +92,31 @@ http {
 #[ignore]
 async fn no_trailing_slash_on_location_works_without_mismatch() {
     // Neither location nor alias ends with /
-    // /files/mime.types → strip "/files" → "/mime.types" → "/etc/nginx" + "/mime.types"
-    //   = "/etc/nginx/mime.types" → 200
+    // /files/mime.types → strip "/files" → "/mime.types" → "{conf_dir}" + "/mime.types"
+    //   = "{conf_dir}/mime.types" → 200
     // This works because the remaining URI retains its leading slash.
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
-events {
+    let conf_dir = nginx_conf_dir();
+    let config = format!(
+        r#"
+events {{
     worker_connections 1024;
-}
-http {
-    server {
+}}
+http {{
+    server {{
         listen 80;
 
-        location /healthz {
+        location /healthz {{
             return 200 'OK';
-        }
+        }}
 
-        location /files {
-            alias /etc/nginx;
-        }
-    }
-}
-"#,
-        "/healthz",
-    )
-    .await;
+        location /files {{
+            alias {conf_dir};
+        }}
+    }}
+}}
+"#
+    );
+    let nginx = NginxContainer::start_with_health_path(config.as_bytes(), "/healthz").await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(

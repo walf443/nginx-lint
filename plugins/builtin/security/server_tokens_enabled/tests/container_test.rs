@@ -9,7 +9,7 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p server-tokens-enabled-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
+use nginx_lint_plugin::container_testing::{NginxContainer, nginx_server_name, reqwest};
 
 // ============================================================================
 // Server header version exposure
@@ -41,7 +41,8 @@ http {
 
     assert!(
         server_header.contains('/'),
-        "Expected Server header to contain version (e.g., 'nginx/1.27.x'), got: '{}'",
+        "Expected Server header to contain version (e.g., '{}/x.y.z'), got: '{}'",
+        nginx_server_name(),
         server_header
     );
 }
@@ -70,9 +71,10 @@ http {
     let resp = reqwest::get(nginx.url("/")).await.unwrap();
     let server_header = resp.headers().get("server").unwrap().to_str().unwrap();
 
+    let expected = nginx_server_name();
     assert_eq!(
-        server_header, "nginx",
-        "Expected Server header to be exactly 'nginx' (no version)"
+        server_header, expected,
+        "Expected Server header to be exactly '{expected}' (no version)"
     );
 }
 
@@ -106,9 +108,10 @@ http {
     assert_eq!(resp.status(), 404);
 
     let body = resp.text().await.unwrap();
+    let name = nginx_server_name();
     assert!(
-        body.contains("nginx/"),
-        "Expected error page to contain nginx version info, got:\n{}",
+        body.contains(&format!("{name}/")),
+        "Expected error page to contain version info ('{name}/x.y.z'), got:\n{}",
         body
     );
 }
@@ -139,9 +142,10 @@ http {
     assert_eq!(resp.status(), 404);
 
     let body = resp.text().await.unwrap();
+    let name = nginx_server_name();
     assert!(
-        !body.contains("nginx/"),
-        "Expected error page NOT to contain nginx version info, got:\n{}",
+        !body.contains(&format!("{name}/")),
+        "Expected error page NOT to contain version info, got:\n{}",
         body
     );
 }
