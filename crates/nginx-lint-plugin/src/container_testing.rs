@@ -112,3 +112,108 @@ impl NginxContainer {
         self.port
     }
 }
+
+/// Result of running `nginx -t` on a configuration.
+#[derive(Debug)]
+pub struct NginxConfigTestResult {
+    /// Whether `nginx -t` exited successfully (exit code 0).
+    pub success: bool,
+    /// Combined stdout and stderr output from `nginx -t`.
+    pub output: String,
+}
+
+impl NginxConfigTestResult {
+    /// Assert that `nginx -t` rejected the configuration and the output contains
+    /// the expected error message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` succeeded or the output does not contain `expected`.
+    pub fn assert_fails_with(&self, expected: &str) {
+        assert!(
+            !self.success,
+            "Expected nginx -t to fail, but it succeeded. Output:\n{}",
+            self.output
+        );
+        assert!(
+            self.output.contains(expected),
+            "Expected output to contain {:?}, got:\n{}",
+            expected,
+            self.output
+        );
+    }
+
+    /// Assert that `nginx -t` accepted the configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed.
+    pub fn assert_success(&self) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed, but it failed. Output:\n{}",
+            self.output
+        );
+    }
+}
+
+/// Run `nginx -t` on a configuration string and return the result.
+///
+/// This is useful for verifying that nginx rejects certain invalid configurations
+/// (e.g., duplicate locations) without needing to start a full container.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use nginx_lint_plugin::container_testing::nginx_config_test;
+///
+/// #[test]
+/// #[ignore]
+/// fn duplicate_location_rejected() {
+///     let result = nginx_config_test(r#"
+/// events { worker_connections 1024; }
+/// http {
+///     server {
+///         listen 80;
+///         location /api { return 200; }
+///         location /api { return 201; }
+///     }
+/// }
+/// "#);
+///     result.assert_fails_with("duplicate location");
+/// }
+/// ```
+pub fn nginx_config_test(config: &str) -> NginxConfigTestResult {
+    let version = nginx_version();
+    let image = format!("nginx:{version}");
+
+    let mut tmpfile = std::env::temp_dir();
+    tmpfile.push(format!(
+        "nginx-lint-container-test-{}.conf",
+        std::process::id()
+    ));
+    std::fs::write(&tmpfile, config).expect("Failed to write temp nginx config");
+
+    let result = std::process::Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-v",
+            &format!("{}:/etc/nginx/nginx.conf:ro", tmpfile.display()),
+            &image,
+            "nginx",
+            "-t",
+        ])
+        .output()
+        .expect("Failed to run docker (is Docker installed and running?)");
+
+    let _ = std::fs::remove_file(&tmpfile);
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    NginxConfigTestResult {
+        success: result.status.success(),
+        output: format!("{stdout}{stderr}"),
+    }
+}
