@@ -74,6 +74,10 @@ jobs:
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build WASM for web
         run: wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm,native-builtin-plugins
+      - name: Build API documentation
+        run: cargo doc --no-deps -p nginx-lint-plugin -p nginx-lint-parser -p nginx-lint-common
+      - name: Copy docs to web
+        run: cp -r target/doc web/api
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v4
       - name: Upload Pages artifact

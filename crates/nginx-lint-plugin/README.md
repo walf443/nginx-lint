@@ -1,5 +1,7 @@
 # nginx-lint-plugin
 
+[![API Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://walf443.github.io/nginx-lint/api/nginx_lint_plugin/)
+
 Plugin SDK for building custom [nginx-lint](https://github.com/walf443/nginx-lint) rules as WASM plugins.
 
 ## Overview
