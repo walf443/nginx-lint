@@ -1,0 +1,48 @@
+name: Container Tests
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  container-tests:
+    name: Container Tests (nginx ${{ matrix.nginx-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        nginx-version: ["1.24", "1.26", "1.27"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "container-tests"
+
+      - name: Pull nginx image
+        run: docker pull nginx:${{ matrix.nginx-version }}
+
+      - name: Run container tests
+        env:
+          NGINX_VERSION: ${{ matrix.nginx-version }}
+        run: |
+          failed=0
+          for dir in plugins/builtin/*/*/; do
+            if [ -f "$dir/tests/container_test.rs" ]; then
+              name=$(basename "$dir")
+              pkg=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
+              echo "::group::$name (nginx ${{ matrix.nginx-version }})"
+              if cargo test -p "$pkg" --test container_test -- --ignored; then
+                echo "✅ $name passed"
+              else
+                echo "❌ $name failed"
+                failed=1
+              fi
+              echo "::endgroup::"
+            fi
+          done
+          exit $failed
