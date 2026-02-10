@@ -146,6 +146,9 @@ impl Plugin for DuplicateDirectivePlugin {
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
+        .with_references(vec![
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/syntax/duplicate_directive/tests/container_test.rs".to_string(),
+        ])
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {

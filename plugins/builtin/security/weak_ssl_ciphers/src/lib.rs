@@ -53,6 +53,7 @@ impl Plugin for WeakSslCiphersPlugin {
             "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_ciphers".to_string(),
             "https://wiki.mozilla.org/Security/Server_Side_TLS".to_string(),
             "https://ssl-config.mozilla.org/".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/weak_ssl_ciphers/tests/container_test.rs".to_string(),
         ])
     }
 

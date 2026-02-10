@@ -184,6 +184,7 @@ impl Plugin for ProxySetHeaderInheritancePlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header"
                 .to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/proxy_set_header_inheritance/tests/container_test.rs".to_string(),
         ])
     }
 

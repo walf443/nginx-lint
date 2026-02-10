@@ -184,6 +184,7 @@ impl Plugin for AddHeaderInheritancePlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_headers_module.html#add_header".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/add_header_inheritance/tests/container_test.rs".to_string(),
         ])
     }
 

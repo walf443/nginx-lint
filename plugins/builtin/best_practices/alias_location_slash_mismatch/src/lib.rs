@@ -184,6 +184,7 @@ impl Plugin for AliasLocationSlashMismatchPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#alias".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/alias_location_slash_mismatch/tests/container_test.rs".to_string(),
         ])
     }
 

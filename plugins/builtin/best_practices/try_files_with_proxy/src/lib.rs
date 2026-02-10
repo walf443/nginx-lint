@@ -116,6 +116,7 @@ impl Plugin for TryFilesWithProxyPlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#try_files".to_string(),
             "https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/#proxy-pass-and-try-files".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/try_files_with_proxy/tests/container_test.rs".to_string(),
         ])
     }
 

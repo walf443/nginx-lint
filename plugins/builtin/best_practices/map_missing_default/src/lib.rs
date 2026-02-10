@@ -33,6 +33,7 @@ impl Plugin for MapMissingDefaultPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_map_module.html".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/map_missing_default/tests/container_test.rs".to_string(),
         ])
     }
 

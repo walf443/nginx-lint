@@ -294,6 +294,7 @@ impl Plugin for UnreachableLocationPlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#location".to_string(),
             "https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/#taxing-rewrites".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/unreachable_location/tests/container_test.rs".to_string(),
         ])
     }
 
