@@ -31,6 +31,8 @@
 pub use reqwest;
 pub use testcontainers;
 
+use std::time::Duration;
+
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
     core::{ExecCommand, IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
@@ -136,6 +138,7 @@ impl NginxContainer {
                 HttpWaitStrategy::new(health_path).with_expected_status_code(200u16),
             ))
             .with_copy_to(&img.conf_path, config.to_vec())
+            .with_startup_timeout(Duration::from_secs(120))
             .start()
             .await
             .unwrap_or_else(|e| {
@@ -183,6 +186,7 @@ impl NginxContainer {
             .with_wait_for(WaitFor::message_on_stderr("start worker process"))
             .with_copy_to(&img.conf_path, config.to_vec())
             .with_cmd(vec!["-c", startup_script])
+            .with_startup_timeout(Duration::from_secs(120))
             .start()
             .await
             .unwrap_or_else(|e| {
