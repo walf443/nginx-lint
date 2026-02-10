@@ -32,9 +32,9 @@ pub use reqwest;
 pub use testcontainers;
 
 use testcontainers::{
-    core::{wait::HttpWaitStrategy, IntoContainerPort, WaitFor},
-    runners::AsyncRunner,
     ContainerAsync, GenericImage, ImageExt,
+    core::{IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
+    runners::AsyncRunner,
 };
 
 /// Get the nginx image tag from the `NGINX_VERSION` environment variable.

@@ -9,7 +9,7 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p gzip-not-enabled-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{reqwest, NginxContainer};
+use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 
 /// Build a reqwest client with automatic decompression disabled,
 /// so we can inspect the raw Content-Encoding header.

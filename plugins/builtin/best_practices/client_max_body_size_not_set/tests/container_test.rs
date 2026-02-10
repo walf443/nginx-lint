@@ -9,7 +9,7 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p client-max-body-size-not-set-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{reqwest, NginxContainer};
+use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 
 /// Generate a string of the given size in bytes.
 fn make_body(size: usize) -> String {
@@ -19,7 +19,8 @@ fn make_body(size: usize) -> String {
 #[tokio::test]
 #[ignore]
 async fn default_rejects_body_over_1mb() {
-    let nginx = NginxContainer::start(br#"
+    let nginx = NginxContainer::start(
+        br#"
 events {
     worker_connections 1024;
 }
@@ -32,7 +33,9 @@ http {
         }
     }
 }
-"#).await;
+"#,
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(nginx.url("/"))
@@ -51,7 +54,8 @@ http {
 #[tokio::test]
 #[ignore]
 async fn default_accepts_body_under_1mb() {
-    let nginx = NginxContainer::start(br#"
+    let nginx = NginxContainer::start(
+        br#"
 events {
     worker_connections 1024;
 }
@@ -64,7 +68,9 @@ http {
         }
     }
 }
-"#).await;
+"#,
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(nginx.url("/"))
@@ -83,7 +89,8 @@ http {
 #[tokio::test]
 #[ignore]
 async fn custom_limit_rejects_body_over_limit() {
-    let nginx = NginxContainer::start(br#"
+    let nginx = NginxContainer::start(
+        br#"
 events {
     worker_connections 1024;
 }
@@ -98,7 +105,9 @@ http {
         }
     }
 }
-"#).await;
+"#,
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(nginx.url("/"))
@@ -117,7 +126,8 @@ http {
 #[tokio::test]
 #[ignore]
 async fn custom_limit_accepts_body_under_limit() {
-    let nginx = NginxContainer::start(br#"
+    let nginx = NginxContainer::start(
+        br#"
 events {
     worker_connections 1024;
 }
@@ -132,7 +142,9 @@ http {
         }
     }
 }
-"#).await;
+"#,
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(nginx.url("/"))
@@ -151,7 +163,8 @@ http {
 #[tokio::test]
 #[ignore]
 async fn zero_disables_limit() {
-    let nginx = NginxContainer::start(br#"
+    let nginx = NginxContainer::start(
+        br#"
 events {
     worker_connections 1024;
 }
@@ -166,7 +179,9 @@ http {
         }
     }
 }
-"#).await;
+"#,
+    )
+    .await;
 
     let resp = reqwest::Client::new()
         .post(nginx.url("/"))

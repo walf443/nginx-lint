@@ -9,7 +9,7 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p add-header-inheritance-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{reqwest, NginxContainer};
+use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 
 /// Helper to get a header value from a response.
 fn get_header(resp: &reqwest::Response, name: &str) -> Option<String> {
