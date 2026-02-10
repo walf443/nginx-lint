@@ -1456,6 +1456,7 @@ dependencies = [
  "serde",
  "serde_json",
  "testcontainers",
+ "tokio",
 ]
 
 [[package]]
