@@ -67,11 +67,10 @@ impl AliasLocationSlashMismatchPlugin {
         }
 
         for arg in &directive.args {
-            if let ArgumentValue::Literal(s) = &arg.value {
-                if s == "~" || s == "~*" {
+            if let ArgumentValue::Literal(s) = &arg.value
+                && (s == "~" || s == "~*") {
                     return true;
                 }
-            }
         }
 
         false
@@ -87,8 +86,8 @@ impl AliasLocationSlashMismatchPlugin {
     ) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
-                if directive.name == "alias" && location_ends_with_slash {
-                    if let Some(path) = directive.first_arg() {
+                if directive.name == "alias" && location_ends_with_slash
+                    && let Some(path) = directive.first_arg() {
                         // Don't warn if path ends with slash
                         if path.ends_with('/') {
                             continue;
@@ -112,8 +111,8 @@ impl AliasLocationSlashMismatchPlugin {
                         );
 
                         // Add autofix: append trailing slash (only for non-regex locations)
-                        if !is_regex_location {
-                            if let Some(arg) = directive.args.first() {
+                        if !is_regex_location
+                            && let Some(arg) = directive.args.first() {
                                 match &arg.value {
                                     ArgumentValue::QuotedString(_)
                                     | ArgumentValue::SingleQuotedString(_) => {
@@ -133,17 +132,15 @@ impl AliasLocationSlashMismatchPlugin {
                                     }
                                 }
                             }
-                        }
 
                         errors.push(error);
                     }
-                }
 
                 // Recurse into blocks
                 if let Some(block) = &directive.block {
                     if directive.name == "location" {
                         let loc_path = Self::get_location_path(directive);
-                        let ends_with_slash = loc_path.as_ref().map_or(false, |p| p.ends_with('/'));
+                        let ends_with_slash = loc_path.as_ref().is_some_and(|p| p.ends_with('/'));
                         let is_regex = Self::is_regex_location(directive);
                         self.check_items(&block.items, ends_with_slash, is_regex, errors);
                     } else {

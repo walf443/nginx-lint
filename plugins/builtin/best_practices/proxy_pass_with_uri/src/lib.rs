@@ -26,7 +26,7 @@ impl ProxyPassWithUriPlugin {
             after_dollar
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_alphanumeric() || c == '_')
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
         } else {
             false
         }
@@ -80,8 +80,8 @@ impl ProxyPassWithUriPlugin {
                         continue;
                     }
 
-                    if let Some(url) = directive.first_arg() {
-                        if let Some(path) = Self::extract_uri_path(url) {
+                    if let Some(url) = directive.first_arg()
+                        && let Some(path) = Self::extract_uri_path(url) {
                             let message = if path == "/" {
                                 format!(
                                     "proxy_pass '{}' has trailing slash which causes URI rewriting; \
@@ -101,7 +101,6 @@ impl ProxyPassWithUriPlugin {
 
                             errors.push(err.warning_at(&message, directive));
                         }
-                    }
                 }
 
                 // Recurse into blocks

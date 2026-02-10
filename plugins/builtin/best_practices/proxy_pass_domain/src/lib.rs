@@ -48,10 +48,10 @@ impl Plugin for ProxyPassDomainPlugin {
 
         for directive in config.all_directives() {
             // Check proxy_pass directive
-            if directive.is("proxy_pass") {
-                if let Some(url) = directive.first_arg() {
-                    if let Some(host) = helpers::extract_host_from_url(url) {
-                        if helpers::is_domain_name(host) {
+            if directive.is("proxy_pass")
+                && let Some(url) = directive.first_arg()
+                    && let Some(host) = helpers::extract_host_from_url(url)
+                        && helpers::is_domain_name(host) {
                             let domain = helpers::extract_domain(host);
                             errors.push(err.warning_at(
                                 &format!(
@@ -63,9 +63,6 @@ impl Plugin for ProxyPassDomainPlugin {
                                 directive,
                             ));
                         }
-                    }
-                }
-            }
         }
 
         errors

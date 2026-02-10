@@ -44,9 +44,9 @@ impl AddHeaderInheritancePlugin {
     fn collect_headers_from_block(block: &Block) -> HashMap<String, HeaderInfo> {
         let mut headers = HashMap::new();
         for item in &block.items {
-            if let ConfigItem::Directive(directive) = item {
-                if directive.name == "add_header" {
-                    if let Some(header_name) = directive.first_arg() {
+            if let ConfigItem::Directive(directive) = item
+                && directive.name == "add_header"
+                    && let Some(header_name) = directive.first_arg() {
                         let info = HeaderInfo {
                             name_lower: header_name.to_lowercase(),
                             directive_text: Self::directive_to_text(directive),
@@ -54,8 +54,6 @@ impl AddHeaderInheritancePlugin {
                         };
                         headers.insert(header_name.to_lowercase(), info);
                     }
-                }
-            }
         }
         headers
     }
@@ -99,11 +97,10 @@ impl AddHeaderInheritancePlugin {
                                     .items
                                     .iter()
                                     .filter_map(|item| {
-                                        if let ConfigItem::Directive(d) = item {
-                                            if d.name == "add_header" {
+                                        if let ConfigItem::Directive(d) = item
+                                            && d.name == "add_header" {
                                                 return Some(d.as_ref());
                                             }
-                                        }
                                         None
                                     })
                                     .next();
