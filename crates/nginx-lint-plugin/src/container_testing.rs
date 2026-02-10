@@ -33,7 +33,7 @@ pub use testcontainers;
 
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
-    core::{IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
+    core::{ExecCommand, IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
     runners::AsyncRunner,
 };
 
@@ -47,9 +47,27 @@ pub fn nginx_version() -> String {
 ///
 /// The container is automatically stopped and removed when this value is dropped.
 pub struct NginxContainer {
-    _container: ContainerAsync<GenericImage>,
+    container: ContainerAsync<GenericImage>,
     host: String,
     port: u16,
+}
+
+/// Output from executing a command inside a container.
+#[derive(Debug)]
+pub struct ExecOutput {
+    /// Standard output from the command.
+    pub stdout: String,
+    /// Standard error from the command.
+    pub stderr: String,
+    /// Exit code of the command.
+    pub exit_code: i64,
+}
+
+impl ExecOutput {
+    /// Get the combined stdout and stderr output.
+    pub fn output(&self) -> String {
+        format!("{}{}", self.stdout, self.stderr)
+    }
 }
 
 impl NginxContainer {
@@ -86,10 +104,85 @@ impl NginxContainer {
         let port = container.get_host_port_ipv4(80).await.unwrap();
 
         Self {
-            _container: container,
+            container,
             host,
             port,
         }
+    }
+
+    /// Start an nginx container with SSL support.
+    ///
+    /// Generates a self-signed certificate at `/tmp/cert.pem` and `/tmp/key.pem`,
+    /// then starts nginx with the provided configuration.
+    ///
+    /// The configuration should reference these certificate paths:
+    /// ```nginx
+    /// ssl_certificate /tmp/cert.pem;
+    /// ssl_certificate_key /tmp/key.pem;
+    /// ```
+    ///
+    /// Use [`Self::exec`] or [`Self::exec_shell`] to run commands (like
+    /// `openssl s_client`) inside the container for protocol-level testing.
+    pub async fn start_ssl(config: &[u8]) -> Self {
+        let version = nginx_version();
+        let startup_script = concat!(
+            "openssl req -x509 -nodes -days 1 -newkey rsa:2048 ",
+            "-keyout /tmp/key.pem -out /tmp/cert.pem ",
+            "-subj '/CN=test' 2>/dev/null && ",
+            "exec nginx -g 'daemon off; error_log /dev/stderr notice;'"
+        );
+
+        let container = GenericImage::new("nginx", &version)
+            .with_entrypoint("sh")
+            .with_wait_for(WaitFor::message_on_stderr("start worker process"))
+            .with_copy_to("/etc/nginx/nginx.conf", config.to_vec())
+            .with_cmd(vec!["-c", startup_script])
+            .start()
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to start nginx:{} SSL container (is Docker running?): {}",
+                    version, e
+                )
+            });
+
+        let host = container.get_host().await.unwrap().to_string();
+
+        Self {
+            container,
+            host,
+            port: 0,
+        }
+    }
+
+    /// Execute a command inside the running container and return the output.
+    pub async fn exec(&self, cmd: &[&str]) -> ExecOutput {
+        let exec_cmd = ExecCommand::new(cmd.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let mut result = self
+            .container
+            .exec(exec_cmd)
+            .await
+            .expect("Failed to exec command in container");
+
+        let stdout =
+            String::from_utf8_lossy(&result.stdout_to_vec().await.unwrap_or_default()).to_string();
+        let stderr =
+            String::from_utf8_lossy(&result.stderr_to_vec().await.unwrap_or_default()).to_string();
+        let exit_code = result.exit_code().await.ok().flatten().unwrap_or(-1);
+
+        ExecOutput {
+            stdout,
+            stderr,
+            exit_code,
+        }
+    }
+
+    /// Execute a shell command inside the running container.
+    ///
+    /// This is a convenience wrapper around [`Self::exec`] that runs the
+    /// script via `sh -c`.
+    pub async fn exec_shell(&self, script: &str) -> ExecOutput {
+        self.exec(&["sh", "-c", script]).await
     }
 
     /// Build a full URL for the given path on this container.
