@@ -49,7 +49,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy -p nginx-lint -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin --no-default-features --features cli,native-builtin-plugins -- -W clippy::all
+      - run: cargo clippy --workspace --no-default-features --features cli,native-builtin-plugins -- -W clippy::all
 
   test:
     name: Test
