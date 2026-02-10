@@ -80,6 +80,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#server".to_string(),
             "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#zone".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/upstream_server_no_resolve/tests/container_test.rs".to_string(),
         ])
     }
 

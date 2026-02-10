@@ -135,6 +135,7 @@ impl Plugin for ProxyPassWithUriPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/proxy_pass_with_uri/tests/container_test.rs".to_string(),
         ])
     }
 

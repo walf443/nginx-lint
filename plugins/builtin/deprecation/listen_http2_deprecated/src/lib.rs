@@ -32,6 +32,7 @@ impl Plugin for ListenHttp2DeprecatedPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_v2_module.html".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/deprecation/listen_http2_deprecated/tests/container_test.rs".to_string(),
         ])
     }
 

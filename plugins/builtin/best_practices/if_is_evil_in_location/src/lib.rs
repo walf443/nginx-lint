@@ -130,6 +130,7 @@ impl Plugin for IfIsEvilInLocationPlugin {
             "https://github.com/nginxinc/nginx-wiki/blob/master/source/start/topics/depth/ifisevil.rst".to_string(),
             "https://www.getpagespeed.com/server-setup/nginx/nginx-if-is-evil-in-location".to_string(),
             "https://nginx.org/en/docs/http/ngx_http_rewrite_module.html#if".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/if_is_evil_in_location/tests/container_test.rs".to_string(),
         ])
     }
 

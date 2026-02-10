@@ -50,6 +50,9 @@ pub mod native;
 pub mod testing;
 mod types;
 
+#[cfg(feature = "container-testing")]
+pub mod container_testing;
+
 pub use types::*;
 
 // Re-export common types from nginx-lint-common

@@ -34,6 +34,7 @@ impl Plugin for InvalidDirectiveContextPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/beginners_guide.html".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/syntax/invalid_directive_context/tests/container_test.rs".to_string(),
         ])
     }
 

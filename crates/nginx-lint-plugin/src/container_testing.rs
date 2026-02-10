@@ -1,0 +1,676 @@
+//! Container-based testing utilities using Testcontainers.
+//!
+//! Provides helpers for running nginx in Docker containers to verify
+//! that lint rules detect real, observable problems.
+//!
+//! Requires the `container-testing` feature and Docker to be running.
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! use nginx_lint_plugin::container_testing::NginxContainer;
+//!
+//! #[tokio::test]
+//! #[ignore]
+//! async fn test_my_rule() {
+//!     let nginx = NginxContainer::start(br#"
+//! events { worker_connections 1024; }
+//! http {
+//!     server {
+//!         listen 80;
+//!         location / { return 200 'OK'; }
+//!     }
+//! }
+//! "#).await;
+//!
+//!     let resp = reqwest::get(nginx.url("/")).await.unwrap();
+//!     assert_eq!(resp.status(), 200);
+//! }
+//! ```
+
+pub use reqwest;
+pub use testcontainers;
+
+use std::time::Duration;
+
+use testcontainers::{
+    ContainerAsync, GenericImage, ImageExt,
+    core::{ExecCommand, IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
+    runners::AsyncRunner,
+};
+
+// ---------------------------------------------------------------------------
+// DnsTestEnv — reusable CoreDNS + two-backend test environment
+// ---------------------------------------------------------------------------
+
+/// A DNS test environment with CoreDNS and two backend nginx containers.
+///
+/// Provides a reusable setup for testing DNS caching behaviour in nginx.
+/// The environment consists of:
+/// - Two backend nginx containers (`backend-a`, `backend-b`) that each return
+///   their own name as the response body.
+/// - A CoreDNS container that initially resolves `backend.test` to `backend-a`.
+/// - A shared Docker network connecting all containers.
+///
+/// Use [`DnsTestEnv::start_nginx`] to launch nginx frontend containers on the
+/// same network, and [`DnsTestEnv::switch_to_backend_b`] to change DNS
+/// resolution from `backend-a` to `backend-b`.
+pub struct DnsTestEnv {
+    #[allow(dead_code)]
+    backend_a: ContainerAsync<GenericImage>,
+    #[allow(dead_code)]
+    backend_b: ContainerAsync<GenericImage>,
+    coredns: ContainerAsync<GenericImage>,
+    backend_b_ip: String,
+    coredns_ip: String,
+    network: String,
+}
+
+/// Generate a minimal nginx config that returns a fixed body identifying a backend.
+fn dns_backend_config(name: &str) -> Vec<u8> {
+    format!(
+        r#"events {{ worker_connections 64; }}
+http {{
+    server {{
+        listen 80;
+        location / {{
+            return 200 '{name}';
+        }}
+    }}
+}}
+"#
+    )
+    .into_bytes()
+}
+
+/// Generate the CoreDNS Corefile.
+fn dns_corefile() -> Vec<u8> {
+    br#".:53 {
+    hosts /etc/coredns/hosts {
+        reload 1s
+        ttl 1
+        fallthrough
+    }
+    log
+}
+"#
+    .to_vec()
+}
+
+/// Generate a CoreDNS hosts file mapping `backend.test` to the given IP.
+fn dns_hosts_file(ip: &str) -> Vec<u8> {
+    format!("{ip} backend.test\n").into_bytes()
+}
+
+/// Overwrite the CoreDNS hosts file inside the container using `docker cp`.
+///
+/// CoreDNS uses a scratch base image (no shell), so `docker exec` cannot be
+/// used. Instead we write a temp file on the host and copy it in.
+fn docker_cp_hosts(container_id: &str, content: &[u8]) {
+    let mut tmpfile = std::env::temp_dir();
+    tmpfile.push(format!("coredns-hosts-{}", std::process::id()));
+    std::fs::write(&tmpfile, content).expect("Failed to write temp hosts file");
+
+    let output = std::process::Command::new("docker")
+        .args([
+            "cp",
+            &tmpfile.display().to_string(),
+            &format!("{container_id}:/etc/coredns/hosts"),
+        ])
+        .output()
+        .expect("Failed to run docker cp");
+
+    let _ = std::fs::remove_file(&tmpfile);
+
+    assert!(
+        output.status.success(),
+        "docker cp failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+impl DnsTestEnv {
+    /// Start backend-a, backend-b, and CoreDNS on a shared Docker network.
+    ///
+    /// Initially `backend.test` resolves to `backend-a`.
+    pub async fn start(network_prefix: &str) -> Self {
+        let network = format!("{network_prefix}-{}", std::process::id());
+        let nginx_version = nginx_version();
+
+        let backend_a = GenericImage::new("nginx", &nginx_version)
+            .with_exposed_port(80.tcp())
+            .with_wait_for(WaitFor::http(
+                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
+            ))
+            .with_copy_to("/etc/nginx/nginx.conf", dns_backend_config("backend-a"))
+            .with_network(&network)
+            .with_startup_timeout(Duration::from_secs(120))
+            .start()
+            .await
+            .expect("Failed to start backend-a");
+
+        let backend_b = GenericImage::new("nginx", &nginx_version)
+            .with_exposed_port(80.tcp())
+            .with_wait_for(WaitFor::http(
+                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
+            ))
+            .with_copy_to("/etc/nginx/nginx.conf", dns_backend_config("backend-b"))
+            .with_network(&network)
+            .with_startup_timeout(Duration::from_secs(120))
+            .start()
+            .await
+            .expect("Failed to start backend-b");
+
+        let backend_a_ip = backend_a
+            .get_bridge_ip_address()
+            .await
+            .expect("Failed to get backend-a IP");
+        let backend_b_ip = backend_b
+            .get_bridge_ip_address()
+            .await
+            .expect("Failed to get backend-b IP");
+
+        eprintln!("backend-a IP: {backend_a_ip}");
+        eprintln!("backend-b IP: {backend_b_ip}");
+
+        let coredns = GenericImage::new("coredns/coredns", "latest")
+            .with_wait_for(WaitFor::message_on_stdout("CoreDNS-"))
+            .with_copy_to("/etc/coredns/Corefile", dns_corefile())
+            .with_copy_to(
+                "/etc/coredns/hosts",
+                dns_hosts_file(&backend_a_ip.to_string()),
+            )
+            .with_cmd(vec!["-conf", "/etc/coredns/Corefile"])
+            .with_network(&network)
+            .with_startup_timeout(Duration::from_secs(60))
+            .start()
+            .await
+            .expect("Failed to start CoreDNS");
+
+        let coredns_ip = coredns
+            .get_bridge_ip_address()
+            .await
+            .expect("Failed to get CoreDNS IP");
+
+        eprintln!("CoreDNS IP: {coredns_ip}");
+
+        Self {
+            backend_a,
+            backend_b,
+            coredns,
+            backend_b_ip: backend_b_ip.to_string(),
+            coredns_ip: coredns_ip.to_string(),
+            network,
+        }
+    }
+
+    /// CoreDNS IP address (for nginx `resolver` directive).
+    pub fn coredns_ip(&self) -> &str {
+        &self.coredns_ip
+    }
+
+    /// Docker network name (for `with_network()`).
+    pub fn network(&self) -> &str {
+        &self.network
+    }
+
+    /// Start an nginx frontend container on the same network with
+    /// `/etc/resolv.conf` overridden to use CoreDNS.
+    ///
+    /// The returned container exposes port 80 and is ready to serve requests.
+    pub async fn start_nginx(&self, config: Vec<u8>) -> ContainerAsync<GenericImage> {
+        let (img_name, img_tag) = nginx_image();
+        let conf_path = nginx_conf_path();
+        let startup_script = self.nginx_startup_script();
+
+        GenericImage::new(&img_name, &img_tag)
+            .with_exposed_port(80.tcp())
+            .with_entrypoint("sh")
+            .with_wait_for(WaitFor::http(
+                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
+            ))
+            .with_copy_to(&conf_path, config)
+            .with_cmd(vec!["-c", &startup_script])
+            .with_network(&self.network)
+            .with_startup_timeout(Duration::from_secs(120))
+            .start()
+            .await
+            .expect("Failed to start nginx frontend")
+    }
+
+    /// Switch DNS from `backend-a` to `backend-b` and wait for propagation.
+    ///
+    /// Waits 5 seconds for CoreDNS reload (1s) + DNS TTL (1s) + resolver
+    /// valid (1s) + margin.
+    pub async fn switch_to_backend_b(&self) {
+        docker_cp_hosts(self.coredns.id(), &dns_hosts_file(&self.backend_b_ip));
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+    /// Startup script that overrides `/etc/resolv.conf` to use CoreDNS,
+    /// then starts nginx in the foreground.
+    pub fn nginx_startup_script(&self) -> String {
+        format!(
+            "echo 'nameserver {}' > /etc/resolv.conf && \
+             exec nginx -g 'daemon off; error_log /dev/stderr notice;'",
+            self.coredns_ip
+        )
+    }
+}
+
+/// Describes the Docker image and paths for an nginx-compatible container.
+struct NginxImageConfig {
+    image_name: String,
+    image_tag: String,
+    conf_path: String,
+}
+
+impl NginxImageConfig {
+    fn full_image(&self) -> String {
+        format!("{}:{}", self.image_name, self.image_tag)
+    }
+}
+
+/// Build an [`NginxImageConfig`] from environment variables.
+///
+/// - If `NGINX_IMAGE` is set (e.g. `openresty/openresty:noble`), it is split
+///   into name and tag. Images whose name contains `"openresty"` automatically
+///   use the OpenResty config path.
+/// - Otherwise falls back to `nginx:$NGINX_VERSION` (default `"1.27"`).
+fn nginx_image_config() -> NginxImageConfig {
+    if let Ok(image) = std::env::var("NGINX_IMAGE") {
+        let (name, tag) = match image.rsplit_once(':') {
+            Some((n, t)) => (n.to_string(), t.to_string()),
+            None => (image.clone(), "latest".to_string()),
+        };
+        let conf_path = if name.contains("openresty") {
+            "/usr/local/openresty/nginx/conf/nginx.conf".to_string()
+        } else {
+            "/etc/nginx/nginx.conf".to_string()
+        };
+        NginxImageConfig {
+            image_name: name,
+            image_tag: tag,
+            conf_path,
+        }
+    } else {
+        let version = std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string());
+        NginxImageConfig {
+            image_name: "nginx".to_string(),
+            image_tag: version,
+            conf_path: "/etc/nginx/nginx.conf".to_string(),
+        }
+    }
+}
+
+fn is_openresty_image() -> bool {
+    std::env::var("NGINX_IMAGE")
+        .map(|v| v.contains("openresty"))
+        .unwrap_or(false)
+}
+
+/// Get the default HTML document root for the current container image.
+///
+/// - nginx: `/usr/share/nginx/html`
+/// - openresty: `/usr/local/openresty/nginx/html`
+pub fn nginx_html_root() -> &'static str {
+    if is_openresty_image() {
+        "/usr/local/openresty/nginx/html"
+    } else {
+        "/usr/share/nginx/html"
+    }
+}
+
+/// Get the configuration directory for the current container image.
+///
+/// - nginx: `/etc/nginx`
+/// - openresty: `/usr/local/openresty/nginx/conf`
+pub fn nginx_conf_dir() -> &'static str {
+    if is_openresty_image() {
+        "/usr/local/openresty/nginx/conf"
+    } else {
+        "/etc/nginx"
+    }
+}
+
+/// Get the server software name for the current container image.
+///
+/// - nginx: `"nginx"`
+/// - openresty: `"openresty"`
+pub fn nginx_server_name() -> &'static str {
+    if is_openresty_image() {
+        "openresty"
+    } else {
+        "nginx"
+    }
+}
+
+/// Get the nginx image tag from the `NGINX_VERSION` environment variable.
+/// Defaults to `"1.27"` if not set.
+pub fn nginx_version() -> String {
+    std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string())
+}
+
+/// Get the (image_name, image_tag) for creating a [`GenericImage`] directly.
+///
+/// This is useful when you need full control over container creation
+/// (e.g., custom networks, multiple containers) instead of using [`NginxContainer`].
+pub fn nginx_image() -> (String, String) {
+    let cfg = nginx_image_config();
+    (cfg.image_name, cfg.image_tag)
+}
+
+/// Get the full path to nginx.conf inside the container.
+pub fn nginx_conf_path() -> String {
+    let cfg = nginx_image_config();
+    cfg.conf_path
+}
+
+/// A running nginx container for integration testing.
+///
+/// The container is automatically stopped and removed when this value is dropped.
+pub struct NginxContainer {
+    container: ContainerAsync<GenericImage>,
+    host: String,
+    port: u16,
+}
+
+/// Output from executing a command inside a container.
+#[derive(Debug)]
+pub struct ExecOutput {
+    /// Standard output from the command.
+    pub stdout: String,
+    /// Standard error from the command.
+    pub stderr: String,
+    /// Exit code of the command.
+    pub exit_code: i64,
+}
+
+impl ExecOutput {
+    /// Get the combined stdout and stderr output.
+    pub fn output(&self) -> String {
+        format!("{}{}", self.stdout, self.stderr)
+    }
+}
+
+impl NginxContainer {
+    /// Start an nginx container with the given config.
+    ///
+    /// Waits until `GET /` returns HTTP 200 before returning.
+    /// Use [`Self::start_with_health_path`] if `/` is not suitable as a health check.
+    pub async fn start(config: &[u8]) -> Self {
+        Self::start_with_health_path(config, "/").await
+    }
+
+    /// Start an nginx container with the given config, using a custom health check path.
+    ///
+    /// This is useful when `GET /` may not return 200 (e.g., when testing
+    /// autoindex off which returns 403 for directories).
+    pub async fn start_with_health_path(config: &[u8], health_path: &str) -> Self {
+        let img = nginx_image_config();
+        let container = GenericImage::new(&img.image_name, &img.image_tag)
+            .with_exposed_port(80.tcp())
+            .with_wait_for(WaitFor::http(
+                HttpWaitStrategy::new(health_path).with_expected_status_code(200u16),
+            ))
+            .with_copy_to(&img.conf_path, config.to_vec())
+            .with_startup_timeout(Duration::from_secs(120))
+            .start()
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to start {} container (is Docker running?): {}",
+                    img.full_image(),
+                    e
+                )
+            });
+
+        let host = container.get_host().await.unwrap().to_string();
+        let port = container.get_host_port_ipv4(80).await.unwrap();
+
+        Self {
+            container,
+            host,
+            port,
+        }
+    }
+
+    /// Start an nginx container with SSL support.
+    ///
+    /// Generates a self-signed certificate at `/tmp/cert.pem` and `/tmp/key.pem`,
+    /// then starts nginx with the provided configuration.
+    ///
+    /// The configuration should reference these certificate paths:
+    /// ```nginx
+    /// ssl_certificate /tmp/cert.pem;
+    /// ssl_certificate_key /tmp/key.pem;
+    /// ```
+    ///
+    /// Use [`Self::exec`] or [`Self::exec_shell`] to run commands (like
+    /// `openssl s_client`) inside the container for protocol-level testing.
+    pub async fn start_ssl(config: &[u8]) -> Self {
+        let img = nginx_image_config();
+        let startup_script = concat!(
+            "openssl req -x509 -nodes -days 1 -newkey rsa:2048 ",
+            "-keyout /tmp/key.pem -out /tmp/cert.pem ",
+            "-subj '/CN=test' 2>/dev/null && ",
+            "exec nginx -g 'daemon off; error_log /dev/stderr notice;'"
+        );
+
+        let container = GenericImage::new(&img.image_name, &img.image_tag)
+            .with_entrypoint("sh")
+            .with_wait_for(WaitFor::message_on_stderr("start worker process"))
+            .with_copy_to(&img.conf_path, config.to_vec())
+            .with_cmd(vec!["-c", startup_script])
+            .with_startup_timeout(Duration::from_secs(120))
+            .start()
+            .await
+            .unwrap_or_else(|e| {
+                panic!(
+                    "Failed to start {} SSL container (is Docker running?): {}",
+                    img.full_image(),
+                    e
+                )
+            });
+
+        let host = container.get_host().await.unwrap().to_string();
+
+        Self {
+            container,
+            host,
+            port: 0,
+        }
+    }
+
+    /// Execute a command inside the running container and return the output.
+    pub async fn exec(&self, cmd: &[&str]) -> ExecOutput {
+        let exec_cmd = ExecCommand::new(cmd.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let mut result = self
+            .container
+            .exec(exec_cmd)
+            .await
+            .expect("Failed to exec command in container");
+
+        let stdout =
+            String::from_utf8_lossy(&result.stdout_to_vec().await.unwrap_or_default()).to_string();
+        let stderr =
+            String::from_utf8_lossy(&result.stderr_to_vec().await.unwrap_or_default()).to_string();
+        let exit_code = result.exit_code().await.ok().flatten().unwrap_or(-1);
+
+        ExecOutput {
+            stdout,
+            stderr,
+            exit_code,
+        }
+    }
+
+    /// Execute a shell command inside the running container.
+    ///
+    /// This is a convenience wrapper around [`Self::exec`] that runs the
+    /// script via `sh -c`.
+    pub async fn exec_shell(&self, script: &str) -> ExecOutput {
+        self.exec(&["sh", "-c", script]).await
+    }
+
+    /// Build a full URL for the given path on this container.
+    ///
+    /// ```rust,ignore
+    /// let url = nginx.url("/api/v1/health");
+    /// // => "http://127.0.0.1:32768/api/v1/health"
+    /// ```
+    pub fn url(&self, path: &str) -> String {
+        format!("http://{}:{}{}", self.host, self.port, path)
+    }
+
+    /// Get the host address of the container.
+    pub fn host(&self) -> &str {
+        &self.host
+    }
+
+    /// Get the mapped port for port 80 on the container.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+}
+
+/// Result of running `nginx -t` on a configuration.
+#[derive(Debug)]
+pub struct NginxConfigTestResult {
+    /// Whether `nginx -t` exited successfully (exit code 0).
+    pub success: bool,
+    /// Combined stdout and stderr output from `nginx -t`.
+    pub output: String,
+}
+
+impl NginxConfigTestResult {
+    /// Assert that `nginx -t` rejected the configuration and the output contains
+    /// the expected error message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` succeeded or the output does not contain `expected`.
+    pub fn assert_fails_with(&self, expected: &str) {
+        assert!(
+            !self.success,
+            "Expected nginx -t to fail, but it succeeded. Output:\n{}",
+            self.output
+        );
+        assert!(
+            self.output.contains(expected),
+            "Expected output to contain {:?}, got:\n{}",
+            expected,
+            self.output
+        );
+    }
+
+    /// Assert that `nginx -t` accepted the configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed.
+    pub fn assert_success(&self) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed, but it failed. Output:\n{}",
+            self.output
+        );
+    }
+
+    /// Assert that `nginx -t` succeeded but emitted a warning containing the expected message.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed or the output does not contain `expected`.
+    pub fn assert_warns_with(&self, expected: &str) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed with warnings, but it failed. Output:\n{}",
+            self.output
+        );
+        assert!(
+            self.output.contains(expected),
+            "Expected output to contain {:?}, got:\n{}",
+            expected,
+            self.output
+        );
+    }
+
+    /// Assert that `nginx -t` succeeded without any warnings (`[warn]`).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `nginx -t` failed or the output contains `[warn]`.
+    pub fn assert_success_without_warnings(&self) {
+        assert!(
+            self.success,
+            "Expected nginx -t to succeed, but it failed. Output:\n{}",
+            self.output
+        );
+        assert!(
+            !self.output.contains("[warn]"),
+            "Expected no warnings, but got:\n{}",
+            self.output
+        );
+    }
+}
+
+/// Run `nginx -t` on a configuration string and return the result.
+///
+/// This is useful for verifying that nginx rejects certain invalid configurations
+/// (e.g., duplicate locations) without needing to start a full container.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use nginx_lint_plugin::container_testing::nginx_config_test;
+///
+/// #[test]
+/// #[ignore]
+/// fn duplicate_location_rejected() {
+///     let result = nginx_config_test(r#"
+/// events { worker_connections 1024; }
+/// http {
+///     server {
+///         listen 80;
+///         location /api { return 200; }
+///         location /api { return 201; }
+///     }
+/// }
+/// "#);
+///     result.assert_fails_with("duplicate location");
+/// }
+/// ```
+pub fn nginx_config_test(config: &str) -> NginxConfigTestResult {
+    let img = nginx_image_config();
+
+    let mut tmpfile = std::env::temp_dir();
+    tmpfile.push(format!(
+        "nginx-lint-container-test-{}-{:?}.conf",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&tmpfile, config).expect("Failed to write temp nginx config");
+
+    let result = std::process::Command::new("docker")
+        .args([
+            "run",
+            "--rm",
+            "-v",
+            &format!("{}:{}:ro", tmpfile.display(), img.conf_path),
+            &img.full_image(),
+            "nginx",
+            "-t",
+        ])
+        .output()
+        .expect("Failed to run docker (is Docker installed and running?)");
+
+    let _ = std::fs::remove_file(&tmpfile);
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    NginxConfigTestResult {
+        success: result.status.success(),
+        output: format!("{stdout}{stderr}"),
+    }
+}

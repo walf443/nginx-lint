@@ -163,6 +163,7 @@ impl Plugin for ProxyKeepalivePlugin {
             "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_http_version"
                 .to_string(),
             "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#keepalive".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/proxy_keepalive/tests/container_test.rs".to_string(),
         ])
     }
 

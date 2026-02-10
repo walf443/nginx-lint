@@ -67,6 +67,7 @@ impl Plugin for RootInLocationPlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#root".to_string(),
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#alias".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/root_in_location/tests/container_test.rs".to_string(),
         ])
     }
 

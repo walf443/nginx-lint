@@ -36,6 +36,7 @@ impl Plugin for ClientMaxBodySizeNotSetPlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#client_max_body_size"
                 .to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/client_max_body_size_not_set/tests/container_test.rs".to_string(),
         ])
     }
 

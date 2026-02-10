@@ -35,6 +35,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl_protocols".to_string(),
             "https://wiki.mozilla.org/Security/Server_Side_TLS".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/deprecated_ssl_protocol/tests/container_test.rs".to_string(),
         ])
     }
 

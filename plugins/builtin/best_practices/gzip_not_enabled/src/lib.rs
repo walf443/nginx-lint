@@ -34,6 +34,7 @@ impl Plugin for GzipNotEnabledPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_gzip_module.html".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/gzip_not_enabled/tests/container_test.rs".to_string(),
         ])
     }
 

@@ -34,6 +34,7 @@ impl Plugin for ServerTokensEnabledPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens".to_string(),
+            "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/server_tokens_enabled/tests/container_test.rs".to_string(),
         ])
     }
 
