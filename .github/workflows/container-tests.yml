@@ -2,6 +2,9 @@ name: Container Tests
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/container-tests.yml"
 
 env:
   CARGO_TERM_COLOR: always
