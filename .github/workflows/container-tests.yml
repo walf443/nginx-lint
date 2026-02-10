@@ -35,6 +35,8 @@ jobs:
         env:
           NGINX_VERSION: ${{ matrix.nginx-version }}
         run: |
+          failed_plugins=""
+          passed=0
           failed=0
           for dir in plugins/builtin/*/*/; do
             if [ -f "$dir/tests/container_test.rs" ]; then
@@ -43,11 +45,25 @@ jobs:
               echo "::group::$name (nginx ${{ matrix.nginx-version }})"
               if cargo test -p "$pkg" --test container_test -- --ignored; then
                 echo "✅ $name passed"
+                passed=$((passed + 1))
               else
                 echo "❌ $name failed"
-                failed=1
+                failed=$((failed + 1))
+                failed_plugins="$failed_plugins $name"
+                echo "::error title=$name failed::Container test for $name failed with nginx ${{ matrix.nginx-version }}"
               fi
               echo "::endgroup::"
             fi
           done
-          exit $failed
+          echo ""
+          echo "=== Summary (nginx ${{ matrix.nginx-version }}) ==="
+          echo "Passed: $passed"
+          echo "Failed: $failed"
+          if [ -n "$failed_plugins" ]; then
+            echo ""
+            echo "Failed plugins:"
+            for p in $failed_plugins; do
+              echo "  - $p"
+            done
+            exit 1
+          fi
