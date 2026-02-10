@@ -15,12 +15,12 @@ env:
 
 jobs:
   container-tests:
-    name: Container Tests (nginx ${{ matrix.nginx-version }})
+    name: Container Tests (${{ matrix.nginx-image }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        nginx-version: ["1.28", "1.29"]
+        nginx-image: ["nginx:1.28", "nginx:1.29", "openresty/openresty:noble"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,12 +28,12 @@ jobs:
         with:
           shared-key: "container-tests"
 
-      - name: Pull nginx image
-        run: docker pull nginx:${{ matrix.nginx-version }}
+      - name: Pull image
+        run: docker pull ${{ matrix.nginx-image }}
 
       - name: Run container tests
         env:
-          NGINX_VERSION: ${{ matrix.nginx-version }}
+          NGINX_IMAGE: ${{ matrix.nginx-image }}
         run: |
           failed_plugins=""
           passed=0
@@ -42,7 +42,7 @@ jobs:
             if [ -f "$dir/tests/container_test.rs" ]; then
               name=$(basename "$dir")
               pkg=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
-              echo "::group::$name (nginx ${{ matrix.nginx-version }})"
+              echo "::group::$name (${{ matrix.nginx-image }})"
               if cargo test -p "$pkg" --test container_test -- --ignored; then
                 echo "✅ $name passed"
                 passed=$((passed + 1))
@@ -50,13 +50,13 @@ jobs:
                 echo "❌ $name failed"
                 failed=$((failed + 1))
                 failed_plugins="$failed_plugins $name"
-                echo "::error title=$name failed::Container test for $name failed with nginx ${{ matrix.nginx-version }}"
+                echo "::error title=$name failed::Container test for $name failed with ${{ matrix.nginx-image }}"
               fi
               echo "::endgroup::"
             fi
           done
           echo ""
-          echo "=== Summary (nginx ${{ matrix.nginx-version }}) ==="
+          echo "=== Summary (${{ matrix.nginx-image }}) ==="
           echo "Passed: $passed"
           echo "Failed: $failed"
           if [ -n "$failed_plugins" ]; then

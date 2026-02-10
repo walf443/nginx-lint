@@ -37,6 +37,51 @@ use testcontainers::{
     runners::AsyncRunner,
 };
 
+/// Describes the Docker image and paths for an nginx-compatible container.
+struct NginxImageConfig {
+    image_name: String,
+    image_tag: String,
+    conf_path: String,
+}
+
+impl NginxImageConfig {
+    fn full_image(&self) -> String {
+        format!("{}:{}", self.image_name, self.image_tag)
+    }
+}
+
+/// Build an [`NginxImageConfig`] from environment variables.
+///
+/// - If `NGINX_IMAGE` is set (e.g. `openresty/openresty:noble`), it is split
+///   into name and tag. Images whose name contains `"openresty"` automatically
+///   use the OpenResty config path.
+/// - Otherwise falls back to `nginx:$NGINX_VERSION` (default `"1.27"`).
+fn nginx_image_config() -> NginxImageConfig {
+    if let Ok(image) = std::env::var("NGINX_IMAGE") {
+        let (name, tag) = match image.rsplit_once(':') {
+            Some((n, t)) => (n.to_string(), t.to_string()),
+            None => (image.clone(), "latest".to_string()),
+        };
+        let conf_path = if name.contains("openresty") {
+            "/usr/local/openresty/nginx/conf/nginx.conf".to_string()
+        } else {
+            "/etc/nginx/nginx.conf".to_string()
+        };
+        NginxImageConfig {
+            image_name: name,
+            image_tag: tag,
+            conf_path,
+        }
+    } else {
+        let version = std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string());
+        NginxImageConfig {
+            image_name: "nginx".to_string(),
+            image_tag: version,
+            conf_path: "/etc/nginx/nginx.conf".to_string(),
+        }
+    }
+}
+
 /// Get the nginx image tag from the `NGINX_VERSION` environment variable.
 /// Defaults to `"1.27"` if not set.
 pub fn nginx_version() -> String {
@@ -84,19 +129,20 @@ impl NginxContainer {
     /// This is useful when `GET /` may not return 200 (e.g., when testing
     /// autoindex off which returns 403 for directories).
     pub async fn start_with_health_path(config: &[u8], health_path: &str) -> Self {
-        let version = nginx_version();
-        let container = GenericImage::new("nginx", &version)
+        let img = nginx_image_config();
+        let container = GenericImage::new(&img.image_name, &img.image_tag)
             .with_exposed_port(80.tcp())
             .with_wait_for(WaitFor::http(
                 HttpWaitStrategy::new(health_path).with_expected_status_code(200u16),
             ))
-            .with_copy_to("/etc/nginx/nginx.conf", config.to_vec())
+            .with_copy_to(&img.conf_path, config.to_vec())
             .start()
             .await
             .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to start nginx:{} container (is Docker running?): {}",
-                    version, e
+                    "Failed to start {} container (is Docker running?): {}",
+                    img.full_image(),
+                    e
                 )
             });
 
@@ -124,7 +170,7 @@ impl NginxContainer {
     /// Use [`Self::exec`] or [`Self::exec_shell`] to run commands (like
     /// `openssl s_client`) inside the container for protocol-level testing.
     pub async fn start_ssl(config: &[u8]) -> Self {
-        let version = nginx_version();
+        let img = nginx_image_config();
         let startup_script = concat!(
             "openssl req -x509 -nodes -days 1 -newkey rsa:2048 ",
             "-keyout /tmp/key.pem -out /tmp/cert.pem ",
@@ -132,17 +178,18 @@ impl NginxContainer {
             "exec nginx -g 'daemon off; error_log /dev/stderr notice;'"
         );
 
-        let container = GenericImage::new("nginx", &version)
+        let container = GenericImage::new(&img.image_name, &img.image_tag)
             .with_entrypoint("sh")
             .with_wait_for(WaitFor::message_on_stderr("start worker process"))
-            .with_copy_to("/etc/nginx/nginx.conf", config.to_vec())
+            .with_copy_to(&img.conf_path, config.to_vec())
             .with_cmd(vec!["-c", startup_script])
             .start()
             .await
             .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to start nginx:{} SSL container (is Docker running?): {}",
-                    version, e
+                    "Failed to start {} SSL container (is Docker running?): {}",
+                    img.full_image(),
+                    e
                 )
             });
 
@@ -314,8 +361,7 @@ impl NginxConfigTestResult {
 /// }
 /// ```
 pub fn nginx_config_test(config: &str) -> NginxConfigTestResult {
-    let version = nginx_version();
-    let image = format!("nginx:{version}");
+    let img = nginx_image_config();
 
     let mut tmpfile = std::env::temp_dir();
     tmpfile.push(format!(
@@ -330,8 +376,8 @@ pub fn nginx_config_test(config: &str) -> NginxConfigTestResult {
             "run",
             "--rm",
             "-v",
-            &format!("{}:/etc/nginx/nginx.conf:ro", tmpfile.display()),
-            &image,
+            &format!("{}:{}:ro", tmpfile.display(), img.conf_path),
+            &img.full_image(),
             "nginx",
             "-t",
         ])
