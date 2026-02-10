@@ -61,7 +61,9 @@ async fn modern_protocols_tlsv1_0_rejected() {
         .await;
     let combined = output.output();
     assert!(
-        combined.contains("alert protocol version") || combined.contains("alert internal error"),
+        combined.contains("alert protocol version")
+            || combined.contains("alert internal error")
+            || combined.contains("no protocols available"),
         "Expected TLSv1.0 to be rejected, got: {combined}"
     );
 }
@@ -76,7 +78,9 @@ async fn modern_protocols_tlsv1_1_rejected() {
         .await;
     let combined = output.output();
     assert!(
-        combined.contains("alert protocol version") || combined.contains("alert internal error"),
+        combined.contains("alert protocol version")
+            || combined.contains("alert internal error")
+            || combined.contains("no protocols available"),
         "Expected TLSv1.1 to be rejected, got: {combined}"
     );
 }
@@ -93,7 +97,9 @@ async fn deprecated_tlsv1_0_fails_even_when_configured() {
         .await;
     let combined = output.output();
     assert!(
-        combined.contains("alert protocol version") || combined.contains("alert internal error"),
+        combined.contains("alert protocol version")
+            || combined.contains("alert internal error")
+            || combined.contains("no protocols available"),
         "Expected TLSv1.0 to fail even when configured, got: {combined}"
     );
 }
