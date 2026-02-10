@@ -1,8 +1,8 @@
 //! try-files-with-proxy plugin
 //!
 //! This plugin warns when both try_files and proxy_pass are used in the same
-//! location block. try_files takes precedence and proxy_pass will only be
-//! executed if try_files falls through to a named location.
+//! location block. When combined, proxy_pass becomes the content handler and
+//! try_files only rewrites the URI - static files are never served from disk.
 //!
 //! Build with:
 //! ```sh
@@ -78,23 +78,12 @@ impl TryFilesWithProxyPlugin {
                 return;
             }
 
-            // Check if try_files ends with =404 or similar error code
-            let ends_with_error_code = try_files
-                .args
-                .last()
-                .map(|arg| arg.as_str().starts_with('='))
-                .unwrap_or(false);
-
             let err = PluginSpec::new("try-files-with-proxy", "best-practices", "").error_builder();
 
             errors.push(err.warning_at(
-                if ends_with_error_code {
-                    "try_files and proxy_pass in the same location: try_files takes precedence, \
-                     proxy_pass will never be executed. Use a named location (@fallback) for proxy_pass"
-                } else {
-                    "try_files and proxy_pass in the same location: try_files takes precedence. \
-                     If the last try_files argument is a URI, it will be used instead of proxy_pass"
-                },
+                "try_files and proxy_pass in the same location: proxy_pass becomes the content handler \
+                 and try_files only rewrites the URI. Static files will never be served from disk. \
+                 Use a named location (@fallback) for proxy_pass",
                 proxy_pass,
             ));
         }
@@ -111,11 +100,14 @@ impl Plugin for TryFilesWithProxyPlugin {
         .with_severity("warning")
         .with_why(
             "When both try_files and proxy_pass are in the same location block, \
-             try_files takes precedence. The proxy_pass directive will never be executed \
-             because try_files will either:\n\
-             1. Find a matching file and serve it\n\
-             2. Use the last argument as a fallback URI or return an error code\n\n\
-             To proxy requests that don't match static files, use a named location:\n\
+             proxy_pass becomes the content handler and try_files only performs URI \
+             rewriting. This means:\n\
+             1. Static files are never served directly from disk, even if they exist\n\
+             2. All requests are proxied to the upstream server\n\
+             3. try_files only rewrites the URI (e.g., to a fallback like /index.html) \
+             before proxy_pass forwards it\n\n\
+             To serve static files locally and proxy only when no file is found, \
+             use a named location:\n\
              try_files $uri $uri/ @backend;\n\
              And define @backend with proxy_pass separately.",
         )
@@ -215,7 +207,11 @@ http {
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(errors[0].message.contains("never be executed"));
+        assert!(
+            errors[0]
+                .message
+                .contains("proxy_pass becomes the content handler")
+        );
     }
 
     #[test]
