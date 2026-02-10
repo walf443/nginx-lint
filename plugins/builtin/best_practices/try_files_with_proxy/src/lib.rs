@@ -22,9 +22,10 @@ impl TryFilesWithProxyPlugin {
             if let ConfigItem::Directive(directive) = item {
                 // Only check location blocks
                 if directive.is("location")
-                    && let Some(block) = &directive.block {
-                        self.check_location_items(&block.items, errors);
-                    }
+                    && let Some(block) = &directive.block
+                {
+                    self.check_location_items(&block.items, errors);
+                }
 
                 // Recursively check nested blocks (server, http, etc.)
                 if let Some(block) = &directive.block {
@@ -52,10 +53,12 @@ impl TryFilesWithProxyPlugin {
                     // Check for proxy_pass inside if blocks within this location
                     for nested_item in &nested_block.items {
                         if let ConfigItem::Directive(nested_directive) = nested_item
-                            && nested_directive.is("proxy_pass") && try_files_directive.is_some() {
-                                // proxy_pass inside if, but try_files outside - still a problem
-                                // unless the if is specifically handling the fallback
-                            }
+                            && nested_directive.is("proxy_pass")
+                            && try_files_directive.is_some()
+                        {
+                            // proxy_pass inside if, but try_files outside - still a problem
+                            // unless the if is specifically handling the fallback
+                        }
                     }
                 }
             }

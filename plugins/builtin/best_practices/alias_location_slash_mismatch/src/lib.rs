@@ -68,9 +68,10 @@ impl AliasLocationSlashMismatchPlugin {
 
         for arg in &directive.args {
             if let ArgumentValue::Literal(s) = &arg.value
-                && (s == "~" || s == "~*") {
-                    return true;
-                }
+                && (s == "~" || s == "~*")
+            {
+                return true;
+            }
         }
 
         false
@@ -86,23 +87,25 @@ impl AliasLocationSlashMismatchPlugin {
     ) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
-                if directive.name == "alias" && location_ends_with_slash
-                    && let Some(path) = directive.first_arg() {
-                        // Don't warn if path ends with slash
-                        if path.ends_with('/') {
-                            continue;
-                        }
+                if directive.name == "alias"
+                    && location_ends_with_slash
+                    && let Some(path) = directive.first_arg()
+                {
+                    // Don't warn if path ends with slash
+                    if path.ends_with('/') {
+                        continue;
+                    }
 
-                        // Don't warn if path ends with a variable (like $1 in regex locations)
-                        if Self::ends_with_variable(path) {
-                            continue;
-                        }
+                    // Don't warn if path ends with a variable (like $1 in regex locations)
+                    if Self::ends_with_variable(path) {
+                        continue;
+                    }
 
-                        let err =
-                            PluginSpec::new("alias-location-slash-mismatch", "best-practices", "")
-                                .error_builder();
+                    let err =
+                        PluginSpec::new("alias-location-slash-mismatch", "best-practices", "")
+                            .error_builder();
 
-                        let mut error = err.warning_at(
+                    let mut error = err.warning_at(
                             &format!(
                                 "alias path '{}' should end with a trailing slash when location ends with '/'",
                                 path
@@ -110,31 +113,29 @@ impl AliasLocationSlashMismatchPlugin {
                             directive,
                         );
 
-                        // Add autofix: append trailing slash (only for non-regex locations)
-                        if !is_regex_location
-                            && let Some(arg) = directive.args.first() {
-                                match &arg.value {
-                                    ArgumentValue::QuotedString(_)
-                                    | ArgumentValue::SingleQuotedString(_) => {
-                                        // Insert before closing quote
-                                        let fix_start = arg.span.end.offset - 1;
-                                        let fix_end = arg.span.end.offset - 1;
-                                        error = error
-                                            .with_fix(Fix::replace_range(fix_start, fix_end, "/"));
-                                    }
-                                    ArgumentValue::Literal(_) => {
-                                        // Append at end of literal
-                                        let end = arg.span.end.offset;
-                                        error = error.with_fix(Fix::replace_range(end, end, "/"));
-                                    }
-                                    ArgumentValue::Variable(_) => {
-                                        // Don't autofix variables
-                                    }
-                                }
+                    // Add autofix: append trailing slash (only for non-regex locations)
+                    if !is_regex_location && let Some(arg) = directive.args.first() {
+                        match &arg.value {
+                            ArgumentValue::QuotedString(_)
+                            | ArgumentValue::SingleQuotedString(_) => {
+                                // Insert before closing quote
+                                let fix_start = arg.span.end.offset - 1;
+                                let fix_end = arg.span.end.offset - 1;
+                                error = error.with_fix(Fix::replace_range(fix_start, fix_end, "/"));
                             }
-
-                        errors.push(error);
+                            ArgumentValue::Literal(_) => {
+                                // Append at end of literal
+                                let end = arg.span.end.offset;
+                                error = error.with_fix(Fix::replace_range(end, end, "/"));
+                            }
+                            ArgumentValue::Variable(_) => {
+                                // Don't autofix variables
+                            }
+                        }
                     }
+
+                    errors.push(error);
+                }
 
                 // Recurse into blocks
                 if let Some(block) = &directive.block {

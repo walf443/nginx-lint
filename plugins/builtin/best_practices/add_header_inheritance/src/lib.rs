@@ -46,14 +46,15 @@ impl AddHeaderInheritancePlugin {
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item
                 && directive.name == "add_header"
-                    && let Some(header_name) = directive.first_arg() {
-                        let info = HeaderInfo {
-                            name_lower: header_name.to_lowercase(),
-                            directive_text: Self::directive_to_text(directive),
-                            line: directive.span.start.line,
-                        };
-                        headers.insert(header_name.to_lowercase(), info);
-                    }
+                && let Some(header_name) = directive.first_arg()
+            {
+                let info = HeaderInfo {
+                    name_lower: header_name.to_lowercase(),
+                    directive_text: Self::directive_to_text(directive),
+                    line: directive.span.start.line,
+                };
+                headers.insert(header_name.to_lowercase(), info);
+            }
         }
         headers
     }
@@ -98,9 +99,10 @@ impl AddHeaderInheritancePlugin {
                                     .iter()
                                     .filter_map(|item| {
                                         if let ConfigItem::Directive(d) = item
-                                            && d.name == "add_header" {
-                                                return Some(d.as_ref());
-                                            }
+                                            && d.name == "add_header"
+                                        {
+                                            return Some(d.as_ref());
+                                        }
                                         None
                                     })
                                     .next();

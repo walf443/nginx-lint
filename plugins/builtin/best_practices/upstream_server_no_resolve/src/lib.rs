@@ -29,9 +29,10 @@ impl UpstreamServerNoResolvePlugin {
         if let Some(block) = &directive.block {
             for item in &block.items {
                 if let ConfigItem::Directive(d) = item
-                    && d.name == "zone" {
-                        return true;
-                    }
+                    && d.name == "zone"
+                {
+                    return true;
+                }
             }
         }
         false
@@ -44,9 +45,10 @@ impl UpstreamServerNoResolvePlugin {
         for directive in config.all_directives() {
             if directive.is("upstream")
                 && let Some(name) = directive.first_arg()
-                    && Self::upstream_has_zone(directive) {
-                        upstreams_with_zone.insert(name.to_string());
-                    }
+                && Self::upstream_has_zone(directive)
+            {
+                upstreams_with_zone.insert(name.to_string());
+            }
         }
 
         upstreams_with_zone
@@ -98,21 +100,23 @@ impl Plugin for UpstreamServerNoResolvePlugin {
             }
 
             // Check server directive inside upstream block
-            if ctx.directive.is("server") && ctx.is_inside("upstream")
-                && let Some(address) = ctx.directive.first_arg() {
-                    // The address is already just the host (first_arg returns only the first argument)
-                    if helpers::is_domain_name(address) {
-                        // Check if 'resolve' parameter is present in any argument
-                        let has_resolve = ctx
-                            .directive
-                            .args
-                            .iter()
-                            .any(|arg| arg.as_str() == "resolve");
+            if ctx.directive.is("server")
+                && ctx.is_inside("upstream")
+                && let Some(address) = ctx.directive.first_arg()
+            {
+                // The address is already just the host (first_arg returns only the first argument)
+                if helpers::is_domain_name(address) {
+                    // Check if 'resolve' parameter is present in any argument
+                    let has_resolve = ctx
+                        .directive
+                        .args
+                        .iter()
+                        .any(|arg| arg.as_str() == "resolve");
 
-                        let domain = helpers::extract_domain(address);
+                    let domain = helpers::extract_domain(address);
 
-                        if !has_resolve {
-                            errors.push(err.warning_at(
+                    if !has_resolve {
+                        errors.push(err.warning_at(
                                 &format!(
                                     "upstream server uses domain '{}' without 'resolve' parameter; \
                                      DNS is resolved at startup and cached. \
@@ -122,15 +126,15 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                                 ),
                                 ctx.directive,
                             ));
-                        } else {
-                            // has_resolve is true, check if zone exists
-                            let has_zone = current_upstream_name
-                                .as_ref()
-                                .map(|name| upstreams_with_zone.contains(name))
-                                .unwrap_or(false);
+                    } else {
+                        // has_resolve is true, check if zone exists
+                        let has_zone = current_upstream_name
+                            .as_ref()
+                            .map(|name| upstreams_with_zone.contains(name))
+                            .unwrap_or(false);
 
-                            if !has_zone {
-                                errors.push(err.warning_at(
+                        if !has_zone {
+                            errors.push(err.warning_at(
                                     &format!(
                                         "upstream server uses 'resolve' for domain '{}' but upstream block has no 'zone' directive; \
                                          'zone' is required for runtime DNS resolution to store addresses in shared memory",
@@ -138,10 +142,10 @@ impl Plugin for UpstreamServerNoResolvePlugin {
                                     ),
                                     ctx.directive,
                                 ));
-                            }
                         }
                     }
                 }
+            }
         }
 
         errors

@@ -24,10 +24,11 @@ impl ProxyMissingHostHeaderPlugin {
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item
                 && directive.name == "proxy_set_header"
-                    && let Some(header_name) = directive.first_arg()
-                        && header_name.eq_ignore_ascii_case("host") {
-                            return true;
-                        }
+                && let Some(header_name) = directive.first_arg()
+                && header_name.eq_ignore_ascii_case("host")
+            {
+                return true;
+            }
         }
         false
     }
@@ -54,28 +55,32 @@ impl ProxyMissingHostHeaderPlugin {
 
                     for block_item in &block.items {
                         if let ConfigItem::Directive(d) = block_item
-                            && d.name == "proxy_pass" {
-                                proxy_pass_directive = Some(d);
-                                break;
-                            }
+                            && d.name == "proxy_pass"
+                        {
+                            proxy_pass_directive = Some(d);
+                            break;
+                        }
                     }
 
                     // If we found proxy_pass, check for Host header
                     if let Some(pass_directive) = proxy_pass_directive
-                        && !effective_has_host {
-                            let err =
-                                PluginSpec::new("proxy-missing-host-header", "best-practices", "")
-                                    .error_builder();
+                        && !effective_has_host
+                    {
+                        let err =
+                            PluginSpec::new("proxy-missing-host-header", "best-practices", "")
+                                .error_builder();
 
-                            let error = err.warning_at(
+                        let error = err
+                            .warning_at(
                                 "proxy_pass is set but proxy_set_header Host is not configured. \
                                  Without the Host header, the backend may not receive the correct \
                                  hostname. Add 'proxy_set_header Host $host;'",
                                 pass_directive,
-                            ).with_fix(pass_directive.insert_after("proxy_set_header Host $host;"));
+                            )
+                            .with_fix(pass_directive.insert_after("proxy_set_header Host $host;"));
 
-                            errors.push(error);
-                        }
+                        errors.push(error);
+                    }
 
                     // Recursively check nested blocks
                     self.check_block(&block.items, effective_has_host, errors);
@@ -93,10 +98,11 @@ impl ProxyMissingHostHeaderPlugin {
 
         for item in items {
             if let ConfigItem::Directive(d) = item
-                && d.name == "proxy_pass" {
-                    proxy_pass_directive = Some(d);
-                    break;
-                }
+                && d.name == "proxy_pass"
+            {
+                proxy_pass_directive = Some(d);
+                break;
+            }
         }
 
         // If we found proxy_pass, check for Host header
@@ -104,9 +110,10 @@ impl ProxyMissingHostHeaderPlugin {
             let has_host = items.iter().any(|ci| {
                 if let ConfigItem::Directive(d) = ci
                     && d.name == "proxy_set_header"
-                        && let Some(header_name) = d.first_arg() {
-                            return header_name.eq_ignore_ascii_case("host");
-                        }
+                    && let Some(header_name) = d.first_arg()
+                {
+                    return header_name.eq_ignore_ascii_case("host");
+                }
                 false
             });
 
