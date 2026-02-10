@@ -1,8 +1,32 @@
-//! Native plugin adapter
+//! Native plugin adapter.
 //!
-//! Provides `NativePluginRule<P>` which wraps a `Plugin` implementation
-//! into a `LintRule`, allowing WASM plugins to be run natively without
-//! serialization overhead.
+//! Provides [`NativePluginRule<P>`] which wraps a [`Plugin`] implementation
+//! into a [`LintRule`](nginx_lint_common::linter::LintRule), allowing WASM plugins to be run
+//! natively without WASM VM or serialization overhead.
+//!
+//! This is used internally by nginx-lint to embed builtin plugins directly
+//! into the binary when built with the `wasm-builtin-plugins` feature.
+//!
+//! # Example
+//!
+//! ```
+//! use nginx_lint_plugin::prelude::*;
+//! use nginx_lint_plugin::native::NativePluginRule;
+//!
+//! # #[derive(Default)]
+//! # struct MyPlugin;
+//! # impl Plugin for MyPlugin {
+//! #     fn spec(&self) -> PluginSpec {
+//! #         PluginSpec::new("my-rule", "test", "Test rule")
+//! #     }
+//! #     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+//! #         Vec::new()
+//! #     }
+//! # }
+//! // Wrap a plugin as a native lint rule
+//! let rule = NativePluginRule::<MyPlugin>::new();
+//! // `rule` now implements LintRule and can be registered in the linter
+//! ```
 
 use crate::types::{
     Fix as PluginFix, LintError as PluginLintError, Plugin, Severity as PluginSeverity,

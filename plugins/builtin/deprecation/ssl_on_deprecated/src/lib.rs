@@ -70,7 +70,7 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
     for ssl_dir in &ssl_on_directives {
         let mut error = err.warning_at(
             "'ssl on;' is deprecated, use 'listen ... ssl;' instead",
-            *ssl_dir,
+            ssl_dir,
         );
 
         // Delete `ssl on;`

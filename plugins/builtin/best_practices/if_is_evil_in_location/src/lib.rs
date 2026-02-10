@@ -24,10 +24,11 @@ impl IfIsEvilInLocationPlugin {
                 let now_in_location = in_location || is_location;
 
                 // Check if blocks inside location
-                if directive.is("if") && in_location {
-                    if let Some(block) = &directive.block {
-                        self.check_if_block(block, directive, errors);
-                    }
+                if directive.is("if")
+                    && in_location
+                    && let Some(block) = &directive.block
+                {
+                    self.check_if_block(block, directive, errors);
                 }
 
                 // Recursively check nested blocks

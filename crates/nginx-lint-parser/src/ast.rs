@@ -1,15 +1,50 @@
-//! AST types for nginx configuration files
+//! AST types for nginx configuration files.
 //!
-//! Designed for round-trip support (source reconstruction) to enable autofix functionality.
+//! This module defines the tree structure produced by [`crate::parse_string`] and
+//! [`crate::parse_config`]. The AST preserves whitespace, comments, and blank lines
+//! so that source code can be reconstructed via [`Config::to_source`] — this enables
+//! autofix functionality without destroying formatting.
+//!
+//! # AST Structure
+//!
+//! ```text
+//! Config
+//!  └─ items: Vec<ConfigItem>
+//!       ├─ Directive
+//!       │    ├─ name          ("server", "listen", …)
+//!       │    ├─ args          (Vec<Argument>)
+//!       │    └─ block         (Option<Block>)
+//!       │         └─ items    (Vec<ConfigItem>, recursive)
+//!       ├─ Comment            ("# …")
+//!       └─ BlankLine
+//! ```
+//!
+//! # Example
+//!
+//! ```
+//! use nginx_lint_parser::parse_string;
+//!
+//! let config = parse_string("worker_processes auto;").unwrap();
+//! let dir = config.directives().next().unwrap();
+//!
+//! assert_eq!(dir.name, "worker_processes");
+//! assert_eq!(dir.first_arg(), Some("auto"));
+//! ```
 
 use serde::{Deserialize, Serialize};
 
-/// Source position in the file
+/// A position (line, column, byte offset) in the source text.
+///
+/// Lines and columns are 1-based; `offset` is a 0-based byte offset suitable
+/// for slicing the original source string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Position {
+    /// 1-based line number.
     pub line: usize,
+    /// 1-based column number.
     pub column: usize,
-    pub offset: usize, // Byte offset for editing
+    /// 0-based byte offset in the source string.
+    pub offset: usize,
 }
 
 impl Position {
@@ -22,10 +57,14 @@ impl Position {
     }
 }
 
-/// Source range (start and end positions)
+/// A half-open source range defined by a start and end [`Position`].
+///
+/// `start` is inclusive, `end` is exclusive (one past the last character).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Span {
+    /// Inclusive start position.
     pub start: Position,
+    /// Exclusive end position.
     pub end: Position,
 }
 
@@ -35,9 +74,14 @@ impl Span {
     }
 }
 
-/// Root of the configuration file
+/// Root node of a parsed nginx configuration file.
+///
+/// Use [`directives()`](Config::directives) for top-level directives only, or
+/// [`all_directives()`](Config::all_directives) to recurse into blocks.
+/// Call [`to_source()`](Config::to_source) to reconstruct the source text.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
+    /// Top-level items (directives, comments, blank lines).
     pub items: Vec<ConfigItem>,
     /// Context from parent file when this config was included
     /// Empty for root file, e.g., ["http", "server"] for a file included in server block
@@ -76,11 +120,14 @@ impl Config {
     }
 }
 
-/// An item in the configuration (directive, comment, or blank line)
+/// An item in the configuration (directive, comment, or blank line).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConfigItem {
+    /// A directive, possibly with a block (e.g. `listen 80;` or `server { … }`).
     Directive(Box<Directive>),
+    /// A comment line (`# …`).
     Comment(Comment),
+    /// A blank line (may contain only whitespace).
     BlankLine(BlankLine),
 }
 
@@ -124,15 +171,25 @@ pub struct Comment {
     pub trailing_whitespace: String,
 }
 
-/// A directive (simple or block)
+/// A directive — either a simple directive (`listen 80;`) or a block directive
+/// (`server { … }`).
+///
+/// The [`span`](Directive::span) covers the entire directive from the first
+/// character of the name to the terminating `;` or closing `}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Directive {
+    /// Directive name (e.g. `"server"`, `"listen"`, `"more_set_headers"`).
     pub name: String,
+    /// Span of the directive name token.
     pub name_span: Span,
+    /// Arguments following the directive name.
     pub args: Vec<Argument>,
+    /// Block body, present for block directives like `server { … }`.
     pub block: Option<Block>,
-    pub span: Span,                        // Entire directive range
-    pub trailing_comment: Option<Comment>, // Comment at end of line
+    /// Span covering the entire directive (name through terminator).
+    pub span: Span,
+    /// Optional comment at the end of the directive line.
+    pub trailing_comment: Option<Comment>,
     /// Leading whitespace before the directive name (for indentation checking)
     #[serde(default)]
     pub leading_whitespace: String,
@@ -209,10 +266,16 @@ impl Directive {
     }
 }
 
-/// A block { ... }
+/// A brace-delimited block (`{ … }`).
+///
+/// For Lua blocks (e.g. `content_by_lua_block`), the content is stored verbatim
+/// in [`raw_content`](Block::raw_content) instead of being parsed as directives.
+/// Use [`is_raw()`](Block::is_raw) to check.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
+    /// Parsed items inside the block (empty for raw blocks).
     pub items: Vec<ConfigItem>,
+    /// Span from `{` to `}` (inclusive of both braces).
     pub span: Span,
     /// Raw content for special blocks like *_by_lua_block (Lua code)
     pub raw_content: Option<String>,
@@ -239,12 +302,18 @@ impl Block {
     }
 }
 
-/// A directive argument
+/// A single argument to a directive.
+///
+/// Use [`as_str()`](Argument::as_str) to get the logical value (without quotes),
+/// or inspect [`raw`](Argument::raw) for the original source text.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Argument {
+    /// Parsed argument value (see [`ArgumentValue`] for variants).
     pub value: ArgumentValue,
+    /// Source span of this argument.
     pub span: Span,
-    pub raw: String, // Original source text (including quotes)
+    /// Original source text including quotes (e.g. `"hello"`, `80`, `$var`).
+    pub raw: String,
 }
 
 impl Argument {
@@ -297,16 +366,22 @@ impl Argument {
     }
 }
 
-/// Type of argument value
+/// The kind and value of a directive argument.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ArgumentValue {
-    Literal(String),            // on, off, 80, /path/to/file
-    QuotedString(String),       // "hello world" -> hello world
-    SingleQuotedString(String), // 'hello world' -> hello world
-    Variable(String),           // $variable_name -> variable_name
+    /// Unquoted literal (e.g. `on`, `off`, `80`, `/path/to/file`).
+    Literal(String),
+    /// Double-quoted string — inner value has quotes stripped (e.g. `"hello world"` → `hello world`).
+    QuotedString(String),
+    /// Single-quoted string — inner value has quotes stripped (e.g. `'hello world'` → `hello world`).
+    SingleQuotedString(String),
+    /// Variable reference — stored without the `$` prefix (e.g. `$host` → `host`).
+    Variable(String),
 }
 
-/// Iterator over all directives in a config (recursively)
+/// Depth-first iterator over all directives in a config, recursing into blocks.
+///
+/// Obtained via [`Config::all_directives`]. Comments and blank lines are skipped.
 pub struct AllDirectives<'a> {
     stack: Vec<std::slice::Iter<'a, ConfigItem>>,
 }

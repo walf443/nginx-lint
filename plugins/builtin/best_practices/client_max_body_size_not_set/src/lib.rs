@@ -64,14 +64,14 @@ impl Plugin for ClientMaxBodySizeNotSetPlugin {
 
         // Only warn if THIS file has an http block but no client_max_body_size
         // Don't warn for included files - client_max_body_size should be set in the main config
-        if let Some(http_dir) = http_directive {
-            if !has_client_max_body_size {
-                let err = self.spec().error_builder();
-                return vec![err.warning_at(
+        if let Some(http_dir) = http_directive
+            && !has_client_max_body_size
+        {
+            let err = self.spec().error_builder();
+            return vec![err.warning_at(
                     "Consider explicitly setting client_max_body_size to control request body size limits",
                     http_dir,
                 )];
-            }
         }
 
         vec![]

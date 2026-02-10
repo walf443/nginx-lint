@@ -27,14 +27,12 @@ impl ProxyKeepalivePlugin {
     /// Check if a block has proxy_set_header Connection
     fn has_connection_header(block: &Block) -> bool {
         for item in &block.items {
-            if let ConfigItem::Directive(directive) = item {
-                if directive.name == "proxy_set_header" {
-                    if let Some(header_name) = directive.first_arg() {
-                        if header_name.eq_ignore_ascii_case("connection") {
-                            return true;
-                        }
-                    }
-                }
+            if let ConfigItem::Directive(directive) = item
+                && directive.name == "proxy_set_header"
+                && let Some(header_name) = directive.first_arg()
+                && header_name.eq_ignore_ascii_case("connection")
+            {
+                return true;
             }
         }
         false
@@ -50,27 +48,26 @@ impl ProxyKeepalivePlugin {
                     let mut http_version_directive: Option<&Directive> = None;
 
                     for block_item in &block.items {
-                        if let ConfigItem::Directive(d) = block_item {
-                            if d.name == "proxy_http_version" {
-                                if let Some(version) = d.first_arg() {
-                                    if Self::is_http_11_or_higher(version) {
-                                        http_version_directive = Some(d);
-                                        break;
-                                    }
-                                }
-                            }
+                        if let ConfigItem::Directive(d) = block_item
+                            && d.name == "proxy_http_version"
+                            && let Some(version) = d.first_arg()
+                            && Self::is_http_11_or_higher(version)
+                        {
+                            http_version_directive = Some(d);
+                            break;
                         }
                     }
 
                     // If we found proxy_http_version 1.1+, check for Connection header
-                    if let Some(version_directive) = http_version_directive {
-                        if !Self::has_connection_header(block) {
-                            let version = version_directive.first_arg().unwrap_or("1.1");
+                    if let Some(version_directive) = http_version_directive
+                        && !Self::has_connection_header(block)
+                    {
+                        let version = version_directive.first_arg().unwrap_or("1.1");
 
-                            let err = PluginSpec::new("proxy-keepalive", "best-practices", "")
-                                .error_builder();
+                        let err = PluginSpec::new("proxy-keepalive", "best-practices", "")
+                            .error_builder();
 
-                            let error = err.warning_at(
+                        let error = err.warning_at(
                                 &format!(
                                     "proxy_http_version {} is set but proxy_set_header Connection is not configured. \
                                      For keepalive connections with upstream, add 'proxy_set_header Connection \"\";'",
@@ -79,8 +76,7 @@ impl ProxyKeepalivePlugin {
                                 version_directive,
                             ).with_fix(version_directive.insert_after("proxy_set_header Connection \"\";"));
 
-                            errors.push(error);
-                        }
+                        errors.push(error);
                     }
 
                     // Recursively check nested blocks
@@ -98,27 +94,24 @@ impl ProxyKeepalivePlugin {
         let mut http_version_directive: Option<&Directive> = None;
 
         for item in items {
-            if let ConfigItem::Directive(d) = item {
-                if d.name == "proxy_http_version" {
-                    if let Some(version) = d.first_arg() {
-                        if Self::is_http_11_or_higher(version) {
-                            http_version_directive = Some(d);
-                            break;
-                        }
-                    }
-                }
+            if let ConfigItem::Directive(d) = item
+                && d.name == "proxy_http_version"
+                && let Some(version) = d.first_arg()
+                && Self::is_http_11_or_higher(version)
+            {
+                http_version_directive = Some(d);
+                break;
             }
         }
 
         // If we found proxy_http_version 1.1+, check for Connection header
         if let Some(version_directive) = http_version_directive {
             let has_connection = items.iter().any(|item| {
-                if let ConfigItem::Directive(d) = item {
-                    if d.name == "proxy_set_header" {
-                        if let Some(header_name) = d.first_arg() {
-                            return header_name.eq_ignore_ascii_case("connection");
-                        }
-                    }
+                if let ConfigItem::Directive(d) = item
+                    && d.name == "proxy_set_header"
+                    && let Some(header_name) = d.first_arg()
+                {
+                    return header_name.eq_ignore_ascii_case("connection");
                 }
                 false
             });

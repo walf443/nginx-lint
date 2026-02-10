@@ -1,12 +1,31 @@
-//! Common types and parser for nginx-lint
+//! Core types shared between the nginx-lint CLI and WASM plugins.
 //!
-//! This crate provides the core functionality shared between nginx-lint-cli
-//! and nginx-lint-plugin:
-//! - nginx configuration parser
-//! - AST types
-//! - LintRule trait and LintError types
-//! - Configuration management
-//! - Ignore comment support
+//! This crate provides the foundational types used throughout the nginx-lint
+//! ecosystem: lint rule definitions, error reporting, configuration management,
+//! and ignore comment support.
+//!
+//! # Modules
+//!
+//! - [`linter`] — Core lint types: [`LintRule`] trait, [`LintError`], [`Severity`], [`Fix`]
+//! - [`config`] — Configuration loaded from `.nginx-lint.toml` ([`LintConfig`], [`ValidationError`])
+//! - [`ignore`] — `# nginx-lint-ignore` comment parsing and error filtering
+//! - [`docs`] — Rule documentation extraction ([`RuleDoc`])
+//!
+//! # Quick reference
+//!
+//! | Type | Purpose |
+//! |------|---------|
+//! | [`LintRule`] | Trait that every lint rule (native or WASM) implements |
+//! | [`LintError`] | A single lint diagnostic with location, severity, and optional fixes |
+//! | [`Severity`] | `Error` or `Warning` |
+//! | [`Fix`] | An auto-fix action (replace, delete, insert) |
+//! | [`LintConfig`] | Settings loaded from `.nginx-lint.toml` |
+//! | [`Linter`] | Container that holds rules and runs them against a parsed config |
+//!
+//! # Re-exports
+//!
+//! The [`parser`] module re-exports the entire [`nginx_lint_parser`] crate,
+//! giving access to [`parse_config`], [`parse_string`], and the AST types.
 
 pub mod config;
 pub mod docs;

@@ -1,4 +1,15 @@
-//! Types for plugin development
+//! Core types for plugin development.
+//!
+//! This module provides the fundamental types needed to build nginx-lint plugins:
+//!
+//! - [`Plugin`] - The trait every plugin must implement
+//! - [`PluginSpec`] - Plugin metadata (name, category, description, examples)
+//! - [`LintError`] - Lint errors reported by plugins
+//! - [`ErrorBuilder`] - Helper for creating errors with pre-filled rule/category
+//! - [`Fix`] - Autofix actions (replace, delete, insert)
+//! - [`ConfigExt`] - Extension trait for traversing the nginx config AST
+//! - [`DirectiveExt`] - Extension trait for inspecting and modifying directives
+//! - [`DirectiveWithContext`] - A directive paired with its parent block context
 //!
 //! These types mirror the nginx-lint AST and error types for use in WASM plugins.
 
@@ -7,7 +18,28 @@ use serde::{Deserialize, Serialize};
 /// Current API version for the plugin SDK
 pub const API_VERSION: &str = "1.0";
 
-/// Plugin metadata
+/// Plugin metadata describing a lint rule.
+///
+/// Created via [`PluginSpec::new()`] and configured with builder methods.
+///
+/// # Example
+///
+/// ```
+/// use nginx_lint_plugin::PluginSpec;
+///
+/// let spec = PluginSpec::new("my-rule", "security", "Short description")
+///     .with_severity("warning")
+///     .with_why("Detailed explanation of why this rule exists.")
+///     .with_bad_example("server {\n    bad_directive on;\n}")
+///     .with_good_example("server {\n    bad_directive off;\n}")
+///     .with_references(vec![
+///         "https://nginx.org/en/docs/...".to_string(),
+///     ]);
+///
+/// assert_eq!(spec.name, "my-rule");
+/// assert_eq!(spec.category, "security");
+/// assert_eq!(spec.severity, Some("warning".to_string()));
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginSpec {
     /// Unique name for the rule (e.g., "my-custom-rule")
@@ -91,16 +123,19 @@ impl PluginSpec {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
-    ///     let spec = self.spec();
-    ///     let error = spec.error_builder();
+    /// ```
+    /// use nginx_lint_plugin::{PluginSpec, Severity};
     ///
-    ///     // Instead of:
-    ///     // LintError::warning("my-rule", "security", "message", line, col)
-    ///     // Use:
-    ///     error.warning("message", line, col)
-    /// }
+    /// let spec = PluginSpec::new("my-rule", "security", "Check something");
+    /// let err = spec.error_builder();
+    ///
+    /// // Instead of:
+    /// //   LintError::warning("my-rule", "security", "message", 10, 5)
+    /// // Use:
+    /// let warning = err.warning("message", 10, 5);
+    /// assert_eq!(warning.rule, "my-rule");
+    /// assert_eq!(warning.category, "security");
+    /// assert_eq!(warning.severity, Severity::Warning);
     /// ```
     pub fn error_builder(&self) -> ErrorBuilder {
         ErrorBuilder {
@@ -155,7 +190,37 @@ pub enum Severity {
     Warning,
 }
 
-/// Represents a fix that can be applied to resolve a lint error
+/// Represents a fix that can be applied to automatically resolve a lint error.
+///
+/// Fixes can operate in two modes:
+///
+/// - **Line-based**: Operate on entire lines (delete, insert after, replace text on a line)
+/// - **Range-based**: Operate on byte offsets for precise edits (multiple fixes per line)
+///
+/// Use the convenience methods on [`DirectiveExt`] to create fixes from directives:
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// let config = nginx_lint_plugin::parse_string("server_tokens on;").unwrap();
+/// let directive = config.all_directives().next().unwrap();
+///
+/// // Replace the entire directive
+/// let fix = directive.replace_with("server_tokens off;");
+/// assert!(fix.is_range_based());
+///
+/// // Delete the directive's line
+/// let fix = directive.delete_line();
+/// assert!(fix.delete_line);
+///
+/// // Insert a new line after the directive
+/// let fix = directive.insert_after("add_header X-Frame-Options DENY;");
+/// assert!(fix.is_range_based());
+///
+/// // Insert before the directive
+/// let fix = directive.insert_before("# Security headers");
+/// assert!(fix.is_range_based());
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fix {
     /// Line number where the fix should be applied (1-indexed)
@@ -227,7 +292,28 @@ impl Fix {
     }
 }
 
-/// A lint error reported by a plugin
+/// A lint error reported by a plugin.
+///
+/// Create errors using [`LintError::error()`] / [`LintError::warning()`] directly,
+/// or more conveniently via [`ErrorBuilder`] (obtained from [`PluginSpec::error_builder()`]):
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// let spec = PluginSpec::new("my-rule", "security", "Check something");
+/// let err = spec.error_builder();
+///
+/// // Warning at a specific line/column
+/// let warning = err.warning("message", 10, 5);
+/// assert_eq!(warning.line, Some(10));
+///
+/// // Warning at a directive's location (most common pattern)
+/// let config = nginx_lint_plugin::parse_string("autoindex on;").unwrap();
+/// let directive = config.all_directives().next().unwrap();
+/// let error = err.warning_at("use 'off'", directive)
+///     .with_fix(directive.replace_with("autoindex off;"));
+/// assert_eq!(error.fixes.len(), 1);
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LintError {
     pub rule: String,
@@ -282,12 +368,67 @@ impl LintError {
     }
 }
 
-/// Trait that plugins must implement
+/// Trait that all plugins must implement.
+///
+/// A plugin consists of two parts:
+/// - **Metadata** ([`spec()`](Plugin::spec)) describing the rule name, category, severity, and documentation
+/// - **Logic** ([`check()`](Plugin::check)) that inspects the parsed nginx config and reports errors
+///
+/// Plugins must also derive [`Default`], which is used by [`export_plugin!`](crate::export_plugin)
+/// to instantiate the plugin.
+///
+/// # Example
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// #[derive(Default)]
+/// pub struct MyPlugin;
+///
+/// impl Plugin for MyPlugin {
+///     fn spec(&self) -> PluginSpec {
+///         PluginSpec::new("my-rule", "security", "Check for something")
+///             .with_severity("warning")
+///     }
+///
+///     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+///         let mut errors = Vec::new();
+///         let err = self.spec().error_builder();
+///
+///         for ctx in config.all_directives_with_context() {
+///             if ctx.is_inside("http") && ctx.directive.is("bad_directive") {
+///                 errors.push(err.warning_at("Avoid bad_directive", ctx.directive));
+///             }
+///         }
+///         errors
+///     }
+/// }
+///
+/// // export_plugin!(MyPlugin);  // Required for WASM build
+///
+/// // Verify it works
+/// let plugin = MyPlugin;
+/// let config = nginx_lint_plugin::parse_string("http { bad_directive on; }").unwrap();
+/// let errors = plugin.check(&config, "test.conf");
+/// assert_eq!(errors.len(), 1);
+/// ```
 pub trait Plugin: Default {
-    /// Return plugin metadata
+    /// Return plugin metadata.
+    ///
+    /// This is called once at plugin load time. Use [`PluginSpec::new()`] to create
+    /// the spec, then chain builder methods like [`with_severity()`](PluginSpec::with_severity),
+    /// [`with_why()`](PluginSpec::with_why), [`with_bad_example()`](PluginSpec::with_bad_example), etc.
     fn spec(&self) -> PluginSpec;
 
-    /// Check the configuration and return any lint errors
+    /// Check the configuration and return any lint errors.
+    ///
+    /// Called once per file being linted. The `config` parameter contains the parsed
+    /// AST of the nginx configuration file. The `path` parameter is the file path
+    /// being checked (useful for error messages).
+    ///
+    /// Use [`config.all_directives()`](ConfigExt::all_directives) for simple iteration
+    /// or [`config.all_directives_with_context()`](ConfigExt::all_directives_with_context)
+    /// when you need to know the parent block context.
     fn check(&self, config: &Config, path: &str) -> Vec<LintError>;
 }
 
@@ -296,30 +437,66 @@ pub use nginx_lint_common::parser::ast::{
     Argument, ArgumentValue, Block, Comment, Config, ConfigItem, Directive, Position, Span,
 };
 
-/// Extension trait for Config to provide helper methods
+/// Extension trait for [`Config`] providing iteration and include-context helpers.
+///
+/// This trait is automatically available when using `use nginx_lint_plugin::prelude::*`.
+///
+/// # Traversal
+///
+/// Two traversal methods are provided:
+///
+/// - [`all_directives()`](ConfigExt::all_directives) - Simple recursive iteration over all directives
+/// - [`all_directives_with_context()`](ConfigExt::all_directives_with_context) - Iteration with
+///   parent block context (e.g., know if a directive is inside `http`, `server`, `location`)
+///
+/// # Include Context
+///
+/// When nginx-lint processes `include` directives, the included file's [`Config`] receives
+/// an `include_context` field recording the parent block names. For example, a file included
+/// from `http { server { include conf.d/*.conf; } }` would have
+/// `include_context = ["http", "server"]`.
+///
+/// The `is_included_from_*` methods check this context:
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// let mut config = nginx_lint_plugin::parse_string("server { listen 80; }").unwrap();
+/// assert!(!config.is_included_from_http());
+///
+/// // Simulate being included from http context
+/// config.include_context = vec!["http".to_string()];
+/// assert!(config.is_included_from_http());
+/// ```
 pub trait ConfigExt {
-    /// Iterate over all directives recursively
+    /// Iterate over all directives recursively.
+    ///
+    /// Traverses the entire config tree depth-first, yielding each [`Directive`].
     fn all_directives(&self) -> AllDirectivesIter<'_>;
 
-    /// Iterate over all directives recursively with parent context information
+    /// Iterate over all directives with parent context information.
+    ///
+    /// Each item is a [`DirectiveWithContext`] that includes the parent block stack.
+    /// This is the recommended traversal method for most plugins, as it allows
+    /// checking whether a directive is inside a specific block (e.g., `http`, `server`).
     fn all_directives_with_context(&self) -> AllDirectivesWithContextIter<'_>;
 
-    /// Check if this config is included from within a specific context
+    /// Check if this config is included from within a specific context.
     fn is_included_from(&self, context: &str) -> bool;
 
-    /// Check if this config is included from within http context
+    /// Check if this config is included from within `http` context.
     fn is_included_from_http(&self) -> bool;
 
-    /// Check if this config is included from within http > server context
+    /// Check if this config is included from within `http > server` context.
     fn is_included_from_http_server(&self) -> bool;
 
-    /// Check if this config is included from within http > server > location context
+    /// Check if this config is included from within `http > ... > location` context.
     fn is_included_from_http_location(&self) -> bool;
 
-    /// Check if this config is included from within stream context
+    /// Check if this config is included from within `stream` context.
     fn is_included_from_stream(&self) -> bool;
 
-    /// Get the immediate parent context (last element in include_context)
+    /// Get the immediate parent context (last element in include_context).
     fn immediate_parent_context(&self) -> Option<&str>;
 }
 
@@ -391,14 +568,34 @@ impl<'a> Iterator for AllDirectivesIter<'a> {
     }
 }
 
-/// A directive with its parent context information
+/// A directive paired with its parent block context.
+///
+/// Yielded by [`ConfigExt::all_directives_with_context()`]. Provides methods to
+/// query the parent block hierarchy without manually tracking nesting.
+///
+/// # Example
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// let config = nginx_lint_plugin::parse_string(
+///     "http {\n    server {\n        listen 80;\n    }\n}"
+/// ).unwrap();
+///
+/// for ctx in config.all_directives_with_context() {
+///     if ctx.is_inside("http") && ctx.directive.is("listen") {
+///         assert!(ctx.parent_is("server"));
+///         assert_eq!(ctx.depth, 2);
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct DirectiveWithContext<'a> {
-    /// The directive itself
+    /// The directive itself.
     pub directive: &'a Directive,
-    /// Stack of parent directive names
+    /// Stack of parent directive names (e.g., `["http", "server"]`).
     pub parent_stack: Vec<String>,
-    /// Nesting depth
+    /// Nesting depth (0 = root level).
     pub depth: usize,
 }
 
@@ -471,21 +668,60 @@ impl<'a> Iterator for AllDirectivesWithContextIter<'a> {
     }
 }
 
-/// Extension trait for Directive to provide helper methods
+/// Extension trait for [`Directive`] providing inspection and fix-generation helpers.
+///
+/// This trait adds convenience methods to [`Directive`] for:
+/// - **Inspection**: [`is()`](DirectiveExt::is), [`first_arg()`](DirectiveExt::first_arg),
+///   [`has_arg()`](DirectiveExt::has_arg), etc.
+/// - **Fix generation**: [`replace_with()`](DirectiveExt::replace_with),
+///   [`delete_line()`](DirectiveExt::delete_line), [`insert_after()`](DirectiveExt::insert_after), etc.
+///
+/// # Example
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// let config = nginx_lint_plugin::parse_string(
+///     "proxy_pass http://backend;"
+/// ).unwrap();
+/// let directive = config.all_directives().next().unwrap();
+///
+/// assert!(directive.is("proxy_pass"));
+/// assert_eq!(directive.first_arg(), Some("http://backend"));
+/// assert_eq!(directive.arg_count(), 1);
+///
+/// // Generate a fix to replace the directive
+/// let fix = directive.replace_with("proxy_pass http://new-backend;");
+/// assert!(fix.is_range_based());
+/// ```
 pub trait DirectiveExt {
+    /// Check if the directive has the given name.
     fn is(&self, name: &str) -> bool;
+    /// Get the first argument's string value, if any.
     fn first_arg(&self) -> Option<&str>;
+    /// Check if the first argument equals the given value.
     fn first_arg_is(&self, value: &str) -> bool;
+    /// Get the argument at the given index.
     fn arg_at(&self, index: usize) -> Option<&str>;
+    /// Get the last argument's string value, if any.
     fn last_arg(&self) -> Option<&str>;
+    /// Check if any argument equals the given value.
     fn has_arg(&self, value: &str) -> bool;
+    /// Return the number of arguments.
     fn arg_count(&self) -> usize;
+    /// Get the byte offset including leading whitespace.
     fn full_start_offset(&self) -> usize;
+    /// Create a [`Fix`] that replaces this directive with new text, preserving indentation.
     fn replace_with(&self, new_text: &str) -> Fix;
+    /// Create a [`Fix`] that deletes this directive's line.
     fn delete_line(&self) -> Fix;
+    /// Create a [`Fix`] that inserts a new line after this directive, matching indentation.
     fn insert_after(&self, new_text: &str) -> Fix;
+    /// Create a [`Fix`] that inserts multiple new lines after this directive.
     fn insert_after_many(&self, lines: &[&str]) -> Fix;
+    /// Create a [`Fix`] that inserts a new line before this directive, matching indentation.
     fn insert_before(&self, new_text: &str) -> Fix;
+    /// Create a [`Fix`] that inserts multiple new lines before this directive.
     fn insert_before_many(&self, lines: &[&str]) -> Fix;
 }
 

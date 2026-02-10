@@ -1,8 +1,21 @@
+//! Core types for the lint engine: rule definitions, error reporting, and fix proposals.
+//!
+//! This module contains the fundamental abstractions used by both native Rust
+//! rules (in `src/rules/`) and WASM plugin rules:
+//!
+//! - [`LintRule`] — trait that every rule implements
+//! - [`LintError`] — a single diagnostic produced by a rule
+//! - [`Severity`] — error vs. warning classification
+//! - [`Fix`] — an auto-fix action attached to a diagnostic
+//! - [`Linter`] — collects rules and runs them against a parsed config
+
 use crate::parser::ast::Config;
 use serde::Serialize;
 use std::path::Path;
 
-/// Display-ordered list of rule categories for UI output
+/// Display-ordered list of rule categories for UI output.
+///
+/// Used by the CLI and documentation generator to group rules consistently.
 pub const RULE_CATEGORIES: &[&str] = &[
     "style",
     "syntax",
@@ -11,9 +24,17 @@ pub const RULE_CATEGORIES: &[&str] = &[
     "deprecation",
 ];
 
+/// Severity level of a lint diagnostic.
+///
+/// # Variants
+///
+/// - `Error` — the configuration is broken or has a critical security issue.
+/// - `Warning` — the configuration works but uses discouraged settings or could be improved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum Severity {
+    /// The configuration will not work correctly, or there is a critical security issue.
     Error,
+    /// A discouraged setting, potential problem, or improvement suggestion.
     Warning,
 }
 
@@ -123,19 +144,45 @@ impl Fix {
     }
 }
 
+/// A single lint diagnostic produced by a rule.
+///
+/// Every [`LintRule::check`] call returns a `Vec<LintError>`. Each error
+/// carries the rule name, category, a human-readable message, severity, an
+/// optional source location, and zero or more [`Fix`] proposals.
+///
+/// # Building errors
+///
+/// ```
+/// use nginx_lint_common::linter::{LintError, Severity, Fix};
+///
+/// let error = LintError::new("my-rule", "style", "trailing whitespace", Severity::Warning)
+///     .with_location(10, 1)
+///     .with_fix(Fix::replace(10, "value  ", "value"));
+/// ```
 #[derive(Debug, Clone, Serialize)]
 pub struct LintError {
+    /// Rule identifier (e.g. `"server-tokens-enabled"`).
     pub rule: String,
+    /// Category the rule belongs to (e.g. `"security"`, `"style"`).
     pub category: String,
+    /// Human-readable description of the problem.
     pub message: String,
+    /// Whether this is an error or a warning.
     pub severity: Severity,
+    /// 1-indexed line number where the problem was detected.
     pub line: Option<usize>,
+    /// 1-indexed column number where the problem was detected.
     pub column: Option<usize>,
+    /// Auto-fix proposals that can resolve this diagnostic.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixes: Vec<Fix>,
 }
 
 impl LintError {
+    /// Create a new lint error without a source location.
+    ///
+    /// Use [`with_location`](Self::with_location) to attach line/column info
+    /// and [`with_fix`](Self::with_fix) to attach auto-fix proposals.
     pub fn new(rule: &str, category: &str, message: &str, severity: Severity) -> Self {
         Self {
             rule: rule.to_string(),
@@ -148,27 +195,49 @@ impl LintError {
         }
     }
 
+    /// Attach a source location (1-indexed line and column) to this error.
     pub fn with_location(mut self, line: usize, column: usize) -> Self {
         self.line = Some(line);
         self.column = Some(column);
         self
     }
 
+    /// Append a single [`Fix`] proposal to this error.
     pub fn with_fix(mut self, fix: Fix) -> Self {
         self.fixes.push(fix);
         self
     }
 
+    /// Append multiple [`Fix`] proposals to this error.
     pub fn with_fixes(mut self, fixes: Vec<Fix>) -> Self {
         self.fixes.extend(fixes);
         self
     }
 }
 
+/// A lint rule that can be checked against a parsed nginx configuration.
+///
+/// Every rule — whether implemented as a native Rust struct or as a WASM
+/// plugin — implements this trait. The four required methods supply metadata
+/// and the check logic; the optional methods provide documentation and
+/// plugin-specific overrides.
+///
+/// # Required methods
+///
+/// | Method | Purpose |
+/// |--------|---------|
+/// | [`name`](Self::name) | Unique rule identifier (e.g. `"server-tokens-enabled"`) |
+/// | [`category`](Self::category) | Category for grouping (e.g. `"security"`) |
+/// | [`description`](Self::description) | One-line human-readable summary |
+/// | [`check`](Self::check) | Run the rule and return diagnostics |
 pub trait LintRule: Send + Sync {
+    /// Unique identifier for this rule (e.g. `"server-tokens-enabled"`).
     fn name(&self) -> &'static str;
+    /// Category this rule belongs to (e.g. `"security"`, `"style"`).
     fn category(&self) -> &'static str;
+    /// One-line human-readable description of what this rule checks.
     fn description(&self) -> &'static str;
+    /// Run the rule against `config` (parsed from `path`) and return diagnostics.
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError>;
 
     /// Check with pre-serialized config JSON (optimization for WASM plugins)
@@ -211,16 +280,21 @@ pub trait LintRule: Send + Sync {
     }
 }
 
-/// Basic Linter that holds rules and runs them
+/// Container that holds [`LintRule`]s and runs them against a parsed config.
+///
+/// Create a `Linter`, register rules with [`add_rule`](Self::add_rule), then
+/// call [`lint`](Self::lint) to collect all diagnostics.
 pub struct Linter {
     rules: Vec<Box<dyn LintRule>>,
 }
 
 impl Linter {
+    /// Create an empty linter with no rules registered.
     pub fn new() -> Self {
         Self { rules: Vec::new() }
     }
 
+    /// Register a lint rule. Rules are executed in registration order.
     pub fn add_rule(&mut self, rule: Box<dyn LintRule>) {
         self.rules.push(rule);
     }

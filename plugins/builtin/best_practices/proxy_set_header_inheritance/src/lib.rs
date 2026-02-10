@@ -44,17 +44,16 @@ impl ProxySetHeaderInheritancePlugin {
     fn collect_headers_from_block(block: &Block) -> HashMap<String, HeaderInfo> {
         let mut headers = HashMap::new();
         for item in &block.items {
-            if let ConfigItem::Directive(directive) = item {
-                if directive.name == "proxy_set_header" {
-                    if let Some(header_name) = directive.first_arg() {
-                        let info = HeaderInfo {
-                            name_lower: header_name.to_lowercase(),
-                            directive_text: Self::directive_to_text(directive),
-                            line: directive.span.start.line,
-                        };
-                        headers.insert(header_name.to_lowercase(), info);
-                    }
-                }
+            if let ConfigItem::Directive(directive) = item
+                && directive.name == "proxy_set_header"
+                && let Some(header_name) = directive.first_arg()
+            {
+                let info = HeaderInfo {
+                    name_lower: header_name.to_lowercase(),
+                    directive_text: Self::directive_to_text(directive),
+                    line: directive.span.start.line,
+                };
+                headers.insert(header_name.to_lowercase(), info);
             }
         }
         headers
@@ -99,10 +98,10 @@ impl ProxySetHeaderInheritancePlugin {
                                     .items
                                     .iter()
                                     .filter_map(|item| {
-                                        if let ConfigItem::Directive(d) = item {
-                                            if d.name == "proxy_set_header" {
-                                                return Some(d.as_ref());
-                                            }
+                                        if let ConfigItem::Directive(d) = item
+                                            && d.name == "proxy_set_header"
+                                        {
+                                            return Some(d.as_ref());
                                         }
                                         None
                                     })

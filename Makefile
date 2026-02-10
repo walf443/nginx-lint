@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples help $(PLUGIN_NAMES)
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
 
 # Build CLI with native plugins (release, default)
 build:
@@ -103,6 +103,10 @@ lint-plugin-examples:
 	fi
 	@echo "All plugin examples are valid."
 
+# Build API documentation
+doc:
+	cargo doc --no-deps -p nginx-lint-plugin -p nginx-lint-parser -p nginx-lint-common --open
+
 # Run clippy
 lint:
 	cargo clippy
@@ -132,6 +136,7 @@ help:
 	@echo "  make run-web-embed      - Run web server with embedded WASM"
 	@echo "  make test               - Run tests"
 	@echo "  make test-all           - Run all tests including plugins"
+	@echo "  make doc                - Build API documentation (opens in browser)"
 	@echo "  make lint               - Run clippy"
 	@echo "  make lint-plugin-examples - Lint plugin example files"
 	@echo "  make clean              - Clean all build artifacts"

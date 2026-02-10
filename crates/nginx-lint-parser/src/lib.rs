@@ -1,8 +1,84 @@
-//! Custom nginx configuration file parser
+//! nginx configuration file parser
 //!
-//! This module provides a parser for nginx configuration files that accepts
-//! any directive name, allowing extension modules like ngx_headers_more,
-//! lua-nginx-module, etc. to be linted.
+//! This crate provides a parser for nginx configuration files, producing an AST
+//! suitable for lint rules and autofix. It accepts **any directive name**, so
+//! extension modules (ngx_headers_more, lua-nginx-module, etc.) are supported
+//! without special configuration.
+//!
+//! # Quick Start
+//!
+//! ```
+//! use nginx_lint_parser::parse_string;
+//!
+//! let config = parse_string("http { server { listen 80; } }").unwrap();
+//!
+//! for directive in config.all_directives() {
+//!     println!("{} at line {}", directive.name, directive.span.start.line);
+//! }
+//! ```
+//!
+//! To parse from a file on disk:
+//!
+//! ```no_run
+//! use std::path::Path;
+//! use nginx_lint_parser::parse_config;
+//!
+//! let config = parse_config(Path::new("/etc/nginx/nginx.conf")).unwrap();
+//! ```
+//!
+//! # Modules
+//!
+//! - [`ast`] — AST types: [`ast::Config`], [`ast::Directive`], [`ast::Block`],
+//!   [`ast::Argument`], [`ast::Span`], [`ast::Position`]
+//! - [`error`] — Error types: [`error::ParseError`], [`error::LexerError`]
+//! - [`lexer`] — Tokenizer: [`lexer::Lexer`], [`lexer::Token`], [`lexer::TokenKind`]
+//!
+//! # Common Patterns
+//!
+//! ## Iterating over directives
+//!
+//! [`Config::directives()`](ast::Config::directives) yields only top-level directives.
+//! [`Config::all_directives()`](ast::Config::all_directives) recurses into blocks:
+//!
+//! ```
+//! # use nginx_lint_parser::parse_string;
+//! let config = parse_string("http { gzip on; server { listen 80; } }").unwrap();
+//!
+//! // Top-level only → ["http"]
+//! let top: Vec<_> = config.directives().map(|d| &d.name).collect();
+//! assert_eq!(top, vec!["http"]);
+//!
+//! // Recursive → ["http", "gzip", "server", "listen"]
+//! let all: Vec<_> = config.all_directives().map(|d| &d.name).collect();
+//! assert_eq!(all, vec!["http", "gzip", "server", "listen"]);
+//! ```
+//!
+//! ## Checking arguments
+//!
+//! ```
+//! # use nginx_lint_parser::parse_string;
+//! let config = parse_string("server_tokens off;").unwrap();
+//! let dir = config.directives().next().unwrap();
+//!
+//! assert!(dir.is("server_tokens"));
+//! assert_eq!(dir.first_arg(), Some("off"));
+//! assert!(dir.args[0].is_off());
+//! assert!(dir.args[0].is_literal());
+//! ```
+//!
+//! ## Inspecting blocks
+//!
+//! ```
+//! # use nginx_lint_parser::parse_string;
+//! let config = parse_string("upstream backend { server 127.0.0.1:8080; }").unwrap();
+//! let upstream = config.directives().next().unwrap();
+//!
+//! if let Some(block) = &upstream.block {
+//!     for inner in block.directives() {
+//!         println!("{}: {}", inner.name, inner.first_arg().unwrap_or(""));
+//!     }
+//! }
+//! ```
 
 pub mod ast;
 pub mod error;

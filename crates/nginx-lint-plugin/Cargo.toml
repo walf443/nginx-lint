@@ -3,6 +3,7 @@ name = "nginx-lint-plugin"
 version = "0.2.0"
 edition = "2024"
 description = "Plugin SDK for nginx-lint"
+readme = "README.md"
 license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]

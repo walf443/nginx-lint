@@ -91,10 +91,10 @@ impl UnreachableLocationPlugin {
 
         // Collect all location directives
         for item in items {
-            if let ConfigItem::Directive(directive) = item {
-                if let Some(loc_info) = LocationInfo::from_directive(directive) {
-                    locations.push(loc_info);
-                }
+            if let ConfigItem::Directive(directive) = item
+                && let Some(loc_info) = LocationInfo::from_directive(directive)
+            {
+                locations.push(loc_info);
             }
         }
 
@@ -161,7 +161,7 @@ impl UnreachableLocationPlugin {
         // e.g., earlier: /api/.* later: /api/v1/.*
         if later
             .pattern
-            .starts_with(&earlier.pattern.trim_end_matches(".*"))
+            .starts_with(earlier.pattern.trim_end_matches(".*"))
             && earlier.pattern.ends_with(".*")
             && later.pattern.len() > earlier.pattern.len()
         {
@@ -255,10 +255,10 @@ impl UnreachableLocationPlugin {
     fn check_items(&self, items: &[ConfigItem], errors: &mut Vec<LintError>) {
         for item in items {
             if let ConfigItem::Directive(directive) = item {
-                if directive.name == "server" {
-                    if let Some(block) = &directive.block {
-                        self.check_server_locations(&block.items, errors);
-                    }
+                if directive.name == "server"
+                    && let Some(block) = &directive.block
+                {
+                    self.check_server_locations(&block.items, errors);
                 }
 
                 // Recurse into http block

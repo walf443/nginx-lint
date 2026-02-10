@@ -26,7 +26,7 @@ impl ProxyPassWithUriPlugin {
             after_dollar
                 .chars()
                 .next()
-                .map_or(false, |c| c.is_alphanumeric() || c == '_')
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
         } else {
             false
         }
@@ -80,27 +80,27 @@ impl ProxyPassWithUriPlugin {
                         continue;
                     }
 
-                    if let Some(url) = directive.first_arg() {
-                        if let Some(path) = Self::extract_uri_path(url) {
-                            let message = if path == "/" {
-                                format!(
-                                    "proxy_pass '{}' has trailing slash which causes URI rewriting; \
+                    if let Some(url) = directive.first_arg()
+                        && let Some(path) = Self::extract_uri_path(url)
+                    {
+                        let message = if path == "/" {
+                            format!(
+                                "proxy_pass '{}' has trailing slash which causes URI rewriting; \
                                      use '# nginx-lint:ignore' if this is intentional",
-                                    url
-                                )
-                            } else {
-                                format!(
-                                    "proxy_pass '{}' has URI path '{}' which causes URI rewriting; \
+                                url
+                            )
+                        } else {
+                            format!(
+                                "proxy_pass '{}' has URI path '{}' which causes URI rewriting; \
                                      use '# nginx-lint:ignore' if this is intentional",
-                                    url, path
-                                )
-                            };
+                                url, path
+                            )
+                        };
 
-                            let err = PluginSpec::new("proxy-pass-with-uri", "best-practices", "")
-                                .error_builder();
+                        let err = PluginSpec::new("proxy-pass-with-uri", "best-practices", "")
+                            .error_builder();
 
-                            errors.push(err.warning_at(&message, directive));
-                        }
+                        errors.push(err.warning_at(&message, directive));
                     }
                 }
 

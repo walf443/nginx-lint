@@ -1,3 +1,10 @@
+//! Configuration management for nginx-lint.
+//!
+//! This module handles loading and validating the `.nginx-lint.toml`
+//! configuration file. The main entry point is [`LintConfig`], which can be
+//! loaded from a file with [`LintConfig::from_file`] or discovered
+//! automatically with [`LintConfig::find_and_load`].
+
 use serde::{Deserialize, Deserializer};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -216,13 +223,21 @@ enabled = true
 # block_directives = ["rtmp", "application"]
 "#;
 
-/// Configuration for nginx-lint loaded from .nginx-lint.toml
+/// Configuration for nginx-lint loaded from `.nginx-lint.toml`.
+///
+/// Use [`from_file`](Self::from_file) to load from a specific path, or
+/// [`find_and_load`](Self::find_and_load) to search the directory tree upward.
+/// A default `LintConfig` enables all rules except those listed in
+/// [`DISABLED_BY_DEFAULT`](Self::DISABLED_BY_DEFAULT).
 #[derive(Debug, Default, Deserialize)]
 pub struct LintConfig {
+    /// Per-rule configuration keyed by rule name (e.g. `"indent"`, `"server-tokens-enabled"`).
     #[serde(default)]
     pub rules: HashMap<String, RuleConfig>,
+    /// Color output settings.
     #[serde(default)]
     pub color: ColorConfig,
+    /// Parser-level settings (e.g. additional block directives for extension modules).
     #[serde(default)]
     pub parser: ParserConfig,
 }
@@ -356,9 +371,14 @@ impl<'de> Deserialize<'de> for ColorMode {
     }
 }
 
-/// Configuration for a specific lint rule
+/// Configuration for a specific lint rule.
+///
+/// Every `[rules.<name>]` section in `.nginx-lint.toml` is deserialized into
+/// a `RuleConfig`. The only universal field is [`enabled`](Self::enabled);
+/// the remaining fields are rule-specific options.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RuleConfig {
+    /// Whether this rule is active (`true` by default for most rules).
     #[serde(default = "default_true")]
     pub enabled: bool,
     /// For indent rule: number or "auto" for auto-detection
@@ -707,23 +727,40 @@ fn levenshtein_distance(a: &str, b: &str) -> usize {
     matrix[a_len][b_len]
 }
 
-/// Validation error for configuration files
+/// Validation error for configuration files.
+///
+/// Returned by [`LintConfig::validate_file`] when the TOML file contains
+/// unrecognised keys or rule names. Each variant includes an optional
+/// `suggestion` produced by fuzzy matching.
 #[derive(Debug, Clone)]
 pub enum ValidationError {
+    /// An unrecognised top-level or section-level field (e.g. `[colour]` instead of `[color]`).
     UnknownField {
+        /// Dotted path to the field (e.g. `"color.ui_mode"`).
         path: String,
+        /// 1-indexed line number where the field appears, if found.
         line: Option<usize>,
+        /// A similar known field name, if one is close enough.
         suggestion: Option<String>,
     },
+    /// A `[rules.<name>]` section where `<name>` is not a known rule.
     UnknownRule {
+        /// The unrecognised rule name.
         name: String,
+        /// 1-indexed line number where the rule section appears, if found.
         line: Option<usize>,
+        /// A similar known rule name, if one is close enough.
         suggestion: Option<String>,
     },
+    /// An unrecognised option inside a rule section (e.g. `indent_sizee` in `[rules.indent]`).
     UnknownRuleOption {
+        /// The rule name containing the unknown option.
         rule: String,
+        /// The unrecognised option key.
         option: String,
+        /// 1-indexed line number where the option appears, if found.
         line: Option<usize>,
+        /// A similar known option name, if one is close enough.
         suggestion: Option<String>,
     },
 }
@@ -778,14 +815,21 @@ impl std::fmt::Display for ValidationError {
     }
 }
 
+/// Error returned when loading or parsing a configuration file fails.
 #[derive(Debug)]
 pub enum ConfigError {
+    /// The file could not be read (missing, permission denied, etc.).
     IoError {
+        /// Path that was attempted.
         path: std::path::PathBuf,
+        /// Underlying I/O error.
         source: std::io::Error,
     },
+    /// The file was read but contains invalid TOML.
     ParseError {
+        /// Path that was parsed.
         path: std::path::PathBuf,
+        /// Underlying TOML parse error.
         source: toml::de::Error,
     },
 }
