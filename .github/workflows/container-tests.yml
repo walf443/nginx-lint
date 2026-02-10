@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        nginx-version: ["1.24", "1.26", "1.27"]
+        nginx-version: ["1.28", "1.29"]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
