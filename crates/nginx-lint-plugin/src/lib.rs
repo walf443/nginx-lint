@@ -1,48 +1,69 @@
 //! Plugin SDK for building nginx-lint WASM plugins
 //!
-//! This crate provides everything needed to create custom lint rules as WASM plugins.
+//! This crate provides everything needed to create custom lint rules as WASM plugins
+//! for [nginx-lint](https://github.com/walf443/nginx-lint).
+//!
+//! # Getting Started
+//!
+//! 1. Create a library crate with `crate-type = ["cdylib", "rlib"]`
+//! 2. Implement the [`Plugin`] trait
+//! 3. Register with [`export_plugin!`]
+//! 4. Build with `cargo build --target wasm32-unknown-unknown --release`
+//!
+//! # Modules
+//!
+//! - [`types`] - Core types: [`Plugin`], [`PluginSpec`], [`LintError`], [`Fix`],
+//!   [`ConfigExt`], [`DirectiveExt`]
+//! - [`helpers`] - Utility functions for common checks (domain names, URLs, etc.)
+//! - [`testing`] - Test runner and builder: [`testing::PluginTestRunner`], [`testing::TestCase`]
+//! - [`native`] - [`native::NativePluginRule`] adapter for running plugins without WASM
+//! - [`prelude`] - Convenient re-exports for `use nginx_lint_plugin::prelude::*`
 //!
 //! # API Versioning
 //!
-//! Plugins declare the API version they use via `PluginSpec::api_version`.
+//! Plugins declare the API version they use via [`PluginSpec::api_version`].
 //! This allows the host to support multiple output formats for backward compatibility.
-//! Use `PluginSpec::new()` to automatically set the current API version.
+//! [`PluginSpec::new()`] automatically sets the current API version ([`API_VERSION`]).
 //!
 //! # Example
 //!
-//! ```rust,ignore
+//! ```
 //! use nginx_lint_plugin::prelude::*;
 //!
+//! #[derive(Default)]
 //! struct MyRule;
 //!
 //! impl Plugin for MyRule {
 //!     fn spec(&self) -> PluginSpec {
-//!         PluginSpec::new(
-//!             "my-custom-rule",
-//!             "custom",
-//!             "My custom lint rule",
-//!         )
+//!         PluginSpec::new("my-custom-rule", "custom", "My custom lint rule")
+//!             .with_severity("warning")
+//!             .with_why("Explain why this rule matters.")
+//!             .with_bad_example("server {\n    dangerous_directive on;\n}")
+//!             .with_good_example("server {\n    # dangerous_directive removed\n}")
 //!     }
 //!
 //!     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
 //!         let mut errors = Vec::new();
-//!         for directive in config.all_directives() {
-//!             if directive.name == "dangerous_directive" {
-//!                 errors.push(LintError::warning(
-//!                     "my-custom-rule",
-//!                     "custom",
-//!                     "Avoid using dangerous_directive",
-//!                     directive.span.start.line,
-//!                     directive.span.start.column,
-//!                 ));
+//!         let err = self.spec().error_builder();
+//!
+//!         for ctx in config.all_directives_with_context() {
+//!             if ctx.directive.is("dangerous_directive") {
+//!                 errors.push(
+//!                     err.warning_at("Avoid using dangerous_directive", ctx.directive)
+//!                 );
 //!             }
 //!         }
 //!         errors
 //!     }
 //! }
 //!
-//! // Register the plugin
-//! export_plugin!(MyRule);
+//! // export_plugin!(MyRule);  // Required for WASM build
+//!
+//! // Verify it works
+//! let plugin = MyRule;
+//! let config = nginx_lint_plugin::parse_string("dangerous_directive on;").unwrap();
+//! let errors = plugin.check(&config, "test.conf");
+//! assert_eq!(errors.len(), 1);
 //! ```
 
 pub mod helpers;
@@ -59,7 +80,21 @@ pub use types::*;
 pub use nginx_lint_common::parse_string;
 pub use nginx_lint_common::parser;
 
-/// Prelude module for convenient imports
+/// Prelude module for convenient imports.
+///
+/// Importing everything from this module is the recommended way to use the SDK:
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+///
+/// // All core types are now available
+/// let spec = PluginSpec::new("example", "test", "Example rule");
+/// assert_eq!(spec.name, "example");
+/// ```
+///
+/// This re-exports all core types ([`Plugin`], [`PluginSpec`], [`LintError`], [`Fix`],
+/// [`Config`], [`Directive`], etc.), extension traits ([`ConfigExt`], [`DirectiveExt`]),
+/// the [`helpers`] module, and the [`export_plugin!`] macro.
 pub mod prelude {
     pub use super::export_plugin;
     pub use super::helpers;
@@ -73,9 +108,10 @@ pub mod prelude {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```
 /// use nginx_lint_plugin::prelude::*;
 ///
+/// #[derive(Default)]
 /// struct MyPlugin;
 ///
 /// impl Plugin for MyPlugin {
@@ -83,7 +119,7 @@ pub mod prelude {
 ///         PluginSpec::new("my-plugin", "custom", "My plugin")
 ///     }
 ///
-///     fn check(&self, config: &Config, path: &str) -> Vec<LintError> {
+///     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
 ///         Vec::new()
 ///     }
 /// }

@@ -1,6 +1,52 @@
-//! Testing utilities for plugin development
+//! Testing utilities for plugin development.
 //!
-//! This module provides helper functions for testing plugins with fixture files.
+//! This module provides two complementary approaches for testing plugins:
+//!
+//! - [`PluginTestRunner`] - A test runner with assertion methods and fixture-based testing
+//! - [`TestCase`] - A builder for inline, declarative test assertions
+//!
+//! # Quick Example
+//!
+//! ```
+//! use nginx_lint_plugin::prelude::*;
+//! use nginx_lint_plugin::testing::{PluginTestRunner, TestCase};
+//!
+//! // Define a simple plugin for demonstration
+//! # #[derive(Default)]
+//! # struct MyPlugin;
+//! # impl Plugin for MyPlugin {
+//! #     fn spec(&self) -> PluginSpec {
+//! #         PluginSpec::new("my-rule", "test", "Test rule").with_severity("warning")
+//! #     }
+//! #     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+//! #         let err = self.spec().error_builder();
+//! #         config.all_directives()
+//! #             .filter(|d| d.is("bad_directive"))
+//! #             .map(|d| err.warning_at("bad", d))
+//! #             .collect()
+//! #     }
+//! # }
+//!
+//! // Use PluginTestRunner for quick assertions
+//! let runner = PluginTestRunner::new(MyPlugin);
+//! runner.assert_has_errors("http {\n    bad_directive on;\n}");
+//! runner.assert_no_errors("http {\n    good_directive on;\n}");
+//!
+//! // Use TestCase for declarative, detailed assertions
+//! TestCase::new("http {\n    bad_directive on;\n}")
+//!     .expect_error_count(1)
+//!     .expect_error_on_line(2)
+//!     .run(&MyPlugin);
+//! ```
+//!
+//! # Fixture Directory Structure
+//!
+//! ```text
+//! tests/fixtures/
+//! └── 001_basic/
+//!     ├── error/nginx.conf      # Config that should trigger errors
+//!     └── expected/nginx.conf   # Config after applying fixes (no errors expected)
+//! ```
 
 use super::types::{Config, Fix, LintError, Plugin, PluginSpec};
 use std::path::{Path, PathBuf};
@@ -18,7 +64,39 @@ macro_rules! fixtures_dir {
     };
 }
 
-/// Test runner for plugins
+/// Test runner for plugins.
+///
+/// Provides assertion methods for testing plugin behavior against nginx config strings
+/// and fixture directories.
+///
+/// # Example
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+/// use nginx_lint_plugin::testing::PluginTestRunner;
+///
+/// # #[derive(Default)]
+/// # struct MyPlugin;
+/// # impl Plugin for MyPlugin {
+/// #     fn spec(&self) -> PluginSpec {
+/// #         PluginSpec::new("my-rule", "test", "Test rule")
+/// #     }
+/// #     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+/// #         let err = self.spec().error_builder();
+/// #         config.all_directives()
+/// #             .filter(|d| d.is("bad"))
+/// #             .map(|d| err.warning_at("bad", d))
+/// #             .collect()
+/// #     }
+/// # }
+/// let runner = PluginTestRunner::new(MyPlugin);
+///
+/// // Test a config string
+/// runner.assert_has_errors("http {\n    bad on;\n}");
+/// runner.assert_no_errors("http {\n    good on;\n}");
+/// runner.assert_errors("http {\n    bad on;\n    bad on;\n}", 2);
+/// runner.assert_error_on_line("http {\n    bad on;\n}", 2);
+/// ```
 pub struct PluginTestRunner<P: Plugin> {
     plugin: P,
 }
@@ -329,7 +407,49 @@ impl<P: Plugin> PluginTestRunner<P> {
     }
 }
 
-/// Test builder for inline tests
+/// Declarative test builder for inline plugin tests.
+///
+/// Chain expectations and then call [`run()`](TestCase::run) to execute:
+///
+/// ```
+/// use nginx_lint_plugin::prelude::*;
+/// use nginx_lint_plugin::testing::TestCase;
+///
+/// # #[derive(Default)]
+/// # struct MyPlugin;
+/// # impl Plugin for MyPlugin {
+/// #     fn spec(&self) -> PluginSpec {
+/// #         PluginSpec::new("my-rule", "test", "Test rule")
+/// #     }
+/// #     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
+/// #         let err = self.spec().error_builder();
+/// #         config.all_directives()
+/// #             .filter(|d| d.is("autoindex") && d.first_arg_is("on"))
+/// #             .map(|d| err.warning_at("autoindex should be off", d)
+/// #                 .with_fix(d.replace_with("autoindex off;")))
+/// #             .collect()
+/// #     }
+/// # }
+/// TestCase::new("http {\n    autoindex on;\n}")
+///     .expect_error_count(1)
+///     .expect_error_on_line(2)
+///     .expect_message_contains("autoindex")
+///     .expect_has_fix()
+///     .expect_fix_produces("http {\n    autoindex off;\n}")
+///     .run(&MyPlugin);
+/// ```
+///
+/// # Available Expectations
+///
+/// | Method | Description |
+/// |--------|-------------|
+/// | [`expect_error_count(n)`](TestCase::expect_error_count) | Exact error count |
+/// | [`expect_no_errors()`](TestCase::expect_no_errors) | No errors |
+/// | [`expect_error_on_line(n)`](TestCase::expect_error_on_line) | Error on specific line |
+/// | [`expect_message_contains(s)`](TestCase::expect_message_contains) | Error message substring |
+/// | [`expect_has_fix()`](TestCase::expect_has_fix) | At least one error has a fix |
+/// | [`expect_fix_on_line(n)`](TestCase::expect_fix_on_line) | Fix targets specific line |
+/// | [`expect_fix_produces(s)`](TestCase::expect_fix_produces) | Verify fix output |
 pub struct TestCase {
     content: String,
     expected_error_count: Option<usize>,
