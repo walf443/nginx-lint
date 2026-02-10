@@ -30,6 +30,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    /// Returns a human-readable name for this token kind, used in error messages.
     pub fn display_name(&self) -> &str {
         match self {
             TokenKind::Ident(_) => "identifier",
@@ -47,16 +48,23 @@ impl TokenKind {
     }
 }
 
-/// A token with its position in the source
+/// A token with its position in the source.
 #[derive(Debug, Clone)]
 pub struct Token {
+    /// The kind and optional payload of this token.
     pub kind: TokenKind,
+    /// Source span of the token (excluding leading whitespace).
     pub span: Span,
-    pub raw: String,                // Original source text
-    pub leading_whitespace: String, // Whitespace before this token (on same line)
+    /// Original source text of the token (e.g. `"hello"` including quotes).
+    pub raw: String,
+    /// Whitespace characters that appeared before this token on the same line.
+    pub leading_whitespace: String,
 }
 
-/// Lexer for tokenizing nginx configuration files
+/// Lexer for tokenizing nginx configuration files.
+///
+/// Converts source text into a stream of [`Token`]s. Use [`new`](Lexer::new) to
+/// create a lexer and [`tokenize`](Lexer::tokenize) to consume the entire input.
 pub struct Lexer<'a> {
     source: &'a str,
     chars: std::iter::Peekable<std::str::CharIndices<'a>>,
@@ -66,6 +74,7 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
+    /// Creates a new lexer for the given source text.
     pub fn new(source: &'a str) -> Self {
         Self {
             source,
