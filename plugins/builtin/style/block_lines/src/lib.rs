@@ -229,4 +229,10 @@ server {
         // good.conf should produce no errors
         runner.assert_no_errors(include_str!("../examples/good.conf"));
     }
+
+    #[test]
+    fn test_fixtures() {
+        let runner = PluginTestRunner::new(BlockLinesPlugin::default());
+        runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
 }
