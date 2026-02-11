@@ -28,8 +28,7 @@ mod embedded {
     pub const TRAILING_WHITESPACE: &[u8] =
         include_bytes!("../../target/builtin-plugins/trailing_whitespace.wasm");
     /// block-lines plugin
-    pub const BLOCK_LINES: &[u8] =
-        include_bytes!("../../target/builtin-plugins/block_lines.wasm");
+    pub const BLOCK_LINES: &[u8] = include_bytes!("../../target/builtin-plugins/block_lines.wasm");
     /// proxy-pass-domain plugin
     pub const PROXY_PASS_DOMAIN: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_pass_domain.wasm");

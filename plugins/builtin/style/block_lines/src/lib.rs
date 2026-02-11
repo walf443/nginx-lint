@@ -221,7 +221,9 @@ server {
         let runner = PluginTestRunner::new(BlockLinesPlugin::default());
 
         // bad.conf should produce errors
-        let bad_errors = runner.check_string(include_str!("../examples/bad.conf")).expect("parse failed");
+        let bad_errors = runner
+            .check_string(include_str!("../examples/bad.conf"))
+            .expect("parse failed");
         assert!(!bad_errors.is_empty(), "bad.conf should produce errors");
 
         // good.conf should produce no errors
