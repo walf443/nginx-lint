@@ -398,7 +398,7 @@ fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     haystack.as_bytes()[..needle.len()]
         .iter()
         .zip(needle.as_bytes())
-        .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
+        .all(|(h, n)| h.eq_ignore_ascii_case(n))
 }
 
 impl Plugin for UnreachableLocationPlugin {
