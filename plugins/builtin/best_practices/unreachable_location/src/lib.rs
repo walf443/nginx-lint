@@ -336,7 +336,7 @@ fn is_plain_path_char(c: char) -> bool {
 
 /// Check if an escaped character represents a literal in path context.
 fn is_escaped_path_literal(c: char) -> bool {
-    c == '/' || c == '.' || c == '_' || c == '-' || c.is_alphanumeric()
+    matches!(c, '/' | '.' | '_' | '-')
 }
 
 impl Plugin for UnreachableLocationPlugin {
@@ -701,6 +701,12 @@ location /api {
         assert_eq!(plugin().extract_regex_literal_prefix("^/api(.*)"), "/api");
         assert_eq!(plugin().extract_regex_literal_prefix("[a-z]+"), "");
 
+        // Stops at PCRE character classes like \d, \w
+        assert_eq!(
+            plugin().extract_regex_literal_prefix(r"^/api/v\d+"),
+            "/api/v"
+        );
+
         // Empty for patterns without literal prefix
         assert_eq!(plugin().extract_regex_literal_prefix(".*"), "");
     }
@@ -757,12 +763,19 @@ location /api {
 
     #[test]
     fn test_is_escaped_path_literal() {
+        // Path-safe escaped characters
         assert!(is_escaped_path_literal('/'));
         assert!(is_escaped_path_literal('.'));
         assert!(is_escaped_path_literal('_'));
         assert!(is_escaped_path_literal('-'));
-        assert!(is_escaped_path_literal('a'));
 
+        // PCRE character classes and anchors (\d, \w, \s, \b, etc.)
+        assert!(!is_escaped_path_literal('d'));
+        assert!(!is_escaped_path_literal('w'));
+        assert!(!is_escaped_path_literal('s'));
+        assert!(!is_escaped_path_literal('b'));
+
+        // Other regex metacharacters
         assert!(!is_escaped_path_literal('('));
         assert!(!is_escaped_path_literal('['));
         assert!(!is_escaped_path_literal('*'));
