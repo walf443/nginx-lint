@@ -1,4 +1,5 @@
 mod github_actions;
+mod json;
 
 use crate::LintError;
 use crate::Severity;
@@ -34,7 +35,7 @@ impl Reporter {
     pub fn report(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
         match self.format {
             OutputFormat::Text => self.report_text(errors, path, ignored_count),
-            OutputFormat::Json => self.report_json(errors, path, ignored_count),
+            OutputFormat::Json => json::report(errors, path, ignored_count),
             OutputFormat::GithubActions => github_actions::report(errors, path),
         }
     }
@@ -112,57 +113,6 @@ impl Reporter {
         }
     }
 
-    fn report_json(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
-        #[derive(serde::Serialize)]
-        struct JsonReport {
-            file: String,
-            errors: Vec<LintError>,
-            summary: Summary,
-        }
-
-        #[derive(serde::Serialize)]
-        struct Summary {
-            errors: usize,
-            warnings: usize,
-            ignored: usize,
-        }
-
-        // Sort errors by line number, then by column number
-        let mut sorted_errors: Vec<_> = errors.to_vec();
-        sorted_errors.sort_by(|a, b| match (a.line, b.line) {
-            (Some(line_a), Some(line_b)) => {
-                line_a
-                    .cmp(&line_b)
-                    .then_with(|| match (a.column, b.column) {
-                        (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
-                        (Some(_), None) => std::cmp::Ordering::Less,
-                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                        (None, None) => std::cmp::Ordering::Equal,
-                    })
-            }
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        });
-
-        let report = JsonReport {
-            file: path.display().to_string(),
-            errors: sorted_errors,
-            summary: Summary {
-                errors: errors
-                    .iter()
-                    .filter(|e| e.severity == Severity::Error)
-                    .count(),
-                warnings: errors
-                    .iter()
-                    .filter(|e| e.severity == Severity::Warning)
-                    .count(),
-                ignored: ignored_count,
-            },
-        };
-
-        println!("{}", serde_json::to_string_pretty(&report).unwrap());
-    }
 }
 
 /// Apply a color to a string
