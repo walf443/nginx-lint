@@ -151,20 +151,33 @@ impl UnreachableLocationPlugin {
 
     /// Check if earlier regex shadows later regex.
     /// This is a heuristic check for common patterns.
+    ///
+    /// When earlier is `~*` (case-insensitive), pattern comparisons are done
+    /// case-insensitively, and same-length patterns also shadow because `~*`
+    /// matches a superset of what `~` matches.
     fn regex_shadows(&self, earlier: &LocationInfo, later: &LocationInfo) -> bool {
         if self.is_catchall_regex(&earlier.pattern) {
             return true;
         }
 
+        // ~* (case-insensitive) can shadow patterns that differ only in case
+        let ci = earlier.modifier == "~*";
+
         // If later pattern is more specific version of earlier
         // e.g., earlier: /api/.* later: /api/v1/.*
-        if earlier.pattern.ends_with(".*")
-            && later
-                .pattern
-                .starts_with(earlier.pattern.trim_end_matches(".*"))
-            && later.pattern.len() > earlier.pattern.len()
-        {
-            return true;
+        if earlier.pattern.ends_with(".*") {
+            let earlier_prefix = earlier.pattern.trim_end_matches(".*");
+            let prefix_matches = if ci {
+                later
+                    .pattern
+                    .to_lowercase()
+                    .starts_with(&earlier_prefix.to_lowercase())
+            } else {
+                later.pattern.starts_with(earlier_prefix)
+            };
+            if prefix_matches && later.pattern.len() > earlier.pattern.len() {
+                return true;
+            }
         }
 
         // Check for prefix patterns like /foo vs /foo/bar
@@ -178,10 +191,25 @@ impl UnreachableLocationPlugin {
         if !earlier_base.contains('*')
             && !earlier_base.contains('+')
             && !earlier_base.contains('?')
-            && later_base.starts_with(earlier_base)
-            && later_base.len() > earlier_base.len()
         {
-            return true;
+            let starts_with = if ci {
+                later_base
+                    .to_lowercase()
+                    .starts_with(&earlier_base.to_lowercase())
+            } else {
+                later_base.starts_with(earlier_base)
+            };
+
+            if starts_with {
+                // ~* shadows same or longer patterns (it matches a superset)
+                if ci && later_base.len() >= earlier_base.len() {
+                    return true;
+                }
+                // Same modifier: only shadow if later is strictly more specific
+                if later_base.len() > earlier_base.len() {
+                    return true;
+                }
+            }
         }
 
         false
@@ -546,6 +574,94 @@ http {
             return 200;
         }
         location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    // =========================================================================
+    // ~* (case-insensitive) shadowing ~ (case-sensitive)
+    // =========================================================================
+
+    #[test]
+    fn test_case_insensitive_shadows_case_sensitive_different_case() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api matches /API (case-insensitive), so ~ /API is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /API {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_shadows_case_sensitive_specific() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api matches /API/v1 (case-insensitive), so ~ /API/v1 is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /API/v1 {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_sensitive_before_case_insensitive_not_shadow() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~ /api does NOT match /API, so ~* /API can still match /API
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ /api {
+            return 200;
+        }
+        location ~* /API {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_same_case_already_detected() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api before ~ /api — same text, should be detected
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /api {
             return 200;
         }
     }
