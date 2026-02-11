@@ -182,6 +182,10 @@ impl UnreachableLocationPlugin {
 
         // Check for prefix patterns like /foo vs /foo/bar
         // Earlier: ~ /api  Later: ~ /api/v1
+        let earlier_has_start_anchor = earlier.pattern.starts_with('^');
+        let earlier_has_end_anchor = earlier.pattern.ends_with('$');
+        let later_has_start_anchor = later.pattern.starts_with('^');
+
         let earlier_base = earlier
             .pattern
             .trim_start_matches('^')
@@ -200,7 +204,19 @@ impl UnreachableLocationPlugin {
 
             if starts_with {
                 // ~* shadows same or longer patterns (it matches a superset)
+                // But only if anchor constraints are compatible:
+                // - If earlier is fully anchored (^...$) and later is not start-anchored,
+                //   then later can match in more places (e.g., earlier: ^/api$, later: /API$)
                 if ci && later_base.len() >= earlier_base.len() {
+                    // Don't shadow if earlier is more constrained by anchors
+                    // E.g., ~* ^/api$ (exact match) vs ~ /API$ (substring match ending with /API)
+                    let earlier_fully_anchored = earlier_has_start_anchor && earlier_has_end_anchor;
+                    let later_start_unconstrained = !later_has_start_anchor;
+                    
+                    if earlier_fully_anchored && later_start_unconstrained {
+                        return false;
+                    }
+                    
                     return true;
                 }
                 // Same modifier: only shadow if later is strictly more specific
@@ -660,6 +676,71 @@ http {
             return 200;
         }
         location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_anchored_pattern_does_not_shadow_unanchored() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* ^/api$ only matches exactly "/api" (case-insensitive)
+        // ~ /API$ can match "/foo/API", "/bar/API", etc. (case-sensitive)
+        // These should NOT be considered shadowing
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~* ^/api$ {
+            return 200;
+        }
+        location ~ /API$ {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_both_anchored_shadows_correctly() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // Both are fully anchored (^...$), so case-insensitive shadows case-sensitive
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* ^/api$ {
+            return 200;
+        }
+        location ~ ^/API$ {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_both_unanchored_shadows_correctly() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // Neither is anchored, so case-insensitive shadows case-sensitive
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /API {
             return 200;
         }
     }
