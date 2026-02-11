@@ -188,9 +188,7 @@ impl UnreachableLocationPlugin {
             .trim_end_matches('$');
         let later_base = later.pattern.trim_start_matches('^').trim_end_matches('$');
 
-        if !earlier_base.contains('*')
-            && !earlier_base.contains('+')
-            && !earlier_base.contains('?')
+        if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?')
         {
             let starts_with = if ci {
                 later_base
