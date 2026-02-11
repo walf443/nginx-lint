@@ -187,7 +187,7 @@ impl UnreachableLocationPlugin {
             // - The prefix is "/" (catch-all like ^/.*, /.*), shadow everything
             // - OR the later pattern is longer (more specific path)
             if prefix_matches
-                && (earlier_prefix == "/" || later.pattern.len() > earlier.pattern.len())
+                && (earlier_prefix == "/" || later_normalized.len() > earlier_prefix.len())
             {
                 return true;
             }
@@ -648,6 +648,27 @@ http {
             return 200;
         }
         location ~ /products {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_anchored_prefix_dotstar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/api/.*$ should shadow /api/v1 (even though pattern length is longer)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/.*$ {
+            return 200;
+        }
+        location ~ /api/v1 {
             return 200;
         }
     }
