@@ -1028,4 +1028,55 @@ warning = "bright_yellow"
         assert_eq!(config.color.error, Color::BrightRed);
         assert_eq!(config.color.warning, Color::BrightYellow);
     }
+
+    #[test]
+    fn test_block_lines_max_block_lines_parsing() {
+        let toml_content = r#"
+[rules.block-lines]
+enabled = true
+max_block_lines = 50
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert!(config.is_rule_enabled("block-lines"));
+        let rule_config = config.get_rule_config("block-lines").unwrap();
+        assert_eq!(rule_config.max_block_lines, Some(50));
+    }
+
+    #[test]
+    fn test_block_lines_default_no_max() {
+        let toml_content = r#"
+[rules.block-lines]
+enabled = true
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        let rule_config = config.get_rule_config("block-lines").unwrap();
+        assert_eq!(rule_config.max_block_lines, None);
+    }
+
+    #[test]
+    fn test_block_lines_validation_rejects_unknown_option() {
+        let toml_content = r#"
+[rules.block-lines]
+enabled = true
+unknown_option = 42
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert_eq!(errors.len(), 1);
+        match &errors[0] {
+            ValidationError::UnknownRuleOption { rule, option, .. } => {
+                assert_eq!(rule, "block-lines");
+                assert_eq!(option, "unknown_option");
+            }
+            other => panic!("expected UnknownRuleOption, got: {:?}", other),
+        }
+    }
 }

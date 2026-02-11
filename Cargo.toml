@@ -53,7 +53,7 @@ web-server-embed-wasm = ["web-server"]
 # WASM plugin support for custom lint rules
 plugins = ["wasmi"]
 # Embed builtin plugins into the binary (requires make build-plugins first)
-wasm-builtin-plugins = ["plugins"]
+wasm-builtin-plugins = ["plugins", "dep:nginx-lint-plugin", "dep:block-lines-plugin"]
 # Native plugin support (compile plugins as native Rust instead of WASM)
 native-builtin-plugins = [
     "dep:nginx-lint-plugin",

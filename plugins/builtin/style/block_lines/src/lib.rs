@@ -157,7 +157,7 @@ server {
     #[test]
     fn test_nested_child_exceeds_only_child_reported() {
         let runner = PluginTestRunner::new(BlockLinesPlugin::with_max_lines(10));
-        // http(15 lines) > server(12 lines): only server should be reported
+        // http block contains a server block that exceeds the threshold; only server should be reported
         let mut config = String::from("http {\n");
         config.push_str("    server {\n");
         for i in 1..=10 {
@@ -177,7 +177,7 @@ server {
     #[test]
     fn test_nested_no_child_exceeds_parent_reported() {
         let runner = PluginTestRunner::new(BlockLinesPlugin::with_max_lines(10));
-        // http(14 lines) with two short server blocks (3 lines each)
+        // An http block with two short server blocks (3 lines each)
         // Only http should be reported since no child exceeds the threshold
         let mut config = String::from("http {\n");
         config.push_str("    server {\n");
