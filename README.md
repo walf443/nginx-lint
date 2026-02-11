@@ -13,6 +13,7 @@ A linter for nginx configuration files with WASM plugin support, autofix, and a 
 - **Ignore comments** — suppress specific warnings with inline annotations
 - **Configurable** — customize rules, severity, and options via `.nginx-lint.toml`
 - **JSON output** — machine-readable output for CI integration
+- **GitHub Actions integration** — inline PR annotations with `--format github-actions`
 
 ## Quick Start
 
@@ -53,7 +54,7 @@ nginx-lint <COMMAND>
 
 | Flag | Description |
 |------|-------------|
-| `-o, --format <FORMAT>` | Output format: `text` (default) or `json` |
+| `-o, --format <FORMAT>` | Output format: `errorformat` (default), `json`, or `github-actions` |
 | `--fix` | Automatically fix problems |
 | `-c, --config <FILE>` | Path to configuration file |
 | `--context <CONTEXT>` | Parent context for partial configs (e.g., `http,server`) |
@@ -165,6 +166,22 @@ The Web UI provides:
 - Rule documentation with bad/good examples
 - In-browser configuration editing
 - Runs entirely client-side via WebAssembly
+
+## GitHub Actions
+
+You can use [nginx-lint-action](https://github.com/walf443/nginx-lint-action) to run nginx-lint in your GitHub Actions workflow with inline PR annotations:
+
+```yaml
+- uses: walf443/nginx-lint-action@v1
+  with:
+    files: /etc/nginx/nginx.conf
+```
+
+Alternatively, use `--format github-actions` directly to produce workflow commands:
+
+```bash
+nginx-lint --format github-actions /etc/nginx/nginx.conf
+```
 
 ## Custom Plugins
 
