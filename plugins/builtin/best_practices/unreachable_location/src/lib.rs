@@ -165,17 +165,30 @@ impl UnreachableLocationPlugin {
 
         // If later pattern is more specific version of earlier
         // e.g., earlier: /api/.* later: /api/v1/.*
-        if earlier.pattern.ends_with(".*") {
-            let earlier_prefix = earlier.pattern.trim_end_matches(".*");
+        // Also handles catch-all patterns like ^/.*, ^/.*$, /.*
+        if earlier.pattern.ends_with(".*") || earlier.pattern.ends_with(".*$") {
+            // Extract the prefix by removing anchors and .* suffix
+            let without_anchors = earlier
+                .pattern
+                .trim_start_matches('^')
+                .trim_end_matches('$');
+            let earlier_prefix = without_anchors.trim_end_matches(".*");
+            let later_normalized = later.pattern.trim_start_matches('^').trim_end_matches('$');
+
             let prefix_matches = if ci {
-                later
-                    .pattern
+                later_normalized
                     .to_lowercase()
                     .starts_with(&earlier_prefix.to_lowercase())
             } else {
-                later.pattern.starts_with(earlier_prefix)
+                later_normalized.starts_with(earlier_prefix)
             };
-            if prefix_matches && later.pattern.len() > earlier.pattern.len() {
+
+            // If prefix matches and:
+            // - The prefix is "/" (catch-all like ^/.*, /.*), shadow everything
+            // - OR the later pattern is longer (more specific path)
+            if prefix_matches
+                && (earlier_prefix == "/" || later.pattern.len() > earlier.pattern.len())
+            {
                 return true;
             }
         }
@@ -572,6 +585,69 @@ http {
             return 200;
         }
         location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.* matches all URIs (starts with / and matches anything after)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.* {
+            return 200;
+        }
+        location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_slash_dotstar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // /.* matches all URIs (contains / followed by anything)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ /.* {
+            return 200;
+        }
+        location ~ /users {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_dollar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.*$ matches all URIs (anchored: starts with /, anything in between, ends)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.*$ {
+            return 200;
+        }
+        location ~ /products {
             return 200;
         }
     }
