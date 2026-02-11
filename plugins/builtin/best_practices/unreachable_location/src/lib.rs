@@ -149,20 +149,19 @@ impl UnreachableLocationPlugin {
         }
     }
 
-    /// Check if earlier regex shadows later regex
-    /// This is a heuristic check for common patterns
+    /// Check if earlier regex shadows later regex.
+    /// This is a heuristic check for common patterns.
     fn regex_shadows(&self, earlier: &LocationInfo, later: &LocationInfo) -> bool {
-        // If earlier pattern is .* or similar catch-all
-        if earlier.pattern == ".*" || earlier.pattern == "^.*" || earlier.pattern == "." {
+        if self.is_catchall_regex(&earlier.pattern) {
             return true;
         }
 
         // If later pattern is more specific version of earlier
         // e.g., earlier: /api/.* later: /api/v1/.*
-        if later
-            .pattern
-            .starts_with(earlier.pattern.trim_end_matches(".*"))
-            && earlier.pattern.ends_with(".*")
+        if earlier.pattern.ends_with(".*")
+            && later
+                .pattern
+                .starts_with(earlier.pattern.trim_end_matches(".*"))
             && later.pattern.len() > earlier.pattern.len()
         {
             return true;
@@ -176,12 +175,13 @@ impl UnreachableLocationPlugin {
             .trim_end_matches('$');
         let later_base = later.pattern.trim_start_matches('^').trim_end_matches('$');
 
-        if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?')
+        if !earlier_base.contains('*')
+            && !earlier_base.contains('+')
+            && !earlier_base.contains('?')
+            && later_base.starts_with(earlier_base)
+            && later_base.len() > earlier_base.len()
         {
-            // Earlier is a literal pattern
-            if later_base.starts_with(earlier_base) && later_base.len() > earlier_base.len() {
-                return true;
-            }
+            return true;
         }
 
         false
@@ -219,47 +219,60 @@ impl UnreachableLocationPlugin {
         }
     }
 
-    /// Check if a ^~ prefix might shadow a regex location
+    /// Check if a ^~ prefix might shadow a regex location.
+    ///
+    /// A `^~` prefix prevents regex evaluation for any URI that matches the prefix.
+    /// This checks four scenarios:
+    /// 1. `^~ /` matches all URIs
+    /// 2. Catch-all regex (e.g., `.*`) is always shadowed
+    /// 3. Regex's literal prefix overlaps with `^~` path
+    /// 4. Global extension patterns (e.g., `\.(css|js)$`) are shadowed by any `^~`
     fn prefix_might_shadow_regex(&self, prefix: &LocationInfo, regex: &LocationInfo) -> bool {
         let prefix_path = &prefix.pattern;
         let regex_pattern = &regex.pattern;
 
-        // 1. ^~ / matches all URIs, so it shadows any regex
-        if prefix_path == "/" {
-            return true;
-        }
+        prefix_path == "/"
+            || self.is_catchall_regex(regex_pattern)
+            || self.prefix_and_regex_paths_overlap(prefix_path, regex_pattern)
+            || self.is_global_extension_pattern(regex_pattern)
+    }
 
-        // 2. Catch-all regex patterns are always shadowed by any ^~
-        if regex_pattern == ".*" || regex_pattern == "^.*" || regex_pattern == "." {
-            return true;
-        }
+    // =========================================================================
+    // Regex pattern analysis utilities
+    // =========================================================================
 
-        // 3. Extract literal prefix from regex and check overlap
+    /// Check if a regex pattern is a catch-all that matches any URI.
+    /// e.g., `.*`, `^.*$`, `.`, `.+`
+    fn is_catchall_regex(&self, pattern: &str) -> bool {
+        let normalized = pattern.trim_start_matches('^').trim_end_matches('$');
+        normalized == ".*" || normalized == "." || normalized == ".+"
+    }
+
+    /// Check if a `^~` prefix path and a regex pattern have overlapping paths.
+    ///
+    /// Extracts the literal prefix from the regex and checks bidirectional overlap:
+    /// - Regex literal starts with prefix → regex is fully under `^~` scope
+    ///   (e.g., `^~ /static/` shadows `~ ^/static/.*\.css$`)
+    /// - Prefix starts with regex literal → partial overlap
+    ///   (e.g., `^~ /images/photos/` shadows `~ /images/`)
+    fn prefix_and_regex_paths_overlap(&self, prefix_path: &str, regex_pattern: &str) -> bool {
         let regex_literal = self.extract_regex_literal_prefix(regex_pattern);
-        if !regex_literal.is_empty() {
-            // regex literal starts with prefix → shadowed
-            // e.g., ^~ /static/ shadows ~ ^/static/.*\.css$
-            if regex_literal.starts_with(prefix_path.as_str()) {
-                return true;
-            }
-            // prefix starts with regex literal → overlap
-            // e.g., ^~ /images/photos/ shadows ~ /images/
-            if prefix_path.starts_with(&regex_literal) {
-                return true;
-            }
+        if regex_literal.is_empty() {
+            return false;
         }
-
-        // 4. Global file extension patterns (no path prefix)
-        // e.g., ~* \.(jpg|png|gif)$ can be shadowed by any ^~ prefix
-        if self.is_global_extension_pattern(regex_pattern) {
-            return true;
-        }
-
-        false
+        regex_literal.starts_with(prefix_path) || prefix_path.starts_with(&regex_literal)
     }
 
     /// Extract the literal prefix from a regex pattern.
-    /// For example, `^/static/.*\.css$` → `/static/`
+    ///
+    /// Scans from the start collecting path-safe literal characters, stopping at
+    /// the first regex metacharacter. Escaped path characters (e.g., `\.`, `\/`)
+    /// are treated as literals; unescaped `.` is treated as a wildcard.
+    ///
+    /// Examples:
+    /// - `^/static/.*\.css$` → `/static/`
+    /// - `/images/` → `/images/`
+    /// - `\.(css|js)$` → `.`
     fn extract_regex_literal_prefix(&self, pattern: &str) -> String {
         let s = pattern.trim_start_matches('^');
         let mut result = String::new();
@@ -269,24 +282,17 @@ impl UnreachableLocationPlugin {
             if c == '\\' {
                 chars.next();
                 if let Some(&next) = chars.peek() {
-                    // Escaped literals common in paths: \. \/ \- \_
-                    if next == '/'
-                        || next == '.'
-                        || next == '_'
-                        || next == '-'
-                        || next.is_alphanumeric()
-                    {
+                    if is_escaped_path_literal(next) {
                         result.push(next);
                         chars.next();
                     } else {
-                        break; // other escapes are regex metacharacters
+                        break;
                     }
                 }
-            } else if c.is_alphanumeric() || c == '/' || c == '_' || c == '-' {
+            } else if is_plain_path_char(c) {
                 result.push(c);
                 chars.next();
             } else {
-                // Unescaped '.' is a regex wildcard, other chars are metacharacters
                 break;
             }
         }
@@ -295,11 +301,31 @@ impl UnreachableLocationPlugin {
     }
 
     /// Check if a regex pattern is a global file extension pattern (no path prefix).
-    /// e.g., `\.(jpg|png|gif)$` or `\.(css|js)$`
+    /// e.g., `\.(jpg|png|gif)$` or `.*\.(css|js)$`
     fn is_global_extension_pattern(&self, regex_pattern: &str) -> bool {
         let s = regex_pattern.trim_start_matches('^');
-        // Global pattern: doesn't start with a path, contains file extension matching
-        !s.starts_with('/') && regex_pattern.contains(r"\.")
+
+        // Must not start with a path prefix
+        if s.starts_with('/') {
+            return false;
+        }
+
+        // Must start like a pure extension pattern: `\.` or `.*\.`
+        if !(s.starts_with(r"\.") || s.starts_with(r".*\.")) {
+            return false;
+        }
+
+        // Ensure no `/` after `\.` to avoid matching path patterns like `\.well-known/`
+        if let Some(dot_idx) = s.find(r"\.") {
+            let after_dot = &s[dot_idx + 2..];
+            if after_dot.contains('/') {
+                return false;
+            }
+        }
+
+        // Typical extension patterns end with `$` or include a group/class
+        // e.g., `\.(jpg|png)$`, `\.[a-z]+$`
+        s.ends_with('$') || s.contains('(') || s.contains('[')
     }
 
     /// Recursively check all server blocks
@@ -319,6 +345,24 @@ impl UnreachableLocationPlugin {
             }
         }
     }
+}
+
+// =========================================================================
+// Character classification helpers for regex literal prefix extraction
+// =========================================================================
+
+/// Check if a character is a plain path-safe literal (not a regex metacharacter).
+fn is_plain_path_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '/' || c == '_' || c == '-'
+}
+
+/// Check if an escaped character represents a literal in path context.
+/// e.g., `\.` `\/` `\-` `\_` and escaped alphanumerics are literals,
+/// while `\d` `\w` `\s` etc. are regex character classes (but alphanumeric,
+/// so they pass through — acceptable for our heuristic since paths rarely
+/// contain `\d` style sequences).
+fn is_escaped_path_literal(c: char) -> bool {
+    c == '/' || c == '.' || c == '_' || c == '-' || c.is_alphanumeric()
 }
 
 impl Plugin for UnreachableLocationPlugin {
