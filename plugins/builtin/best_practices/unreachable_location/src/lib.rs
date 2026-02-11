@@ -242,9 +242,32 @@ impl UnreachableLocationPlugin {
     // =========================================================================
 
     /// Check if a regex pattern is a catch-all that matches any URI.
+    ///
+    /// Detected patterns (with optional `^` prefix and `$` suffix):
+    /// - `.*`, `.`, `.+` — wildcard patterns matching any string
+    /// - `^/` — all nginx URIs start with `/` (but `^/$` only matches root)
+    /// - `/` — all nginx URIs contain `/` (but `/$` only matches paths ending with `/`)
+    /// - `^` — start anchor alone has no constraint, matches everything
     fn is_catchall_regex(&self, pattern: &str) -> bool {
         let normalized = pattern.trim_start_matches('^').trim_end_matches('$');
-        normalized == ".*" || normalized == "." || normalized == ".+"
+
+        // Wildcard patterns: .* (0+ any), . (any single char), .+ (1+ any)
+        if normalized == ".*" || normalized == "." || normalized == ".+" {
+            return true;
+        }
+
+        // "/" without end anchor: all URIs start with / (if ^/) or contain / (if /)
+        // But "^/$" or "/$" are NOT catch-all (match root or paths ending with /)
+        if normalized == "/" && !pattern.ends_with('$') {
+            return true;
+        }
+
+        // "^" alone: start anchor with no constraint, matches everything
+        if pattern == "^" {
+            return true;
+        }
+
+        false
     }
 
     /// Check if a `^~` prefix path and a regex pattern have overlapping paths.
@@ -469,6 +492,69 @@ http {
     }
 
     #[test]
+    fn test_catchall_caret_slash_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/ matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/ {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_slash_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // / matches all URIs (substring match), so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ / {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^ alone matches everything, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^ {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
     fn test_different_locations_ok() {
         let runner = PluginTestRunner::new(UnreachableLocationPlugin);
 
@@ -667,6 +753,18 @@ location /api {
         assert!(plugin().is_catchall_regex(".+"));
         assert!(plugin().is_catchall_regex("^.+$"));
 
+        // ^/ matches all URIs (all nginx URIs start with /)
+        assert!(plugin().is_catchall_regex("^/"));
+        // / matches all URIs (all nginx URIs contain /)
+        assert!(plugin().is_catchall_regex("/"));
+        // ^ alone has no constraint, matches everything
+        assert!(plugin().is_catchall_regex("^"));
+
+        // ^/$ only matches exactly "/", NOT catch-all
+        assert!(!plugin().is_catchall_regex("^/$"));
+        // /$ only matches paths ending with /, NOT catch-all
+        assert!(!plugin().is_catchall_regex("/$"));
+
         assert!(!plugin().is_catchall_regex("/api"));
         assert!(!plugin().is_catchall_regex(r"\.(css|js)$"));
         assert!(!plugin().is_catchall_regex("^/static/.*"));
@@ -863,6 +961,69 @@ http {
         }
         location ~ /images/ {
             return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_caret_slash() {
+        // ^~ /images/ should shadow ~ ^/ (catch-all: all URIs start with /)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ ^/ {
+            return 404;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_slash() {
+        // ^~ /images/ should shadow ~ / (catch-all: all URIs contain /)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ / {
+            return 404;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_caret() {
+        // ^~ /images/ should shadow ~ ^ (catch-all: matches everything)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ ^ {
+            return 404;
         }
     }
 }
