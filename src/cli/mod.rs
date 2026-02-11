@@ -94,6 +94,7 @@ pub enum Commands {
 pub enum Format {
     Text,
     Json,
+    GithubActions,
 }
 
 impl From<Format> for OutputFormat {
@@ -101,6 +102,7 @@ impl From<Format> for OutputFormat {
         match f {
             Format::Text => OutputFormat::Text,
             Format::Json => OutputFormat::Json,
+            Format::GithubActions => OutputFormat::GithubActions,
         }
     }
 }

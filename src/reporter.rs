@@ -9,6 +9,7 @@ pub enum OutputFormat {
     #[default]
     Text,
     Json,
+    GithubActions,
 }
 
 pub struct Reporter {
@@ -32,6 +33,7 @@ impl Reporter {
         match self.format {
             OutputFormat::Text => self.report_text(errors, path, ignored_count),
             OutputFormat::Json => self.report_json(errors, path, ignored_count),
+            OutputFormat::GithubActions => self.report_github_actions(errors, path),
         }
     }
 
@@ -158,6 +160,45 @@ impl Reporter {
         };
 
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
+    }
+
+    fn report_github_actions(&self, errors: &[LintError], path: &Path) {
+        let path_str = path.display();
+
+        let mut sorted_errors: Vec<_> = errors.iter().collect();
+        sorted_errors.sort_by(|a, b| match (a.line, b.line) {
+            (Some(line_a), Some(line_b)) => {
+                line_a
+                    .cmp(&line_b)
+                    .then_with(|| match (a.column, b.column) {
+                        (Some(col_a), Some(col_b)) => col_a.cmp(&col_b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    })
+            }
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        });
+
+        for error in sorted_errors {
+            let level = match error.severity {
+                Severity::Error => "error",
+                Severity::Warning => "warning",
+            };
+
+            let mut params = format!("file={}", path_str);
+            if let Some(line) = error.line {
+                params.push_str(&format!(",line={}", line));
+            }
+            if let Some(col) = error.column {
+                params.push_str(&format!(",col={}", col));
+            }
+            params.push_str(&format!(",title={}/{}", error.category, error.rule));
+
+            println!("::{} {}::{}", level, params, error.message);
+        }
     }
 }
 
