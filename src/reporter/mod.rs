@@ -163,7 +163,6 @@ impl Reporter {
 
         println!("{}", serde_json::to_string_pretty(&report).unwrap());
     }
-
 }
 
 /// Apply a color to a string
