@@ -168,10 +168,7 @@ impl UnreachableLocationPlugin {
         if earlier.pattern.ends_with(".*") {
             let earlier_prefix = earlier.pattern.trim_end_matches(".*");
             let prefix_matches = if ci {
-                later
-                    .pattern
-                    .to_lowercase()
-                    .starts_with(&earlier_prefix.to_lowercase())
+                starts_with_ignore_ascii_case(&later.pattern, earlier_prefix)
             } else {
                 later.pattern.starts_with(earlier_prefix)
             };
@@ -197,9 +194,7 @@ impl UnreachableLocationPlugin {
         if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?')
         {
             let starts_with = if ci {
-                later_base
-                    .to_lowercase()
-                    .starts_with(&earlier_base.to_lowercase())
+                starts_with_ignore_ascii_case(later_base, earlier_base)
             } else {
                 later_base.starts_with(earlier_base)
             };
@@ -392,6 +387,18 @@ fn is_plain_path_char(c: char) -> bool {
 /// Check if an escaped character represents a literal in path context.
 fn is_escaped_path_literal(c: char) -> bool {
     matches!(c, '/' | '.' | '_' | '-')
+}
+
+/// Case-insensitive `starts_with` for ASCII strings.
+/// Avoids `to_lowercase()` allocations.
+fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    haystack.as_bytes()[..needle.len()]
+        .iter()
+        .zip(needle.as_bytes())
+        .all(|(h, n)| h.to_ascii_lowercase() == n.to_ascii_lowercase())
 }
 
 impl Plugin for UnreachableLocationPlugin {
