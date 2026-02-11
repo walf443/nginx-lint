@@ -279,7 +279,8 @@ impl UnreachableLocationPlugin {
         let normalized = pattern.trim_start_matches('^').trim_end_matches('$');
 
         // Wildcard patterns: .* (0+ any), . (any single char), .+ (1+ any)
-        if normalized == ".*" || normalized == "." || normalized == ".+" {
+        // Also /.*: all URIs start with / so /.* matches everything
+        if normalized == ".*" || normalized == "." || normalized == ".+" || normalized == "/.*" {
             return true;
         }
 
@@ -585,6 +586,48 @@ http {
             return 200;
         }
         location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.* matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.* {
+            return 200;
+        }
+        location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_dollar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.*$ matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.*$ {
+            return 200;
+        }
+        location ~ /api {
             return 200;
         }
     }
@@ -907,6 +950,11 @@ location /api {
         assert!(plugin().is_catchall_regex("/"));
         // ^ alone has no constraint, matches everything
         assert!(plugin().is_catchall_regex("^"));
+
+        // /.*  matches all URIs (/ followed by anything)
+        assert!(plugin().is_catchall_regex("/.*"));
+        assert!(plugin().is_catchall_regex("^/.*"));
+        assert!(plugin().is_catchall_regex("^/.*$"));
 
         // ^/$ only matches exactly "/", NOT catch-all
         assert!(!plugin().is_catchall_regex("^/$"));
