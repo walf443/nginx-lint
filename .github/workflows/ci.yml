@@ -79,7 +79,7 @@ jobs:
       - name: Copy docs to web
         run: cp -r target/doc web/api
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
