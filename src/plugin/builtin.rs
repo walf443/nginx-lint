@@ -27,6 +27,9 @@ mod embedded {
     /// trailing-whitespace plugin
     pub const TRAILING_WHITESPACE: &[u8] =
         include_bytes!("../../target/builtin-plugins/trailing_whitespace.wasm");
+    /// block-lines plugin
+    pub const BLOCK_LINES: &[u8] =
+        include_bytes!("../../target/builtin-plugins/block_lines.wasm");
     /// proxy-pass-domain plugin
     pub const PROXY_PASS_DOMAIN: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_pass_domain.wasm");
@@ -190,6 +193,16 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:trailing-whitespace"),
         embedded::TRAILING_WHITESPACE,
+        loader.memory_limit(),
+        loader.fuel_limit(),
+        fuel_enabled,
+    )?);
+
+    // Load block-lines
+    plugins.push(WasmLintRule::new(
+        loader.engine(),
+        PathBuf::from("builtin:block-lines"),
+        embedded::BLOCK_LINES,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,

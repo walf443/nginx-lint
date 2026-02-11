@@ -113,6 +113,11 @@ enabled = true
 [rules.space-before-semicolon]
 enabled = true
 
+[rules.block-lines]
+enabled = true
+# Maximum number of lines allowed in a block (default: 100)
+# max_block_lines = 100
+
 # =============================================================================
 # Syntax Rules
 # =============================================================================
@@ -392,6 +397,8 @@ pub struct RuleConfig {
     /// For invalid-directive-context rule: additional valid parent contexts
     /// Format: { "server" = ["rtmp"], "upstream" = ["rtmp"] }
     pub additional_contexts: Option<HashMap<String, Vec<String>>>,
+    /// For block-lines rule: maximum number of lines allowed in a block
+    pub max_block_lines: Option<usize>,
 }
 
 fn default_true() -> bool {
@@ -553,6 +560,7 @@ impl LintConfig {
                     "indent",
                     "trailing-whitespace",
                     "space-before-semicolon",
+                    "block-lines",
                     "gzip-not-enabled",
                     "missing-error-log",
                     "proxy-pass-domain",
@@ -667,6 +675,9 @@ fn get_known_rule_options(rule_name: &str) -> HashSet<&'static str> {
         "weak-ssl-ciphers" => {
             options.insert("weak_ciphers");
             options.insert("required_exclusions");
+        }
+        "block-lines" => {
+            options.insert("max_block_lines");
         }
         _ => {}
     }

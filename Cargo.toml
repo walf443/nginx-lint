@@ -7,6 +7,7 @@ members = [
     "plugins/builtin/security/weak_ssl_ciphers",
     "plugins/builtin/style/space_before_semicolon",
     "plugins/builtin/style/trailing_whitespace",
+    "plugins/builtin/style/block_lines",
     "plugins/builtin/syntax/duplicate_directive",
     "plugins/builtin/syntax/invalid_directive_context",
     "plugins/builtin/best_practices/add_header_inheritance",
@@ -62,6 +63,7 @@ native-builtin-plugins = [
     "dep:weak-ssl-ciphers-plugin",
     "dep:space-before-semicolon-plugin",
     "dep:trailing-whitespace-plugin",
+    "dep:block-lines-plugin",
     "dep:duplicate-directive-plugin",
     "dep:invalid-directive-context-plugin",
     "dep:add-header-inheritance-plugin",
@@ -117,6 +119,7 @@ deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_s
 weak-ssl-ciphers-plugin = { path = "plugins/builtin/security/weak_ssl_ciphers", optional = true, default-features = false }
 space-before-semicolon-plugin = { path = "plugins/builtin/style/space_before_semicolon", optional = true, default-features = false }
 trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace", optional = true, default-features = false }
+block-lines-plugin = { path = "plugins/builtin/style/block_lines", optional = true, default-features = false }
 duplicate-directive-plugin = { path = "plugins/builtin/syntax/duplicate_directive", optional = true, default-features = false }
 invalid-directive-context-plugin = { path = "plugins/builtin/syntax/invalid_directive_context", optional = true, default-features = false }
 add-header-inheritance-plugin = { path = "plugins/builtin/best_practices/add_header_inheritance", optional = true, default-features = false }

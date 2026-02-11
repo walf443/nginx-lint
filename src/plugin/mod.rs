@@ -39,6 +39,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "duplicate-directive",
     "space-before-semicolon",
     "trailing-whitespace",
+    "block-lines",
     "proxy-pass-domain",
     "upstream-server-no-resolve",
     "proxy-set-header-inheritance",
