@@ -269,19 +269,25 @@ impl UnreachableLocationPlugin {
             if c == '\\' {
                 chars.next();
                 if let Some(&next) = chars.peek() {
-                    // \/ is a literal slash in paths
-                    if next == '/' {
+                    // Escaped literals common in paths: \. \/ \- \_
+                    if next == '/'
+                        || next == '.'
+                        || next == '_'
+                        || next == '-'
+                        || next.is_alphanumeric()
+                    {
                         result.push(next);
                         chars.next();
                     } else {
                         break; // other escapes are regex metacharacters
                     }
                 }
-            } else if c.is_alphanumeric() || c == '/' || c == '_' || c == '-' || c == '.' {
+            } else if c.is_alphanumeric() || c == '/' || c == '_' || c == '-' {
                 result.push(c);
                 chars.next();
             } else {
-                break; // regex metacharacter
+                // Unescaped '.' is a regex wildcard, other chars are metacharacters
+                break;
             }
         }
 
