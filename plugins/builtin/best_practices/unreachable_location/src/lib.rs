@@ -183,12 +183,14 @@ impl UnreachableLocationPlugin {
                 later_normalized.starts_with(earlier_prefix)
             };
 
-            // If prefix matches and:
-            // - The prefix is "/" (catch-all like ^/.*, /.*), shadow everything
-            // - OR the later pattern is longer (more specific path)
-            if prefix_matches
-                && (earlier_prefix == "/" || later_normalized.len() > earlier_prefix.len())
-            {
+            // Check if this is a catch-all pattern (prefix is just "/")
+            // Catch-all patterns like ^/.*, /.*, ^/.*$ match all URIs
+            let is_catchall = earlier_prefix == "/";
+
+            // Shadow if prefix matches and:
+            // - It's a catch-all pattern, OR
+            // - The later pattern is more specific (longer path)
+            if prefix_matches && (is_catchall || later_normalized.len() > earlier_prefix.len()) {
                 return true;
             }
         }
