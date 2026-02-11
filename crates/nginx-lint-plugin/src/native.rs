@@ -96,7 +96,11 @@ impl<P: Plugin> Default for NativePluginRule<P> {
 
 impl<P: Plugin> NativePluginRule<P> {
     pub fn new() -> Self {
-        let plugin = P::default();
+        Self::with_plugin(P::default())
+    }
+
+    /// Create a NativePluginRule with a pre-configured plugin instance
+    pub fn with_plugin(plugin: P) -> Self {
         let spec = plugin.spec();
 
         // Leak strings for 'static lifetime (same approach as WasmLintRule)

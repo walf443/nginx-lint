@@ -73,6 +73,23 @@ impl Linter {
             };
             linter.add_rule(Box::new(rule));
         }
+        // block-lines: use configured max_block_lines if specified
+        #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+        let use_configured_block_lines = config
+            .and_then(|c| c.get_rule_config("block-lines"))
+            .and_then(|cfg| cfg.max_block_lines)
+            .is_some();
+        #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+        if is_enabled("block-lines") && use_configured_block_lines {
+            use nginx_lint_plugin::native::NativePluginRule;
+            let max_lines = config
+                .and_then(|c| c.get_rule_config("block-lines"))
+                .and_then(|cfg| cfg.max_block_lines)
+                .unwrap();
+            let plugin = block_lines_plugin::BlockLinesPlugin::with_max_lines(max_lines);
+            linter.add_rule(Box::new(NativePluginRule::with_plugin(plugin)));
+        }
+
         // Load native plugins when native-builtin-plugins feature is enabled
         #[cfg(feature = "native-builtin-plugins")]
         {
@@ -84,6 +101,10 @@ impl Linter {
                 if plugin.name() == "invalid-directive-context"
                     && use_native_invalid_directive_context
                 {
+                    continue;
+                }
+                // Skip block-lines if configured max_block_lines is used
+                if plugin.name() == "block-lines" && use_configured_block_lines {
                     continue;
                 }
                 if is_enabled(plugin.name()) {
@@ -106,6 +127,10 @@ impl Linter {
                     if plugin.name() == "invalid-directive-context"
                         && use_native_invalid_directive_context
                     {
+                        continue;
+                    }
+                    // Skip block-lines if configured max_block_lines is used
+                    if plugin.name() == "block-lines" && use_configured_block_lines {
                         continue;
                     }
                     if is_enabled(plugin.name()) {

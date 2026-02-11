@@ -29,6 +29,7 @@ pub fn load_native_builtin_plugins() -> Vec<Box<dyn LintRule>> {
         Box::new(NativePluginRule::<
             trailing_whitespace_plugin::TrailingWhitespacePlugin,
         >::new()),
+        Box::new(NativePluginRule::<block_lines_plugin::BlockLinesPlugin>::new()),
         // Syntax plugins
         Box::new(NativePluginRule::<
             duplicate_directive_plugin::DuplicateDirectivePlugin,
