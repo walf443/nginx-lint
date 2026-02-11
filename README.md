@@ -54,7 +54,7 @@ nginx-lint <COMMAND>
 
 | Flag | Description |
 |------|-------------|
-| `-o, --format <FORMAT>` | Output format: `text` (default), `json`, or `github-actions` |
+| `-o, --format <FORMAT>` | Output format: `errorformat` (default), `json`, or `github-actions` |
 | `--fix` | Automatically fix problems |
 | `-c, --config <FILE>` | Path to configuration file |
 | `--context <CONTEXT>` | Parent context for partial configs (e.g., `http,server`) |

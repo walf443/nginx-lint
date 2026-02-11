@@ -19,7 +19,7 @@ pub struct Cli {
     pub files: Vec<PathBuf>,
 
     /// Output format
-    #[arg(short = 'o', long, value_enum, default_value = "text")]
+    #[arg(short = 'o', long, value_enum, default_value = "errorformat")]
     pub format: Format,
 
     /// Automatically fix problems
@@ -92,7 +92,7 @@ pub enum Commands {
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Format {
-    Text,
+    Errorformat,
     Json,
     GithubActions,
 }
@@ -100,7 +100,7 @@ pub enum Format {
 impl From<Format> for OutputFormat {
     fn from(f: Format) -> Self {
         match f {
-            Format::Text => OutputFormat::Text,
+            Format::Errorformat => OutputFormat::ErrorFormat,
             Format::Json => OutputFormat::Json,
             Format::GithubActions => OutputFormat::GithubActions,
         }
