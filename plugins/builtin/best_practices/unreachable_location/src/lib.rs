@@ -212,11 +212,9 @@ impl UnreachableLocationPlugin {
                     // E.g., ~* ^/api$ (exact match) vs ~ /API$ (substring match ending with /API)
                     let earlier_fully_anchored = earlier_has_start_anchor && earlier_has_end_anchor;
                     let later_start_unconstrained = !later_has_start_anchor;
-                    
                     if earlier_fully_anchored && later_start_unconstrained {
                         return false;
                     }
-                    
                     return true;
                 }
                 // Same modifier: only shadow if later is strictly more specific
