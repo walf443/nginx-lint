@@ -247,3 +247,147 @@ http {
         "Expected regex to match .jpg outside of ^~ prefix path"
     );
 }
+
+/// ^~ /static (without trailing slash) also shadows file extension regex.
+#[tokio::test]
+#[ignore]
+async fn prefix_no_regex_without_trailing_slash_shadows_regex() {
+    let nginx = NginxContainer::start_with_health_path(
+        br#"
+events {
+    worker_connections 1024;
+}
+http {
+    server {
+        listen 80;
+
+        location /healthz {
+            return 200 'OK';
+        }
+
+        # ^~ without trailing slash still matches /static/*
+        location ^~ /static {
+            return 200 'prefix-static';
+        }
+
+        # This regex will NOT match /static/style.css because ^~ takes priority
+        location ~* \.(css|js)$ {
+            return 200 'regex-css-js';
+        }
+    }
+}
+"#,
+        "/healthz",
+    )
+    .await;
+
+    // /static/style.css matches ^~ /static prefix, so regex is not checked
+    let resp = reqwest::get(nginx.url("/static/style.css")).await.unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, "prefix-static",
+        "Expected ^~ /static (no trailing slash) to prevent regex match"
+    );
+
+    // /other/style.css should match the regex (no ^~ applies)
+    let resp = reqwest::get(nginx.url("/other/style.css")).await.unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, "regex-css-js",
+        "Expected regex to match .css outside of ^~ prefix path"
+    );
+}
+
+/// ^~ / shadows ALL regex locations since every URI starts with /.
+#[tokio::test]
+#[ignore]
+async fn prefix_no_regex_root_shadows_all_regex() {
+    let nginx = NginxContainer::start_with_health_path(
+        br#"
+events {
+    worker_connections 1024;
+}
+http {
+    server {
+        listen 80;
+
+        location /healthz {
+            return 200 'OK';
+        }
+
+        # ^~ / matches every URI, preventing all regex evaluation
+        location ^~ / {
+            return 200 'prefix-root';
+        }
+
+        location ~ /api {
+            return 200 'regex-api';
+        }
+    }
+}
+"#,
+        "/healthz",
+    )
+    .await;
+
+    // /api/test should match ^~ / (not the regex) because ^~ stops regex search
+    let resp = reqwest::get(nginx.url("/api/test")).await.unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, "prefix-root",
+        "Expected ^~ / to shadow all regex locations"
+    );
+}
+
+/// ^~ /images/photos/ (longer prefix) shadows ~ /images/ (shorter regex literal).
+#[tokio::test]
+#[ignore]
+async fn prefix_no_regex_longer_shadows_shorter_regex() {
+    let nginx = NginxContainer::start_with_health_path(
+        br#"
+events {
+    worker_connections 1024;
+}
+http {
+    server {
+        listen 80;
+
+        location /healthz {
+            return 200 'OK';
+        }
+
+        location ^~ /images/photos/ {
+            return 200 'prefix-photos';
+        }
+
+        # This regex matches /images/ but for /images/photos/* the ^~ wins
+        location ~ /images/ {
+            return 200 'regex-images';
+        }
+    }
+}
+"#,
+        "/healthz",
+    )
+    .await;
+
+    // /images/photos/vacation.jpg matches ^~ /images/photos/, regex not checked
+    let resp = reqwest::get(nginx.url("/images/photos/vacation.jpg"))
+        .await
+        .unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, "prefix-photos",
+        "Expected ^~ /images/photos/ to shadow regex for paths under it"
+    );
+
+    // /images/icons/logo.png should match the regex (^~ doesn't apply)
+    let resp = reqwest::get(nginx.url("/images/icons/logo.png"))
+        .await
+        .unwrap();
+    let body = resp.text().await.unwrap();
+    assert_eq!(
+        body, "regex-images",
+        "Expected regex to match /images/ paths not under ^~ prefix"
+    );
+}
