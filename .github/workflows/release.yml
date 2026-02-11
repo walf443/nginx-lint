@@ -45,7 +45,7 @@ jobs:
           tar czf ../nginx-lint-${{ matrix.target }}.tar.gz nginx-lint
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nginx-lint-${{ matrix.target }}
           path: nginx-lint-${{ matrix.target }}.tar.gz
@@ -57,7 +57,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: nginx-lint-*
           merge-multiple: true
@@ -76,11 +76,11 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: nginx-lint-x86_64-unknown-linux-gnu
           path: /tmp/artifacts
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: nginx-lint-aarch64-unknown-linux-gnu
           path: /tmp/artifacts
