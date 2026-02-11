@@ -175,8 +175,14 @@ impl UnreachableLocationPlugin {
             } else {
                 later.pattern.starts_with(earlier_prefix)
             };
-            if prefix_matches && later.pattern.len() > earlier.pattern.len() {
-                return true;
+            if prefix_matches {
+                // ~* shadows same or longer patterns (case-insensitive superset)
+                if ci && later.pattern.len() >= earlier.pattern.len() {
+                    return true;
+                }
+                if later.pattern.len() > earlier.pattern.len() {
+                    return true;
+                }
             }
         }
 
@@ -660,6 +666,27 @@ http {
             return 200;
         }
         location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_wildcard_shadows_same_length() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api/.* shadows ~ /API/.* (same length, different case, ends with .*)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api/.* {
+            return 200;
+        }
+        location ~ /API/.* {
             return 200;
         }
     }
