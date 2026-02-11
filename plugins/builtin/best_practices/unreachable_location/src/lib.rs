@@ -226,7 +226,7 @@ impl UnreachableLocationPlugin {
     /// 1. `^~ /` matches all URIs
     /// 2. Catch-all regex (e.g., `.*`) is always shadowed
     /// 3. Regex's literal prefix overlaps with `^~` path
-    /// 4. Global extension patterns (e.g., `\.(css|js)$`) are shadowed by any `^~`
+    /// 4. Global extension patterns (e.g., `\.(css|js)$`) may be shadowed for URIs under a `^~` prefix
     fn prefix_might_shadow_regex(&self, prefix: &LocationInfo, regex: &LocationInfo) -> bool {
         let prefix_path = &prefix.pattern;
         let regex_pattern = &regex.pattern;
