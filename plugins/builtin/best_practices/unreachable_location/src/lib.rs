@@ -151,20 +151,36 @@ impl UnreachableLocationPlugin {
 
     /// Check if earlier regex shadows later regex.
     /// This is a heuristic check for common patterns.
+    ///
+    /// When earlier is `~*` (case-insensitive), pattern comparisons are done
+    /// case-insensitively, and same-length patterns also shadow because `~*`
+    /// matches a superset of what `~` matches.
     fn regex_shadows(&self, earlier: &LocationInfo, later: &LocationInfo) -> bool {
         if self.is_catchall_regex(&earlier.pattern) {
             return true;
         }
 
+        // ~* (case-insensitive) can shadow patterns that differ only in case
+        let ci = earlier.modifier == "~*";
+
         // If later pattern is more specific version of earlier
         // e.g., earlier: /api/.* later: /api/v1/.*
-        if earlier.pattern.ends_with(".*")
-            && later
-                .pattern
-                .starts_with(earlier.pattern.trim_end_matches(".*"))
-            && later.pattern.len() > earlier.pattern.len()
-        {
-            return true;
+        if earlier.pattern.ends_with(".*") {
+            let earlier_prefix = earlier.pattern.trim_end_matches(".*");
+            let prefix_matches = if ci {
+                starts_with_ignore_ascii_case(&later.pattern, earlier_prefix)
+            } else {
+                later.pattern.starts_with(earlier_prefix)
+            };
+            if prefix_matches {
+                // ~* shadows same or longer patterns (case-insensitive superset)
+                if ci && later.pattern.len() >= earlier.pattern.len() {
+                    return true;
+                }
+                if later.pattern.len() > earlier.pattern.len() {
+                    return true;
+                }
+            }
         }
 
         // Check for prefix patterns like /foo vs /foo/bar
@@ -175,13 +191,24 @@ impl UnreachableLocationPlugin {
             .trim_end_matches('$');
         let later_base = later.pattern.trim_start_matches('^').trim_end_matches('$');
 
-        if !earlier_base.contains('*')
-            && !earlier_base.contains('+')
-            && !earlier_base.contains('?')
-            && later_base.starts_with(earlier_base)
-            && later_base.len() > earlier_base.len()
+        if !earlier_base.contains('*') && !earlier_base.contains('+') && !earlier_base.contains('?')
         {
-            return true;
+            let starts_with = if ci {
+                starts_with_ignore_ascii_case(later_base, earlier_base)
+            } else {
+                later_base.starts_with(earlier_base)
+            };
+
+            if starts_with {
+                // ~* shadows same or longer patterns (it matches a superset)
+                if ci && later_base.len() >= earlier_base.len() {
+                    return true;
+                }
+                // Same modifier: only shadow if later is strictly more specific
+                if later_base.len() > earlier_base.len() {
+                    return true;
+                }
+            }
         }
 
         false
@@ -242,9 +269,33 @@ impl UnreachableLocationPlugin {
     // =========================================================================
 
     /// Check if a regex pattern is a catch-all that matches any URI.
+    ///
+    /// Detected patterns (with optional `^` prefix and `$` suffix):
+    /// - `.*`, `.`, `.+` — wildcard patterns matching any string
+    /// - `^/` — all nginx URIs start with `/` (but `^/$` only matches root)
+    /// - `/` — all nginx URIs contain `/` (but `/$` only matches paths ending with `/`)
+    /// - `^` — start anchor alone has no constraint, matches everything
     fn is_catchall_regex(&self, pattern: &str) -> bool {
         let normalized = pattern.trim_start_matches('^').trim_end_matches('$');
-        normalized == ".*" || normalized == "." || normalized == ".+"
+
+        // Wildcard patterns: .* (0+ any), . (any single char), .+ (1+ any)
+        // Also /.*: all URIs start with / so /.* matches everything
+        if normalized == ".*" || normalized == "." || normalized == ".+" || normalized == "/.*" {
+            return true;
+        }
+
+        // "/" without end anchor: all URIs start with / (if ^/) or contain / (if /)
+        // But "^/$" or "/$" are NOT catch-all (match root or paths ending with /)
+        if normalized == "/" && !pattern.ends_with('$') {
+            return true;
+        }
+
+        // "^" alone: start anchor with no constraint, matches everything
+        if pattern == "^" {
+            return true;
+        }
+
+        false
     }
 
     /// Check if a `^~` prefix path and a regex pattern have overlapping paths.
@@ -337,6 +388,18 @@ fn is_plain_path_char(c: char) -> bool {
 /// Check if an escaped character represents a literal in path context.
 fn is_escaped_path_literal(c: char) -> bool {
     matches!(c, '/' | '.' | '_' | '-')
+}
+
+/// Case-insensitive `starts_with` for ASCII strings.
+/// Avoids `to_lowercase()` allocations.
+fn starts_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    if haystack.len() < needle.len() {
+        return false;
+    }
+    haystack.as_bytes()[..needle.len()]
+        .iter()
+        .zip(needle.as_bytes())
+        .all(|(h, n)| h.eq_ignore_ascii_case(n))
 }
 
 impl Plugin for UnreachableLocationPlugin {
@@ -461,6 +524,220 @@ http {
         }
         location ~ /api {
             proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/ matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/ {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_slash_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // / matches all URIs (substring match), so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ / {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^ alone matches everything, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^ {
+            return 200;
+        }
+        location ~ /specific {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.* matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.* {
+            return 200;
+        }
+        location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_catchall_caret_slash_dotstar_dollar_shadows_later_regex() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ^/.*$ matches all URIs, so later regex is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/.*$ {
+            return 200;
+        }
+        location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    // =========================================================================
+    // ~* (case-insensitive) shadowing ~ (case-sensitive)
+    // =========================================================================
+
+    #[test]
+    fn test_case_insensitive_shadows_case_sensitive_different_case() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api matches /API (case-insensitive), so ~ /API is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /API {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_shadows_case_sensitive_specific() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api matches /API/v1 (case-insensitive), so ~ /API/v1 is unreachable
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /API/v1 {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_sensitive_before_case_insensitive_not_shadow() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~ /api does NOT match /API, so ~* /API can still match /API
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ /api {
+            return 200;
+        }
+        location ~* /API {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_same_case_already_detected() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api before ~ /api — same text, should be detected
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api {
+            return 200;
+        }
+        location ~ /api {
+            return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_wildcard_shadows_same_length() {
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        // ~* /api/.* shadows ~ /API/.* (same length, different case, ends with .*)
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~* /api/.* {
+            return 200;
+        }
+        location ~ /API/.* {
+            return 200;
         }
     }
 }
@@ -667,6 +944,23 @@ location /api {
         assert!(plugin().is_catchall_regex(".+"));
         assert!(plugin().is_catchall_regex("^.+$"));
 
+        // ^/ matches all URIs (all nginx URIs start with /)
+        assert!(plugin().is_catchall_regex("^/"));
+        // / matches all URIs (all nginx URIs contain /)
+        assert!(plugin().is_catchall_regex("/"));
+        // ^ alone has no constraint, matches everything
+        assert!(plugin().is_catchall_regex("^"));
+
+        // /.*  matches all URIs (/ followed by anything)
+        assert!(plugin().is_catchall_regex("/.*"));
+        assert!(plugin().is_catchall_regex("^/.*"));
+        assert!(plugin().is_catchall_regex("^/.*$"));
+
+        // ^/$ only matches exactly "/", NOT catch-all
+        assert!(!plugin().is_catchall_regex("^/$"));
+        // /$ only matches paths ending with /, NOT catch-all
+        assert!(!plugin().is_catchall_regex("/$"));
+
         assert!(!plugin().is_catchall_regex("/api"));
         assert!(!plugin().is_catchall_regex(r"\.(css|js)$"));
         assert!(!plugin().is_catchall_regex("^/static/.*"));
@@ -863,6 +1157,69 @@ http {
         }
         location ~ /images/ {
             return 200;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_caret_slash() {
+        // ^~ /images/ should shadow ~ ^/ (catch-all: all URIs start with /)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ ^/ {
+            return 404;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_slash() {
+        // ^~ /images/ should shadow ~ / (catch-all: all URIs contain /)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ / {
+            return 404;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_prefix_no_regex_catchall_caret() {
+        // ^~ /images/ should shadow ~ ^ (catch-all: matches everything)
+        let runner = PluginTestRunner::new(UnreachableLocationPlugin);
+
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ^~ /images/ {
+            alias /var/images;
+        }
+        location ~ ^ {
+            return 404;
         }
     }
 }
