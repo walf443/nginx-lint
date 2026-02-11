@@ -242,19 +242,12 @@ impl UnreachableLocationPlugin {
     // =========================================================================
 
     /// Check if a regex pattern is a catch-all that matches any URI.
-    /// e.g., `.*`, `^.*$`, `.`, `.+`
     fn is_catchall_regex(&self, pattern: &str) -> bool {
         let normalized = pattern.trim_start_matches('^').trim_end_matches('$');
         normalized == ".*" || normalized == "." || normalized == ".+"
     }
 
     /// Check if a `^~` prefix path and a regex pattern have overlapping paths.
-    ///
-    /// Extracts the literal prefix from the regex and checks bidirectional overlap:
-    /// - Regex literal starts with prefix → regex is fully under `^~` scope
-    ///   (e.g., `^~ /static/` shadows `~ ^/static/.*\.css$`)
-    /// - Prefix starts with regex literal → partial overlap
-    ///   (e.g., `^~ /images/photos/` shadows `~ /images/`)
     fn prefix_and_regex_paths_overlap(&self, prefix_path: &str, regex_pattern: &str) -> bool {
         let regex_literal = self.extract_regex_literal_prefix(regex_pattern);
         if regex_literal.is_empty() {
@@ -264,15 +257,6 @@ impl UnreachableLocationPlugin {
     }
 
     /// Extract the literal prefix from a regex pattern.
-    ///
-    /// Scans from the start collecting path-safe literal characters, stopping at
-    /// the first regex metacharacter. Escaped path characters (e.g., `\.`, `\/`)
-    /// are treated as literals; unescaped `.` is treated as a wildcard.
-    ///
-    /// Examples:
-    /// - `^/static/.*\.css$` → `/static/`
-    /// - `/images/` → `/images/`
-    /// - `\.(css|js)$` → `.`
     fn extract_regex_literal_prefix(&self, pattern: &str) -> String {
         let s = pattern.trim_start_matches('^');
         let mut result = String::new();
@@ -301,21 +285,17 @@ impl UnreachableLocationPlugin {
     }
 
     /// Check if a regex pattern is a global file extension pattern (no path prefix).
-    /// e.g., `\.(jpg|png|gif)$` or `.*\.(css|js)$`
     fn is_global_extension_pattern(&self, regex_pattern: &str) -> bool {
         let s = regex_pattern.trim_start_matches('^');
 
-        // Must not start with a path prefix
         if s.starts_with('/') {
             return false;
         }
 
-        // Must start like a pure extension pattern: `\.` or `.*\.`
         if !(s.starts_with(r"\.") || s.starts_with(r".*\.")) {
             return false;
         }
 
-        // Ensure no `/` after `\.` to avoid matching path patterns like `\.well-known/`
         if let Some(dot_idx) = s.find(r"\.") {
             let after_dot = &s[dot_idx + 2..];
             if after_dot.contains('/') {
@@ -323,8 +303,6 @@ impl UnreachableLocationPlugin {
             }
         }
 
-        // Typical extension patterns end with `$` or include a group/class
-        // e.g., `\.(jpg|png)$`, `\.[a-z]+$`
         s.ends_with('$') || s.contains('(') || s.contains('[')
     }
 
@@ -357,10 +335,6 @@ fn is_plain_path_char(c: char) -> bool {
 }
 
 /// Check if an escaped character represents a literal in path context.
-/// e.g., `\.` `\/` `\-` `\_` and escaped alphanumerics are literals,
-/// while `\d` `\w` `\s` etc. are regex character classes (but alphanumeric,
-/// so they pass through — acceptable for our heuristic since paths rarely
-/// contain `\d` style sequences).
 fn is_escaped_path_literal(c: char) -> bool {
     c == '/' || c == '.' || c == '_' || c == '-' || c.is_alphanumeric()
 }
@@ -677,7 +651,126 @@ location /api {
     }
 
     // =========================================================================
-    // ^~ prefix shadowing regex - improved detection tests
+    // Utility function unit tests
+    // =========================================================================
+
+    fn plugin() -> UnreachableLocationPlugin {
+        UnreachableLocationPlugin
+    }
+
+    #[test]
+    fn test_is_catchall_regex() {
+        assert!(plugin().is_catchall_regex(".*"));
+        assert!(plugin().is_catchall_regex("^.*"));
+        assert!(plugin().is_catchall_regex("^.*$"));
+        assert!(plugin().is_catchall_regex("."));
+        assert!(plugin().is_catchall_regex(".+"));
+        assert!(plugin().is_catchall_regex("^.+$"));
+
+        assert!(!plugin().is_catchall_regex("/api"));
+        assert!(!plugin().is_catchall_regex(r"\.(css|js)$"));
+        assert!(!plugin().is_catchall_regex("^/static/.*"));
+    }
+
+    #[test]
+    fn test_extract_regex_literal_prefix() {
+        // Strips ^ anchor and extracts path literals
+        assert_eq!(
+            plugin().extract_regex_literal_prefix("^/static/"),
+            "/static/"
+        );
+        assert_eq!(
+            plugin().extract_regex_literal_prefix("/images/"),
+            "/images/"
+        );
+
+        // Stops at unescaped dot (regex wildcard)
+        assert_eq!(
+            plugin().extract_regex_literal_prefix("^/static/.*"),
+            "/static/"
+        );
+
+        // Escaped dot is treated as literal
+        assert_eq!(plugin().extract_regex_literal_prefix(r"\.(css|js)$"), ".");
+        assert_eq!(
+            plugin().extract_regex_literal_prefix(r"^/api/v1\.0/test"),
+            "/api/v1.0/test"
+        );
+
+        // Stops at metacharacters like ( [ *
+        assert_eq!(plugin().extract_regex_literal_prefix("^/api(.*)"), "/api");
+        assert_eq!(plugin().extract_regex_literal_prefix("[a-z]+"), "");
+
+        // Empty for patterns without literal prefix
+        assert_eq!(plugin().extract_regex_literal_prefix(".*"), "");
+    }
+
+    #[test]
+    fn test_prefix_and_regex_paths_overlap() {
+        // Regex literal starts with prefix path
+        assert!(plugin().prefix_and_regex_paths_overlap("/static/", "^/static/.*\\.css$"));
+
+        // Prefix path starts with regex literal
+        assert!(plugin().prefix_and_regex_paths_overlap("/images/photos/", "/images/"));
+
+        // No overlap
+        assert!(!plugin().prefix_and_regex_paths_overlap("/static/", "^/api/"));
+        assert!(!plugin().prefix_and_regex_paths_overlap("/images/", "^/downloads/"));
+
+        // Empty regex literal returns false
+        assert!(!plugin().prefix_and_regex_paths_overlap("/static/", ".*"));
+    }
+
+    #[test]
+    fn test_is_global_extension_pattern() {
+        // Typical extension patterns
+        assert!(plugin().is_global_extension_pattern(r"\.(jpg|png|gif)$"));
+        assert!(plugin().is_global_extension_pattern(r"\.(css|js)$"));
+        assert!(plugin().is_global_extension_pattern(r".*\.(jpg|png)$"));
+        assert!(plugin().is_global_extension_pattern(r"\.[a-z]+$"));
+
+        // Path-prefixed patterns are not global
+        assert!(!plugin().is_global_extension_pattern(r"/static/\.(css|js)$"));
+
+        // Path-like patterns with dot are not extensions
+        assert!(!plugin().is_global_extension_pattern(r"\.well-known/acme"));
+
+        // Patterns without extension shape
+        assert!(!plugin().is_global_extension_pattern("/api"));
+        assert!(!plugin().is_global_extension_pattern(".*"));
+    }
+
+    #[test]
+    fn test_is_plain_path_char() {
+        assert!(is_plain_path_char('/'));
+        assert!(is_plain_path_char('a'));
+        assert!(is_plain_path_char('Z'));
+        assert!(is_plain_path_char('0'));
+        assert!(is_plain_path_char('_'));
+        assert!(is_plain_path_char('-'));
+
+        assert!(!is_plain_path_char('.'));
+        assert!(!is_plain_path_char('*'));
+        assert!(!is_plain_path_char('('));
+        assert!(!is_plain_path_char('\\'));
+    }
+
+    #[test]
+    fn test_is_escaped_path_literal() {
+        assert!(is_escaped_path_literal('/'));
+        assert!(is_escaped_path_literal('.'));
+        assert!(is_escaped_path_literal('_'));
+        assert!(is_escaped_path_literal('-'));
+        assert!(is_escaped_path_literal('a'));
+
+        assert!(!is_escaped_path_literal('('));
+        assert!(!is_escaped_path_literal('['));
+        assert!(!is_escaped_path_literal('*'));
+        assert!(!is_escaped_path_literal('+'));
+    }
+
+    // =========================================================================
+    // ^~ prefix shadowing regex - integration tests
     // =========================================================================
 
     #[test]
