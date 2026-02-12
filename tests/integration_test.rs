@@ -1891,13 +1891,13 @@ http {
 
     let inheritance_errors: Vec<_> = errors
         .iter()
-        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .filter(|e| e.rule == "directive-inheritance")
         .collect();
 
     assert_eq!(
         inheritance_errors.len(),
         1,
-        "Expected 1 proxy-set-header-inheritance warning, got: {:?}",
+        "Expected 1 directive-inheritance warning, got: {:?}",
         inheritance_errors
     );
     assert!(
@@ -1930,12 +1930,12 @@ http {
 
     let inheritance_errors: Vec<_> = errors
         .iter()
-        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .filter(|e| e.rule == "directive-inheritance")
         .collect();
 
     assert!(
         inheritance_errors.is_empty(),
-        "Expected no proxy-set-header-inheritance warning when all headers included, got: {:?}",
+        "Expected no directive-inheritance warning when all headers included, got: {:?}",
         inheritance_errors
     );
 }
@@ -1960,7 +1960,7 @@ http {
 
     let inheritance_errors: Vec<_> = errors
         .iter()
-        .filter(|e| e.rule == "proxy-set-header-inheritance")
+        .filter(|e| e.rule == "directive-inheritance")
         .collect();
 
     assert!(

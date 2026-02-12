@@ -1,5 +1,5 @@
 [package]
-name = "proxy-set-header-inheritance-plugin"
+name = "directive-inheritance-plugin"
 version = "0.5.0"
 edition = "2024"
 

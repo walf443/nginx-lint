@@ -10,7 +10,7 @@ members = [
     "plugins/builtin/style/block_lines",
     "plugins/builtin/syntax/duplicate_directive",
     "plugins/builtin/syntax/invalid_directive_context",
-    "plugins/builtin/best_practices/add_header_inheritance",
+    "plugins/builtin/best_practices/directive_inheritance",
     "plugins/builtin/best_practices/alias_location_slash_mismatch",
     "plugins/builtin/best_practices/client_max_body_size_not_set",
     "plugins/builtin/best_practices/gzip_not_enabled",
@@ -21,7 +21,6 @@ members = [
     "plugins/builtin/best_practices/proxy_missing_host_header",
     "plugins/builtin/best_practices/proxy_pass_domain",
     "plugins/builtin/best_practices/proxy_pass_with_uri",
-    "plugins/builtin/best_practices/proxy_set_header_inheritance",
     "plugins/builtin/best_practices/root_in_location",
     "plugins/builtin/best_practices/try_files_with_proxy",
     "plugins/builtin/best_practices/unreachable_location",
@@ -66,7 +65,7 @@ native-builtin-plugins = [
     "dep:block-lines-plugin",
     "dep:duplicate-directive-plugin",
     "dep:invalid-directive-context-plugin",
-    "dep:add-header-inheritance-plugin",
+    "dep:directive-inheritance-plugin",
     "dep:alias-location-slash-mismatch-plugin",
     "dep:client-max-body-size-not-set-plugin",
     "dep:gzip-not-enabled-plugin",
@@ -77,7 +76,6 @@ native-builtin-plugins = [
     "dep:proxy-missing-host-header-plugin",
     "dep:proxy-pass-domain-plugin",
     "dep:proxy-pass-with-uri-plugin",
-    "dep:proxy-set-header-inheritance-plugin",
     "dep:root-in-location-plugin",
     "dep:try-files-with-proxy-plugin",
     "dep:unreachable-location-plugin",
@@ -122,7 +120,7 @@ trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace
 block-lines-plugin = { path = "plugins/builtin/style/block_lines", optional = true, default-features = false }
 duplicate-directive-plugin = { path = "plugins/builtin/syntax/duplicate_directive", optional = true, default-features = false }
 invalid-directive-context-plugin = { path = "plugins/builtin/syntax/invalid_directive_context", optional = true, default-features = false }
-add-header-inheritance-plugin = { path = "plugins/builtin/best_practices/add_header_inheritance", optional = true, default-features = false }
+directive-inheritance-plugin = { path = "plugins/builtin/best_practices/directive_inheritance", optional = true, default-features = false }
 alias-location-slash-mismatch-plugin = { path = "plugins/builtin/best_practices/alias_location_slash_mismatch", optional = true, default-features = false }
 client-max-body-size-not-set-plugin = { path = "plugins/builtin/best_practices/client_max_body_size_not_set", optional = true, default-features = false }
 gzip-not-enabled-plugin = { path = "plugins/builtin/best_practices/gzip_not_enabled", optional = true, default-features = false }
@@ -133,7 +131,6 @@ proxy-keepalive-plugin = { path = "plugins/builtin/best_practices/proxy_keepaliv
 proxy-missing-host-header-plugin = { path = "plugins/builtin/best_practices/proxy_missing_host_header", optional = true, default-features = false }
 proxy-pass-domain-plugin = { path = "plugins/builtin/best_practices/proxy_pass_domain", optional = true, default-features = false }
 proxy-pass-with-uri-plugin = { path = "plugins/builtin/best_practices/proxy_pass_with_uri", optional = true, default-features = false }
-proxy-set-header-inheritance-plugin = { path = "plugins/builtin/best_practices/proxy_set_header_inheritance", optional = true, default-features = false }
 root-in-location-plugin = { path = "plugins/builtin/best_practices/root_in_location", optional = true, default-features = false }
 try-files-with-proxy-plugin = { path = "plugins/builtin/best_practices/try_files_with_proxy", optional = true, default-features = false }
 unreachable-location-plugin = { path = "plugins/builtin/best_practices/unreachable_location", optional = true, default-features = false }

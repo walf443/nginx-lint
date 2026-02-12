@@ -1,18 +1,3 @@
-//! Container-based integration tests for the proxy-set-header-inheritance rule.
-//!
-//! Verifies that `proxy_set_header` in a child block completely overrides
-//! parent block headers -they are NOT inherited in nginx.
-//!
-//! Each test uses two server blocks in the same nginx:
-//! - Port 8080 (backend): echoes request headers via `$http_<name>` variables
-//! - Port 80 (frontend): proxies to the backend with various header configurations
-//!
-//! Run with:
-//!   cargo test -p proxy-set-header-inheritance-plugin --test container_test -- --ignored
-//!
-//! Specify nginx version via environment variable (default: "1.27"):
-//!   NGINX_VERSION=1.26 cargo test -p proxy-set-header-inheritance-plugin --test container_test -- --ignored
-
 use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 
 /// Helper to extract a named value from "key=value\nkey=value" response body.
@@ -28,7 +13,7 @@ fn get_value(body: &str, key: &str) -> String {
 /// When a child block has proxy_set_header, parent headers are lost.
 #[tokio::test]
 #[ignore]
-async fn child_proxy_set_header_overrides_parent() {
+async fn child_overrides_parent() {
     let nginx = NginxContainer::start(
         br#"
 events {
@@ -49,7 +34,7 @@ http {
         proxy_set_header X-Real-IP $remote_addr;
 
         location / {
-            # Only sets X-Custom -parent headers are lost
+            # Only sets X-Custom - parent headers are lost
             proxy_set_header X-Custom "value";
             proxy_pass http://127.0.0.1:8080;
         }
@@ -91,7 +76,7 @@ http {
 /// When all parent headers are repeated in the child block, they are preserved.
 #[tokio::test]
 #[ignore]
-async fn repeated_headers_in_child_preserves_all() {
+async fn repeated_in_child_preserves_all() {
     let nginx = NginxContainer::start(
         br#"
 events {
@@ -173,7 +158,7 @@ http {
         proxy_set_header X-Real-IP $remote_addr;
 
         location / {
-            # No proxy_set_header here -parent headers are inherited
+            # No proxy_set_header here - parent headers are inherited
             proxy_pass http://127.0.0.1:8080;
         }
     }
@@ -191,7 +176,6 @@ http {
         .unwrap();
     let body = resp.text().await.unwrap();
 
-    // Without override in child, parent headers are inherited
     assert_eq!(
         get_value(&body, "host"),
         "example.com",
