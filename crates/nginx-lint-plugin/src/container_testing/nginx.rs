@@ -269,6 +269,26 @@ impl NginxContainer {
         self.exec(&["sh", "-c", script]).await
     }
 
+    /// Retrieve the self-signed TLS certificate (PEM) from an SSL container.
+    ///
+    /// Returns a [`reqwest::tls::Certificate`] that can be passed to
+    /// [`reqwest::ClientBuilder::add_root_certificate`] to trust this
+    /// container's self-signed certificate for HTTPS requests.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the certificate file cannot be read from the container.
+    pub async fn ssl_certificate(&self) -> reqwest::tls::Certificate {
+        let output = self.exec(&["cat", "/tmp/cert.pem"]).await;
+        assert!(
+            output.exit_code == 0 && !output.stdout.is_empty(),
+            "Failed to read /tmp/cert.pem from container: {}",
+            output.stderr
+        );
+        reqwest::tls::Certificate::from_pem(output.stdout.as_bytes())
+            .expect("Failed to parse certificate PEM")
+    }
+
     /// Build a full URL for the given path on this container.
     ///
     /// Returns `https://` for SSL containers, `http://` otherwise.
