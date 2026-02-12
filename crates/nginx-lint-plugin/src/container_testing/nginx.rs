@@ -127,6 +127,7 @@ pub struct NginxContainer {
     container: ContainerAsync<GenericImage>,
     host: String,
     port: u16,
+    tls: bool,
     bridge_ip: Option<String>,
 }
 
@@ -233,7 +234,7 @@ impl NginxContainer {
             .entrypoint("sh")
             .cmd(vec!["-c", startup_script])
             .wait_for(WaitFor::message_on_stderr("start worker process"))
-            .expose_port(None)
+            .expose_port(Some(443))
             .start(config)
             .await
     }
@@ -270,12 +271,15 @@ impl NginxContainer {
 
     /// Build a full URL for the given path on this container.
     ///
+    /// Returns `https://` for SSL containers, `http://` otherwise.
+    ///
     /// ```text
     /// let url = nginx.url("/api/v1/health");
     /// // => "http://127.0.0.1:32768/api/v1/health"
     /// ```
     pub fn url(&self, path: &str) -> String {
-        format!("http://{}:{}{}", self.host, self.port, path)
+        let scheme = if self.tls { "https" } else { "http" };
+        format!("{scheme}://{}:{}{}", self.host, self.port, path)
     }
 
     /// Get the host address of the container.
@@ -416,6 +420,7 @@ impl NginxContainerBuilder {
             container,
             host,
             port,
+            tls: self.expose_port == Some(443),
             bridge_ip,
         }
     }
