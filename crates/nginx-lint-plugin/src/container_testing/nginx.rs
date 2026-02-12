@@ -152,43 +152,34 @@ impl NginxContainer {
     /// Start an nginx container with the given config.
     ///
     /// Waits until `GET /` returns HTTP 200 before returning.
-    /// Use [`Self::start_with_health_path`] if `/` is not suitable as a health check.
+    /// Use [`NginxContainer::builder`] with [`NginxContainerBuilder::health_path`]
+    /// if `/` is not suitable as a health check.
     pub async fn start(config: &[u8]) -> Self {
-        Self::start_with_health_path(config, "/").await
+        Self::builder().start(config).await
     }
 
     /// Start an nginx container with the given config, using a custom health check path.
     ///
     /// This is useful when `GET /` may not return 200 (e.g., when testing
     /// autoindex off which returns 403 for directories).
+    ///
+    /// # Deprecated
+    ///
+    /// Use [`NginxContainer::builder`] with [`NginxContainerBuilder::health_path`] instead:
+    ///
+    /// ```rust,no_run
+    /// # async fn example() {
+    /// use nginx_lint_plugin::container_testing::NginxContainer;
+    ///
+    /// let nginx = NginxContainer::builder()
+    ///     .health_path("/healthz")
+    ///     .start(b"events {} http { server { listen 80; } }")
+    ///     .await;
+    /// # }
+    /// ```
+    #[deprecated(note = "use NginxContainer::builder().health_path(...).start(...) instead")]
     pub async fn start_with_health_path(config: &[u8], health_path: &str) -> Self {
-        let img = nginx_image_config();
-        let container = GenericImage::new(&img.image_name, &img.image_tag)
-            .with_exposed_port(80.tcp())
-            .with_wait_for(WaitFor::http(
-                HttpWaitStrategy::new(health_path).with_expected_status_code(200u16),
-            ))
-            .with_copy_to(&img.conf_path, config.to_vec())
-            .with_startup_timeout(Duration::from_secs(120))
-            .start()
-            .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to start {} container (is Docker running?): {}",
-                    img.full_image(),
-                    e
-                )
-            });
-
-        let host = container.get_host().await.unwrap().to_string();
-        let port = container.get_host_port_ipv4(80).await.unwrap();
-
-        Self {
-            container,
-            host,
-            port,
-            bridge_ip: None,
-        }
+        Self::builder().health_path(health_path).start(config).await
     }
 
     /// Create a builder for configuring an nginx container with advanced options.
