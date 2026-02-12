@@ -196,11 +196,15 @@ impl NginxContainer {
     /// Use the builder when you need to attach the container to a Docker network
     /// or customise the health-check path.
     ///
-    /// ```rust,ignore
+    /// ```rust,no_run
+    /// # async fn example() {
+    /// use nginx_lint_plugin::container_testing::NginxContainer;
+    ///
     /// let nginx = NginxContainer::builder()
     ///     .network("my-network")
     ///     .start(b"events {} http { server { listen 80; } }")
     ///     .await;
+    /// # }
     /// ```
     pub fn builder() -> NginxContainerBuilder {
         NginxContainerBuilder {
@@ -291,7 +295,7 @@ impl NginxContainer {
 
     /// Build a full URL for the given path on this container.
     ///
-    /// ```rust,ignore
+    /// ```text
     /// let url = nginx.url("/api/v1/health");
     /// // => "http://127.0.0.1:32768/api/v1/health"
     /// ```
@@ -500,7 +504,7 @@ impl NginxConfigTestResult {
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// use nginx_lint_plugin::container_testing::nginx_config_test;
 ///
 /// #[test]

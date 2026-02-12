@@ -7,8 +7,8 @@
 //!
 //! # Example
 //!
-//! ```rust,ignore
-//! use nginx_lint_plugin::container_testing::NginxContainer;
+//! ```rust,no_run
+//! use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 //!
 //! #[tokio::test]
 //! #[ignore]
