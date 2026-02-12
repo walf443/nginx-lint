@@ -28,6 +28,7 @@
 //! }
 //! ```
 
+pub mod coredns;
 pub mod nginx;
 
 pub use reqwest;
@@ -43,6 +44,8 @@ use testcontainers::{
     core::{IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
     runners::AsyncRunner,
 };
+
+use coredns::CoreDnsContainer;
 
 // ---------------------------------------------------------------------------
 // DnsTestEnv — reusable CoreDNS + two-backend test environment
@@ -65,9 +68,8 @@ pub struct DnsTestEnv {
     backend_a: ContainerAsync<GenericImage>,
     #[allow(dead_code)]
     backend_b: ContainerAsync<GenericImage>,
-    coredns: ContainerAsync<GenericImage>,
+    coredns: CoreDnsContainer,
     backend_b_ip: String,
-    coredns_ip: String,
     network: String,
 }
 
@@ -86,52 +88,6 @@ http {{
 "#
     )
     .into_bytes()
-}
-
-/// Generate the CoreDNS Corefile.
-fn dns_corefile() -> Vec<u8> {
-    br#".:53 {
-    hosts /etc/coredns/hosts {
-        reload 1s
-        ttl 1
-        fallthrough
-    }
-    log
-}
-"#
-    .to_vec()
-}
-
-/// Generate a CoreDNS hosts file mapping `backend.test` to the given IP.
-fn dns_hosts_file(ip: &str) -> Vec<u8> {
-    format!("{ip} backend.test\n").into_bytes()
-}
-
-/// Overwrite the CoreDNS hosts file inside the container using `docker cp`.
-///
-/// CoreDNS uses a scratch base image (no shell), so `docker exec` cannot be
-/// used. Instead we write a temp file on the host and copy it in.
-fn docker_cp_hosts(container_id: &str, content: &[u8]) {
-    let mut tmpfile = std::env::temp_dir();
-    tmpfile.push(format!("coredns-hosts-{}", std::process::id()));
-    std::fs::write(&tmpfile, content).expect("Failed to write temp hosts file");
-
-    let output = std::process::Command::new("docker")
-        .args([
-            "cp",
-            &tmpfile.display().to_string(),
-            &format!("{container_id}:/etc/coredns/hosts"),
-        ])
-        .output()
-        .expect("Failed to run docker cp");
-
-    let _ = std::fs::remove_file(&tmpfile);
-
-    assert!(
-        output.status.success(),
-        "docker cp failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
 }
 
 impl DnsTestEnv {
@@ -178,40 +134,20 @@ impl DnsTestEnv {
         eprintln!("backend-a IP: {backend_a_ip}");
         eprintln!("backend-b IP: {backend_b_ip}");
 
-        let coredns = GenericImage::new("coredns/coredns", "latest")
-            .with_wait_for(WaitFor::message_on_stdout("CoreDNS-"))
-            .with_copy_to("/etc/coredns/Corefile", dns_corefile())
-            .with_copy_to(
-                "/etc/coredns/hosts",
-                dns_hosts_file(&backend_a_ip.to_string()),
-            )
-            .with_cmd(vec!["-conf", "/etc/coredns/Corefile"])
-            .with_network(&network)
-            .with_startup_timeout(Duration::from_secs(60))
-            .start()
-            .await
-            .expect("Failed to start CoreDNS");
-
-        let coredns_ip = coredns
-            .get_bridge_ip_address()
-            .await
-            .expect("Failed to get CoreDNS IP");
-
-        eprintln!("CoreDNS IP: {coredns_ip}");
+        let coredns = CoreDnsContainer::start(&network, &backend_a_ip.to_string()).await;
 
         Self {
             backend_a,
             backend_b,
             coredns,
             backend_b_ip: backend_b_ip.to_string(),
-            coredns_ip: coredns_ip.to_string(),
             network,
         }
     }
 
     /// CoreDNS IP address (for nginx `resolver` directive).
     pub fn coredns_ip(&self) -> &str {
-        &self.coredns_ip
+        self.coredns.ip()
     }
 
     /// Docker network name (for `with_network()`).
@@ -248,7 +184,7 @@ impl DnsTestEnv {
     /// Waits 5 seconds for CoreDNS reload (1s) + DNS TTL (1s) + resolver
     /// valid (1s) + margin.
     pub async fn switch_to_backend_b(&self) {
-        docker_cp_hosts(self.coredns.id(), &dns_hosts_file(&self.backend_b_ip));
+        self.coredns.update_hosts(&self.backend_b_ip);
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 
@@ -258,7 +194,7 @@ impl DnsTestEnv {
         format!(
             "echo 'nameserver {}' > /etc/resolv.conf && \
              exec nginx -g 'daemon off; error_log /dev/stderr notice;'",
-            self.coredns_ip
+            self.coredns_ip()
         )
     }
 }
