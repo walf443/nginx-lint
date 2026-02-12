@@ -85,7 +85,7 @@ http {
 #[tokio::test]
 #[ignore]
 async fn server_tokens_on_exposes_version_in_error_page() {
-    let nginx = NginxContainer::start_with_health_path(
+    let nginx = NginxContainer::start(
         br#"
 events {
     worker_connections 1024;
@@ -100,7 +100,6 @@ http {
     }
 }
 "#,
-        "/",
     )
     .await;
 
@@ -119,7 +118,7 @@ http {
 #[tokio::test]
 #[ignore]
 async fn server_tokens_off_hides_version_in_error_page() {
-    let nginx = NginxContainer::start_with_health_path(
+    let nginx = NginxContainer::start(
         br#"
 events {
     worker_connections 1024;
@@ -134,7 +133,6 @@ http {
     }
 }
 "#,
-        "/",
     )
     .await;
 
