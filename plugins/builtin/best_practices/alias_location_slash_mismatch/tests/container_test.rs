@@ -41,7 +41,10 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::builder().health_path("/healthz").start(config.as_bytes()).await;
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(config.as_bytes())
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(
@@ -78,7 +81,10 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::builder().health_path("/healthz").start(config.as_bytes()).await;
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(config.as_bytes())
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(
@@ -116,7 +122,10 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::builder().health_path("/healthz").start(config.as_bytes()).await;
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(config.as_bytes())
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/mime.types")).await.unwrap();
     assert_eq!(
