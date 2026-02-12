@@ -87,10 +87,6 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
     // Frontend 2: upstream WITH resolve + zone (DNS re-resolved dynamically)
     let frontend_resolve = env.start_nginx(resolve_config(env.coredns_ip())).await;
 
-    let host = frontend_no_resolve.host().to_string();
-    let port_no_resolve = frontend_no_resolve.port();
-    let port_resolve = frontend_resolve.port();
-
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -99,7 +95,7 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
     // --- Phase 1: Both frontends should reach backend-a ---
 
     let body_no_resolve = client
-        .get(format!("http://{host}:{port_no_resolve}/"))
+        .get(frontend_no_resolve.url("/"))
         .send()
         .await
         .expect("Phase 1: no-resolve request failed")
@@ -108,7 +104,7 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
         .unwrap();
 
     let body_resolve = client
-        .get(format!("http://{host}:{port_resolve}/"))
+        .get(frontend_resolve.url("/"))
         .send()
         .await
         .expect("Phase 1: resolve request failed")
@@ -135,7 +131,7 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
     // --- Phase 2: no-resolve should still reach backend-a (stale), resolve should reach backend-b ---
 
     let body_no_resolve = client
-        .get(format!("http://{host}:{port_no_resolve}/"))
+        .get(frontend_no_resolve.url("/"))
         .send()
         .await
         .expect("Phase 2: no-resolve request failed")
@@ -144,7 +140,7 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
         .unwrap();
 
     let body_resolve = client
-        .get(format!("http://{host}:{port_resolve}/"))
+        .get(frontend_resolve.url("/"))
         .send()
         .await
         .expect("Phase 2: resolve request failed")
