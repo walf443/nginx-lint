@@ -202,8 +202,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn prefix_no_regex_shadows_regex() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -227,9 +229,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     // /images/photo.jpg matches ^~ /images/ prefix, so regex is not checked
     let resp = reqwest::get(nginx.url("/images/photo.jpg")).await.unwrap();
@@ -252,8 +253,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn prefix_no_regex_without_trailing_slash_shadows_regex() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -277,9 +280,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     // /static/style.css matches ^~ /static prefix, so regex is not checked
     let resp = reqwest::get(nginx.url("/static/style.css")).await.unwrap();
@@ -302,8 +304,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn prefix_no_regex_root_shadows_all_regex() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -326,9 +330,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     // /api/test should match ^~ / (not the regex) because ^~ stops regex search
     let resp = reqwest::get(nginx.url("/api/test")).await.unwrap();
@@ -343,8 +346,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn prefix_no_regex_longer_shadows_shorter_regex() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -367,9 +372,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     // /images/photos/vacation.jpg matches ^~ /images/photos/, regex not checked
     let resp = reqwest::get(nginx.url("/images/photos/vacation.jpg"))

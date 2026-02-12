@@ -50,7 +50,7 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::start(config.as_bytes()).await;
+    let nginx = NginxContainer::start(config).await;
 
     // Even for existing file (50x.html), proxy_pass handles the request
     let resp = reqwest::get(nginx.url("/50x.html")).await.unwrap();
@@ -103,7 +103,7 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::start(config.as_bytes()).await;
+    let nginx = NginxContainer::start(config).await;
 
     // Existing file: served directly from disk (not proxied)
     let resp = reqwest::get(nginx.url("/index.html")).await.unwrap();

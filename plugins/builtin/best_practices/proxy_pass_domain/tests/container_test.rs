@@ -20,8 +20,8 @@ use nginx_lint_plugin::container_testing::{DnsTestEnv, reqwest};
 use std::time::Duration;
 
 /// Generate nginx config for the "direct domain" approach (DNS cached at startup).
-fn direct_domain_config() -> Vec<u8> {
-    br#"events { worker_connections 64; }
+fn direct_domain_config() -> &'static str {
+    r#"events { worker_connections 64; }
 http {
     server {
         listen 80;
@@ -31,11 +31,10 @@ http {
     }
 }
 "#
-    .to_vec()
 }
 
 /// Generate nginx config for the "variable + resolver" approach (DNS re-resolved).
-fn variable_resolver_config(resolver_ip: &str) -> Vec<u8> {
+fn variable_resolver_config(resolver_ip: &str) -> String {
     format!(
         r#"events {{ worker_connections 64; }}
 http {{
@@ -50,7 +49,6 @@ http {{
 }}
 "#
     )
-    .into_bytes()
 }
 
 /// Verify that `proxy_pass http://domain` caches DNS at startup while
@@ -71,10 +69,6 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
         .start_nginx(variable_resolver_config(env.coredns_ip()))
         .await;
 
-    let host = frontend_direct.get_host().await.unwrap().to_string();
-    let port_direct = frontend_direct.get_host_port_ipv4(80).await.unwrap();
-    let port_variable = frontend_variable.get_host_port_ipv4(80).await.unwrap();
-
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -83,7 +77,7 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
     // --- Phase 1: Both frontends should reach backend-a ---
 
     let body_direct = client
-        .get(format!("http://{host}:{port_direct}/"))
+        .get(frontend_direct.url("/"))
         .send()
         .await
         .expect("Phase 1: direct request failed")
@@ -92,7 +86,7 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
         .unwrap();
 
     let body_variable = client
-        .get(format!("http://{host}:{port_variable}/"))
+        .get(frontend_variable.url("/"))
         .send()
         .await
         .expect("Phase 1: variable request failed")
@@ -119,7 +113,7 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
     // --- Phase 2: Direct should still reach backend-a (stale), variable should reach backend-b ---
 
     let body_direct = client
-        .get(format!("http://{host}:{port_direct}/"))
+        .get(frontend_direct.url("/"))
         .send()
         .await
         .expect("Phase 2: direct request failed")
@@ -128,7 +122,7 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
         .unwrap();
 
     let body_variable = client
-        .get(format!("http://{host}:{port_variable}/"))
+        .get(frontend_variable.url("/"))
         .send()
         .await
         .expect("Phase 2: variable request failed")

@@ -14,8 +14,10 @@ use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 #[tokio::test]
 #[ignore]
 async fn autoindex_on_shows_directory_listing() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -34,9 +36,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();
     assert_eq!(resp.status(), 200);
@@ -52,8 +53,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn autoindex_off_returns_403_for_directory() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -72,9 +75,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();
     assert_eq!(
@@ -87,8 +89,10 @@ http {
 #[tokio::test]
 #[ignore]
 async fn autoindex_default_returns_403_for_directory() {
-    let nginx = NginxContainer::start_with_health_path(
-        br#"
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(
+            br#"
 events {
     worker_connections 1024;
 }
@@ -106,9 +110,8 @@ http {
     }
 }
 "#,
-        "/healthz",
-    )
-    .await;
+        )
+        .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();
     assert_eq!(
