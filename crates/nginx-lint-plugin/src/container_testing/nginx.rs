@@ -127,6 +127,7 @@ pub struct NginxContainer {
     container: ContainerAsync<GenericImage>,
     host: String,
     port: u16,
+    bridge_ip: Option<String>,
 }
 
 /// Output from executing a command inside a container.
@@ -186,6 +187,25 @@ impl NginxContainer {
             container,
             host,
             port,
+            bridge_ip: None,
+        }
+    }
+
+    /// Create a builder for configuring an nginx container with advanced options.
+    ///
+    /// Use the builder when you need to attach the container to a Docker network
+    /// or customise the health-check path.
+    ///
+    /// ```rust,ignore
+    /// let nginx = NginxContainer::builder()
+    ///     .network("my-network")
+    ///     .start(b"events {} http { server { listen 80; } }")
+    ///     .await;
+    /// ```
+    pub fn builder() -> NginxContainerBuilder {
+        NginxContainerBuilder {
+            network: None,
+            health_path: "/".to_string(),
         }
     }
 
@@ -233,6 +253,7 @@ impl NginxContainer {
             container,
             host,
             port: 0,
+            bridge_ip: None,
         }
     }
 
@@ -284,6 +305,85 @@ impl NginxContainer {
     /// Get the mapped port for port 80 on the container.
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Get the bridge IP address of the container, if it was started on a network.
+    ///
+    /// This is only available when the container was created via
+    /// [`NginxContainerBuilder`] with a network configured.
+    pub fn bridge_ip(&self) -> Option<&str> {
+        self.bridge_ip.as_deref()
+    }
+}
+
+/// Builder for creating [`NginxContainer`] instances with advanced configuration.
+///
+/// Use [`NginxContainer::builder()`] to create a new builder.
+pub struct NginxContainerBuilder {
+    network: Option<String>,
+    health_path: String,
+}
+
+impl NginxContainerBuilder {
+    /// Attach the container to a Docker network.
+    ///
+    /// When a network is set, the container's bridge IP address is resolved
+    /// after startup and available via [`NginxContainer::bridge_ip()`].
+    pub fn network(mut self, network: &str) -> Self {
+        self.network = Some(network.to_string());
+        self
+    }
+
+    /// Set the HTTP health-check path (default: `"/"`).
+    pub fn health_path(mut self, path: &str) -> Self {
+        self.health_path = path.to_string();
+        self
+    }
+
+    /// Build and start the nginx container with the given configuration.
+    pub async fn start(self, config: &[u8]) -> NginxContainer {
+        let img = nginx_image_config();
+        let mut image = GenericImage::new(&img.image_name, &img.image_tag)
+            .with_exposed_port(80.tcp())
+            .with_wait_for(WaitFor::http(
+                HttpWaitStrategy::new(&self.health_path).with_expected_status_code(200u16),
+            ))
+            .with_copy_to(&img.conf_path, config.to_vec())
+            .with_startup_timeout(Duration::from_secs(120));
+
+        if let Some(ref network) = self.network {
+            image = image.with_network(network);
+        }
+
+        let container = image.start().await.unwrap_or_else(|e| {
+            panic!(
+                "Failed to start {} container (is Docker running?): {}",
+                img.full_image(),
+                e
+            )
+        });
+
+        let host = container.get_host().await.unwrap().to_string();
+        let port = container.get_host_port_ipv4(80).await.unwrap();
+
+        let bridge_ip = if self.network.is_some() {
+            Some(
+                container
+                    .get_bridge_ip_address()
+                    .await
+                    .expect("Failed to get bridge IP address")
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
+        NginxContainer {
+            container,
+            host,
+            port,
+            bridge_ip,
+        }
     }
 }
 

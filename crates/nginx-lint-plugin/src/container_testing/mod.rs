@@ -65,9 +65,9 @@ use coredns::CoreDnsContainer;
 /// resolution from `backend-a` to `backend-b`.
 pub struct DnsTestEnv {
     #[allow(dead_code)]
-    backend_a: ContainerAsync<GenericImage>,
+    backend_a: NginxContainer,
     #[allow(dead_code)]
-    backend_b: ContainerAsync<GenericImage>,
+    backend_b: NginxContainer,
     coredns: CoreDnsContainer,
     backend_b_ip: String,
     network: String,
@@ -96,51 +96,36 @@ impl DnsTestEnv {
     /// Initially `backend.test` resolves to `backend-a`.
     pub async fn start(network_prefix: &str) -> Self {
         let network = format!("{network_prefix}-{}", std::process::id());
-        let nginx_version = nginx_version();
 
-        let backend_a = GenericImage::new("nginx", &nginx_version)
-            .with_exposed_port(80.tcp())
-            .with_wait_for(WaitFor::http(
-                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
-            ))
-            .with_copy_to("/etc/nginx/nginx.conf", dns_backend_config("backend-a"))
-            .with_network(&network)
-            .with_startup_timeout(Duration::from_secs(120))
-            .start()
-            .await
-            .expect("Failed to start backend-a");
+        let backend_a = NginxContainer::builder()
+            .network(&network)
+            .start(&dns_backend_config("backend-a"))
+            .await;
 
-        let backend_b = GenericImage::new("nginx", &nginx_version)
-            .with_exposed_port(80.tcp())
-            .with_wait_for(WaitFor::http(
-                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
-            ))
-            .with_copy_to("/etc/nginx/nginx.conf", dns_backend_config("backend-b"))
-            .with_network(&network)
-            .with_startup_timeout(Duration::from_secs(120))
-            .start()
-            .await
-            .expect("Failed to start backend-b");
+        let backend_b = NginxContainer::builder()
+            .network(&network)
+            .start(&dns_backend_config("backend-b"))
+            .await;
 
         let backend_a_ip = backend_a
-            .get_bridge_ip_address()
-            .await
-            .expect("Failed to get backend-a IP");
+            .bridge_ip()
+            .expect("Failed to get backend-a IP")
+            .to_string();
         let backend_b_ip = backend_b
-            .get_bridge_ip_address()
-            .await
-            .expect("Failed to get backend-b IP");
+            .bridge_ip()
+            .expect("Failed to get backend-b IP")
+            .to_string();
 
         eprintln!("backend-a IP: {backend_a_ip}");
         eprintln!("backend-b IP: {backend_b_ip}");
 
-        let coredns = CoreDnsContainer::start(&network, &backend_a_ip.to_string()).await;
+        let coredns = CoreDnsContainer::start(&network, &backend_a_ip).await;
 
         Self {
             backend_a,
             backend_b,
             coredns,
-            backend_b_ip: backend_b_ip.to_string(),
+            backend_b_ip,
             network,
         }
     }
