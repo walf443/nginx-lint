@@ -203,6 +203,8 @@ impl NginxContainer {
             health_path: "/".to_string(),
             entrypoint: None,
             cmd: None,
+            wait_for: None,
+            expose_port: Some(80),
         }
     }
 
@@ -220,7 +222,6 @@ impl NginxContainer {
     /// Use [`Self::exec`] or [`Self::exec_shell`] to run commands (like
     /// `openssl s_client`) inside the container for protocol-level testing.
     pub async fn start_ssl(config: &[u8]) -> Self {
-        let img = nginx_image_config();
         let startup_script = concat!(
             "openssl req -x509 -nodes -days 1 -newkey rsa:2048 ",
             "-keyout /tmp/key.pem -out /tmp/cert.pem ",
@@ -228,30 +229,13 @@ impl NginxContainer {
             "exec nginx -g 'daemon off; error_log /dev/stderr notice;'"
         );
 
-        let container = GenericImage::new(&img.image_name, &img.image_tag)
-            .with_entrypoint("sh")
-            .with_wait_for(WaitFor::message_on_stderr("start worker process"))
-            .with_copy_to(&img.conf_path, config.to_vec())
-            .with_cmd(vec!["-c", startup_script])
-            .with_startup_timeout(Duration::from_secs(120))
-            .start()
+        Self::builder()
+            .entrypoint("sh")
+            .cmd(vec!["-c", startup_script])
+            .wait_for(WaitFor::message_on_stderr("start worker process"))
+            .expose_port(None)
+            .start(config)
             .await
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to start {} SSL container (is Docker running?): {}",
-                    img.full_image(),
-                    e
-                )
-            });
-
-        let host = container.get_host().await.unwrap().to_string();
-
-        Self {
-            container,
-            host,
-            port: 0,
-            bridge_ip: None,
-        }
     }
 
     /// Execute a command inside the running container and return the output.
@@ -321,6 +305,8 @@ pub struct NginxContainerBuilder {
     health_path: String,
     entrypoint: Option<String>,
     cmd: Option<Vec<String>>,
+    wait_for: Option<WaitFor>,
+    expose_port: Option<u16>,
 }
 
 impl NginxContainerBuilder {
@@ -351,6 +337,23 @@ impl NginxContainerBuilder {
         self
     }
 
+    /// Override the wait-for strategy.
+    ///
+    /// By default the builder waits for an HTTP 200 on [`Self::health_path`].
+    /// Use this to wait for a log message instead (e.g. for SSL containers
+    /// that don't expose an HTTP port).
+    pub fn wait_for(mut self, wait_for: WaitFor) -> Self {
+        self.wait_for = Some(wait_for);
+        self
+    }
+
+    /// Set the port to expose (default: `80`). Pass `None` to skip port
+    /// exposure (e.g. for SSL containers that are tested via `exec_shell`).
+    pub fn expose_port(mut self, port: Option<u16>) -> Self {
+        self.expose_port = port;
+        self
+    }
+
     /// Build and start the nginx container with the given configuration.
     pub async fn start(self, config: &[u8]) -> NginxContainer {
         let img = nginx_image_config();
@@ -359,11 +362,18 @@ impl NginxContainerBuilder {
             generic = generic.with_entrypoint(entrypoint);
         }
 
-        let mut image = generic
-            .with_exposed_port(80.tcp())
-            .with_wait_for(WaitFor::http(
+        let wait = self.wait_for.unwrap_or_else(|| {
+            WaitFor::http(
                 HttpWaitStrategy::new(&self.health_path).with_expected_status_code(200u16),
-            ))
+            )
+        });
+
+        if let Some(port) = self.expose_port {
+            generic = generic.with_exposed_port(port.tcp());
+        }
+
+        let mut image = generic
+            .with_wait_for(wait)
             .with_copy_to(&img.conf_path, config.to_vec())
             .with_startup_timeout(Duration::from_secs(120));
 
@@ -384,7 +394,11 @@ impl NginxContainerBuilder {
         });
 
         let host = container.get_host().await.unwrap().to_string();
-        let port = container.get_host_port_ipv4(80).await.unwrap();
+        let port = if let Some(p) = self.expose_port {
+            container.get_host_port_ipv4(p).await.unwrap()
+        } else {
+            0
+        };
 
         let bridge_ip = if self.network.is_some() {
             Some(
