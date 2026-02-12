@@ -42,7 +42,11 @@ fn dns_hosts_file(ip: &str) -> Vec<u8> {
 /// used. Instead we write a temp file on the host and copy it in.
 fn docker_cp_hosts(container_id: &str, content: &[u8]) {
     let mut tmpfile = std::env::temp_dir();
-    tmpfile.push(format!("coredns-hosts-{}", std::process::id()));
+    tmpfile.push(format!(
+        "coredns-hosts-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
     std::fs::write(&tmpfile, content).expect("Failed to write temp hosts file");
 
     let output = std::process::Command::new("docker")

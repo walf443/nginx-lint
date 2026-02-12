@@ -307,7 +307,7 @@ impl NginxContainer {
         &self.host
     }
 
-    /// Get the mapped port for port 80 on the container.
+    /// Get the mapped host port for the exposed container port (default: 80, SSL: 443).
     pub fn port(&self) -> u16 {
         self.port
     }
