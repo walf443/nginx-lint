@@ -206,6 +206,8 @@ impl NginxContainer {
         NginxContainerBuilder {
             network: None,
             health_path: "/".to_string(),
+            entrypoint: None,
+            cmd: None,
         }
     }
 
@@ -322,6 +324,8 @@ impl NginxContainer {
 pub struct NginxContainerBuilder {
     network: Option<String>,
     health_path: String,
+    entrypoint: Option<String>,
+    cmd: Option<Vec<String>>,
 }
 
 impl NginxContainerBuilder {
@@ -340,10 +344,27 @@ impl NginxContainerBuilder {
         self
     }
 
+    /// Override the container entrypoint (e.g. `"sh"`).
+    pub fn entrypoint(mut self, entrypoint: &str) -> Self {
+        self.entrypoint = Some(entrypoint.to_string());
+        self
+    }
+
+    /// Override the container command (e.g. `vec!["-c", "script"]`).
+    pub fn cmd(mut self, cmd: Vec<&str>) -> Self {
+        self.cmd = Some(cmd.into_iter().map(|s| s.to_string()).collect());
+        self
+    }
+
     /// Build and start the nginx container with the given configuration.
     pub async fn start(self, config: &[u8]) -> NginxContainer {
         let img = nginx_image_config();
-        let mut image = GenericImage::new(&img.image_name, &img.image_tag)
+        let mut generic = GenericImage::new(&img.image_name, &img.image_tag);
+        if let Some(ref entrypoint) = self.entrypoint {
+            generic = generic.with_entrypoint(entrypoint);
+        }
+
+        let mut image = generic
             .with_exposed_port(80.tcp())
             .with_wait_for(WaitFor::http(
                 HttpWaitStrategy::new(&self.health_path).with_expected_status_code(200u16),
@@ -351,6 +372,10 @@ impl NginxContainerBuilder {
             .with_copy_to(&img.conf_path, config.to_vec())
             .with_startup_timeout(Duration::from_secs(120));
 
+        if let Some(ref cmd) = self.cmd {
+            let cmd_refs: Vec<&str> = cmd.iter().map(|s| s.as_str()).collect();
+            image = image.with_cmd(cmd_refs);
+        }
         if let Some(ref network) = self.network {
             image = image.with_network(network);
         }

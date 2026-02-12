@@ -87,9 +87,9 @@ async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
     // Frontend 2: upstream WITH resolve + zone (DNS re-resolved dynamically)
     let frontend_resolve = env.start_nginx(resolve_config(env.coredns_ip())).await;
 
-    let host = frontend_no_resolve.get_host().await.unwrap().to_string();
-    let port_no_resolve = frontend_no_resolve.get_host_port_ipv4(80).await.unwrap();
-    let port_resolve = frontend_resolve.get_host_port_ipv4(80).await.unwrap();
+    let host = frontend_no_resolve.host().to_string();
+    let port_no_resolve = frontend_no_resolve.port();
+    let port_resolve = frontend_resolve.port();
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))

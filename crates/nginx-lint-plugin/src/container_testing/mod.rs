@@ -39,12 +39,6 @@ pub use nginx::*;
 
 use std::time::Duration;
 
-use testcontainers::{
-    ContainerAsync, GenericImage, ImageExt,
-    core::{IntoContainerPort, WaitFor, wait::HttpWaitStrategy},
-    runners::AsyncRunner,
-};
-
 use coredns::CoreDnsContainer;
 
 // ---------------------------------------------------------------------------
@@ -144,24 +138,15 @@ impl DnsTestEnv {
     /// `/etc/resolv.conf` overridden to use CoreDNS.
     ///
     /// The returned container exposes port 80 and is ready to serve requests.
-    pub async fn start_nginx(&self, config: Vec<u8>) -> ContainerAsync<GenericImage> {
-        let (img_name, img_tag) = nginx_image();
-        let conf_path = nginx_conf_path();
+    pub async fn start_nginx(&self, config: Vec<u8>) -> NginxContainer {
         let startup_script = self.nginx_startup_script();
 
-        GenericImage::new(&img_name, &img_tag)
-            .with_exposed_port(80.tcp())
-            .with_entrypoint("sh")
-            .with_wait_for(WaitFor::http(
-                HttpWaitStrategy::new("/").with_expected_status_code(200u16),
-            ))
-            .with_copy_to(&conf_path, config)
-            .with_cmd(vec!["-c", &startup_script])
-            .with_network(&self.network)
-            .with_startup_timeout(Duration::from_secs(120))
-            .start()
+        NginxContainer::builder()
+            .network(&self.network)
+            .entrypoint("sh")
+            .cmd(vec!["-c", &startup_script])
+            .start(&config)
             .await
-            .expect("Failed to start nginx frontend")
     }
 
     /// Switch DNS from `backend-a` to `backend-b` and wait for propagation.

@@ -71,9 +71,9 @@ async fn domain_proxy_pass_caches_dns_while_variable_re_resolves() {
         .start_nginx(variable_resolver_config(env.coredns_ip()))
         .await;
 
-    let host = frontend_direct.get_host().await.unwrap().to_string();
-    let port_direct = frontend_direct.get_host_port_ipv4(80).await.unwrap();
-    let port_variable = frontend_variable.get_host_port_ipv4(80).await.unwrap();
+    let host = frontend_direct.host().to_string();
+    let port_direct = frontend_direct.port();
+    let port_variable = frontend_variable.port();
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
