@@ -68,7 +68,7 @@ pub struct DnsTestEnv {
 }
 
 /// Generate a minimal nginx config that returns a fixed body identifying a backend.
-fn dns_backend_config(name: &str) -> Vec<u8> {
+fn dns_backend_config(name: &str) -> String {
     format!(
         r#"events {{ worker_connections 64; }}
 http {{
@@ -81,7 +81,6 @@ http {{
 }}
 "#
     )
-    .into_bytes()
 }
 
 impl DnsTestEnv {
@@ -93,12 +92,12 @@ impl DnsTestEnv {
 
         let backend_a = NginxContainer::builder()
             .network(&network)
-            .start(&dns_backend_config("backend-a"))
+            .start(dns_backend_config("backend-a"))
             .await;
 
         let backend_b = NginxContainer::builder()
             .network(&network)
-            .start(&dns_backend_config("backend-b"))
+            .start(dns_backend_config("backend-b"))
             .await;
 
         let backend_a_ip = backend_a
@@ -138,14 +137,14 @@ impl DnsTestEnv {
     /// `/etc/resolv.conf` overridden to use CoreDNS.
     ///
     /// The returned container exposes port 80 and is ready to serve requests.
-    pub async fn start_nginx(&self, config: Vec<u8>) -> NginxContainer {
+    pub async fn start_nginx(&self, config: impl Into<Vec<u8>>) -> NginxContainer {
         let startup_script = self.nginx_startup_script();
 
         NginxContainer::builder()
             .network(&self.network)
             .entrypoint("sh")
             .cmd(vec!["-c", &startup_script])
-            .start(&config)
+            .start(config)
             .await
     }
 

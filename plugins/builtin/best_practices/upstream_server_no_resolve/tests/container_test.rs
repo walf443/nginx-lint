@@ -20,8 +20,8 @@ use nginx_lint_plugin::container_testing::{self, DnsTestEnv, reqwest};
 use std::time::Duration;
 
 /// Generate nginx config for upstream WITHOUT `resolve` (DNS cached at startup).
-fn no_resolve_config() -> Vec<u8> {
-    br#"events { worker_connections 64; }
+fn no_resolve_config() -> &'static str {
+    r#"events { worker_connections 64; }
 http {
     upstream backend {
         server backend.test:80;
@@ -34,13 +34,12 @@ http {
     }
 }
 "#
-    .to_vec()
 }
 
 /// Generate nginx config for upstream WITH `resolve` + `zone` (DNS re-resolved).
 ///
 /// Requires nginx 1.27.3+ or nginx Plus.
-fn resolve_config(resolver_ip: &str) -> Vec<u8> {
+fn resolve_config(resolver_ip: &str) -> String {
     format!(
         r#"events {{ worker_connections 64; }}
 http {{
@@ -58,7 +57,6 @@ http {{
 }}
 "#
     )
-    .into_bytes()
 }
 
 /// Verify that `upstream { server domain; }` caches DNS at startup while

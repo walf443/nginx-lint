@@ -20,8 +20,8 @@ use nginx_lint_plugin::container_testing::{DnsTestEnv, reqwest};
 use std::time::Duration;
 
 /// Generate nginx config for the "direct domain" approach (DNS cached at startup).
-fn direct_domain_config() -> Vec<u8> {
-    br#"events { worker_connections 64; }
+fn direct_domain_config() -> &'static str {
+    r#"events { worker_connections 64; }
 http {
     server {
         listen 80;
@@ -31,11 +31,10 @@ http {
     }
 }
 "#
-    .to_vec()
 }
 
 /// Generate nginx config for the "variable + resolver" approach (DNS re-resolved).
-fn variable_resolver_config(resolver_ip: &str) -> Vec<u8> {
+fn variable_resolver_config(resolver_ip: &str) -> String {
     format!(
         r#"events {{ worker_connections 64; }}
 http {{
@@ -50,7 +49,6 @@ http {{
 }}
 "#
     )
-    .into_bytes()
 }
 
 /// Verify that `proxy_pass http://domain` caches DNS at startup while

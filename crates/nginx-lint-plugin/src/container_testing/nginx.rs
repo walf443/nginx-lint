@@ -154,7 +154,7 @@ impl NginxContainer {
     /// Waits until `GET /` returns HTTP 200 before returning.
     /// Use [`NginxContainer::builder`] with [`NginxContainerBuilder::health_path`]
     /// if `/` is not suitable as a health check.
-    pub async fn start(config: &[u8]) -> Self {
+    pub async fn start(config: impl Into<Vec<u8>>) -> Self {
         Self::builder().start(config).await
     }
 
@@ -178,7 +178,7 @@ impl NginxContainer {
     /// # }
     /// ```
     #[deprecated(note = "use NginxContainer::builder().health_path(...).start(...) instead")]
-    pub async fn start_with_health_path(config: &[u8], health_path: &str) -> Self {
+    pub async fn start_with_health_path(config: impl Into<Vec<u8>>, health_path: &str) -> Self {
         Self::builder().health_path(health_path).start(config).await
     }
 
@@ -221,7 +221,7 @@ impl NginxContainer {
     ///
     /// Use [`Self::exec`] or [`Self::exec_shell`] to run commands (like
     /// `openssl s_client`) inside the container for protocol-level testing.
-    pub async fn start_ssl(config: &[u8]) -> Self {
+    pub async fn start_ssl(config: impl Into<Vec<u8>>) -> Self {
         let startup_script = concat!(
             "openssl req -x509 -nodes -days 1 -newkey rsa:2048 ",
             "-keyout /tmp/key.pem -out /tmp/cert.pem ",
@@ -355,7 +355,7 @@ impl NginxContainerBuilder {
     }
 
     /// Build and start the nginx container with the given configuration.
-    pub async fn start(self, config: &[u8]) -> NginxContainer {
+    pub async fn start(self, config: impl Into<Vec<u8>>) -> NginxContainer {
         let img = nginx_image_config();
         let mut generic = GenericImage::new(&img.image_name, &img.image_tag);
         if let Some(ref entrypoint) = self.entrypoint {
@@ -374,7 +374,7 @@ impl NginxContainerBuilder {
 
         let mut image = generic
             .with_wait_for(wait)
-            .with_copy_to(&img.conf_path, config.to_vec())
+            .with_copy_to(&img.conf_path, config.into())
             .with_startup_timeout(Duration::from_secs(120));
 
         if let Some(ref cmd) = self.cmd {

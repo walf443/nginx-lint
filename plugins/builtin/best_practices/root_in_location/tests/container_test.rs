@@ -41,7 +41,7 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::start(config.as_bytes()).await;
+    let nginx = NginxContainer::start(config).await;
 
     // / location serves files (root inherited from server)
     let resp = reqwest::get(nginx.url("/index.html")).await.unwrap();
@@ -80,7 +80,7 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::start(config.as_bytes()).await;
+    let nginx = NginxContainer::start(config).await;
 
     // / location has root set - serves files
     let resp = reqwest::get(nginx.url("/index.html")).await.unwrap();
@@ -128,7 +128,7 @@ http {{
 }}
 "#
     );
-    let nginx = NginxContainer::start(config.as_bytes()).await;
+    let nginx = NginxContainer::start(config).await;
 
     // Both locations with root work
     let resp = reqwest::get(nginx.url("/index.html")).await.unwrap();

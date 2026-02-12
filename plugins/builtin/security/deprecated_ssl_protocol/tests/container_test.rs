@@ -15,7 +15,7 @@
 use nginx_lint_plugin::container_testing::NginxContainer;
 
 /// Build an nginx SSL config with the given ssl_protocols directive.
-fn ssl_config(ssl_protocols: &str) -> Vec<u8> {
+fn ssl_config(ssl_protocols: &str) -> String {
     format!(
         r#"
 events {{ worker_connections 1024; }}
@@ -31,14 +31,13 @@ http {{
 "#,
         ssl_protocols = ssl_protocols,
     )
-    .into_bytes()
 }
 
 /// With only TLSv1.2 and TLSv1.3 enabled, TLSv1.2 connection succeeds.
 #[tokio::test]
 #[ignore]
 async fn modern_protocols_tlsv1_2_succeeds() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("TLSv1.2 TLSv1.3")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("TLSv1.2 TLSv1.3")).await;
     let output = nginx
         .exec_shell(
             "echo | openssl s_client -connect 127.0.0.1:443 -tls1_2 2>&1 | grep 'Protocol  :'",
@@ -55,7 +54,7 @@ async fn modern_protocols_tlsv1_2_succeeds() {
 #[tokio::test]
 #[ignore]
 async fn modern_protocols_tlsv1_0_rejected() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("TLSv1.2 TLSv1.3")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("TLSv1.2 TLSv1.3")).await;
     let output = nginx
         .exec_shell("echo | openssl s_client -connect 127.0.0.1:443 -tls1 2>&1")
         .await;
@@ -72,7 +71,7 @@ async fn modern_protocols_tlsv1_0_rejected() {
 #[tokio::test]
 #[ignore]
 async fn modern_protocols_tlsv1_1_rejected() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("TLSv1.2 TLSv1.3")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("TLSv1.2 TLSv1.3")).await;
     let output = nginx
         .exec_shell("echo | openssl s_client -connect 127.0.0.1:443 -tls1_1 2>&1")
         .await;
@@ -91,7 +90,7 @@ async fn modern_protocols_tlsv1_1_rejected() {
 #[tokio::test]
 #[ignore]
 async fn deprecated_tlsv1_0_fails_even_when_configured() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("TLSv1 TLSv1.1 TLSv1.2")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("TLSv1 TLSv1.1 TLSv1.2")).await;
     let output = nginx
         .exec_shell("echo | openssl s_client -connect 127.0.0.1:443 -tls1 2>&1")
         .await;

@@ -14,7 +14,7 @@ use nginx_lint_plugin::container_testing::NginxContainer;
 
 /// Build an nginx SSL config with the given ssl_ciphers directive.
 /// Uses TLSv1.2 only to ensure cipher negotiation is predictable.
-fn ssl_config(ssl_ciphers: &str) -> Vec<u8> {
+fn ssl_config(ssl_ciphers: &str) -> String {
     format!(
         r#"
 events {{ worker_connections 1024; }}
@@ -31,7 +31,6 @@ http {{
 "#,
         ssl_ciphers = ssl_ciphers,
     )
-    .into_bytes()
 }
 
 /// With strong cipher configuration (ECDHE only), a PFS cipher succeeds.
@@ -39,7 +38,7 @@ http {{
 #[ignore]
 async fn strong_ciphers_accept_pfs_connection() {
     let ciphers = "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5";
-    let nginx = NginxContainer::start_ssl(&ssl_config(ciphers)).await;
+    let nginx = NginxContainer::start_ssl(ssl_config(ciphers)).await;
     let output = nginx
         .exec_shell(
             "echo | openssl s_client -connect 127.0.0.1:443 -tls1_2 -cipher ECDHE-RSA-AES128-GCM-SHA256 2>&1 | grep 'Cipher is'",
@@ -60,7 +59,7 @@ async fn strong_ciphers_accept_pfs_connection() {
 #[ignore]
 async fn strong_ciphers_reject_non_pfs() {
     let ciphers = "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5";
-    let nginx = NginxContainer::start_ssl(&ssl_config(ciphers)).await;
+    let nginx = NginxContainer::start_ssl(ssl_config(ciphers)).await;
     let output = nginx
         .exec_shell(
             "echo | openssl s_client -connect 127.0.0.1:443 -tls1_2 -cipher AES128-SHA 2>&1",
@@ -80,7 +79,7 @@ async fn strong_ciphers_reject_non_pfs() {
 #[tokio::test]
 #[ignore]
 async fn all_ciphers_allow_non_pfs() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("ALL")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("ALL")).await;
     let output = nginx
         .exec_shell(
             "echo | openssl s_client -connect 127.0.0.1:443 -tls1_2 -cipher AES128-SHA 2>&1 | grep 'Cipher is'",
@@ -100,7 +99,7 @@ async fn all_ciphers_allow_non_pfs() {
 #[tokio::test]
 #[ignore]
 async fn rc4_rejected_by_openssl_even_with_all() {
-    let nginx = NginxContainer::start_ssl(&ssl_config("ALL")).await;
+    let nginx = NginxContainer::start_ssl(ssl_config("ALL")).await;
     let output = nginx
         .exec_shell("echo | openssl s_client -connect 127.0.0.1:443 -tls1_2 -cipher RC4-SHA 2>&1")
         .await;
