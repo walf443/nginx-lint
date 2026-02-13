@@ -19,6 +19,8 @@ struct DirectiveSpec {
     name: &'static str,
     /// Whether the first argument key comparison is case-insensitive
     case_insensitive: bool,
+    /// If true, all numeric arguments are separate keys (for error_page)
+    multi_key: bool,
 }
 
 /// Directives that have the "override, not inherit" behavior in nginx
@@ -26,30 +28,42 @@ const CHECKED_DIRECTIVES: &[DirectiveSpec] = &[
     DirectiveSpec {
         name: "proxy_set_header",
         case_insensitive: true,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "add_header",
         case_insensitive: true,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "fastcgi_param",
         case_insensitive: false,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "proxy_hide_header",
         case_insensitive: true,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "grpc_set_header",
         case_insensitive: true,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "uwsgi_param",
         case_insensitive: false,
+        multi_key: false,
     },
     DirectiveSpec {
         name: "scgi_param",
         case_insensitive: false,
+        multi_key: false,
+    },
+    DirectiveSpec {
+        name: "error_page",
+        case_insensitive: false,
+        multi_key: true,
     },
 ];
 
@@ -103,15 +117,32 @@ impl DirectiveInheritancePlugin {
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item
                 && let Some(spec) = Self::find_spec(&directive.name)
-                && let Some(first_arg) = directive.first_arg()
             {
-                let key = Self::normalize_key(first_arg, spec);
-                let info = DirectiveInfo {
-                    key_normalized: key.clone(),
-                    directive_text: Self::directive_to_text(directive),
-                    line: directive.span.start.line,
-                };
-                result.entry(spec.name).or_default().insert(key, info);
+                let directive_text = Self::directive_to_text(directive);
+                let line = directive.span.start.line;
+
+                if spec.multi_key {
+                    // Extract all numeric arguments as separate keys (for error_page)
+                    for arg in &directive.args {
+                        if arg.as_str().parse::<u16>().is_ok() {
+                            let key = arg.as_str().to_string();
+                            let info = DirectiveInfo {
+                                key_normalized: key.clone(),
+                                directive_text: directive_text.clone(),
+                                line,
+                            };
+                            result.entry(spec.name).or_default().insert(key, info);
+                        }
+                    }
+                } else if let Some(first_arg) = directive.first_arg() {
+                    let key = Self::normalize_key(first_arg, spec);
+                    let info = DirectiveInfo {
+                        key_normalized: key.clone(),
+                        directive_text,
+                        line,
+                    };
+                    result.entry(spec.name).or_default().insert(key, info);
+                }
             }
         }
 
@@ -219,10 +250,13 @@ impl DirectiveInheritancePlugin {
                 .map(|d| format!("'{}'", d.key_normalized))
                 .collect();
 
-            let missing_texts: Vec<&str> = missing_sorted
+            let mut missing_texts: Vec<&str> = missing_sorted
                 .iter()
                 .map(|d| d.directive_text.as_str())
                 .collect();
+            // Deduplicate: multi-key directives (e.g., error_page 500 502 503 504 /50x.html)
+            // may register multiple keys pointing to the same directive text.
+            missing_texts.dedup();
 
             let error = err_builder
                 .warning_at(
@@ -775,6 +809,142 @@ http {
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("grpc_set_header"));
         assert!(errors[0].message.contains("host"));
+    }
+
+    // ========================================================================
+    // error_page tests (new)
+    // ========================================================================
+
+    #[test]
+    fn test_error_page_missing_parent() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        error_page 404 /404.html;
+
+        location / {
+            error_page 403 /403.html;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = DirectiveInheritancePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("error_page"));
+        assert!(errors[0].message.contains("404"));
+    }
+
+    #[test]
+    fn test_error_page_multi_code() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        error_page 500 502 503 504 /50x.html;
+
+        location / {
+            error_page 403 /403.html;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = DirectiveInheritancePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("'500'"));
+        assert!(errors[0].message.contains("'502'"));
+        assert!(errors[0].message.contains("'503'"));
+        assert!(errors[0].message.contains("'504'"));
+
+        // Fix should insert the original directive (only once, not 4 times)
+        let fix = &errors[0].fixes[0];
+        let count = fix
+            .new_text
+            .matches("error_page 500 502 503 504 /50x.html;")
+            .count();
+        assert_eq!(
+            count, 1,
+            "Fix should contain the directive exactly once: {}",
+            fix.new_text
+        );
+    }
+
+    #[test]
+    fn test_error_page_all_included() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        error_page 404 /404.html;
+
+        location / {
+            error_page 404 /404.html;
+            error_page 403 /403.html;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_error_page_no_child() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        error_page 404 /404.html;
+        error_page 500 502 503 504 /50x.html;
+
+        location / {
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_error_page_with_response_code() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        error_page 404 =200 /empty.gif;
+
+        location / {
+            error_page 403 /403.html;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = DirectiveInheritancePlugin;
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("'404'"));
     }
 
     // ========================================================================

@@ -10,6 +10,7 @@
 //!   NGINX_VERSION=1.26 cargo test -p directive-inheritance-plugin --test container_test -- --ignored
 
 mod add_header;
+mod error_page;
 mod fastcgi_param;
 mod proxy_hide_header;
 mod proxy_set_header;
