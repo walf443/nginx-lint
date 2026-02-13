@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/container-tests.yml"
       - "plugins/builtin/**/tests/container_test.rs"
+      - "plugins/builtin/**/tests/container_test/**"
       - "crates/nginx-lint-plugin/src/container_testing.rs"
 
 env:
@@ -34,6 +35,9 @@ jobs:
       - name: Pull CoreDNS image
         run: docker pull coredns/coredns:latest
 
+      - name: Pull PHP-FPM image
+        run: docker pull php:8.3-fpm
+
       - name: Run container tests
         env:
           NGINX_IMAGE: ${{ matrix.nginx-image }}
@@ -42,7 +46,7 @@ jobs:
           passed=0
           failed=0
           for dir in plugins/builtin/*/*/; do
-            if [ -f "$dir/tests/container_test.rs" ]; then
+            if [ -f "$dir/tests/container_test.rs" ] || [ -f "$dir/tests/container_test/main.rs" ]; then
               name=$(basename "$dir")
               pkg=$(grep '^name = ' "$dir/Cargo.toml" | head -1 | sed 's/name = "\(.*\)"/\1/')
               echo "::group::$name (${{ matrix.nginx-image }})"
