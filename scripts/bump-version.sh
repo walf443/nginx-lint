@@ -38,16 +38,22 @@ done
 
 echo "Bumping version to $NEW_VERSION in ${#CARGO_FILES[@]} Cargo.toml files..."
 
+sed_inplace() {
+    if sed --version 2>/dev/null | grep -q GNU; then
+        sed -i "$@"
+    else
+        sed -i '' "$@"
+    fi
+}
+
 for file in "${CARGO_FILES[@]}"; do
     relative="${file#$ROOT_DIR/}"
     # Replace the version line in [package] section
-    if sed --version 2>/dev/null | grep -q GNU; then
-        # GNU sed
-        sed -i "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$file"
-    else
-        # BSD sed (macOS)
-        sed -i '' "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$file"
-    fi
+    sed_inplace "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$file"
+    # Update internal crate dependency versions
+    sed_inplace "s/\(nginx-lint-parser = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
+    sed_inplace "s/\(nginx-lint-common = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
+    sed_inplace "s/\(nginx-lint-plugin = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     echo "  Updated $relative"
 done
 
