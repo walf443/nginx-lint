@@ -4,7 +4,7 @@ use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
 ///
 /// Server block has `limit_conn strict 1` (1 concurrent connection per IP).
 /// The /test/ location has no limit_conn, so the parent's limit is inherited.
-/// Uses `limit_rate 1` to keep the first connection open while testing the second.
+/// Uses `limit_rate 100` to keep the first connection open while testing the second.
 #[tokio::test]
 #[ignore]
 async fn no_child_override_inherits_parent() {
@@ -22,7 +22,7 @@ http {
     server {
         listen 8080;
         location / {
-            return 200 'aaaaaaaaaaaaaaaaaaaa';
+            return 200 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         }
     }
 
@@ -37,7 +37,7 @@ http {
 
         location /test/ {
             # No limit_conn here - parent's strict limit (1 conn) is inherited
-            limit_rate 1;
+            limit_rate 100;
             proxy_pass http://127.0.0.1:8080;
         }
     }
@@ -48,7 +48,7 @@ http {
 
     let client = reqwest::Client::new();
 
-    // First request starts streaming body at 1 byte/sec, holding the connection open
+    // First request starts streaming body at 100 bytes/sec, holding the connection open
     let resp1 = client.get(nginx.url("/test/")).send().await.unwrap();
     assert_eq!(resp1.status(), 200, "First request should succeed");
 
@@ -84,7 +84,7 @@ http {
     server {
         listen 8080;
         location / {
-            return 200 'aaaaaaaaaaaaaaaaaaaa';
+            return 200 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         }
     }
 
@@ -100,7 +100,7 @@ http {
         location /test/ {
             # Only loose limit (100 conns) - parent's strict (1 conn) is lost
             limit_conn loose 100;
-            limit_rate 1;
+            limit_rate 100;
             proxy_pass http://127.0.0.1:8080;
         }
     }
@@ -145,7 +145,7 @@ http {
     server {
         listen 8080;
         location / {
-            return 200 'aaaaaaaaaaaaaaaaaaaa';
+            return 200 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         }
     }
 
@@ -162,7 +162,7 @@ http {
             # Good: parent limit_conn repeated, plus new one
             limit_conn strict 1;
             limit_conn loose 100;
-            limit_rate 1;
+            limit_rate 100;
             proxy_pass http://127.0.0.1:8080;
         }
     }
