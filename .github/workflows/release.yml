@@ -117,7 +117,7 @@ jobs:
           tar xzf nginx-lint-aarch64-unknown-linux-gnu.tar.gz
           mv nginx-lint /tmp/docker-context/nginx-lint-arm64
           cat > /tmp/docker-context/Dockerfile <<'DOCKERFILE'
-          FROM debian:bookworm-slim
+          FROM debian:trixie-slim
           ARG TARGETARCH
           COPY nginx-lint-${TARGETARCH} /usr/local/bin/nginx-lint
           ENTRYPOINT ["nginx-lint"]
