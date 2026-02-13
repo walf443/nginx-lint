@@ -12,6 +12,7 @@
 mod add_header;
 mod error_page;
 mod fastcgi_param;
+mod limit_conn;
 mod limit_req;
 mod proxy_hide_header;
 mod proxy_set_header;
