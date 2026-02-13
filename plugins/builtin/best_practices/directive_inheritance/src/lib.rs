@@ -9,6 +9,7 @@
 //! Checked directives:
 //! - proxy_set_header, add_header, proxy_hide_header, grpc_set_header (case-insensitive keys)
 //! - fastcgi_param, uwsgi_param, scgi_param (case-sensitive keys)
+//! - limit_conn, limit_req (case-sensitive zone keys)
 
 use nginx_lint_plugin::prelude::*;
 use std::collections::HashMap;
@@ -73,6 +74,16 @@ const CHECKED_DIRECTIVES: &[DirectiveSpec] = &[
         name: "error_page",
         case_insensitive: false,
         multi_key: true,
+    },
+    DirectiveSpec {
+        name: "limit_conn",
+        case_insensitive: false,
+        multi_key: false,
+    },
+    DirectiveSpec {
+        name: "limit_req",
+        case_insensitive: false,
+        multi_key: false,
     },
 ];
 
@@ -1007,6 +1018,108 @@ http {
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("'404'"));
+    }
+
+    // ========================================================================
+    // limit_conn tests
+    // ========================================================================
+
+    #[test]
+    fn test_limit_conn_missing_parent() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        limit_conn addr 10;
+
+        location / {
+            limit_conn perserver 100;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = DirectiveInheritancePlugin::default();
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("limit_conn"));
+        assert!(errors[0].message.contains("addr"));
+    }
+
+    #[test]
+    fn test_limit_conn_all_included() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        limit_conn addr 10;
+
+        location / {
+            limit_conn addr 10;
+            limit_conn perserver 100;
+            root /var/www/html;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    // ========================================================================
+    // limit_req tests
+    // ========================================================================
+
+    #[test]
+    fn test_limit_req_missing_parent() {
+        let config = parse_string(
+            r#"
+http {
+    server {
+        limit_req zone=one burst=5;
+
+        location / {
+            limit_req zone=two burst=10 nodelay;
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let plugin = DirectiveInheritancePlugin::default();
+        let errors = plugin.check(&config, "test.conf");
+
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("limit_req"));
+        assert!(errors[0].message.contains("zone=one"));
+    }
+
+    #[test]
+    fn test_limit_req_all_included() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
+
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        limit_req zone=one burst=5;
+
+        location / {
+            limit_req zone=one burst=5;
+            limit_req zone=two burst=10 nodelay;
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        );
     }
 
     // ========================================================================
