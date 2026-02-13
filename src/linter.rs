@@ -89,6 +89,40 @@ impl Linter {
             let plugin = block_lines_plugin::BlockLinesPlugin::with_max_lines(max_lines);
             linter.add_rule(Box::new(NativePluginRule::with_plugin(plugin)));
         }
+        // directive-inheritance: use configured excluded/additional directives if specified
+        #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+        let use_configured_directive_inheritance = config
+            .map(|c| {
+                c.directive_inheritance_excluded()
+                    .is_some_and(|v| !v.is_empty())
+                    || c.directive_inheritance_additional()
+                        .is_some_and(|v| !v.is_empty())
+            })
+            .unwrap_or(false);
+        #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+        if is_enabled("directive-inheritance") && use_configured_directive_inheritance {
+            use nginx_lint_plugin::native::NativePluginRule;
+            let excluded = config
+                .and_then(|c| c.directive_inheritance_excluded())
+                .map(|v| v.to_vec())
+                .unwrap_or_default();
+            let additional = config
+                .and_then(|c| c.directive_inheritance_additional())
+                .map(|v| {
+                    v.iter()
+                        .map(|a| directive_inheritance_plugin::DirectiveSpecOwned {
+                            name: a.name.clone(),
+                            case_insensitive: a.case_insensitive,
+                            multi_key: a.multi_key,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let plugin = directive_inheritance_plugin::DirectiveInheritancePlugin::with_config(
+                excluded, additional,
+            );
+            linter.add_rule(Box::new(NativePluginRule::with_plugin(plugin)));
+        }
 
         // Load native plugins when native-builtin-plugins feature is enabled
         #[cfg(feature = "native-builtin-plugins")]
@@ -105,6 +139,11 @@ impl Linter {
                 }
                 // Skip block-lines if configured max_block_lines is used
                 if plugin.name() == "block-lines" && use_configured_block_lines {
+                    continue;
+                }
+                // Skip directive-inheritance if configured excluded/additional is used
+                if plugin.name() == "directive-inheritance" && use_configured_directive_inheritance
+                {
                     continue;
                 }
                 if is_enabled(plugin.name()) {
@@ -131,6 +170,12 @@ impl Linter {
                     }
                     // Skip block-lines if configured max_block_lines is used
                     if plugin.name() == "block-lines" && use_configured_block_lines {
+                        continue;
+                    }
+                    // Skip directive-inheritance if configured excluded/additional is used
+                    if plugin.name() == "directive-inheritance"
+                        && use_configured_directive_inheritance
+                    {
                         continue;
                     }
                     if is_enabled(plugin.name()) {

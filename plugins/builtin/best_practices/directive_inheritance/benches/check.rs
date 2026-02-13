@@ -228,7 +228,7 @@ http {
 fn bench_config(name: &str, config_str: &str) {
     let config =
         nginx_lint_plugin::parse_string(config_str).unwrap_or_else(|e| panic!("{name}: {e}"));
-    let plugin = DirectiveInheritancePlugin;
+    let plugin = DirectiveInheritancePlugin::default();
 
     // Warm up
     let _ = plugin.check(&config, "bench.conf");
@@ -256,7 +256,7 @@ fn bench_scaling() {
     for num_servers in [1, 2, 4, 8, 16] {
         let config_str = generate_config(num_servers);
         let config = nginx_lint_plugin::parse_string(&config_str).unwrap();
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
 
         // Warm up
         let _ = plugin.check(&config, "bench.conf");

@@ -14,7 +14,7 @@ use nginx_lint_plugin::prelude::*;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-/// Specification for a directive to check for inheritance issues
+/// Specification for a directive to check for inheritance issues (static definition)
 struct DirectiveSpec {
     /// The directive name (e.g., "proxy_set_header")
     name: &'static str,
@@ -22,6 +22,14 @@ struct DirectiveSpec {
     case_insensitive: bool,
     /// If true, all numeric arguments are separate keys (for error_page)
     multi_key: bool,
+}
+
+/// Owned version of DirectiveSpec for dynamic/configured directives
+#[derive(Debug, Clone)]
+pub struct DirectiveSpecOwned {
+    pub name: String,
+    pub case_insensitive: bool,
+    pub multi_key: bool,
 }
 
 /// Directives that have the "override, not inherit" behavior in nginx
@@ -80,18 +88,52 @@ struct DirectiveInfo {
 }
 
 /// Lookup map from directive name to its spec (built once per check)
-type SpecMap = HashMap<&'static str, &'static DirectiveSpec>;
+type SpecMap<'a> = HashMap<&'a str, &'a DirectiveSpecOwned>;
 
 /// Per-directive-name tracking of parent directives
-type ParentDirectives = HashMap<&'static str, HashMap<String, DirectiveInfo>>;
+type ParentDirectives<'a> = HashMap<&'a str, HashMap<String, DirectiveInfo>>;
 
-#[derive(Default)]
-pub struct DirectiveInheritancePlugin;
+pub struct DirectiveInheritancePlugin {
+    /// The effective set of directive specs (default + additional - excluded)
+    effective_specs: Vec<DirectiveSpecOwned>,
+}
+
+impl Default for DirectiveInheritancePlugin {
+    fn default() -> Self {
+        let effective_specs = CHECKED_DIRECTIVES
+            .iter()
+            .map(|s| DirectiveSpecOwned {
+                name: s.name.to_string(),
+                case_insensitive: s.case_insensitive,
+                multi_key: s.multi_key,
+            })
+            .collect();
+        Self { effective_specs }
+    }
+}
 
 impl DirectiveInheritancePlugin {
+    /// Create a plugin with custom configuration
+    pub fn with_config(excluded: Vec<String>, additional: Vec<DirectiveSpecOwned>) -> Self {
+        let mut effective_specs: Vec<DirectiveSpecOwned> = CHECKED_DIRECTIVES
+            .iter()
+            .filter(|s| !excluded.iter().any(|e| e == s.name))
+            .map(|s| DirectiveSpecOwned {
+                name: s.name.to_string(),
+                case_insensitive: s.case_insensitive,
+                multi_key: s.multi_key,
+            })
+            .collect();
+        effective_specs.extend(additional);
+        Self { effective_specs }
+    }
+
     /// Build a lookup map from directive name to spec (O(1) lookup instead of linear scan)
-    fn build_spec_map() -> SpecMap {
-        CHECKED_DIRECTIVES.iter().map(|s| (s.name, s)).collect()
+    fn build_spec_map(&self) -> SpecMap<'_> {
+        self.effective_specs
+            .iter()
+            .map(|s| (s.name.as_str(), s))
+            .collect()
     }
 
     /// Reconstruct directive text from a Directive AST node
@@ -104,7 +146,7 @@ impl DirectiveInheritancePlugin {
     }
 
     /// Normalize a key based on the directive spec
-    fn normalize_key(key: &str, spec: &DirectiveSpec) -> String {
+    fn normalize_key(key: &str, spec: &DirectiveSpecOwned) -> String {
         if spec.case_insensitive {
             key.to_lowercase()
         } else {
@@ -113,11 +155,11 @@ impl DirectiveInheritancePlugin {
     }
 
     /// Collect checked directives from a block's direct children (not nested)
-    fn collect_directives_from_block(
+    fn collect_directives_from_block<'a>(
         block: &Block,
-        spec_map: &SpecMap,
-    ) -> HashMap<&'static str, HashMap<String, DirectiveInfo>> {
-        let mut result: HashMap<&'static str, HashMap<String, DirectiveInfo>> = HashMap::new();
+        spec_map: &SpecMap<'a>,
+    ) -> ParentDirectives<'a> {
+        let mut result: ParentDirectives<'a> = HashMap::new();
 
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item
@@ -135,7 +177,10 @@ impl DirectiveInheritancePlugin {
                                 directive_text: Rc::clone(&directive_text),
                                 line,
                             };
-                            result.entry(spec.name).or_default().insert(key, info);
+                            result
+                                .entry(spec.name.as_str())
+                                .or_default()
+                                .insert(key, info);
                         }
                     }
                 } else if let Some(first_arg) = directive.first_arg() {
@@ -145,7 +190,10 @@ impl DirectiveInheritancePlugin {
                         directive_text: Self::directive_to_text(directive),
                         line,
                     };
-                    result.entry(spec.name).or_default().insert(key, info);
+                    result
+                        .entry(spec.name.as_str())
+                        .or_default()
+                        .insert(key, info);
                 }
             }
         }
@@ -158,11 +206,11 @@ impl DirectiveInheritancePlugin {
     /// Uses a stack of directive layers instead of cloning and merging HashMaps.
     /// Each layer represents directives from one scope level (http, server, location).
     /// Parent entries are computed by walking the stack only when needed.
-    fn check_block(
-        &self,
+    fn check_block<'a>(
+        &'a self,
         items: &[ConfigItem],
-        parent_layers: &[&ParentDirectives],
-        spec_map: &SpecMap,
+        parent_layers: &[&ParentDirectives<'a>],
+        spec_map: &SpecMap<'a>,
         errors: &mut Vec<LintError>,
     ) {
         for item in items {
@@ -210,7 +258,7 @@ impl DirectiveInheritancePlugin {
                     if current.is_empty() {
                         self.check_block(&block.items, parent_layers, spec_map, errors);
                     } else {
-                        let mut new_layers: Vec<&ParentDirectives> = parent_layers.to_vec();
+                        let mut new_layers: Vec<&ParentDirectives<'a>> = parent_layers.to_vec();
                         new_layers.push(&current);
                         self.check_block(&block.items, &new_layers, spec_map, errors);
                     }
@@ -230,7 +278,7 @@ impl DirectiveInheritancePlugin {
     fn report_missing(
         &self,
         block: &Block,
-        spec: &DirectiveSpec,
+        spec: &DirectiveSpecOwned,
         missing: &[&DirectiveInfo],
         errors: &mut Vec<LintError>,
     ) {
@@ -288,7 +336,11 @@ impl DirectiveInheritancePlugin {
 
 impl Plugin for DirectiveInheritancePlugin {
     fn spec(&self) -> PluginSpec {
-        let directive_names: Vec<&str> = CHECKED_DIRECTIVES.iter().map(|s| s.name).collect();
+        let directive_names: Vec<&str> = self
+            .effective_specs
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
 
         PluginSpec::new(
             "directive-inheritance",
@@ -318,7 +370,7 @@ impl Plugin for DirectiveInheritancePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        let spec_map = Self::build_spec_map();
+        let spec_map = self.build_spec_map();
         self.check_block(&config.items, &[], &spec_map, &mut errors);
         errors
     }
@@ -355,7 +407,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -383,7 +435,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -404,7 +456,7 @@ http {
 
     #[test]
     fn test_proxy_set_header_all_included() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -427,7 +479,7 @@ http {
 
     #[test]
     fn test_no_parent_directives() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -445,7 +497,7 @@ http {
 
     #[test]
     fn test_no_child_directives() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -481,7 +533,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -510,7 +562,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
@@ -518,7 +570,7 @@ http {
 
     #[test]
     fn test_case_insensitive_headers() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -557,7 +609,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -589,7 +641,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
@@ -613,7 +665,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1);
@@ -650,7 +702,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -661,7 +713,7 @@ http {
 
     #[test]
     fn test_add_header_all_included() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -703,7 +755,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -730,7 +782,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         // fastcgi_param keys are case-sensitive, so SCRIPT_FILENAME != script_filename
@@ -740,7 +792,7 @@ http {
 
     #[test]
     fn test_fastcgi_param_all_included() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -782,7 +834,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -813,7 +865,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -843,7 +895,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -869,7 +921,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -893,7 +945,7 @@ http {
 
     #[test]
     fn test_error_page_all_included() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -914,7 +966,7 @@ http {
 
     #[test]
     fn test_error_page_no_child() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         runner.assert_no_errors(
             r#"
@@ -950,7 +1002,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
@@ -981,7 +1033,7 @@ http {
         )
         .unwrap();
 
-        let plugin = DirectiveInheritancePlugin;
+        let plugin = DirectiveInheritancePlugin::default();
         let errors = plugin.check(&config, "test.conf");
 
         // Should report 2 errors: one for proxy_set_header, one for add_header
@@ -1000,7 +1052,7 @@ http {
 
     #[test]
     fn test_independent_directive_types() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
 
         // proxy_set_header in child should not affect add_header checking
         runner.assert_no_errors(
@@ -1025,7 +1077,7 @@ http {
 
     #[test]
     fn test_examples() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
         runner.test_examples(
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
@@ -1034,7 +1086,211 @@ http {
 
     #[test]
     fn test_fixtures() {
-        let runner = PluginTestRunner::new(DirectiveInheritancePlugin);
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
+
+    // ========================================================================
+    // Configuration tests
+    // ========================================================================
+
+    #[test]
+    fn test_excluded_directive() {
+        // Exclude proxy_set_header - should no longer report errors for it
+        let plugin =
+            DirectiveInheritancePlugin::with_config(vec!["proxy_set_header".to_string()], vec![]);
+
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_header Host $host;
+
+        location / {
+            proxy_set_header X-Custom "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors = plugin.check(&config, "test.conf");
+        assert_eq!(
+            errors.len(),
+            0,
+            "Excluded directive should not produce errors: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_excluded_directive_does_not_affect_others() {
+        // Exclude proxy_set_header but add_header should still be checked
+        let plugin =
+            DirectiveInheritancePlugin::with_config(vec!["proxy_set_header".to_string()], vec![]);
+
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_header Host $host;
+        add_header X-Frame-Options DENY;
+
+        location / {
+            proxy_set_header X-Custom "value";
+            add_header X-Custom "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors = plugin.check(&config, "test.conf");
+        assert_eq!(
+            errors.len(),
+            1,
+            "Only add_header should produce error: {:?}",
+            errors
+        );
+        assert!(errors[0].message.contains("add_header"));
+    }
+
+    #[test]
+    fn test_additional_directive() {
+        // Add a custom directive
+        let plugin = DirectiveInheritancePlugin::with_config(
+            vec![],
+            vec![DirectiveSpecOwned {
+                name: "proxy_set_cookie".to_string(),
+                case_insensitive: true,
+                multi_key: false,
+            }],
+        );
+
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_cookie SessionId $upstream_cookie_session;
+
+        location / {
+            proxy_set_cookie CustomCookie "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors = plugin.check(&config, "test.conf");
+        assert_eq!(
+            errors.len(),
+            1,
+            "Additional directive should produce error: {:?}",
+            errors
+        );
+        assert!(errors[0].message.contains("proxy_set_cookie"));
+        assert!(errors[0].message.contains("sessionid"));
+    }
+
+    #[test]
+    fn test_additional_directive_no_error_when_all_included() {
+        let plugin = DirectiveInheritancePlugin::with_config(
+            vec![],
+            vec![DirectiveSpecOwned {
+                name: "proxy_set_cookie".to_string(),
+                case_insensitive: true,
+                multi_key: false,
+            }],
+        );
+
+        let config = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_cookie SessionId $upstream_cookie_session;
+
+        location / {
+            proxy_set_cookie SessionId $upstream_cookie_session;
+            proxy_set_cookie CustomCookie "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors = plugin.check(&config, "test.conf");
+        assert_eq!(
+            errors.len(),
+            0,
+            "No error when all directives included: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_excluded_and_additional_combined() {
+        // Exclude grpc_set_header, add proxy_set_cookie
+        let plugin = DirectiveInheritancePlugin::with_config(
+            vec!["grpc_set_header".to_string()],
+            vec![DirectiveSpecOwned {
+                name: "proxy_set_cookie".to_string(),
+                case_insensitive: false,
+                multi_key: false,
+            }],
+        );
+
+        // grpc_set_header should not produce error (excluded)
+        let config = parse_string(
+            r#"
+http {
+    server {
+        grpc_set_header Host $host;
+
+        location / {
+            grpc_set_header X-Custom "value";
+            grpc_pass grpc://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors = plugin.check(&config, "test.conf");
+        assert_eq!(errors.len(), 0, "Excluded grpc_set_header: {:?}", errors);
+
+        // proxy_set_cookie should produce error (additional)
+        let config2 = parse_string(
+            r#"
+http {
+    server {
+        proxy_set_cookie SessionId $upstream_cookie_session;
+
+        location / {
+            proxy_set_cookie CustomCookie "value";
+            proxy_pass http://backend;
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+
+        let errors2 = plugin.check(&config2, "test.conf");
+        assert_eq!(
+            errors2.len(),
+            1,
+            "Additional proxy_set_cookie: {:?}",
+            errors2
+        );
+        assert!(errors2[0].message.contains("proxy_set_cookie"));
     }
 }
