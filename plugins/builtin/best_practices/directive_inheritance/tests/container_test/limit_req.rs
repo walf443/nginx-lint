@@ -32,7 +32,7 @@ http {
         limit_req zone=strict;
 
         location = /healthz {
-            limit_req zone=loose;
+            limit_req zone=loose burst=5 nodelay;
             proxy_pass http://127.0.0.1:8080;
         }
 
@@ -91,13 +91,13 @@ http {
         limit_req zone=strict;
 
         location = /healthz {
-            limit_req zone=loose;
+            limit_req zone=loose burst=5 nodelay;
             proxy_pass http://127.0.0.1:8080;
         }
 
         location /test/ {
             # Only loose limit - parent's strict limit is lost
-            limit_req zone=loose;
+            limit_req zone=loose burst=5 nodelay;
             proxy_pass http://127.0.0.1:8080;
         }
     }
@@ -147,7 +147,7 @@ http {
         limit_req zone=strict;
 
         location = /healthz {
-            limit_req zone=loose;
+            limit_req zone=loose burst=5 nodelay;
             proxy_pass http://127.0.0.1:8080;
         }
 
