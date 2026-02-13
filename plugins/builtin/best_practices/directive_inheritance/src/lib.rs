@@ -95,22 +95,23 @@ impl DirectiveInheritancePlugin {
     }
 
     /// Collect checked directives from a block's direct children (not nested)
-    fn collect_directives_from_block(block: &Block) -> HashMap<&'static str, HashMap<String, DirectiveInfo>> {
+    fn collect_directives_from_block(
+        block: &Block,
+    ) -> HashMap<&'static str, HashMap<String, DirectiveInfo>> {
         let mut result: HashMap<&'static str, HashMap<String, DirectiveInfo>> = HashMap::new();
 
         for item in &block.items {
-            if let ConfigItem::Directive(directive) = item {
-                if let Some(spec) = Self::find_spec(&directive.name) {
-                    if let Some(first_arg) = directive.first_arg() {
-                        let key = Self::normalize_key(first_arg, spec);
-                        let info = DirectiveInfo {
-                            key_normalized: key.clone(),
-                            directive_text: Self::directive_to_text(directive),
-                            line: directive.span.start.line,
-                        };
-                        result.entry(spec.name).or_default().insert(key, info);
-                    }
-                }
+            if let ConfigItem::Directive(directive) = item
+                && let Some(spec) = Self::find_spec(&directive.name)
+                && let Some(first_arg) = directive.first_arg()
+            {
+                let key = Self::normalize_key(first_arg, spec);
+                let info = DirectiveInfo {
+                    key_normalized: key.clone(),
+                    directive_text: Self::directive_to_text(directive),
+                    line: directive.span.start.line,
+                };
+                result.entry(spec.name).or_default().insert(key, info);
             }
         }
 
@@ -125,62 +126,59 @@ impl DirectiveInheritancePlugin {
         errors: &mut Vec<LintError>,
     ) {
         for item in items {
-            if let ConfigItem::Directive(directive) = item {
-                if let Some(block) = &directive.block {
-                    let is_inheritable_context = matches!(
-                        directive.name.as_str(),
-                        "server" | "location" | "if" | "limit_except"
-                    );
+            if let ConfigItem::Directive(directive) = item
+                && let Some(block) = &directive.block
+            {
+                let is_inheritable_context = matches!(
+                    directive.name.as_str(),
+                    "server" | "location" | "if" | "limit_except"
+                );
 
-                    if is_inheritable_context {
-                        let current = Self::collect_directives_from_block(block);
+                if is_inheritable_context {
+                    let current = Self::collect_directives_from_block(block);
 
-                        // Check each directive type for missing parent entries
-                        for spec in CHECKED_DIRECTIVES {
-                            let parent_entries = parent_directives.get(spec.name);
-                            let current_entries = current.get(spec.name);
+                    // Check each directive type for missing parent entries
+                    for spec in CHECKED_DIRECTIVES {
+                        let parent_entries = parent_directives.get(spec.name);
+                        let current_entries = current.get(spec.name);
 
-                            if let (Some(parent), Some(current_map)) =
-                                (parent_entries, current_entries)
-                            {
-                                if !parent.is_empty() && !current_map.is_empty() {
-                                    let missing: Vec<_> = parent
-                                        .iter()
-                                        .filter(|(key, _)| !current_map.contains_key(*key))
-                                        .map(|(_, info)| info.clone())
-                                        .collect();
+                        if let (Some(parent), Some(current_map)) = (parent_entries, current_entries)
+                            && !parent.is_empty()
+                            && !current_map.is_empty()
+                        {
+                            let missing: Vec<_> = parent
+                                .iter()
+                                .filter(|(key, _)| !current_map.contains_key(*key))
+                                .map(|(_, info)| info.clone())
+                                .collect();
 
-                                    if !missing.is_empty() {
-                                        self.report_missing(
-                                            block, spec, &missing, errors,
-                                        );
-                                    }
-                                }
+                            if !missing.is_empty() {
+                                self.report_missing(block, spec, &missing, errors);
                             }
                         }
-
-                        // Merge parent and current for recursion
-                        let mut merged = parent_directives.clone();
-                        for (directive_name, entries) in &current {
-                            let merged_entries = merged.entry(directive_name).or_default();
-                            for (key, info) in entries {
-                                merged_entries.insert(key.clone(), info.clone());
-                            }
-                        }
-
-                        self.check_block(&block.items, &merged, errors);
-                    } else if directive.name == "http" {
-                        // http block: start fresh collection
-                        let current = Self::collect_directives_from_block(block);
-                        let mut fresh: ParentDirectives = HashMap::new();
-                        for (name, entries) in current {
-                            fresh.insert(name, entries);
-                        }
-                        self.check_block(&block.items, &fresh, errors);
-                    } else {
-                        // Other blocks (upstream, etc.): pass through
-                        self.check_block(&block.items, parent_directives, errors);
                     }
+
+                    // Merge parent and current for recursion
+                    let mut merged = parent_directives.clone();
+                    for (directive_name, entries) in &current {
+                        let merged_entries = merged.entry(directive_name).or_default();
+                        for (key, info) in entries {
+                            merged_entries.insert(key.clone(), info.clone());
+                        }
+                    }
+
+                    self.check_block(&block.items, &merged, errors);
+                } else if directive.name == "http" {
+                    // http block: start fresh collection
+                    let current = Self::collect_directives_from_block(block);
+                    let mut fresh: ParentDirectives = HashMap::new();
+                    for (name, entries) in current {
+                        fresh.insert(name, entries);
+                    }
+                    self.check_block(&block.items, &fresh, errors);
+                } else {
+                    // Other blocks (upstream, etc.): pass through
+                    self.check_block(&block.items, parent_directives, errors);
                 }
             }
         }
@@ -256,7 +254,7 @@ impl Plugin for DirectiveInheritancePlugin {
         )
         .with_severity("warning")
         .with_why(
-            &format!(
+            format!(
                 "In nginx, certain directives in a child block (like location) completely \
                  override those in the parent block (like server) - they are NOT inherited. \
                  This is a common source of bugs where important settings are unintentionally lost.\n\n\

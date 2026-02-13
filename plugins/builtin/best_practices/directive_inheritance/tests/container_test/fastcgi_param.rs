@@ -17,11 +17,7 @@ fn get_value(body: &str, key: &str) -> String {
     body.lines()
         .find_map(|line| {
             let (k, v) = line.split_once('=')?;
-            if k == key {
-                Some(v.to_string())
-            } else {
-                None
-            }
+            if k == key { Some(v.to_string()) } else { None }
         })
         .unwrap_or_default()
 }
