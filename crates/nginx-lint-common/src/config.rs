@@ -193,9 +193,6 @@ enabled = true
 [rules.upstream-server-no-resolve]
 enabled = true
 
-[rules.proxy-set-header-inheritance]
-enabled = true
-
 [rules.directive-inheritance]
 enabled = true
 # Exclude specific directives from checking
@@ -212,9 +209,6 @@ enabled = true
 enabled = true
 
 [rules.proxy-pass-with-uri]
-enabled = true
-
-[rules.add-header-inheritance]
 enabled = true
 
 [rules.proxy-keepalive]
@@ -607,11 +601,9 @@ impl LintConfig {
                     "missing-error-log",
                     "proxy-pass-domain",
                     "upstream-server-no-resolve",
-                    "proxy-set-header-inheritance",
                     "root-in-location",
                     "alias-location-slash-mismatch",
                     "proxy-pass-with-uri",
-                    "add-header-inheritance",
                     "proxy-keepalive",
                     "try-files-with-proxy",
                     "if-is-evil-in-location",
