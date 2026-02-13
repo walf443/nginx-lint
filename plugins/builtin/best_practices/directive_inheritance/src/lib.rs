@@ -12,6 +12,7 @@
 
 use nginx_lint_plugin::prelude::*;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// Specification for a directive to check for inheritance issues
 struct DirectiveSpec {
@@ -72,11 +73,14 @@ const CHECKED_DIRECTIVES: &[DirectiveSpec] = &[
 struct DirectiveInfo {
     /// The key (first argument), normalized for comparison
     key_normalized: String,
-    /// The original directive text for fix generation
-    directive_text: String,
+    /// The original directive text for fix generation (Rc for cheap cloning)
+    directive_text: Rc<str>,
     /// Line number for preserving order
     line: usize,
 }
+
+/// Lookup map from directive name to its spec (built once per check)
+type SpecMap = HashMap<&'static str, &'static DirectiveSpec>;
 
 /// Per-directive-name tracking of parent directives
 type ParentDirectives = HashMap<&'static str, HashMap<String, DirectiveInfo>>;
@@ -85,13 +89,18 @@ type ParentDirectives = HashMap<&'static str, HashMap<String, DirectiveInfo>>;
 pub struct DirectiveInheritancePlugin;
 
 impl DirectiveInheritancePlugin {
+    /// Build a lookup map from directive name to spec (O(1) lookup instead of linear scan)
+    fn build_spec_map() -> SpecMap {
+        CHECKED_DIRECTIVES.iter().map(|s| (s.name, s)).collect()
+    }
+
     /// Reconstruct directive text from a Directive AST node
-    fn directive_to_text(directive: &Directive) -> String {
+    fn directive_to_text(directive: &Directive) -> Rc<str> {
         let mut parts = vec![directive.name.clone()];
         for arg in &directive.args {
             parts.push(arg.to_source());
         }
-        format!("{};", parts.join(" "))
+        Rc::from(format!("{};", parts.join(" ")))
     }
 
     /// Normalize a key based on the directive spec
@@ -103,32 +112,27 @@ impl DirectiveInheritancePlugin {
         }
     }
 
-    /// Find the DirectiveSpec for a given directive name
-    fn find_spec(name: &str) -> Option<&'static DirectiveSpec> {
-        CHECKED_DIRECTIVES.iter().find(|s| s.name == name)
-    }
-
     /// Collect checked directives from a block's direct children (not nested)
     fn collect_directives_from_block(
         block: &Block,
+        spec_map: &SpecMap,
     ) -> HashMap<&'static str, HashMap<String, DirectiveInfo>> {
         let mut result: HashMap<&'static str, HashMap<String, DirectiveInfo>> = HashMap::new();
 
         for item in &block.items {
             if let ConfigItem::Directive(directive) = item
-                && let Some(spec) = Self::find_spec(&directive.name)
+                && let Some(&spec) = spec_map.get(directive.name.as_str())
             {
-                let directive_text = Self::directive_to_text(directive);
                 let line = directive.span.start.line;
 
                 if spec.multi_key {
-                    // Extract all numeric arguments as separate keys (for error_page)
+                    let directive_text = Self::directive_to_text(directive);
                     for arg in &directive.args {
                         if arg.as_str().parse::<u16>().is_ok() {
                             let key = arg.as_str().to_string();
                             let info = DirectiveInfo {
                                 key_normalized: key.clone(),
-                                directive_text: directive_text.clone(),
+                                directive_text: Rc::clone(&directive_text),
                                 line,
                             };
                             result.entry(spec.name).or_default().insert(key, info);
@@ -138,7 +142,7 @@ impl DirectiveInheritancePlugin {
                     let key = Self::normalize_key(first_arg, spec);
                     let info = DirectiveInfo {
                         key_normalized: key.clone(),
-                        directive_text,
+                        directive_text: Self::directive_to_text(directive),
                         line,
                     };
                     result.entry(spec.name).or_default().insert(key, info);
@@ -149,11 +153,16 @@ impl DirectiveInheritancePlugin {
         result
     }
 
-    /// Check a block for directive inheritance issues
+    /// Check a block for directive inheritance issues.
+    ///
+    /// Uses a stack of directive layers instead of cloning and merging HashMaps.
+    /// Each layer represents directives from one scope level (http, server, location).
+    /// Parent entries are computed by walking the stack only when needed.
     fn check_block(
         &self,
         items: &[ConfigItem],
-        parent_directives: &ParentDirectives,
+        parent_layers: &[&ParentDirectives],
+        spec_map: &SpecMap,
         errors: &mut Vec<LintError>,
     ) {
         for item in items {
@@ -166,50 +175,52 @@ impl DirectiveInheritancePlugin {
                 );
 
                 if is_inheritable_context {
-                    let current = Self::collect_directives_from_block(block);
+                    let current = Self::collect_directives_from_block(block, spec_map);
 
-                    // Check each directive type for missing parent entries
-                    for spec in CHECKED_DIRECTIVES {
-                        let parent_entries = parent_directives.get(spec.name);
-                        let current_entries = current.get(spec.name);
+                    // Only check directive types present in current block
+                    for (spec_name, current_map) in &current {
+                        if current_map.is_empty() {
+                            continue;
+                        }
 
-                        if let (Some(parent), Some(current_map)) = (parent_entries, current_entries)
-                            && !parent.is_empty()
-                            && !current_map.is_empty()
-                        {
-                            let missing: Vec<_> = parent
-                                .iter()
-                                .filter(|(key, _)| !current_map.contains_key(*key))
-                                .map(|(_, info)| info.clone())
+                        // Collect all parent entries for this directive type by walking the stack
+                        let mut all_parent: HashMap<&str, &DirectiveInfo> = HashMap::new();
+                        for layer in parent_layers {
+                            if let Some(entries) = layer.get(spec_name) {
+                                for (key, info) in entries {
+                                    all_parent.insert(key.as_str(), info);
+                                }
+                            }
+                        }
+
+                        if !all_parent.is_empty() {
+                            let missing: Vec<&DirectiveInfo> = all_parent
+                                .into_values()
+                                .filter(|info| !current_map.contains_key(&info.key_normalized))
                                 .collect();
 
                             if !missing.is_empty() {
+                                let spec = spec_map[spec_name];
                                 self.report_missing(block, spec, &missing, errors);
                             }
                         }
                     }
 
-                    // Merge parent and current for recursion
-                    let mut merged = parent_directives.clone();
-                    for (directive_name, entries) in &current {
-                        let merged_entries = merged.entry(directive_name).or_default();
-                        for (key, info) in entries {
-                            merged_entries.insert(key.clone(), info.clone());
-                        }
+                    // Recurse with current layer pushed onto stack (no cloning)
+                    if current.is_empty() {
+                        self.check_block(&block.items, parent_layers, spec_map, errors);
+                    } else {
+                        let mut new_layers: Vec<&ParentDirectives> = parent_layers.to_vec();
+                        new_layers.push(&current);
+                        self.check_block(&block.items, &new_layers, spec_map, errors);
                     }
-
-                    self.check_block(&block.items, &merged, errors);
                 } else if directive.name == "http" {
-                    // http block: start fresh collection
-                    let current = Self::collect_directives_from_block(block);
-                    let mut fresh: ParentDirectives = HashMap::new();
-                    for (name, entries) in current {
-                        fresh.insert(name, entries);
-                    }
-                    self.check_block(&block.items, &fresh, errors);
+                    // http block: start fresh stack
+                    let current = Self::collect_directives_from_block(block, spec_map);
+                    self.check_block(&block.items, &[&current], spec_map, errors);
                 } else {
                     // Other blocks (upstream, etc.): pass through
-                    self.check_block(&block.items, parent_directives, errors);
+                    self.check_block(&block.items, parent_layers, spec_map, errors);
                 }
             }
         }
@@ -220,7 +231,7 @@ impl DirectiveInheritancePlugin {
         &self,
         block: &Block,
         spec: &DirectiveSpec,
-        missing: &[DirectiveInfo],
+        missing: &[&DirectiveInfo],
         errors: &mut Vec<LintError>,
     ) {
         let mut missing_sorted = missing.to_vec();
@@ -250,10 +261,8 @@ impl DirectiveInheritancePlugin {
                 .map(|d| format!("'{}'", d.key_normalized))
                 .collect();
 
-            let mut missing_texts: Vec<&str> = missing_sorted
-                .iter()
-                .map(|d| d.directive_text.as_str())
-                .collect();
+            let mut missing_texts: Vec<&str> =
+                missing_sorted.iter().map(|d| &*d.directive_text).collect();
             // Deduplicate: multi-key directives (e.g., error_page 500 502 503 504 /50x.html)
             // may register multiple keys pointing to the same directive text.
             missing_texts.dedup();
@@ -309,7 +318,8 @@ impl Plugin for DirectiveInheritancePlugin {
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
-        self.check_block(&config.items, &HashMap::new(), &mut errors);
+        let spec_map = Self::build_spec_map();
+        self.check_block(&config.items, &[], &spec_map, &mut errors);
         errors
     }
 }

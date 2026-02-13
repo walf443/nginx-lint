@@ -243,7 +243,10 @@ fn bench_config(name: &str, config_str: &str) {
 
     let errors = plugin.check(&config, "bench.conf");
 
-    println!("  {name:<12} {total:>10.3?} total, {per_iter:>10.3?}/iter  ({} errors)", errors.len());
+    println!(
+        "  {name:<12} {total:>10.3?} total, {per_iter:>10.3?}/iter  ({} errors)",
+        errors.len()
+    );
 }
 
 fn bench_scaling() {
