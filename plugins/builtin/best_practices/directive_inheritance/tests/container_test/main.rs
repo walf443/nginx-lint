@@ -11,4 +11,5 @@
 
 mod add_header;
 mod fastcgi_param;
+mod proxy_hide_header;
 mod proxy_set_header;
