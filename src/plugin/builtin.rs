@@ -35,9 +35,9 @@ mod embedded {
     /// upstream-server-no-resolve plugin
     pub const UPSTREAM_SERVER_NO_RESOLVE: &[u8] =
         include_bytes!("../../target/builtin-plugins/upstream_server_no_resolve.wasm");
-    /// proxy-set-header-inheritance plugin
-    pub const PROXY_SET_HEADER_INHERITANCE: &[u8] =
-        include_bytes!("../../target/builtin-plugins/proxy_set_header_inheritance.wasm");
+    /// directive-inheritance plugin
+    pub const DIRECTIVE_INHERITANCE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/directive_inheritance.wasm");
     /// root-in-location plugin
     pub const ROOT_IN_LOCATION: &[u8] =
         include_bytes!("../../target/builtin-plugins/root_in_location.wasm");
@@ -47,9 +47,6 @@ mod embedded {
     /// proxy-pass-with-uri plugin
     pub const PROXY_PASS_WITH_URI: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_pass_with_uri.wasm");
-    /// add-header-inheritance plugin
-    pub const ADD_HEADER_INHERITANCE: &[u8] =
-        include_bytes!("../../target/builtin-plugins/add_header_inheritance.wasm");
     /// proxy-keepalive plugin
     pub const PROXY_KEEPALIVE: &[u8] =
         include_bytes!("../../target/builtin-plugins/proxy_keepalive.wasm");
@@ -227,11 +224,11 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         fuel_enabled,
     )?);
 
-    // Load proxy-set-header-inheritance
+    // Load directive-inheritance
     plugins.push(WasmLintRule::new(
         loader.engine(),
-        PathBuf::from("builtin:proxy-set-header-inheritance"),
-        embedded::PROXY_SET_HEADER_INHERITANCE,
+        PathBuf::from("builtin:directive-inheritance"),
+        embedded::DIRECTIVE_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,
@@ -262,16 +259,6 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, P
         loader.engine(),
         PathBuf::from("builtin:proxy-pass-with-uri"),
         embedded::PROXY_PASS_WITH_URI,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load add-header-inheritance
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:add-header-inheritance"),
-        embedded::ADD_HEADER_INHERITANCE,
         loader.memory_limit(),
         loader.fuel_limit(),
         fuel_enabled,

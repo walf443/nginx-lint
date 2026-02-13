@@ -193,8 +193,14 @@ enabled = true
 [rules.upstream-server-no-resolve]
 enabled = true
 
-[rules.proxy-set-header-inheritance]
+[rules.directive-inheritance]
 enabled = true
+# Exclude specific directives from checking
+# excluded_directives = ["grpc_set_header", "uwsgi_param"]
+# Add custom directives to check (name is required, case_insensitive and multi_key default to false)
+# additional_directives = [
+#   { name = "proxy_set_cookie", case_insensitive = true },
+# ]
 
 [rules.root-in-location]
 enabled = true
@@ -203,9 +209,6 @@ enabled = true
 enabled = true
 
 [rules.proxy-pass-with-uri]
-enabled = true
-
-[rules.add-header-inheritance]
 enabled = true
 
 [rules.proxy-keepalive]
@@ -376,6 +379,21 @@ impl<'de> Deserialize<'de> for ColorMode {
     }
 }
 
+/// An additional directive to check for inheritance issues.
+///
+/// Used in `[rules.directive-inheritance]` configuration.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AdditionalDirective {
+    /// The directive name (e.g., "proxy_set_cookie")
+    pub name: String,
+    /// Whether the first argument key comparison is case-insensitive (default: false)
+    #[serde(default)]
+    pub case_insensitive: bool,
+    /// If true, all numeric arguments are separate keys like error_page (default: false)
+    #[serde(default)]
+    pub multi_key: bool,
+}
+
 /// Configuration for a specific lint rule.
 ///
 /// Every `[rules.<name>]` section in `.nginx-lint.toml` is deserialized into
@@ -399,6 +417,10 @@ pub struct RuleConfig {
     pub additional_contexts: Option<HashMap<String, Vec<String>>>,
     /// For block-lines rule: maximum number of lines allowed in a block
     pub max_block_lines: Option<usize>,
+    /// For directive-inheritance rule: directives to exclude from checking
+    pub excluded_directives: Option<Vec<String>>,
+    /// For directive-inheritance rule: additional directives to check
+    pub additional_directives: Option<Vec<AdditionalDirective>>,
 }
 
 fn default_true() -> bool {
@@ -476,6 +498,20 @@ impl LintConfig {
         self.rules
             .get("invalid-directive-context")
             .and_then(|r| r.additional_contexts.as_ref())
+    }
+
+    /// Get excluded directives for directive-inheritance rule
+    pub fn directive_inheritance_excluded(&self) -> Option<&[String]> {
+        self.rules
+            .get("directive-inheritance")
+            .and_then(|r| r.excluded_directives.as_deref())
+    }
+
+    /// Get additional directives for directive-inheritance rule
+    pub fn directive_inheritance_additional(&self) -> Option<&[AdditionalDirective]> {
+        self.rules
+            .get("directive-inheritance")
+            .and_then(|r| r.additional_directives.as_deref())
     }
 
     /// Validate a configuration file and return any errors
@@ -565,14 +601,13 @@ impl LintConfig {
                     "missing-error-log",
                     "proxy-pass-domain",
                     "upstream-server-no-resolve",
-                    "proxy-set-header-inheritance",
                     "root-in-location",
                     "alias-location-slash-mismatch",
                     "proxy-pass-with-uri",
-                    "add-header-inheritance",
                     "proxy-keepalive",
                     "try-files-with-proxy",
                     "if-is-evil-in-location",
+                    "directive-inheritance",
                 ]
                 .into_iter()
                 .collect();
@@ -678,6 +713,10 @@ fn get_known_rule_options(rule_name: &str) -> HashSet<&'static str> {
         }
         "block-lines" => {
             options.insert("max_block_lines");
+        }
+        "directive-inheritance" => {
+            options.insert("excluded_directives");
+            options.insert("additional_directives");
         }
         _ => {}
     }

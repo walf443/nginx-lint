@@ -39,7 +39,7 @@ pub fn load_native_builtin_plugins() -> Vec<Box<dyn LintRule>> {
         >::new()),
         // Best practices plugins
         Box::new(NativePluginRule::<
-            add_header_inheritance_plugin::AddHeaderInheritancePlugin,
+            directive_inheritance_plugin::DirectiveInheritancePlugin,
         >::new()),
         Box::new(NativePluginRule::<
             alias_location_slash_mismatch_plugin::AliasLocationSlashMismatchPlugin,
@@ -70,9 +70,6 @@ pub fn load_native_builtin_plugins() -> Vec<Box<dyn LintRule>> {
         >::new()),
         Box::new(NativePluginRule::<
             proxy_pass_with_uri_plugin::ProxyPassWithUriPlugin,
-        >::new()),
-        Box::new(NativePluginRule::<
-            proxy_set_header_inheritance_plugin::ProxySetHeaderInheritancePlugin,
         >::new()),
         Box::new(NativePluginRule::<
             root_in_location_plugin::RootInLocationPlugin,
