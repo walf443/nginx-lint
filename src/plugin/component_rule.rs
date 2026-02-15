@@ -47,8 +47,12 @@ impl wasmtime::component::HasData for ComponentStoreData {
     type Data<'a> = &'a mut ComponentStoreData;
 }
 
-/// Helper to get a directive ref from the resource table, panicking on invalid handle.
-/// Resource handles are managed by wasmtime runtime, so invalid handles indicate a bug.
+/// Helper methods for resource table access.
+///
+/// These methods panic on invalid handles or table exhaustion. In the wasmtime
+/// runtime context, panics in host functions are caught and converted to traps,
+/// so the host process will not crash. The descriptive panic messages appear in
+/// the trap error for debugging.
 impl ComponentStoreData {
     fn get_directive(&self, self_: &Resource<DirectiveResource>) -> &ast::Directive {
         &self
@@ -66,10 +70,19 @@ impl ComponentStoreData {
             .config
     }
 
+    /// Push a directive into the resource table.
+    ///
+    /// Panics (trapped by wasmtime) if the resource table is full. This can
+    /// happen if an untrusted plugin requests an excessive number of handles.
+    /// The fuel limit should prevent this in practice.
     fn push_directive(&mut self, directive: ast::Directive) -> Resource<DirectiveResource> {
         self.table
             .push(DirectiveResource { directive })
-            .expect("resource table full")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "resource table full: too many directive handles allocated (limit exceeded)"
+                )
+            })
     }
 }
 
@@ -84,6 +97,10 @@ impl config_api::HostConfig for ComponentStoreData {
         &mut self,
         self_: Resource<ConfigResource>,
     ) -> Vec<config_api::DirectiveContext> {
+        // TODO: Each directive (including its block subtree) is deep-cloned into
+        // a DirectiveResource. For large configs this is O(n^2) memory/time.
+        // Consider storing Arc<Directive> or an index into the original
+        // Arc<Config> to avoid deep cloning.
         let config = self.get_config(&self_).clone();
         let mut collected = Vec::new();
         collect_directives_with_context(&config.items, &config.include_context, &mut collected);
@@ -117,8 +134,10 @@ impl config_api::HostConfig for ComponentStoreData {
     }
 
     fn items(&mut self, self_: Resource<ConfigResource>) -> Vec<config_api::ConfigItem> {
-        let items = self.get_config(&self_).items.clone();
-        convert_config_items_to_wit(&items, &mut self.table)
+        // Clone the Arc (cheap) to release the immutable borrow on self.table,
+        // allowing convert_config_items_to_wit to borrow self.table mutably.
+        let config = self.get_config(&self_).clone();
+        convert_config_items_to_wit(&config.items, &mut self.table)
     }
 
     fn include_context(&mut self, self_: Resource<ConfigResource>) -> Vec<String> {
@@ -276,9 +295,19 @@ impl config_api::HostDirective for ComponentStoreData {
     }
 
     fn block_items(&mut self, self_: Resource<DirectiveResource>) -> Vec<config_api::ConfigItem> {
-        let items = match &self.get_directive(&self_).block {
-            Some(block) => block.items.clone(),
-            None => Vec::new(),
+        // Clone block items to release the immutable borrow on self.table,
+        // allowing convert_config_items_to_wit to borrow self.table mutably.
+        // TODO: Consider using Arc<Directive> in DirectiveResource to avoid
+        // deep-cloning block subtrees on each call.
+        let items = {
+            let dir = self
+                .table
+                .get(&self_)
+                .expect("invalid directive resource handle");
+            match &dir.directive.block {
+                Some(block) => block.items.clone(),
+                None => return Vec::new(),
+            }
         };
         convert_config_items_to_wit(&items, &mut self.table)
     }
@@ -722,6 +751,11 @@ impl ComponentLintRule {
                     PluginError::execution_error(&self.path, format!("check() failed: {}", e))
                 }
             })?;
+
+        // Note: The config resource and any directive resources created during
+        // the check are cleaned up when `store` is dropped at function exit.
+        // A fresh store is created for each execute_check call, so resources
+        // do not leak across lint runs.
 
         Ok(wit_errors.iter().map(convert_lint_error).collect())
     }

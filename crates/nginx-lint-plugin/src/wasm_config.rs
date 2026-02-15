@@ -4,10 +4,16 @@
 //! but delegate to host functions via WIT resource handles instead of
 //! holding the data directly.
 //!
+//! **Warning**: This module has known limitations with the `DirectiveExt` trait:
+//! `first_arg()`, `arg_at()`, and `last_arg()` return `None` because WIT host
+//! calls return owned strings, while the trait requires `Option<&str>`.
+//! Use the `_owned()` variants (`first_arg_owned()`, `arg_at_owned()`,
+//! `last_arg_owned()`) instead.
+//!
 //! **Note**: The `export_component_plugin!` macro uses `reconstruct_config`
-//! from `wit_guest` instead of these types. These types are provided for
-//! advanced manual interop with the WIT config API, but are not actively
-//! used in the standard plugin workflow.
+//! from `wit_guest` instead of these types, which rebuilds native parser AST
+//! types without this limitation. These types are provided for advanced manual
+//! interop with the WIT config API only.
 
 use crate::types::{DirectiveExt, Fix};
 use crate::wit_guest::nginx_lint::plugin::config_api;
