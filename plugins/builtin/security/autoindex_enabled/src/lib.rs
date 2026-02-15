@@ -64,8 +64,7 @@ impl Plugin for AutoindexEnabledPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(AutoindexEnabledPlugin);
+nginx_lint_plugin::export_component_plugin!(AutoindexEnabledPlugin);
 
 #[cfg(test)]
 mod tests {

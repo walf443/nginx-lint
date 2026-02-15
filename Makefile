@@ -4,7 +4,7 @@ PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
 # Plugins that use the WIT component model (built with wasm32-wasip1 + wasm-tools)
-COMPONENT_PLUGINS := server_tokens_enabled
+COMPONENT_PLUGINS := server_tokens_enabled autoindex_enabled
 
 .PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-component-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
 
