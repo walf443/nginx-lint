@@ -2,8 +2,12 @@
 //!
 //! These types provide the same API surface as the parser AST types
 //! but delegate to host functions via WIT resource handles instead of
-//! holding the data directly. This eliminates the need for JSON
-//! parsing libraries in the WASM plugin binary.
+//! holding the data directly.
+//!
+//! **Note**: The `export_component_plugin!` macro uses `reconstruct_config`
+//! from `wit_guest` instead of these types. These types are provided for
+//! advanced manual interop with the WIT config API, but are not actively
+//! used in the standard plugin workflow.
 
 use crate::types::{DirectiveExt, Fix};
 use crate::wit_guest::nginx_lint::plugin::config_api;
@@ -15,7 +19,12 @@ pub struct Config {
 }
 
 impl Config {
-    /// Create from a WIT resource handle (used by the export macro).
+    /// Create from a WIT resource handle.
+    ///
+    /// Intended for advanced/manual interop with the WIT-generated
+    /// config API. The `export_component_plugin!` macro reconstructs
+    /// configs via `reconstruct_config` in `wit_guest` instead of
+    /// calling this method directly.
     pub fn from_handle(handle: config_api::Config) -> Self {
         Self { handle }
     }
@@ -163,11 +172,13 @@ impl DirectiveExt for Directive {
     }
 
     fn first_arg(&self) -> Option<&str> {
-        // NOTE: We can't return &str from a host call because the string
-        // is returned by value. Plugin code that calls first_arg() in WASM mode
-        // would need to use first_arg_owned() or we handle this differently.
-        // For now, we'll use a workaround - see first_arg_owned().
-        None // This won't be called - inherent method below takes precedence
+        // LIMITATION: Cannot return &str from a WIT host call because the
+        // string is returned by value. This returns None, which will be
+        // incorrect for code using trait objects or generic bounds.
+        // The standard plugin path uses `reconstruct_config` (wit_guest.rs)
+        // which rebuilds parser AST types that don't have this limitation.
+        // For direct use of these WASM types, use `first_arg_owned()` instead.
+        None
     }
 
     fn first_arg_is(&self, value: &str) -> bool {
@@ -175,11 +186,13 @@ impl DirectiveExt for Directive {
     }
 
     fn arg_at(&self, _index: usize) -> Option<&str> {
-        None // Same issue as first_arg - use arg_at_owned()
+        // LIMITATION: Same as first_arg - use arg_at_owned() instead.
+        None
     }
 
     fn last_arg(&self) -> Option<&str> {
-        None // Same issue - use last_arg_owned()
+        // LIMITATION: Same as first_arg - use last_arg_owned() instead.
+        None
     }
 
     fn has_arg(&self, value: &str) -> bool {

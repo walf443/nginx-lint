@@ -137,16 +137,26 @@ impl config_api::HostConfig for ComponentStoreData {
 
     fn is_included_from_http_server(&mut self, self_: Resource<ConfigResource>) -> bool {
         let ctx = &self.get_config(&self_).include_context;
-        ctx.iter().any(|c| c == "http")
-            && ctx.iter().any(|c| c == "server")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server")
+        if let (Some(http_pos), Some(server_pos)) = (
+            ctx.iter().position(|c| c == "http"),
+            ctx.iter().position(|c| c == "server"),
+        ) {
+            http_pos < server_pos
+        } else {
+            false
+        }
     }
 
     fn is_included_from_http_location(&mut self, self_: Resource<ConfigResource>) -> bool {
         let ctx = &self.get_config(&self_).include_context;
-        ctx.iter().any(|c| c == "http")
-            && ctx.iter().any(|c| c == "location")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location")
+        if let (Some(http_pos), Some(location_pos)) = (
+            ctx.iter().position(|c| c == "http"),
+            ctx.iter().position(|c| c == "location"),
+        ) {
+            http_pos < location_pos
+        } else {
+            false
+        }
     }
 
     fn is_included_from_stream(&mut self, self_: Resource<ConfigResource>) -> bool {
@@ -325,7 +335,11 @@ impl config_api::HostDirective for ComponentStoreData {
         let d = self.get_directive(&self_);
         let indent = " ".repeat(d.span.start.column.saturating_sub(1));
         let fix_text = format!("{}{}\n", indent, new_text);
-        let offset = d.span.start.offset - (d.span.start.column - 1);
+        let offset = d
+            .span
+            .start
+            .offset
+            .saturating_sub(d.span.start.column.saturating_sub(1));
         make_range_fix(offset, offset, fix_text)
     }
 
@@ -355,7 +369,11 @@ impl config_api::HostDirective for ComponentStoreData {
             .iter()
             .map(|line| format!("{}{}\n", indent, line))
             .collect();
-        let offset = d.span.start.offset - (d.span.start.column - 1);
+        let offset = d
+            .span
+            .start
+            .offset
+            .saturating_sub(d.span.start.column.saturating_sub(1));
         make_range_fix(offset, offset, fix_text)
     }
 

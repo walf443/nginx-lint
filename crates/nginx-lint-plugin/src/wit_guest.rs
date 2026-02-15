@@ -96,7 +96,7 @@ fn reconstruct_config_items(
                     ast::Position::new(c.line as usize, c.column as usize, c.start_offset as usize),
                     ast::Position::new(
                         c.line as usize,
-                        c.column as usize + c.text.len(),
+                        c.column as usize + c.text.chars().count(),
                         c.end_offset as usize,
                     ),
                 ),
@@ -108,7 +108,7 @@ fn reconstruct_config_items(
                     ast::Position::new(b.line as usize, 1, b.start_offset as usize),
                     ast::Position::new(
                         b.line as usize,
-                        1 + b.content.len(),
+                        1 + b.content.chars().count(),
                         b.start_offset as usize + b.content.len(),
                     ),
                 ),
@@ -144,7 +144,7 @@ fn convert_wit_argument(
             ast::Position::new(a.line as usize, a.column as usize, a.start_offset as usize),
             ast::Position::new(
                 a.line as usize,
-                a.column as usize + a.raw.len(),
+                a.column as usize + a.raw.chars().count(),
                 a.end_offset as usize,
             ),
         ),
@@ -176,13 +176,12 @@ fn reconstruct_directive(
         // One additional WIT call for block items (recursive)
         let block_items = reconstruct_config_items(&handle.block_items());
         Some(ast::Block {
+            // Note: The WIT interface does not expose the precise positions of
+            // the opening and closing braces of the block. We use the
+            // enclosing directive's span as an approximation.
             items: block_items,
             span: ast::Span::new(
-                ast::Position::new(
-                    line,
-                    column + d.name.len() + 1,
-                    start_offset + d.name.len() + 1,
-                ),
+                ast::Position::new(line, column, start_offset),
                 ast::Position::new(line, column, end_offset),
             ),
             raw_content: if d.block_is_raw {
@@ -197,15 +196,18 @@ fn reconstruct_directive(
         None
     };
 
-    let name_len = d.name.len();
+    let name_char_len = d.name.chars().count();
+    let name_byte_len = d.name.len();
     ast::Directive {
         name: d.name,
         name_span: ast::Span::new(
             ast::Position::new(line, column, start_offset),
-            ast::Position::new(line, column + name_len, start_offset + name_len),
+            ast::Position::new(line, column + name_char_len, start_offset + name_byte_len),
         ),
         args,
         block,
+        // Note: end column is not available from the WIT interface, so we use
+        // start column as an approximation. The byte offset (end_offset) is accurate.
         span: ast::Span::new(
             ast::Position::new(line, column, start_offset),
             ast::Position::new(line, column, end_offset),
