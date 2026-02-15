@@ -6,12 +6,16 @@ on:
     paths:
       - "plugins/**"
       - "crates/**"
+      - "src/**"
+      - "wit/**"
       - "Cargo.toml"
   pull_request:
     branches: [main]
     paths:
       - "plugins/**"
       - "crates/**"
+      - "src/**"
+      - "wit/**"
       - "Cargo.toml"
 
 env:
@@ -48,3 +52,83 @@ jobs:
               (cd "$dir" && cargo test)
             fi
           done
+
+  wasm-build:
+    name: Build WASM Plugins (${{ matrix.chunk }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chunk: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "wasm-build-${{ matrix.chunk }}"
+      - name: Install wasm-tools
+        run: |
+          WASM_TOOLS_VERSION=1.245.1
+          curl -sSfL "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/wasm-tools-${WASM_TOOLS_VERSION}-x86_64-linux.tar.gz" \
+            | tar xz --strip-components=1 --wildcards "*/wasm-tools"
+          mv wasm-tools /usr/local/bin/
+          wasm-tools --version
+      - name: Build WASM plugin chunk
+        run: |
+          plugins=(plugins/builtin/*/*/)
+          total=${#plugins[@]}
+          chunks=4
+          chunk=${{ matrix.chunk }}
+          start=$(( chunk * total / chunks ))
+          end=$(( (chunk + 1) * total / chunks ))
+
+          for (( i=start; i<end; i++ )); do
+            dir="${plugins[$i]}"
+            if [ -f "$dir/Cargo.toml" ]; then
+              name=$(basename "$dir")
+              echo "Building $name..."
+              cargo build --manifest-path "$dir/Cargo.toml" \
+                --target wasm32-unknown-unknown \
+                --target-dir target/wasm-plugins \
+                --release
+              wasm_name=$(echo "$name" | tr '-' '_')_plugin
+              core_wasm="target/wasm-plugins/wasm32-unknown-unknown/release/$wasm_name.wasm"
+              out_dir="$dir/target/wasm32-unknown-unknown/release"
+              mkdir -p "$out_dir"
+              wasm-tools component new "$core_wasm" -o "$out_dir/$wasm_name.wasm.component.wasm"
+            fi
+          done
+      - name: Package WASM components
+        run: |
+          find plugins/builtin -name "*.wasm.component.wasm" \
+            | tar czf "wasm-components-${{ matrix.chunk }}.tar.gz" -T -
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wasm-plugins-${{ matrix.chunk }}
+          path: wasm-components-${{ matrix.chunk }}.tar.gz
+          retention-days: 1
+
+  wasm-integration:
+    name: WASM Integration Test
+    needs: wasm-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "wasm-integration"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wasm-plugins-*
+          merge-multiple: true
+      - name: Extract WASM plugins
+        run: |
+          for f in wasm-components-*.tar.gz; do
+            tar xzf "$f"
+          done
+          echo "Discovered WASM plugins:"
+          find plugins/builtin -name "*.wasm.component.wasm" | sort
+      - name: Run WASM integration tests
+        run: cargo test --test wasm_plugin_test --features plugins

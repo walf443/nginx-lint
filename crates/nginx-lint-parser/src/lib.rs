@@ -1343,4 +1343,41 @@ http {
         assert_eq!(inner.len(), 3);
         assert_eq!(inner[0].name, "text/html");
     }
+
+    #[test]
+    fn test_utf8_comment_column_tracking() {
+        // Columns should be character-based, not byte-based
+        // "# 開発環境" has 6 characters but 14 bytes
+        let config = parse_string("# 開発環境\nlisten 80;").unwrap();
+        // Check comment span
+        if let ast::ConfigItem::Comment(c) = &config.items[0] {
+            assert_eq!(c.span.start.line, 1);
+            assert_eq!(c.span.start.column, 1);
+            // End column should be 1 + 6 chars = 7 (character-based)
+            // not 1 + 14 bytes = 15
+            assert_eq!(c.span.end.column, 7);
+        } else {
+            panic!("expected Comment");
+        }
+        // "listen" on line 2 should still be at column 1
+        let directives: Vec<_> = config.all_directives().collect();
+        assert_eq!(directives[0].span.start.line, 2);
+        assert_eq!(directives[0].span.start.column, 1);
+    }
+
+    #[test]
+    fn test_utf8_comment_byte_offset_tracking() {
+        // Byte offsets should be byte-based (not character-based)
+        let config = parse_string("# 開発環境\nlisten 80;").unwrap();
+        if let ast::ConfigItem::Comment(c) = &config.items[0] {
+            // "# 開発環境" = 14 bytes, offset starts at 0
+            assert_eq!(c.span.start.offset, 0);
+            assert_eq!(c.span.end.offset, 14);
+        } else {
+            panic!("expected Comment");
+        }
+        // "listen" starts after "# 開発環境\n" = 15 bytes
+        let directives: Vec<_> = config.all_directives().collect();
+        assert_eq!(directives[0].span.start.offset, 15);
+    }
 }

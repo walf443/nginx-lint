@@ -49,7 +49,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --no-default-features --features cli,native-builtin-plugins -- -D clippy::all
+      - run: cargo clippy --workspace --features plugins -- -D clippy::all
 
   test:
     name: Test
@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p nginx-lint -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin
+      - run: cargo test -p nginx-lint --features plugins -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin
 
   pages-build:
     name: Pages Build

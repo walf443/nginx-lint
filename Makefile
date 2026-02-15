@@ -29,24 +29,36 @@ run-web:
 run-web-embed: build-web
 	cargo run --release --features web-server-embed-wasm -- web
 
-# Build all WASM builtin plugins as WIT components (requires: cargo install wasm-tools)
+# Shared target directory for plugin builds (dependencies compiled once)
+SHARED_PLUGIN_TARGET := target/wasm-plugins
+
+# Build all WASM builtin plugins as WIT components (requires: wasm-tools)
+# Uses a shared target directory so nginx-lint-plugin and other dependencies
+# are compiled only once instead of per-plugin.
 build-plugins:
 	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
-	@echo "Building plugins..."
-	@for name in $(PLUGIN_NAMES); do \
-		dir=$$(find plugins/builtin -type d -name "$$name" 2>/dev/null | head -1); \
-		if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
-			echo "  Building $$name..."; \
+	@echo "Building plugins (shared target: $(SHARED_PLUGIN_TARGET))..."
+	@for dir in $(PLUGIN_DIRS); do \
+		if [ -f "$$dir/Cargo.toml" ]; then \
+			name=$$(basename "$$dir"); \
+			echo "  Compiling $$name..."; \
 			cargo build --manifest-path "$$dir/Cargo.toml" \
 				--target wasm32-unknown-unknown \
-				--target-dir "$$dir/target" \
-				--release && \
-			core_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
-			if [ -f "$$core_wasm" ]; then \
-				wasm-tools component new "$$core_wasm" -o "$$core_wasm.component.wasm" && \
-				echo "    Component: $$core_wasm.component.wasm"; \
-			fi \
-		fi \
+				--target-dir $(SHARED_PLUGIN_TARGET) \
+				--release || exit 1; \
+		fi; \
+	done
+	@echo "Creating components..."
+	@for dir in $(PLUGIN_DIRS); do \
+		if [ -f "$$dir/Cargo.toml" ]; then \
+			name=$$(basename "$$dir"); \
+			wasm_name=$$(echo $$name | tr '-' '_')_plugin; \
+			core_wasm=$(SHARED_PLUGIN_TARGET)/wasm32-unknown-unknown/release/$$wasm_name.wasm; \
+			out_dir="$$dir/target/wasm32-unknown-unknown/release"; \
+			mkdir -p "$$out_dir"; \
+			wasm-tools component new "$$core_wasm" -o "$$out_dir/$$wasm_name.wasm.component.wasm" && \
+			echo "  Component: $$out_dir/$$wasm_name.wasm.component.wasm"; \
+		fi; \
 	done
 	@echo "Done building plugins."
 

@@ -253,7 +253,7 @@ mod tests {
     fn test_load_plugins_empty_dir() {
         let loader = PluginLoader::new().unwrap();
         let dir = tempdir().unwrap();
-        let plugins = loader.load_plugins(dir.path());
+        let plugins = loader.load_plugins_dynamic(dir.path());
         assert!(plugins.is_ok());
         assert!(plugins.unwrap().is_empty());
     }
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn test_load_plugins_nonexistent_dir() {
         let loader = PluginLoader::new().unwrap();
-        let result = loader.load_plugins(Path::new("/nonexistent/path"));
+        let result = loader.load_plugins_dynamic(Path::new("/nonexistent/path"));
         assert!(matches!(result, Err(PluginError::DirectoryNotFound { .. })));
     }
 
@@ -272,7 +272,7 @@ mod tests {
         let wasm_path = dir.path().join("invalid.wasm");
         fs::write(&wasm_path, b"not a wasm file").unwrap();
 
-        let result = loader.load_plugin(&wasm_path);
+        let result = loader.load_plugin_dynamic(&wasm_path);
         assert!(matches!(result, Err(PluginError::InvalidWasmFile { .. })));
     }
 

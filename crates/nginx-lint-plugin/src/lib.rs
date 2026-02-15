@@ -75,6 +75,8 @@ mod types;
 pub mod container_testing;
 
 #[cfg(feature = "wit-export")]
+pub mod wasm_config;
+#[cfg(feature = "wit-export")]
 pub mod wit_guest;
 
 pub use types::*;
@@ -294,23 +296,12 @@ macro_rules! export_component_plugin {
                 }
 
                 fn check(
-                    config_json: String,
+                    config: &$crate::wit_guest::nginx_lint::plugin::config_api::Config,
                     path: String,
                 ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
                     let plugin = get_plugin();
-                    let config: $crate::Config = match serde_json::from_str(&config_json) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            let err = $crate::LintError::error(
-                                "plugin-error",
-                                "plugin",
-                                &format!("Failed to parse config: {}", e),
-                                0,
-                                0,
-                            );
-                            return vec![$crate::wit_guest::convert_lint_error(err)];
-                        }
-                    };
+                    // Reconstruct parser Config from host resource handle
+                    let config = $crate::wit_guest::reconstruct_config(config);
                     let errors = $crate::Plugin::check(plugin, &config, &path);
                     errors
                         .into_iter()
