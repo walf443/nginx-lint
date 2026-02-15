@@ -133,7 +133,10 @@ pub mod prelude {
 /// // Preferred:
 /// export_component_plugin!(MyPlugin);
 /// ```
-#[deprecated(since = "0.7.0", note = "Use export_component_plugin! instead for WIT component model support")]
+#[deprecated(
+    since = "0.7.0",
+    note = "Use export_component_plugin! instead for WIT component model support"
+)]
 #[doc(hidden)]
 pub fn _export_plugin_deprecated() {}
 

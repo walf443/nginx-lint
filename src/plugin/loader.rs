@@ -360,8 +360,7 @@ mod tests {
         // A minimal component should not fail at the engine level
         // (it may fail at validation, but not because component model is disabled)
         let bytes = b"\0asm\x0d\x00\x01\x00";
-        let result =
-            wasmtime::component::Component::new(loader.engine(), bytes);
+        let result = wasmtime::component::Component::new(loader.engine(), bytes);
         // This will fail because it's not a complete component, but the error
         // should NOT be about component model being disabled
         if let Err(e) = result {

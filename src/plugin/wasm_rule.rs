@@ -213,8 +213,14 @@ impl WasmLintRule {
         Self::validate_exports(&module, &path)?;
 
         // Get plugin spec by instantiating temporarily
-        let spec =
-            Self::get_plugin_spec(engine, &module, &path, memory_limit, fuel_limit, fuel_enabled)?;
+        let spec = Self::get_plugin_spec(
+            engine,
+            &module,
+            &path,
+            memory_limit,
+            fuel_limit,
+            fuel_enabled,
+        )?;
 
         // Leak strings for 'static lifetime (these live for the program duration)
         let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
