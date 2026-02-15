@@ -1,0 +1,13 @@
+{
+  "name": "server-tokens-enabled-ts",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc && jco componentize dist/plugin.js -w ../../../wit -n plugin --disable all -o server-tokens-enabled-ts.wasm"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "^1",
+    "@bytecodealliance/componentize-js": "^0.14",
+    "typescript": "^5"
+  }
+}
