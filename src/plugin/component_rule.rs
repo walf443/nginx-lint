@@ -178,10 +178,7 @@ impl config_api::HostDirective for ComponentStoreData {
             trailing_whitespace: dir.trailing_whitespace.clone(),
             space_before_terminator: dir.space_before_terminator.clone(),
             has_block: dir.block.is_some(),
-            block_is_raw: dir
-                .block
-                .as_ref()
-                .map_or(false, |b| b.raw_content.is_some()),
+            block_is_raw: dir.block.as_ref().is_some_and(|b| b.raw_content.is_some()),
         }
     }
 
@@ -280,7 +277,7 @@ impl config_api::HostDirective for ComponentStoreData {
         self.get_directive(&self_)
             .block
             .as_ref()
-            .map_or(false, |b| b.is_raw())
+            .is_some_and(|b| b.is_raw())
     }
 
     fn replace_with(
