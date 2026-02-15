@@ -44,7 +44,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = ["cli", "native-builtin-plugins", "plugins"]
+default = ["cli", "native-builtin-plugins"]
 cli = ["clap", "colored", "glob", "rayon"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]

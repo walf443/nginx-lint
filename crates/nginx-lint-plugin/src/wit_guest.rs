@@ -171,48 +171,57 @@ fn reconstruct_directive(
     let column = d.column as usize;
     let start_offset = d.start_offset as usize;
     let end_offset = d.end_offset as usize;
+    let end_line = d.end_line as usize;
+    let end_column = d.end_column as usize;
 
     let block = if d.has_block {
         // One additional WIT call for block items (recursive)
         let block_items = reconstruct_config_items(&handle.block_items());
+        // The block span uses the directive's end position (which includes the
+        // closing brace). The start position is an approximation using the
+        // directive's start since the precise `{` position is not tracked.
         Some(ast::Block {
-            // Note: The WIT interface does not expose the precise positions of
-            // the opening and closing braces of the block. We use the
-            // enclosing directive's span as an approximation.
             items: block_items,
             span: ast::Span::new(
                 ast::Position::new(line, column, start_offset),
-                ast::Position::new(line, column, end_offset),
+                ast::Position::new(end_line, end_column, end_offset),
             ),
-            raw_content: if d.block_is_raw {
-                Some(String::new()) // marker for raw block
-            } else {
-                None
-            },
-            closing_brace_leading_whitespace: String::new(),
-            trailing_whitespace: String::new(),
+            raw_content: d.block_raw_content,
+            closing_brace_leading_whitespace: d
+                .closing_brace_leading_whitespace
+                .unwrap_or_default(),
+            trailing_whitespace: d.block_trailing_whitespace.unwrap_or_default(),
         })
     } else {
         None
     };
 
-    let name_char_len = d.name.chars().count();
-    let name_byte_len = d.name.len();
+    let name_end_column = d.name_end_column as usize;
+    let name_end_offset = d.name_end_offset as usize;
+
+    let trailing_comment = d.trailing_comment_text.map(|text| ast::Comment {
+        span: ast::Span::new(
+            ast::Position::new(line, 0, 0),
+            ast::Position::new(line, 0, 0),
+        ),
+        leading_whitespace: String::new(),
+        trailing_whitespace: String::new(),
+        text,
+    });
+
     ast::Directive {
         name: d.name,
         name_span: ast::Span::new(
             ast::Position::new(line, column, start_offset),
-            ast::Position::new(line, column + name_char_len, start_offset + name_byte_len),
+            ast::Position::new(line, name_end_column, name_end_offset),
         ),
         args,
         block,
-        // Note: end column is not available from the WIT interface, so we use
-        // start column as an approximation. The byte offset (end_offset) is accurate.
         span: ast::Span::new(
             ast::Position::new(line, column, start_offset),
-            ast::Position::new(line, column, end_offset),
+            ast::Position::new(end_line, end_column, end_offset),
         ),
-        trailing_comment: None,
+        trailing_comment,
         leading_whitespace: d.leading_whitespace,
         space_before_terminator: d.space_before_terminator,
         trailing_whitespace: d.trailing_whitespace,

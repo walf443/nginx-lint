@@ -78,9 +78,7 @@ impl ComponentStoreData {
     fn push_directive(&mut self, directive: ast::Directive) -> Resource<DirectiveResource> {
         self.table
             .push(DirectiveResource { directive })
-            .unwrap_or_else(|_| {
-                panic!("resource table full: too many directive handles allocated (limit exceeded)")
-            })
+            .expect("resource table full: too many directive handles allocated")
     }
 }
 
@@ -201,11 +199,22 @@ impl config_api::HostDirective for ComponentStoreData {
             column: dir.span.start.column as u32,
             start_offset: dir.span.start.offset as u32,
             end_offset: dir.span.end.offset as u32,
+            end_line: dir.span.end.line as u32,
+            end_column: dir.span.end.column as u32,
             leading_whitespace: dir.leading_whitespace.clone(),
             trailing_whitespace: dir.trailing_whitespace.clone(),
             space_before_terminator: dir.space_before_terminator.clone(),
             has_block: dir.block.is_some(),
             block_is_raw: dir.block.as_ref().is_some_and(|b| b.raw_content.is_some()),
+            block_raw_content: dir.block.as_ref().and_then(|b| b.raw_content.clone()),
+            closing_brace_leading_whitespace: dir
+                .block
+                .as_ref()
+                .map(|b| b.closing_brace_leading_whitespace.clone()),
+            block_trailing_whitespace: dir.block.as_ref().map(|b| b.trailing_whitespace.clone()),
+            trailing_comment_text: dir.trailing_comment.as_ref().map(|c| c.text.clone()),
+            name_end_column: dir.name_span.end.column as u32,
+            name_end_offset: dir.name_span.end.offset as u32,
         }
     }
 
@@ -468,7 +477,7 @@ fn convert_config_items_to_wit(
                     .push(DirectiveResource {
                         directive: directive.as_ref().clone(),
                     })
-                    .expect("resource table full");
+                    .expect("resource table full: too many directive handles allocated");
                 results.push(config_api::ConfigItem::DirectiveItem(dir_resource));
             }
             ast::ConfigItem::Comment(comment) => {

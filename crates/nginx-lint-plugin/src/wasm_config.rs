@@ -4,18 +4,18 @@
 //! but delegate to host functions via WIT resource handles instead of
 //! holding the data directly.
 //!
-//! **Warning**: This module has known limitations with the `DirectiveExt` trait:
-//! `first_arg()`, `arg_at()`, and `last_arg()` return `None` because WIT host
-//! calls return owned strings, while the trait requires `Option<&str>`.
-//! Use the `_owned()` variants (`first_arg_owned()`, `arg_at_owned()`,
-//! `last_arg_owned()`) instead.
-//!
 //! **Note**: The `export_component_plugin!` macro uses `reconstruct_config`
 //! from `wit_guest` instead of these types, which rebuilds native parser AST
-//! types without this limitation. These types are provided for advanced manual
-//! interop with the WIT config API only.
+//! types without the `&str` lifetime limitation. These types are provided for
+//! advanced manual interop with the WIT config API only.
+//!
+//! This module does **not** implement `DirectiveExt` because WIT host calls
+//! return owned strings, making it impossible to implement `first_arg()`,
+//! `arg_at()`, and `last_arg()` which require `Option<&str>`. Use the owned
+//! variants (`first_arg_owned()`, `arg_at_owned()`, `last_arg_owned()`) or
+//! the standard `reconstruct_config` path instead.
 
-use crate::types::{DirectiveExt, Fix};
+use crate::types::Fix;
 use crate::wit_guest::nginx_lint::plugin::config_api;
 use crate::wit_guest::nginx_lint::plugin::types as wit_types;
 
@@ -172,97 +172,92 @@ impl Directive {
     }
 }
 
-impl DirectiveExt for Directive {
-    fn is(&self, name: &str) -> bool {
+/// Query and fix methods for WASM-mode Directive.
+///
+/// These methods return owned strings since WIT host calls return by value.
+/// For code that needs `&str` references, use `reconstruct_config` which
+/// builds native parser AST types.
+impl Directive {
+    /// Check if the directive has the given name.
+    pub fn is(&self, name: &str) -> bool {
         self.handle.is(name)
     }
 
-    fn first_arg(&self) -> Option<&str> {
-        // LIMITATION: Cannot return &str from a WIT host call because the
-        // string is returned by value. This returns None, which will be
-        // incorrect for code using trait objects or generic bounds.
-        // The standard plugin path uses `reconstruct_config` (wit_guest.rs)
-        // which rebuilds parser AST types that don't have this limitation.
-        // For direct use of these WASM types, use `first_arg_owned()` instead.
-        None
-    }
-
-    fn first_arg_is(&self, value: &str) -> bool {
-        self.handle.first_arg_is(value)
-    }
-
-    fn arg_at(&self, _index: usize) -> Option<&str> {
-        // LIMITATION: Same as first_arg - use arg_at_owned() instead.
-        None
-    }
-
-    fn last_arg(&self) -> Option<&str> {
-        // LIMITATION: Same as first_arg - use last_arg_owned() instead.
-        None
-    }
-
-    fn has_arg(&self, value: &str) -> bool {
-        self.handle.has_arg(value)
-    }
-
-    fn arg_count(&self) -> usize {
-        self.handle.arg_count() as usize
-    }
-
-    fn line(&self) -> usize {
-        self.handle.line() as usize
-    }
-
-    fn column(&self) -> usize {
-        self.handle.column() as usize
-    }
-
-    fn full_start_offset(&self) -> usize {
-        self.start_offset() - self.leading_whitespace().len()
-    }
-
-    fn replace_with(&self, new_text: &str) -> Fix {
-        convert_wit_fix(self.handle.replace_with(new_text))
-    }
-
-    fn delete_line(&self) -> Fix {
-        convert_wit_fix(self.handle.delete_line_fix())
-    }
-
-    fn insert_after(&self, new_text: &str) -> Fix {
-        convert_wit_fix(self.handle.insert_after(new_text))
-    }
-
-    fn insert_after_many(&self, lines: &[&str]) -> Fix {
-        let owned: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-        convert_wit_fix(self.handle.insert_after_many(&owned))
-    }
-
-    fn insert_before(&self, new_text: &str) -> Fix {
-        convert_wit_fix(self.handle.insert_before(new_text))
-    }
-
-    fn insert_before_many(&self, lines: &[&str]) -> Fix {
-        let owned: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
-        convert_wit_fix(self.handle.insert_before_many(&owned))
-    }
-}
-
-/// Additional methods for WASM-mode Directive that return owned strings.
-impl Directive {
-    /// Get the first argument value (owned string).
+    /// Get the first argument value.
     pub fn first_arg_owned(&self) -> Option<String> {
         self.handle.first_arg()
     }
 
-    /// Get the argument at the given index (owned string).
+    /// Check if the first argument equals the given value.
+    pub fn first_arg_is(&self, value: &str) -> bool {
+        self.handle.first_arg_is(value)
+    }
+
+    /// Get the argument at the given index.
     pub fn arg_at_owned(&self, index: usize) -> Option<String> {
         self.handle.arg_at(index as u32)
     }
 
-    /// Get the last argument value (owned string).
+    /// Get the last argument value.
     pub fn last_arg_owned(&self) -> Option<String> {
         self.handle.last_arg()
+    }
+
+    /// Check if any argument equals the given value.
+    pub fn has_arg(&self, value: &str) -> bool {
+        self.handle.has_arg(value)
+    }
+
+    /// Return the number of arguments.
+    pub fn arg_count(&self) -> usize {
+        self.handle.arg_count() as usize
+    }
+
+    /// Get the start line number (1-based).
+    pub fn line(&self) -> usize {
+        self.handle.line() as usize
+    }
+
+    /// Get the start column number (1-based).
+    pub fn column(&self) -> usize {
+        self.handle.column() as usize
+    }
+
+    /// Get the full start offset including leading whitespace.
+    pub fn full_start_offset(&self) -> usize {
+        self.start_offset() - self.leading_whitespace().len()
+    }
+
+    /// Create a fix that replaces this directive with new text.
+    pub fn replace_with(&self, new_text: &str) -> Fix {
+        convert_wit_fix(self.handle.replace_with(new_text))
+    }
+
+    /// Create a fix that deletes this directive's line.
+    pub fn delete_line(&self) -> Fix {
+        convert_wit_fix(self.handle.delete_line_fix())
+    }
+
+    /// Create a fix that inserts a new line after this directive.
+    pub fn insert_after(&self, new_text: &str) -> Fix {
+        convert_wit_fix(self.handle.insert_after(new_text))
+    }
+
+    /// Create a fix that inserts multiple lines after this directive.
+    pub fn insert_after_many(&self, lines: &[&str]) -> Fix {
+        let owned: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        convert_wit_fix(self.handle.insert_after_many(&owned))
+    }
+
+    /// Create a fix that inserts a new line before this directive.
+    pub fn insert_before(&self, new_text: &str) -> Fix {
+        convert_wit_fix(self.handle.insert_before(new_text))
+    }
+
+    /// Create a fix that inserts multiple lines before this directive.
+    pub fn insert_before_many(&self, lines: &[&str]) -> Fix {
+        let owned: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+        convert_wit_fix(self.handle.insert_before_many(&owned))
     }
 }
 

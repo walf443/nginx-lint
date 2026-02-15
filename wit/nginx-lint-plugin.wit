@@ -94,11 +94,25 @@ interface config-api {
         column: u32,
         start-offset: u32,
         end-offset: u32,
+        end-line: u32,
+        end-column: u32,
         leading-whitespace: string,
         trailing-whitespace: string,
         space-before-terminator: string,
         has-block: bool,
         block-is-raw: bool,
+        /// Actual raw content for raw blocks (e.g., lua code); none if not a raw block
+        block-raw-content: option<string>,
+        /// Leading whitespace before the closing brace; none if no block
+        closing-brace-leading-whitespace: option<string>,
+        /// Trailing whitespace after the closing brace; none if no block
+        block-trailing-whitespace: option<string>,
+        /// Text of the trailing comment on the directive line; none if no comment
+        trailing-comment-text: option<string>,
+        /// End column of the name token (1-based)
+        name-end-column: u32,
+        /// End byte offset of the name token (0-based)
+        name-end-offset: u32,
     }
 
     /// A directive paired with its parent block context
