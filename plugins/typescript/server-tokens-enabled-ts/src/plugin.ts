@@ -11,15 +11,13 @@
  *   plugins/builtin/security/server_tokens_enabled/
  */
 
-// WIT types are provided by jco componentize from the WIT definition.
-// - `config` and `directive` are WIT resources, passed as objects with methods.
-// - WIT kebab-case names are converted to camelCase by jco.
+import type { Config, LintError, PluginSpec } from "./types.js";
 
 /**
  * Return plugin metadata.
  * Exported as `spec` per the WIT world definition.
  */
-export function spec() {
+export function spec(): PluginSpec {
   return {
     name: "server-tokens-enabled-ts",
     category: "security",
@@ -41,13 +39,9 @@ export function spec() {
 /**
  * Check the nginx config and return lint errors.
  * Exported as `check` per the WIT world definition.
- *
- * @param cfg - A WIT `config` resource (host-backed). Has methods like
- *              `allDirectivesWithContext()`, `allDirectives()`, etc.
- * @param path - The file path being checked.
  */
-export function check(cfg: any, path: string) {
-  const errors: any[] = [];
+export function check(cfg: Config, path: string): LintError[] {
+  const errors: LintError[] = [];
   let hasServerTokensOff = false;
   let hasServerTokensOn = false;
   let httpBlockLine: number | undefined;

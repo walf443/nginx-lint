@@ -10,8 +10,8 @@ describe("spec", () => {
     assert.equal(s.category, "security");
     assert.equal(s.severity, "warning");
     assert.ok(s.description.length > 0);
-    assert.ok(s.badExample.length > 0);
-    assert.ok(s.goodExample.length > 0);
+    assert.ok(s.badExample);
+    assert.ok(s.goodExample);
   });
 });
 
