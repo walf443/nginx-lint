@@ -28,10 +28,9 @@ mod bindings {
         path: "wit/nginx-lint-plugin.wit",
         world: "plugin",
         with: {
-            "nginx-lint:plugin/config-api/config": super::ConfigResource,
-            "nginx-lint:plugin/config-api/directive": super::DirectiveResource,
+            "nginx-lint:plugin/config-api.config": super::ConfigResource,
+            "nginx-lint:plugin/config-api.directive": super::DirectiveResource,
         },
-        trappable_imports: true,
     });
 }
 
@@ -44,7 +43,39 @@ struct ComponentStoreData {
     table: ResourceTable,
 }
 
+impl wasmtime::component::HasData for ComponentStoreData {
+    type Data<'a> = &'a mut ComponentStoreData;
+}
+
+/// Helper to get a directive ref from the resource table, panicking on invalid handle.
+/// Resource handles are managed by wasmtime runtime, so invalid handles indicate a bug.
+impl ComponentStoreData {
+    fn get_directive(&self, self_: &Resource<DirectiveResource>) -> &ast::Directive {
+        &self
+            .table
+            .get(self_)
+            .expect("invalid directive resource handle")
+            .directive
+    }
+
+    fn get_config(&self, self_: &Resource<ConfigResource>) -> &Arc<Config> {
+        &self
+            .table
+            .get(self_)
+            .expect("invalid config resource handle")
+            .config
+    }
+
+    fn push_directive(&mut self, directive: ast::Directive) -> Resource<DirectiveResource> {
+        self.table
+            .push(DirectiveResource { directive })
+            .expect("resource table full")
+    }
+}
+
 // === Host trait implementations for config-api ===
+
+impl bindings::nginx_lint::plugin::types::Host for ComponentStoreData {}
 
 impl config_api::Host for ComponentStoreData {}
 
@@ -52,111 +83,79 @@ impl config_api::HostConfig for ComponentStoreData {
     fn all_directives_with_context(
         &mut self,
         self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<Vec<config_api::DirectiveContext>> {
-        let config = self.table.get(&self_)?.config.clone();
+    ) -> Vec<config_api::DirectiveContext> {
+        let config = self.get_config(&self_).clone();
         let mut collected = Vec::new();
         collect_directives_with_context(&config.items, &config.include_context, &mut collected);
 
         let mut results = Vec::new();
         for (directive, parent_stack, depth) in collected {
-            let dir_resource = self.table.push(DirectiveResource {
-                directive: directive.clone(),
-            })?;
+            let dir_resource = self.push_directive(directive.clone());
             results.push(config_api::DirectiveContext {
                 directive: dir_resource,
                 parent_stack,
                 depth,
             });
         }
-        Ok(results)
+        results
     }
 
     fn all_directives(
         &mut self,
         self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<Vec<Resource<DirectiveResource>>> {
-        let config = self.table.get(&self_)?.config.clone();
+    ) -> Vec<Resource<DirectiveResource>> {
+        let config = self.get_config(&self_).clone();
         let mut collected = Vec::new();
         collect_all_directives(&config.items, &mut collected);
 
         let mut results = Vec::new();
         for directive in collected {
-            let dir_resource = self.table.push(DirectiveResource {
-                directive: directive.clone(),
-            })?;
+            let dir_resource = self.push_directive(directive.clone());
             results.push(dir_resource);
         }
-        Ok(results)
+        results
     }
 
-    fn items(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<Vec<config_api::ConfigItem>> {
-        let items = { self.table.get(&self_)?.config.items.clone() };
+    fn items(&mut self, self_: Resource<ConfigResource>) -> Vec<config_api::ConfigItem> {
+        let items = self.get_config(&self_).items.clone();
         convert_config_items_to_wit(&items, &mut self.table)
     }
 
-    fn include_context(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<Vec<String>> {
-        Ok(self.table.get(&self_)?.config.include_context.clone())
+    fn include_context(&mut self, self_: Resource<ConfigResource>) -> Vec<String> {
+        self.get_config(&self_).include_context.clone()
     }
 
-    fn is_included_from(
-        &mut self,
-        self_: Resource<ConfigResource>,
-        context: String,
-    ) -> wasmtime::Result<bool> {
-        let ctx = &self.table.get(&self_)?.config.include_context;
-        Ok(ctx.iter().any(|c| c == &context))
+    fn is_included_from(&mut self, self_: Resource<ConfigResource>, context: String) -> bool {
+        let ctx = &self.get_config(&self_).include_context;
+        ctx.iter().any(|c| c == &context)
     }
 
-    fn is_included_from_http(&mut self, self_: Resource<ConfigResource>) -> wasmtime::Result<bool> {
-        let ctx = &self.table.get(&self_)?.config.include_context;
-        Ok(ctx.iter().any(|c| c == "http"))
+    fn is_included_from_http(&mut self, self_: Resource<ConfigResource>) -> bool {
+        let ctx = &self.get_config(&self_).include_context;
+        ctx.iter().any(|c| c == "http")
     }
 
-    fn is_included_from_http_server(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<bool> {
-        let ctx = &self.table.get(&self_)?.config.include_context;
-        Ok(ctx.iter().any(|c| c == "http")
+    fn is_included_from_http_server(&mut self, self_: Resource<ConfigResource>) -> bool {
+        let ctx = &self.get_config(&self_).include_context;
+        ctx.iter().any(|c| c == "http")
             && ctx.iter().any(|c| c == "server")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server"))
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server")
     }
 
-    fn is_included_from_http_location(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<bool> {
-        let ctx = &self.table.get(&self_)?.config.include_context;
-        Ok(ctx.iter().any(|c| c == "http")
+    fn is_included_from_http_location(&mut self, self_: Resource<ConfigResource>) -> bool {
+        let ctx = &self.get_config(&self_).include_context;
+        ctx.iter().any(|c| c == "http")
             && ctx.iter().any(|c| c == "location")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location"))
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location")
     }
 
-    fn is_included_from_stream(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<bool> {
-        let ctx = &self.table.get(&self_)?.config.include_context;
-        Ok(ctx.iter().any(|c| c == "stream"))
+    fn is_included_from_stream(&mut self, self_: Resource<ConfigResource>) -> bool {
+        let ctx = &self.get_config(&self_).include_context;
+        ctx.iter().any(|c| c == "stream")
     }
 
-    fn immediate_parent_context(
-        &mut self,
-        self_: Resource<ConfigResource>,
-    ) -> wasmtime::Result<Option<String>> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .config
-            .include_context
-            .last()
-            .cloned())
+    fn immediate_parent_context(&mut self, self_: Resource<ConfigResource>) -> Option<String> {
+        self.get_config(&self_).include_context.last().cloned()
     }
 
     fn drop(&mut self, rep: Resource<ConfigResource>) -> wasmtime::Result<()> {
@@ -166,12 +165,9 @@ impl config_api::HostConfig for ComponentStoreData {
 }
 
 impl config_api::HostDirective for ComponentStoreData {
-    fn data(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<config_api::DirectiveData> {
-        let dir = &self.table.get(&self_)?.directive;
-        Ok(config_api::DirectiveData {
+    fn data(&mut self, self_: Resource<DirectiveResource>) -> config_api::DirectiveData {
+        let dir = self.get_directive(&self_);
+        config_api::DirectiveData {
             name: dir.name.clone(),
             args: dir.args.iter().map(convert_argument_to_wit).collect(),
             line: dir.span.start.line as u32,
@@ -186,185 +182,122 @@ impl config_api::HostDirective for ComponentStoreData {
                 .block
                 .as_ref()
                 .map_or(false, |b| b.raw_content.is_some()),
-        })
+        }
     }
 
-    fn name(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<String> {
-        Ok(self.table.get(&self_)?.directive.name.clone())
+    fn name(&mut self, self_: Resource<DirectiveResource>) -> String {
+        self.get_directive(&self_).name.clone()
     }
 
-    fn is(&mut self, self_: Resource<DirectiveResource>, name: String) -> wasmtime::Result<bool> {
-        Ok(self.table.get(&self_)?.directive.name == name)
+    fn is(&mut self, self_: Resource<DirectiveResource>, name: String) -> bool {
+        self.get_directive(&self_).name == name
     }
 
-    fn first_arg(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<Option<String>> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn first_arg(&mut self, self_: Resource<DirectiveResource>) -> Option<String> {
+        self.get_directive(&self_)
             .first_arg()
-            .map(|s| s.to_string()))
+            .map(|s| s.to_string())
     }
 
-    fn first_arg_is(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-        value: String,
-    ) -> wasmtime::Result<bool> {
-        Ok(self.table.get(&self_)?.directive.first_arg_is(&value))
+    fn first_arg_is(&mut self, self_: Resource<DirectiveResource>, value: String) -> bool {
+        self.get_directive(&self_).first_arg_is(&value)
     }
 
-    fn arg_at(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-        index: u32,
-    ) -> wasmtime::Result<Option<String>> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn arg_at(&mut self, self_: Resource<DirectiveResource>, index: u32) -> Option<String> {
+        self.get_directive(&self_)
             .args
             .get(index as usize)
-            .map(|a| a.as_str().to_string()))
+            .map(|a| a.as_str().to_string())
     }
 
-    fn last_arg(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<Option<String>> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn last_arg(&mut self, self_: Resource<DirectiveResource>) -> Option<String> {
+        self.get_directive(&self_)
             .args
             .last()
-            .map(|a| a.as_str().to_string()))
+            .map(|a| a.as_str().to_string())
     }
 
-    fn has_arg(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-        value: String,
-    ) -> wasmtime::Result<bool> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn has_arg(&mut self, self_: Resource<DirectiveResource>, value: String) -> bool {
+        self.get_directive(&self_)
             .args
             .iter()
-            .any(|a| a.as_str() == value))
+            .any(|a| a.as_str() == value)
     }
 
-    fn arg_count(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<u32> {
-        Ok(self.table.get(&self_)?.directive.args.len() as u32)
+    fn arg_count(&mut self, self_: Resource<DirectiveResource>) -> u32 {
+        self.get_directive(&self_).args.len() as u32
     }
 
-    fn args(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<Vec<config_api::ArgumentInfo>> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn args(&mut self, self_: Resource<DirectiveResource>) -> Vec<config_api::ArgumentInfo> {
+        self.get_directive(&self_)
             .args
             .iter()
             .map(convert_argument_to_wit)
-            .collect())
+            .collect()
     }
 
-    fn line(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<u32> {
-        Ok(self.table.get(&self_)?.directive.span.start.line as u32)
+    fn line(&mut self, self_: Resource<DirectiveResource>) -> u32 {
+        self.get_directive(&self_).span.start.line as u32
     }
 
-    fn column(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<u32> {
-        Ok(self.table.get(&self_)?.directive.span.start.column as u32)
+    fn column(&mut self, self_: Resource<DirectiveResource>) -> u32 {
+        self.get_directive(&self_).span.start.column as u32
     }
 
-    fn start_offset(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<u32> {
-        Ok(self.table.get(&self_)?.directive.span.start.offset as u32)
+    fn start_offset(&mut self, self_: Resource<DirectiveResource>) -> u32 {
+        self.get_directive(&self_).span.start.offset as u32
     }
 
-    fn end_offset(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<u32> {
-        Ok(self.table.get(&self_)?.directive.span.end.offset as u32)
+    fn end_offset(&mut self, self_: Resource<DirectiveResource>) -> u32 {
+        self.get_directive(&self_).span.end.offset as u32
     }
 
-    fn leading_whitespace(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<String> {
-        Ok(self.table.get(&self_)?.directive.leading_whitespace.clone())
+    fn leading_whitespace(&mut self, self_: Resource<DirectiveResource>) -> String {
+        self.get_directive(&self_).leading_whitespace.clone()
     }
 
-    fn trailing_whitespace(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<String> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
-            .trailing_whitespace
-            .clone())
+    fn trailing_whitespace(&mut self, self_: Resource<DirectiveResource>) -> String {
+        self.get_directive(&self_).trailing_whitespace.clone()
     }
 
-    fn space_before_terminator(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<String> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
-            .space_before_terminator
-            .clone())
+    fn space_before_terminator(&mut self, self_: Resource<DirectiveResource>) -> String {
+        self.get_directive(&self_).space_before_terminator.clone()
     }
 
-    fn has_block(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<bool> {
-        Ok(self.table.get(&self_)?.directive.block.is_some())
+    fn has_block(&mut self, self_: Resource<DirectiveResource>) -> bool {
+        self.get_directive(&self_).block.is_some()
     }
 
-    fn block_items(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<Vec<config_api::ConfigItem>> {
-        let items = {
-            match &self.table.get(&self_)?.directive.block {
-                Some(block) => block.items.clone(),
-                None => Vec::new(),
-            }
+    fn block_items(&mut self, self_: Resource<DirectiveResource>) -> Vec<config_api::ConfigItem> {
+        let items = match &self.get_directive(&self_).block {
+            Some(block) => block.items.clone(),
+            None => Vec::new(),
         };
         convert_config_items_to_wit(&items, &mut self.table)
     }
 
-    fn block_is_raw(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<bool> {
-        Ok(self
-            .table
-            .get(&self_)?
-            .directive
+    fn block_is_raw(&mut self, self_: Resource<DirectiveResource>) -> bool {
+        self.get_directive(&self_)
             .block
             .as_ref()
-            .map_or(false, |b| b.is_raw()))
+            .map_or(false, |b| b.is_raw())
     }
 
     fn replace_with(
         &mut self,
         self_: Resource<DirectiveResource>,
         new_text: String,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let d = &self.table.get(&self_)?.directive;
+    ) -> config_api::Fix {
+        let d = self.get_directive(&self_);
         let start = d.span.start.offset - d.leading_whitespace.len();
         let end = d.span.end.offset;
         let fixed = format!("{}{}", d.leading_whitespace, new_text);
-        Ok(make_range_fix(start, end, fixed))
+        make_range_fix(start, end, fixed)
     }
 
-    fn delete_line_fix(
-        &mut self,
-        self_: Resource<DirectiveResource>,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let line = self.table.get(&self_)?.directive.span.start.line;
-        Ok(bindings::nginx_lint::plugin::types::Fix {
+    fn delete_line_fix(&mut self, self_: Resource<DirectiveResource>) -> config_api::Fix {
+        let line = self.get_directive(&self_).span.start.line;
+        config_api::Fix {
             line: line as u32,
             old_text: None,
             new_text: String::new(),
@@ -372,61 +305,61 @@ impl config_api::HostDirective for ComponentStoreData {
             insert_after: false,
             start_offset: None,
             end_offset: None,
-        })
+        }
     }
 
     fn insert_after(
         &mut self,
         self_: Resource<DirectiveResource>,
         new_text: String,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let d = &self.table.get(&self_)?.directive;
+    ) -> config_api::Fix {
+        let d = self.get_directive(&self_);
         let indent = " ".repeat(d.span.start.column.saturating_sub(1));
         let fix_text = format!("\n{}{}", indent, new_text);
         let offset = d.span.end.offset;
-        Ok(make_range_fix(offset, offset, fix_text))
+        make_range_fix(offset, offset, fix_text)
     }
 
     fn insert_before(
         &mut self,
         self_: Resource<DirectiveResource>,
         new_text: String,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let d = &self.table.get(&self_)?.directive;
+    ) -> config_api::Fix {
+        let d = self.get_directive(&self_);
         let indent = " ".repeat(d.span.start.column.saturating_sub(1));
         let fix_text = format!("{}{}\n", indent, new_text);
         let offset = d.span.start.offset - (d.span.start.column - 1);
-        Ok(make_range_fix(offset, offset, fix_text))
+        make_range_fix(offset, offset, fix_text)
     }
 
     fn insert_after_many(
         &mut self,
         self_: Resource<DirectiveResource>,
         lines: Vec<String>,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let d = &self.table.get(&self_)?.directive;
+    ) -> config_api::Fix {
+        let d = self.get_directive(&self_);
         let indent = " ".repeat(d.span.start.column.saturating_sub(1));
         let fix_text: String = lines
             .iter()
             .map(|line| format!("\n{}{}", indent, line))
             .collect();
         let offset = d.span.end.offset;
-        Ok(make_range_fix(offset, offset, fix_text))
+        make_range_fix(offset, offset, fix_text)
     }
 
     fn insert_before_many(
         &mut self,
         self_: Resource<DirectiveResource>,
         lines: Vec<String>,
-    ) -> wasmtime::Result<bindings::nginx_lint::plugin::types::Fix> {
-        let d = &self.table.get(&self_)?.directive;
+    ) -> config_api::Fix {
+        let d = self.get_directive(&self_);
         let indent = " ".repeat(d.span.start.column.saturating_sub(1));
         let fix_text: String = lines
             .iter()
             .map(|line| format!("{}{}\n", indent, line))
             .collect();
         let offset = d.span.start.offset - (d.span.start.column - 1);
-        Ok(make_range_fix(offset, offset, fix_text))
+        make_range_fix(offset, offset, fix_text)
     }
 
     fn drop(&mut self, rep: Resource<DirectiveResource>) -> wasmtime::Result<()> {
@@ -438,12 +371,8 @@ impl config_api::HostDirective for ComponentStoreData {
 // === Helper functions ===
 
 /// Create a range-based WIT fix.
-fn make_range_fix(
-    start: usize,
-    end: usize,
-    new_text: String,
-) -> bindings::nginx_lint::plugin::types::Fix {
-    bindings::nginx_lint::plugin::types::Fix {
+fn make_range_fix(start: usize, end: usize, new_text: String) -> config_api::Fix {
+    config_api::Fix {
         line: 0,
         old_text: None,
         new_text,
@@ -488,14 +417,16 @@ fn collect_all_directives<'a>(items: &'a [ast::ConfigItem], results: &mut Vec<&'
 fn convert_config_items_to_wit(
     items: &[ast::ConfigItem],
     table: &mut ResourceTable,
-) -> wasmtime::Result<Vec<config_api::ConfigItem>> {
+) -> Vec<config_api::ConfigItem> {
     let mut results = Vec::new();
     for item in items {
         match item {
             ast::ConfigItem::Directive(directive) => {
-                let dir_resource = table.push(DirectiveResource {
-                    directive: directive.as_ref().clone(),
-                })?;
+                let dir_resource = table
+                    .push(DirectiveResource {
+                        directive: directive.as_ref().clone(),
+                    })
+                    .expect("resource table full");
                 results.push(config_api::ConfigItem::DirectiveItem(dir_resource));
             }
             ast::ConfigItem::Comment(comment) => {
@@ -522,7 +453,7 @@ fn convert_config_items_to_wit(
             }
         }
     }
-    Ok(results)
+    results
 }
 
 /// Convert a parser Argument to WIT ArgumentInfo.
@@ -710,15 +641,11 @@ impl ComponentLintRule {
     ) -> Result<Plugin, PluginError> {
         let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(engine);
 
-        // Register config-api host functions
-        config_api::add_to_linker(&mut linker, |data: &mut ComponentStoreData| data).map_err(
-            |e| {
-                PluginError::instantiate_error(
-                    path,
-                    format!("Failed to add config-api to linker: {}", e),
-                )
-            },
-        )?;
+        // Register all host functions (types + config-api)
+        Plugin::add_to_linker::<ComponentStoreData, ComponentStoreData>(&mut linker, |data| data)
+            .map_err(|e| {
+            PluginError::instantiate_error(path, format!("Failed to add imports to linker: {}", e))
+        })?;
 
         Plugin::instantiate(store, component, &linker)
             .map_err(|e| PluginError::instantiate_error(path, e.to_string()))
