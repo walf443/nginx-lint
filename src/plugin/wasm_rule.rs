@@ -8,7 +8,9 @@ use crate::parser::ast::Config;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wasmtime::{Engine, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
+use wasmtime::{
+    Engine, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, Trap, TypedFunc,
+};
 
 /// Plugin spec returned by the plugin_spec export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,7 +213,8 @@ impl WasmLintRule {
         Self::validate_exports(&module, &path)?;
 
         // Get plugin spec by instantiating temporarily
-        let spec = Self::get_plugin_spec(engine, &module, &path, fuel_limit, fuel_enabled)?;
+        let spec =
+            Self::get_plugin_spec(engine, &module, &path, memory_limit, fuel_limit, fuel_enabled)?;
 
         // Leak strings for 'static lifetime (these live for the program duration)
         let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
@@ -261,10 +264,13 @@ impl WasmLintRule {
         engine: &Engine,
         module: &Module,
         path: &Path,
+        memory_limit: u64,
         fuel_limit: u64,
         fuel_enabled: bool,
     ) -> Result<PluginSpec, PluginError> {
-        let limits = StoreLimitsBuilder::new().build();
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(memory_limit as usize)
+            .build();
         let mut store = Store::new(engine, StoreData { limits });
         store.limiter(|data| &mut data.limits);
         if fuel_enabled {
@@ -458,8 +464,7 @@ impl WasmLintRule {
                 ),
             )
             .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("fuel") || err_str.contains("Fuel") {
+                if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
                     PluginError::timeout(&self.path)
                 } else {
                     PluginError::execution_error(&self.path, format!("check failed: {}", e))

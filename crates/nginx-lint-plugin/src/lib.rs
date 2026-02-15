@@ -275,12 +275,18 @@ macro_rules! export_component_plugin {
         const _: () = {
             use $crate::wit_guest::Guest;
 
+            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
+
+            fn get_plugin() -> &'static $plugin_type {
+                PLUGIN.get_or_init(|| <$plugin_type>::default())
+            }
+
             struct ComponentExport;
 
             impl Guest for ComponentExport {
                 fn spec() -> $crate::wit_guest::nginx_lint::plugin::types::PluginSpec {
-                    let plugin = <$plugin_type>::default();
-                    let sdk_spec = $crate::Plugin::spec(&plugin);
+                    let plugin = get_plugin();
+                    let sdk_spec = $crate::Plugin::spec(plugin);
                     $crate::wit_guest::convert_spec(sdk_spec)
                 }
 
@@ -288,7 +294,7 @@ macro_rules! export_component_plugin {
                     config_json: String,
                     path: String,
                 ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
-                    let plugin = <$plugin_type>::default();
+                    let plugin = get_plugin();
                     let config: $crate::Config = match serde_json::from_str(&config_json) {
                         Ok(c) => c,
                         Err(e) => {
@@ -302,7 +308,7 @@ macro_rules! export_component_plugin {
                             return vec![$crate::wit_guest::convert_lint_error(err)];
                         }
                     };
-                    let errors = $crate::Plugin::check(&plugin, &config, &path);
+                    let errors = $crate::Plugin::check(plugin, &config, &path);
                     errors
                         .into_iter()
                         .map($crate::wit_guest::convert_lint_error)

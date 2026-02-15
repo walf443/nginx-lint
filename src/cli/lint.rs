@@ -1,8 +1,6 @@
 use super::Cli;
 use clap::CommandFactory;
 use colored::control;
-#[cfg(feature = "plugins")]
-use nginx_lint::linter::LintRule;
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content, collect_included_files,
@@ -467,7 +465,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         use nginx_lint::plugin::PluginLoader;
 
         match PluginLoader::new() {
-            Ok(loader) => match loader.load_plugins(plugins_dir) {
+            Ok(loader) => match loader.load_plugins_dynamic(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {
                         eprintln!(
@@ -480,7 +478,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                         if cli.verbose {
                             eprintln!("  - {} ({})", plugin.name(), plugin.description());
                         }
-                        linter.add_rule(Box::new(plugin));
+                        linter.add_rule(plugin);
                     }
                 }
                 Err(e) => {

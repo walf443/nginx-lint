@@ -7,7 +7,7 @@ use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder, Trap};
 
 /// Generated bindings from WIT file, isolated in a submodule to avoid name conflicts
 mod bindings {
@@ -228,11 +228,10 @@ impl ComponentLintRule {
         let wit_errors = plugin
             .call_check(&mut store, config_json, &path_str)
             .map_err(|e| {
-                let err_str = e.to_string();
-                if err_str.contains("fuel") || err_str.contains("Fuel") {
+                if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
                     PluginError::timeout(&self.path)
                 } else {
-                    PluginError::execution_error(&self.path, format!("check() failed: {}", err_str))
+                    PluginError::execution_error(&self.path, format!("check() failed: {}", e))
                 }
             })?;
 
