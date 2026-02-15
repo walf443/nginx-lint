@@ -861,4 +861,39 @@ mod tests {
             ]
         );
     }
+
+    fn tokenize_full(source: &str) -> Vec<Token> {
+        let mut lexer = Lexer::new(source);
+        lexer.tokenize().unwrap()
+    }
+
+    #[test]
+    fn test_utf8_comment_column_is_char_based() {
+        // Column counting should be character-based, not byte-based
+        // "# 開発環境" has 6 characters but 14 bytes
+        let input = "# 開発環境\nlisten 80;";
+        let tokens = tokenize_full(input);
+        // Comment starts at column 1
+        assert_eq!(tokens[0].span.start.column, 1);
+        // "listen" starts at line 2, column 1
+        let listen_token = tokens
+            .iter()
+            .find(|t| t.kind == TokenKind::Ident("listen".to_string()))
+            .unwrap();
+        assert_eq!(listen_token.span.start.line, 2);
+        assert_eq!(listen_token.span.start.column, 1);
+    }
+
+    #[test]
+    fn test_utf8_argument_column_tracking() {
+        // After a multi-byte identifier, column should advance by char count
+        let input = "listen 80;";
+        let tokens = tokenize_full(input);
+        // "listen" at column 1, "80" at column 8 (1 + 6 chars + 1 space)
+        let arg_token = tokens
+            .iter()
+            .find(|t| t.kind == TokenKind::Argument("80".to_string()))
+            .unwrap();
+        assert_eq!(arg_token.span.start.column, 8);
+    }
 }

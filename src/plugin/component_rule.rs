@@ -79,9 +79,7 @@ impl ComponentStoreData {
         self.table
             .push(DirectiveResource { directive })
             .unwrap_or_else(|_| {
-                panic!(
-                    "resource table full: too many directive handles allocated (limit exceeded)"
-                )
+                panic!("resource table full: too many directive handles allocated (limit exceeded)")
             })
     }
 }
@@ -1008,5 +1006,283 @@ mod tests {
             true,
         );
         assert!(matches!(result, Err(PluginError::CompileError { .. })));
+    }
+
+    // === Host trait method tests ===
+
+    /// Create a ComponentStoreData with a config resource for testing host methods.
+    fn setup_store_with_config(
+        include_context: Vec<String>,
+        items: Vec<ast::ConfigItem>,
+    ) -> (ComponentStoreData, Resource<ConfigResource>) {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let config = Arc::new(Config {
+            items,
+            include_context,
+        });
+        let resource = data
+            .table
+            .push(ConfigResource { config })
+            .expect("push config");
+        (data, resource)
+    }
+
+    /// Create a directive with the given name and span.
+    fn make_directive(
+        name: &str,
+        line: usize,
+        column: usize,
+        start_offset: usize,
+        end_offset: usize,
+    ) -> ast::Directive {
+        ast::Directive {
+            name: name.to_string(),
+            name_span: ast::Span::new(
+                ast::Position::new(line, column, start_offset),
+                ast::Position::new(line, column + name.len(), start_offset + name.len()),
+            ),
+            args: vec![],
+            block: None,
+            span: ast::Span::new(
+                ast::Position::new(line, column, start_offset),
+                ast::Position::new(line, column, end_offset),
+            ),
+            trailing_comment: None,
+            leading_whitespace: " ".repeat(column.saturating_sub(1)),
+            space_before_terminator: String::new(),
+            trailing_whitespace: "\n".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_is_included_from_http_server_correct_order() {
+        let (mut data, resource) =
+            setup_store_with_config(vec!["http".to_string(), "server".to_string()], vec![]);
+        assert!(config_api::HostConfig::is_included_from_http_server(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_server_reversed_order() {
+        let (mut data, resource) =
+            setup_store_with_config(vec!["server".to_string(), "http".to_string()], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_server(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_server_missing_server() {
+        let (mut data, resource) = setup_store_with_config(vec!["http".to_string()], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_server(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_server_missing_http() {
+        let (mut data, resource) = setup_store_with_config(vec!["server".to_string()], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_server(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_server_empty_context() {
+        let (mut data, resource) = setup_store_with_config(vec![], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_server(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_location_correct_order() {
+        let (mut data, resource) =
+            setup_store_with_config(vec!["http".to_string(), "location".to_string()], vec![]);
+        assert!(config_api::HostConfig::is_included_from_http_location(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_location_reversed_order() {
+        let (mut data, resource) =
+            setup_store_with_config(vec!["location".to_string(), "http".to_string()], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_location(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_location_missing_location() {
+        let (mut data, resource) = setup_store_with_config(vec!["http".to_string()], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_location(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_location_empty_context() {
+        let (mut data, resource) = setup_store_with_config(vec![], vec![]);
+        assert!(!config_api::HostConfig::is_included_from_http_location(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_is_included_from_http_location_with_server_in_between() {
+        let (mut data, resource) = setup_store_with_config(
+            vec![
+                "http".to_string(),
+                "server".to_string(),
+                "location".to_string(),
+            ],
+            vec![],
+        );
+        assert!(config_api::HostConfig::is_included_from_http_location(
+            &mut data, resource
+        ));
+    }
+
+    #[test]
+    fn test_insert_before_column_1() {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let dir = make_directive("listen", 2, 1, 10, 20);
+        let resource = data
+            .table
+            .push(DirectiveResource { directive: dir })
+            .unwrap();
+
+        let fix =
+            config_api::HostDirective::insert_before(&mut data, resource, "new_line;".to_string());
+        // Column 1: offset should be offset - 0 = 10
+        assert_eq!(fix.start_offset, Some(10));
+        assert_eq!(fix.end_offset, Some(10));
+        assert!(fix.new_text.contains("new_line;"));
+    }
+
+    #[test]
+    fn test_insert_before_indented() {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let dir = make_directive("listen", 2, 5, 15, 25);
+        let resource = data
+            .table
+            .push(DirectiveResource { directive: dir })
+            .unwrap();
+
+        let fix =
+            config_api::HostDirective::insert_before(&mut data, resource, "new_line;".to_string());
+        // Column 5: offset should be 15 - 4 = 11
+        assert_eq!(fix.start_offset, Some(11));
+        assert_eq!(fix.end_offset, Some(11));
+        // Should include indentation
+        assert!(fix.new_text.starts_with("    "));
+    }
+
+    #[test]
+    fn test_insert_before_many_multiple_lines() {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let dir = make_directive("listen", 2, 5, 15, 25);
+        let resource = data
+            .table
+            .push(DirectiveResource { directive: dir })
+            .unwrap();
+
+        let fix = config_api::HostDirective::insert_before_many(
+            &mut data,
+            resource,
+            vec!["line1;".to_string(), "line2;".to_string()],
+        );
+        assert_eq!(fix.start_offset, Some(11));
+        assert!(fix.new_text.contains("line1;"));
+        assert!(fix.new_text.contains("line2;"));
+    }
+
+    #[test]
+    fn test_items_with_mixed_content() {
+        let items = vec![
+            ast::ConfigItem::Directive(Box::new(make_directive("http", 1, 1, 0, 10))),
+            ast::ConfigItem::Comment(ast::Comment {
+                text: "# comment".to_string(),
+                span: ast::Span::new(ast::Position::new(2, 1, 11), ast::Position::new(2, 10, 20)),
+                leading_whitespace: String::new(),
+                trailing_whitespace: "\n".to_string(),
+            }),
+            ast::ConfigItem::BlankLine(ast::BlankLine {
+                span: ast::Span::new(ast::Position::new(3, 1, 21), ast::Position::new(3, 1, 22)),
+                content: "\n".to_string(),
+            }),
+        ];
+        let (mut data, resource) = setup_store_with_config(vec![], items);
+        let wit_items = config_api::HostConfig::items(&mut data, resource);
+        assert_eq!(wit_items.len(), 3);
+        // Check types: directive, comment, blank line
+        assert!(matches!(
+            wit_items[0],
+            config_api::ConfigItem::DirectiveItem(_)
+        ));
+        assert!(matches!(
+            wit_items[1],
+            config_api::ConfigItem::CommentItem(_)
+        ));
+        assert!(matches!(
+            wit_items[2],
+            config_api::ConfigItem::BlankLineItem(_)
+        ));
+    }
+
+    #[test]
+    fn test_block_items_no_block() {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let dir = make_directive("listen", 1, 1, 0, 10);
+        let resource = data
+            .table
+            .push(DirectiveResource { directive: dir })
+            .unwrap();
+
+        let items = config_api::HostDirective::block_items(&mut data, resource);
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_block_items_with_block() {
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let mut dir = make_directive("http", 1, 1, 0, 30);
+        dir.block = Some(ast::Block {
+            items: vec![ast::ConfigItem::Directive(Box::new(make_directive(
+                "server", 2, 5, 10, 25,
+            )))],
+            span: ast::Span::new(ast::Position::new(1, 6, 5), ast::Position::new(3, 1, 30)),
+            raw_content: None,
+            closing_brace_leading_whitespace: String::new(),
+            trailing_whitespace: "\n".to_string(),
+        });
+        let resource = data
+            .table
+            .push(DirectiveResource { directive: dir })
+            .unwrap();
+
+        let items = config_api::HostDirective::block_items(&mut data, resource);
+        assert_eq!(items.len(), 1);
+        assert!(matches!(items[0], config_api::ConfigItem::DirectiveItem(_)));
     }
 }
