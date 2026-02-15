@@ -47,7 +47,7 @@ $(PLUGIN_NAMES):
 			--release; \
 	fi
 
-# Build component model plugins (requires: rustup target add wasm32-wasip1 && cargo install wasm-tools)
+# Build component model plugins (requires: cargo install wasm-tools)
 build-component-plugins:
 	@echo "Building component model plugins..."
 	@for name in $(COMPONENT_PLUGINS); do \
@@ -55,10 +55,10 @@ build-component-plugins:
 		if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
 			echo "  Building $$name (component)..."; \
 			cargo build --manifest-path "$$dir/Cargo.toml" \
-				--target wasm32-wasip1 \
+				--target wasm32-unknown-unknown \
 				--target-dir "$$dir/target" \
 				--release && \
-			core_wasm="$$dir/target/wasm32-wasip1/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
+			core_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
 			if [ -f "$$core_wasm" ]; then \
 				wasm-tools component new "$$core_wasm" -o "$$core_wasm.component.wasm" && \
 				echo "    Component: $$core_wasm.component.wasm"; \
@@ -74,7 +74,7 @@ collect-plugins: build-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			name=$$(basename "$$dir"); \
-			component_wasm="$$dir/target/wasm32-wasip1/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
+			component_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
 			core_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
 			if [ -f "$$component_wasm" ]; then \
 				cp "$$component_wasm" "target/builtin-plugins/$${name}.wasm"; \

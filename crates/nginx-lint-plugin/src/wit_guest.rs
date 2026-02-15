@@ -7,6 +7,7 @@
 wit_bindgen::generate!({
     path: "../../wit/nginx-lint-plugin.wit",
     world: "plugin",
+    pub_export_macro: true,
 });
 
 /// Convert SDK PluginSpec to WIT PluginSpec
