@@ -21,5 +21,6 @@ name = "check"
 harness = false
 
 [features]
-default = ["wasm-export"]
+default = ["wit-export"]
+wit-export = ["nginx-lint-plugin/wit-export"]
 wasm-export = []

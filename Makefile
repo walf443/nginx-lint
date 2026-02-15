@@ -1,9 +1,9 @@
-# Plugin directories (for parallel WASM builds)
+# Plugin directories
 PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -29,20 +29,26 @@ run-web:
 run-web-embed: build-web
 	cargo run --release --features web-server-embed-wasm -- web
 
-# Build all WASM builtin plugins (use -j for parallel builds: make -j8 build-plugins)
-build-plugins: $(PLUGIN_NAMES)
+# Build all WASM builtin plugins as WIT components (requires: cargo install wasm-tools)
+build-plugins:
+	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
+	@echo "Building plugins..."
+	@for name in $(PLUGIN_NAMES); do \
+		dir=$$(find plugins/builtin -type d -name "$$name" 2>/dev/null | head -1); \
+		if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
+			echo "  Building $$name..."; \
+			cargo build --manifest-path "$$dir/Cargo.toml" \
+				--target wasm32-unknown-unknown \
+				--target-dir "$$dir/target" \
+				--release && \
+			core_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
+			if [ -f "$$core_wasm" ]; then \
+				wasm-tools component new "$$core_wasm" -o "$$core_wasm.component.wasm" && \
+				echo "    Component: $$core_wasm.component.wasm"; \
+			fi \
+		fi \
+	done
 	@echo "Done building plugins."
-
-# Pattern rule for building individual plugins (uses separate target-dir to avoid lock contention)
-$(PLUGIN_NAMES):
-	@echo "Building $@..."
-	@dir=$$(find plugins/builtin -type d -name "$@" 2>/dev/null | head -1); \
-	if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
-		cargo build --manifest-path "$$dir/Cargo.toml" \
-			--target wasm32-unknown-unknown \
-			--target-dir "$$dir/target" \
-			--release; \
-	fi
 
 # Collect built plugins to target/builtin-plugins/
 collect-plugins: build-plugins
@@ -51,9 +57,9 @@ collect-plugins: build-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			name=$$(basename "$$dir"); \
-			wasm_file="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
-			if [ -f "$$wasm_file" ]; then \
-				cp "$$wasm_file" "target/builtin-plugins/$${name}.wasm"; \
+			component_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
+			if [ -f "$$component_wasm" ]; then \
+				cp "$$component_wasm" "target/builtin-plugins/$${name}.wasm"; \
 				echo "  Collected $$name.wasm"; \
 			fi \
 		fi \
@@ -127,7 +133,7 @@ help:
 	@echo "nginx-lint build targets:"
 	@echo ""
 	@echo "  make build              - Build CLI with native plugins (release, default)"
-	@echo "  make build-plugins      - Build WASM builtin plugins (use -j for parallel)"
+	@echo "  make build-plugins      - Build WASM builtin plugins as WIT components"
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"

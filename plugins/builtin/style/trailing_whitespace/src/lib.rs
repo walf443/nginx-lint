@@ -136,8 +136,7 @@ fn create_fix_for_comment(comment: &Comment) -> Fix {
     Fix::replace_range(start, end, "")
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(TrailingWhitespacePlugin);
+nginx_lint_plugin::export_component_plugin!(TrailingWhitespacePlugin);
 
 #[cfg(test)]
 mod tests {

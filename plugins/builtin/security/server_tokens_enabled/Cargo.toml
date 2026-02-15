@@ -17,5 +17,6 @@ nginx-lint-plugin = { path = "../../../../crates/nginx-lint-plugin", features = 
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [features]
-default = ["wasm-export"]
-wasm-export = []
+default = ["wit-export"]
+wit-export = ["nginx-lint-plugin/wit-export"]
+wasm-export = []  # Legacy core module export

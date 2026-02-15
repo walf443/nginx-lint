@@ -1,0 +1,50 @@
+package nginx-lint:plugin@2.0.0;
+
+interface types {
+    enum severity {
+        error,
+        warning,
+    }
+
+    record fix {
+        line: u32,
+        old-text: option<string>,
+        new-text: string,
+        delete-line: bool,
+        insert-after: bool,
+        start-offset: option<u32>,
+        end-offset: option<u32>,
+    }
+
+    record lint-error {
+        rule: string,
+        category: string,
+        message: string,
+        severity: severity,
+        line: option<u32>,
+        column: option<u32>,
+        fixes: list<fix>,
+    }
+
+    record plugin-spec {
+        name: string,
+        category: string,
+        description: string,
+        api-version: string,
+        severity: option<string>,
+        why: option<string>,
+        bad-example: option<string>,
+        good-example: option<string>,
+        references: option<list<string>>,
+    }
+}
+
+world plugin {
+    use types.{plugin-spec, lint-error};
+
+    /// Return plugin metadata
+    export spec: func() -> plugin-spec;
+
+    /// Check config (JSON) and return lint errors
+    export check: func(config-json: string, path: string) -> list<lint-error>;
+}

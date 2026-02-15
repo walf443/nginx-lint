@@ -134,8 +134,7 @@ fn check_context(items: &[ConfigItem], parent_stack: &[&str], errors: &mut Vec<L
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(InvalidDirectiveContextPlugin);
+nginx_lint_plugin::export_component_plugin!(InvalidDirectiveContextPlugin);
 
 #[cfg(test)]
 mod tests {

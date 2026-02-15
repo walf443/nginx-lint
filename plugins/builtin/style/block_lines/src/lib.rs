@@ -87,8 +87,7 @@ fn check_items(
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(BlockLinesPlugin);
+nginx_lint_plugin::export_component_plugin!(BlockLinesPlugin);
 
 #[cfg(test)]
 mod tests {

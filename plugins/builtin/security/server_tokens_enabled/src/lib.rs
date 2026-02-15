@@ -95,8 +95,7 @@ impl Plugin for ServerTokensEnabledPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ServerTokensEnabledPlugin);
+nginx_lint_plugin::export_component_plugin!(ServerTokensEnabledPlugin);
 
 #[cfg(test)]
 mod tests {

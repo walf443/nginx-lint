@@ -74,6 +74,9 @@ mod types;
 #[cfg(feature = "container-testing")]
 pub mod container_testing;
 
+#[cfg(feature = "wit-export")]
+pub mod wit_guest;
+
 pub use types::*;
 
 // Re-export common types from nginx-lint-common
@@ -96,15 +99,18 @@ pub use nginx_lint_common::parser;
 /// [`Config`], [`Directive`], etc.), extension traits ([`ConfigExt`], [`DirectiveExt`]),
 /// the [`helpers`] module, and the [`export_plugin!`] macro.
 pub mod prelude {
+    pub use super::export_component_plugin;
     pub use super::export_plugin;
     pub use super::helpers;
     pub use super::types::API_VERSION;
     pub use super::types::*;
 }
 
-/// Macro to export a plugin implementation
+/// Macro to export a plugin implementation (legacy core module format)
 ///
-/// This macro generates all the required WASM exports for your plugin.
+/// **Deprecated**: Use [`export_component_plugin!`] instead, which generates
+/// WIT component model exports. This macro generates legacy core WASM module
+/// exports and will be removed in a future version.
 ///
 /// # Example
 ///
@@ -124,11 +130,21 @@ pub mod prelude {
 ///     }
 /// }
 ///
-/// export_plugin!(MyPlugin);
+/// // Preferred:
+/// export_component_plugin!(MyPlugin);
 /// ```
+#[deprecated(
+    since = "0.7.0",
+    note = "Use export_component_plugin! instead for WIT component model support"
+)]
+#[doc(hidden)]
+pub fn _export_plugin_deprecated() {}
+
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
+        const _: fn() = $crate::_export_plugin_deprecated;
+
         #[cfg(all(target_arch = "wasm32", feature = "wasm-export"))]
         const _: () = {
             static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
@@ -231,6 +247,79 @@ macro_rules! export_plugin {
                 let cache = CHECK_RESULT_CACHE.lock().unwrap();
                 cache.len() as u32
             }
+        };
+    };
+}
+
+/// Macro to export a plugin as a WIT component
+///
+/// This generates the WIT component model exports for your plugin.
+/// Use this instead of `export_plugin!` when building component model plugins.
+///
+/// # Example
+///
+/// ```ignore
+/// use nginx_lint_plugin::prelude::*;
+///
+/// #[derive(Default)]
+/// struct MyPlugin;
+///
+/// impl Plugin for MyPlugin {
+///     fn spec(&self) -> PluginSpec { /* ... */ }
+///     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> { /* ... */ }
+/// }
+///
+/// export_component_plugin!(MyPlugin);
+/// ```
+#[macro_export]
+macro_rules! export_component_plugin {
+    ($plugin_type:ty) => {
+        #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
+        const _: () = {
+            use $crate::wit_guest::Guest;
+
+            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
+
+            fn get_plugin() -> &'static $plugin_type {
+                PLUGIN.get_or_init(|| <$plugin_type>::default())
+            }
+
+            struct ComponentExport;
+
+            impl Guest for ComponentExport {
+                fn spec() -> $crate::wit_guest::nginx_lint::plugin::types::PluginSpec {
+                    let plugin = get_plugin();
+                    let sdk_spec = $crate::Plugin::spec(plugin);
+                    $crate::wit_guest::convert_spec(sdk_spec)
+                }
+
+                fn check(
+                    config_json: String,
+                    path: String,
+                ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
+                    let plugin = get_plugin();
+                    let config: $crate::Config = match serde_json::from_str(&config_json) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let err = $crate::LintError::error(
+                                "plugin-error",
+                                "plugin",
+                                &format!("Failed to parse config: {}", e),
+                                0,
+                                0,
+                            );
+                            return vec![$crate::wit_guest::convert_lint_error(err)];
+                        }
+                    };
+                    let errors = $crate::Plugin::check(plugin, &config, &path);
+                    errors
+                        .into_iter()
+                        .map($crate::wit_guest::convert_lint_error)
+                        .collect()
+                }
+            }
+
+    $crate::wit_guest::export!(ComponentExport with_types_in $crate::wit_guest);
         };
     };
 }

@@ -134,8 +134,7 @@ impl Plugin for TryFilesWithProxyPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(TryFilesWithProxyPlugin);
+nginx_lint_plugin::export_component_plugin!(TryFilesWithProxyPlugin);
 
 #[cfg(test)]
 mod tests {

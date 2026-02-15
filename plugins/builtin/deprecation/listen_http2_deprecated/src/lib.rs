@@ -96,8 +96,7 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
     errors.push(error);
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ListenHttp2DeprecatedPlugin);
+nginx_lint_plugin::export_component_plugin!(ListenHttp2DeprecatedPlugin);
 
 #[cfg(test)]
 mod tests {

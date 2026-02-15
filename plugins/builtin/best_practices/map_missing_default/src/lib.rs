@@ -63,8 +63,7 @@ impl Plugin for MapMissingDefaultPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(MapMissingDefaultPlugin);
+nginx_lint_plugin::export_component_plugin!(MapMissingDefaultPlugin);
 
 #[cfg(test)]
 mod tests {

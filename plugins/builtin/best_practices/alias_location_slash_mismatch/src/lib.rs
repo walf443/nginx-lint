@@ -194,8 +194,7 @@ impl Plugin for AliasLocationSlashMismatchPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(AliasLocationSlashMismatchPlugin);
+nginx_lint_plugin::export_component_plugin!(AliasLocationSlashMismatchPlugin);
 
 #[cfg(test)]
 mod tests {

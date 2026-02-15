@@ -81,8 +81,7 @@ impl Plugin for RootInLocationPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(RootInLocationPlugin);
+nginx_lint_plugin::export_component_plugin!(RootInLocationPlugin);
 
 #[cfg(test)]
 mod tests {

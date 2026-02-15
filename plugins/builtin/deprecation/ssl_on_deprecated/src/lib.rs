@@ -92,8 +92,7 @@ fn check_items(items: &[ConfigItem], err: &ErrorBuilder, errors: &mut Vec<LintEr
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(SslOnDeprecatedPlugin);
+nginx_lint_plugin::export_component_plugin!(SslOnDeprecatedPlugin);
 
 #[cfg(test)]
 mod tests {
