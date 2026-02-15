@@ -78,8 +78,7 @@ impl Plugin for ClientMaxBodySizeNotSetPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ClientMaxBodySizeNotSetPlugin);
+nginx_lint_plugin::export_component_plugin!(ClientMaxBodySizeNotSetPlugin);
 
 #[cfg(test)]
 mod tests {

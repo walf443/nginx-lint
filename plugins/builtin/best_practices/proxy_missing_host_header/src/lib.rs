@@ -175,8 +175,7 @@ impl Plugin for ProxyMissingHostHeaderPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ProxyMissingHostHeaderPlugin);
+nginx_lint_plugin::export_component_plugin!(ProxyMissingHostHeaderPlugin);
 
 #[cfg(test)]
 mod tests {

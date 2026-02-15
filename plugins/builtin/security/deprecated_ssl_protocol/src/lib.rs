@@ -123,8 +123,7 @@ fn generate_fixed_protocols(current: &[&str]) -> String {
     protocols.join(" ")
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(DeprecatedSslProtocolPlugin);
+nginx_lint_plugin::export_component_plugin!(DeprecatedSslProtocolPlugin);
 
 #[cfg(test)]
 mod tests {

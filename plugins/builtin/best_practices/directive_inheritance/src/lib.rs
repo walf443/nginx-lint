@@ -387,7 +387,7 @@ impl Plugin for DirectiveInheritancePlugin {
     }
 }
 
-nginx_lint_plugin::export_plugin!(DirectiveInheritancePlugin);
+nginx_lint_plugin::export_component_plugin!(DirectiveInheritancePlugin);
 
 #[cfg(test)]
 mod tests {

@@ -443,8 +443,7 @@ impl Plugin for UnreachableLocationPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(UnreachableLocationPlugin);
+nginx_lint_plugin::export_component_plugin!(UnreachableLocationPlugin);
 
 #[cfg(test)]
 mod tests {

@@ -70,8 +70,7 @@ impl Plugin for ProxyPassDomainPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ProxyPassDomainPlugin);
+nginx_lint_plugin::export_component_plugin!(ProxyPassDomainPlugin);
 
 #[cfg(test)]
 mod tests {

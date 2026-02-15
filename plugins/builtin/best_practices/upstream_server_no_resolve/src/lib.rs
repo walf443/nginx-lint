@@ -152,8 +152,7 @@ impl Plugin for UpstreamServerNoResolvePlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(UpstreamServerNoResolvePlugin);
+nginx_lint_plugin::export_component_plugin!(UpstreamServerNoResolvePlugin);
 
 #[cfg(test)]
 mod tests {

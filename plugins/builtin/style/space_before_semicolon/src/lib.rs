@@ -70,8 +70,7 @@ fn create_fix(directive: &Directive) -> Fix {
     Fix::replace_range(start, end, "")
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(SpaceBeforeSemicolonPlugin);
+nginx_lint_plugin::export_component_plugin!(SpaceBeforeSemicolonPlugin);
 
 #[cfg(test)]
 mod tests {

@@ -144,8 +144,7 @@ impl Plugin for IfIsEvilInLocationPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(IfIsEvilInLocationPlugin);
+nginx_lint_plugin::export_component_plugin!(IfIsEvilInLocationPlugin);
 
 #[cfg(test)]
 mod tests {

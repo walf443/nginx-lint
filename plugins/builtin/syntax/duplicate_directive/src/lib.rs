@@ -164,8 +164,7 @@ impl Plugin for DuplicateDirectivePlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(DuplicateDirectivePlugin);
+nginx_lint_plugin::export_component_plugin!(DuplicateDirectivePlugin);
 
 #[cfg(test)]
 mod tests {

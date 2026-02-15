@@ -189,8 +189,7 @@ fn generate_fixed_cipher_string(original: &str, missing: &[String]) -> String {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(WeakSslCiphersPlugin);
+nginx_lint_plugin::export_component_plugin!(WeakSslCiphersPlugin);
 
 #[cfg(test)]
 mod tests {

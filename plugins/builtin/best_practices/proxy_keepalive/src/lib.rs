@@ -173,8 +173,7 @@ impl Plugin for ProxyKeepalivePlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ProxyKeepalivePlugin);
+nginx_lint_plugin::export_component_plugin!(ProxyKeepalivePlugin);
 
 #[cfg(test)]
 mod tests {

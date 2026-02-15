@@ -16,5 +16,6 @@ serde_json = "1.0"
 nginx-lint-plugin = { path = "../../../../crates/nginx-lint-plugin", features = ["container-testing"] }
 
 [features]
-default = ["wasm-export"]
+default = ["wit-export"]
+wit-export = ["nginx-lint-plugin/wit-export"]
 wasm-export = []

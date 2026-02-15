@@ -4,7 +4,14 @@ PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
 # Plugins that use the WIT component model (built with wasm32-wasip1 + wasm-tools)
-COMPONENT_PLUGINS := server_tokens_enabled autoindex_enabled
+COMPONENT_PLUGINS := server_tokens_enabled autoindex_enabled deprecated_ssl_protocol weak_ssl_ciphers \
+	alias_location_slash_mismatch client_max_body_size_not_set directive_inheritance gzip_not_enabled \
+	if_is_evil_in_location map_missing_default missing_error_log proxy_keepalive \
+	proxy_missing_host_header proxy_pass_domain proxy_pass_with_uri root_in_location \
+	try_files_with_proxy unreachable_location upstream_server_no_resolve \
+	block_lines space_before_semicolon trailing_whitespace \
+	duplicate_directive invalid_directive_context \
+	listen_http2_deprecated ssl_on_deprecated
 
 .PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-component-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
 

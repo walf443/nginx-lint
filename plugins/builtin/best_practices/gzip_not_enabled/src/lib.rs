@@ -75,8 +75,7 @@ impl Plugin for GzipNotEnabledPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(GzipNotEnabledPlugin);
+nginx_lint_plugin::export_component_plugin!(GzipNotEnabledPlugin);
 
 #[cfg(test)]
 mod tests {

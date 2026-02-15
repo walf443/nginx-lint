@@ -146,8 +146,7 @@ impl Plugin for ProxyPassWithUriPlugin {
     }
 }
 
-// Export the plugin
-nginx_lint_plugin::export_plugin!(ProxyPassWithUriPlugin);
+nginx_lint_plugin::export_component_plugin!(ProxyPassWithUriPlugin);
 
 #[cfg(test)]
 mod tests {
