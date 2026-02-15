@@ -113,6 +113,12 @@ interface config-api {
         name-end-column: u32,
         /// End byte offset of the name token (0-based)
         name-end-offset: u32,
+        /// Start line of the block's opening brace (1-based); none if no block
+        block-start-line: option<u32>,
+        /// Start column of the block's opening brace (1-based); none if no block
+        block-start-column: option<u32>,
+        /// Start byte offset of the block's opening brace (0-based); none if no block
+        block-start-offset: option<u32>,
     }
 
     /// A directive paired with its parent block context

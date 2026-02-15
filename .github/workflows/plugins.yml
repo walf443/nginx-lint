@@ -6,12 +6,16 @@ on:
     paths:
       - "plugins/**"
       - "crates/**"
+      - "src/**"
+      - "wit/**"
       - "Cargo.toml"
   pull_request:
     branches: [main]
     paths:
       - "plugins/**"
       - "crates/**"
+      - "src/**"
+      - "wit/**"
       - "Cargo.toml"
 
 env:
@@ -48,3 +52,21 @@ jobs:
               (cd "$dir" && cargo test)
             fi
           done
+
+  wasm-integration:
+    name: WASM Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "wasm-integration"
+      - name: Install wasm-tools
+        run: cargo install wasm-tools --locked
+      - name: Build WASM plugins
+        run: make build-plugins
+      - name: Run WASM integration tests
+        run: cargo test --test wasm_plugin_test --features plugins

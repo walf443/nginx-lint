@@ -215,6 +215,9 @@ impl config_api::HostDirective for ComponentStoreData {
             trailing_comment_text: dir.trailing_comment.as_ref().map(|c| c.text.clone()),
             name_end_column: dir.name_span.end.column as u32,
             name_end_offset: dir.name_span.end.offset as u32,
+            block_start_line: dir.block.as_ref().map(|b| b.span.start.line as u32),
+            block_start_column: dir.block.as_ref().map(|b| b.span.start.column as u32),
+            block_start_offset: dir.block.as_ref().map(|b| b.span.start.offset as u32),
         }
     }
 

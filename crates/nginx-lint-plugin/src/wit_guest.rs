@@ -177,13 +177,15 @@ fn reconstruct_directive(
     let block = if d.has_block {
         // One additional WIT call for block items (recursive)
         let block_items = reconstruct_config_items(&handle.block_items());
-        // The block span uses the directive's end position (which includes the
-        // closing brace). The start position is an approximation using the
-        // directive's start since the precise `{` position is not tracked.
+        // Use the actual block span start (position of '{') when available,
+        // falling back to directive start for backwards compatibility.
+        let block_start_line = d.block_start_line.unwrap_or(line as u32) as usize;
+        let block_start_column = d.block_start_column.unwrap_or(column as u32) as usize;
+        let block_start_offset = d.block_start_offset.unwrap_or(start_offset as u32) as usize;
         Some(ast::Block {
             items: block_items,
             span: ast::Span::new(
-                ast::Position::new(line, column, start_offset),
+                ast::Position::new(block_start_line, block_start_column, block_start_offset),
                 ast::Position::new(end_line, end_column, end_offset),
             ),
             raw_content: d.block_raw_content,
