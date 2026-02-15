@@ -3,7 +3,10 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
+# Plugins that use the WIT component model (built with wasm32-wasip1 + wasm-tools)
+COMPONENT_PLUGINS := server_tokens_enabled
+
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-component-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help $(PLUGIN_NAMES)
 
 # Build CLI with native plugins (release, default)
 build:
@@ -44,6 +47,26 @@ $(PLUGIN_NAMES):
 			--release; \
 	fi
 
+# Build component model plugins (requires: rustup target add wasm32-wasip1 && cargo install wasm-tools)
+build-component-plugins:
+	@echo "Building component model plugins..."
+	@for name in $(COMPONENT_PLUGINS); do \
+		dir=$$(find plugins/builtin -type d -name "$$name" 2>/dev/null | head -1); \
+		if [ -n "$$dir" ] && [ -f "$$dir/Cargo.toml" ]; then \
+			echo "  Building $$name (component)..."; \
+			cargo build --manifest-path "$$dir/Cargo.toml" \
+				--target wasm32-wasip1 \
+				--target-dir "$$dir/target" \
+				--release && \
+			core_wasm="$$dir/target/wasm32-wasip1/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
+			if [ -f "$$core_wasm" ]; then \
+				wasm-tools component new "$$core_wasm" -o "$$core_wasm.component.wasm" && \
+				echo "    Component: $$core_wasm.component.wasm"; \
+			fi \
+		fi \
+	done
+	@echo "Done building component model plugins."
+
 # Collect built plugins to target/builtin-plugins/
 collect-plugins: build-plugins
 	@echo "Collecting plugins..."
@@ -51,10 +74,14 @@ collect-plugins: build-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			name=$$(basename "$$dir"); \
-			wasm_file="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
-			if [ -f "$$wasm_file" ]; then \
-				cp "$$wasm_file" "target/builtin-plugins/$${name}.wasm"; \
-				echo "  Collected $$name.wasm"; \
+			component_wasm="$$dir/target/wasm32-wasip1/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
+			core_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm"; \
+			if [ -f "$$component_wasm" ]; then \
+				cp "$$component_wasm" "target/builtin-plugins/$${name}.wasm"; \
+				echo "  Collected $$name.wasm (component)"; \
+			elif [ -f "$$core_wasm" ]; then \
+				cp "$$core_wasm" "target/builtin-plugins/$${name}.wasm"; \
+				echo "  Collected $$name.wasm (core)"; \
 			fi \
 		fi \
 	done
@@ -128,6 +155,7 @@ help:
 	@echo ""
 	@echo "  make build              - Build CLI with native plugins (release, default)"
 	@echo "  make build-plugins      - Build WASM builtin plugins (use -j for parallel)"
+	@echo "  make build-component-plugins - Build WIT component model plugins"
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"

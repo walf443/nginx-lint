@@ -8,7 +8,7 @@ use crate::parser::ast::Config;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use wasmi::{Engine, Linker, Memory, Module, Store, TypedFunc};
+use wasmtime::{Engine, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
 
 /// Plugin spec returned by the plugin_spec export
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -146,8 +146,9 @@ fn parse_plugin_output(
 }
 
 /// Store data for WASM execution
-#[derive(Default)]
-struct StoreData {}
+struct StoreData {
+    limits: StoreLimits,
+}
 
 /// Instance data for WASM execution
 struct WasmInstance {
@@ -178,6 +179,8 @@ pub struct WasmLintRule {
     module: Arc<Module>,
     /// WASM engine reference (shared across threads)
     engine: Engine,
+    /// Memory limit in bytes for WASM execution
+    memory_limit: u64,
     /// Fuel limit for CPU metering (0 = unlimited)
     fuel_limit: u64,
     /// Whether fuel metering is enabled
@@ -196,7 +199,7 @@ impl WasmLintRule {
         engine: &Engine,
         path: PathBuf,
         wasm_bytes: &[u8],
-        _memory_limit: u64,
+        memory_limit: u64,
         fuel_limit: u64,
         fuel_enabled: bool,
     ) -> Result<Self, PluginError> {
@@ -221,6 +224,7 @@ impl WasmLintRule {
             spec,
             module: Arc::new(module),
             engine: engine.clone(),
+            memory_limit,
             fuel_limit,
             fuel_enabled,
             name,
@@ -241,7 +245,7 @@ impl WasmLintRule {
             "dealloc",
         ];
 
-        let exports: Vec<_> = module.exports().map(|e| e.name().to_string()).collect();
+        let exports: Vec<String> = module.exports().map(|e| e.name().to_string()).collect();
 
         for export in &required_exports {
             if !exports.iter().any(|e| e == *export) {
@@ -260,7 +264,9 @@ impl WasmLintRule {
         fuel_limit: u64,
         fuel_enabled: bool,
     ) -> Result<PluginSpec, PluginError> {
-        let mut store = Store::new(engine, StoreData::default());
+        let limits = StoreLimitsBuilder::new().build();
+        let mut store = Store::new(engine, StoreData { limits });
+        store.limiter(|data| &mut data.limits);
         if fuel_enabled {
             store.set_fuel(fuel_limit).map_err(|e| {
                 PluginError::execution_error(path, format!("Failed to set fuel: {}", e))
@@ -269,21 +275,21 @@ impl WasmLintRule {
 
         let linker = Linker::<StoreData>::new(engine);
         let instance = linker
-            .instantiate_and_start(&mut store, module)
+            .instantiate(&mut store, module)
             .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
 
         // Get memory
         let memory = instance
-            .get_memory(&store, "memory")
+            .get_memory(&mut store, "memory")
             .ok_or_else(|| PluginError::missing_export(path, "memory"))?;
 
         // Get functions
         let plugin_spec_len = instance
-            .get_typed_func::<(), u32>(&store, "plugin_spec_len")
+            .get_typed_func::<(), u32>(&mut store, "plugin_spec_len")
             .map_err(|e| PluginError::missing_export(path, format!("plugin_spec_len: {}", e)))?;
 
         let plugin_spec = instance
-            .get_typed_func::<(), u32>(&store, "plugin_spec")
+            .get_typed_func::<(), u32>(&mut store, "plugin_spec")
             .map_err(|e| PluginError::missing_export(path, format!("plugin_spec: {}", e)))?;
 
         // Call plugin_spec_len to get the length
@@ -336,7 +342,11 @@ impl WasmLintRule {
 
     /// Create a new instance
     fn create_instance(&self) -> Result<WasmInstance, PluginError> {
-        let mut store = Store::new(&self.engine, StoreData::default());
+        let limits = StoreLimitsBuilder::new()
+            .memory_size(self.memory_limit as usize)
+            .build();
+        let mut store = Store::new(&self.engine, StoreData { limits });
+        store.limiter(|data| &mut data.limits);
         if self.fuel_enabled {
             store.set_fuel(self.fuel_limit).map_err(|e| {
                 PluginError::execution_error(&self.path, format!("Failed to set fuel: {}", e))
@@ -345,27 +355,27 @@ impl WasmLintRule {
 
         let linker = Linker::<StoreData>::new(&self.engine);
         let instance = linker
-            .instantiate_and_start(&mut store, &self.module)
+            .instantiate(&mut store, &self.module)
             .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
 
         let memory = instance
-            .get_memory(&store, "memory")
+            .get_memory(&mut store, "memory")
             .ok_or_else(|| PluginError::missing_export(&self.path, "memory"))?;
 
         let alloc = instance
-            .get_typed_func::<u32, u32>(&store, "alloc")
+            .get_typed_func::<u32, u32>(&mut store, "alloc")
             .map_err(|e| PluginError::missing_export(&self.path, format!("alloc: {}", e)))?;
 
         let dealloc = instance
-            .get_typed_func::<(u32, u32), ()>(&store, "dealloc")
+            .get_typed_func::<(u32, u32), ()>(&mut store, "dealloc")
             .map_err(|e| PluginError::missing_export(&self.path, format!("dealloc: {}", e)))?;
 
         let check = instance
-            .get_typed_func::<(u32, u32, u32, u32), u32>(&store, "check")
+            .get_typed_func::<(u32, u32, u32, u32), u32>(&mut store, "check")
             .map_err(|e| PluginError::missing_export(&self.path, format!("check: {}", e)))?;
 
         let check_result_len = instance
-            .get_typed_func::<(), u32>(&store, "check_result_len")
+            .get_typed_func::<(), u32>(&mut store, "check_result_len")
             .map_err(|e| {
                 PluginError::missing_export(&self.path, format!("check_result_len: {}", e))
             })?;
@@ -619,11 +629,3 @@ impl LintRule for WasmLintRule {
         self.spec.references.clone()
     }
 }
-
-// WasmLintRule is Send + Sync because:
-// - Engine is Send + Sync
-// - Module (wrapped in Arc) is Send + Sync
-// - Instance cache is thread-local (no sharing between threads)
-// - All other fields are primitive or owned types
-unsafe impl Send for WasmLintRule {}
-unsafe impl Sync for WasmLintRule {}

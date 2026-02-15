@@ -74,6 +74,9 @@ mod types;
 #[cfg(feature = "container-testing")]
 pub mod container_testing;
 
+#[cfg(feature = "wit-export")]
+pub mod wit_guest;
+
 pub use types::*;
 
 // Re-export common types from nginx-lint-common
@@ -96,6 +99,7 @@ pub use nginx_lint_common::parser;
 /// [`Config`], [`Directive`], etc.), extension traits ([`ConfigExt`], [`DirectiveExt`]),
 /// the [`helpers`] module, and the [`export_plugin!`] macro.
 pub mod prelude {
+    pub use super::export_component_plugin;
     pub use super::export_plugin;
     pub use super::helpers;
     pub use super::types::API_VERSION;
@@ -231,6 +235,73 @@ macro_rules! export_plugin {
                 let cache = CHECK_RESULT_CACHE.lock().unwrap();
                 cache.len() as u32
             }
+        };
+    };
+}
+
+/// Macro to export a plugin as a WIT component
+///
+/// This generates the WIT component model exports for your plugin.
+/// Use this instead of `export_plugin!` when building component model plugins.
+///
+/// # Example
+///
+/// ```ignore
+/// use nginx_lint_plugin::prelude::*;
+///
+/// #[derive(Default)]
+/// struct MyPlugin;
+///
+/// impl Plugin for MyPlugin {
+///     fn spec(&self) -> PluginSpec { /* ... */ }
+///     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> { /* ... */ }
+/// }
+///
+/// export_component_plugin!(MyPlugin);
+/// ```
+#[macro_export]
+macro_rules! export_component_plugin {
+    ($plugin_type:ty) => {
+        #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
+        const _: () = {
+            use $crate::wit_guest::Guest;
+
+            struct ComponentExport;
+
+            impl Guest for ComponentExport {
+                fn spec() -> $crate::wit_guest::nginx_lint::plugin::types::PluginSpec {
+                    let plugin = <$plugin_type>::default();
+                    let sdk_spec = $crate::Plugin::spec(&plugin);
+                    $crate::wit_guest::convert_spec(sdk_spec)
+                }
+
+                fn check(
+                    config_json: String,
+                    path: String,
+                ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
+                    let plugin = <$plugin_type>::default();
+                    let config: $crate::Config = match serde_json::from_str(&config_json) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            let err = $crate::LintError::error(
+                                "plugin-error",
+                                "plugin",
+                                &format!("Failed to parse config: {}", e),
+                                0,
+                                0,
+                            );
+                            return vec![$crate::wit_guest::convert_lint_error(err)];
+                        }
+                    };
+                    let errors = $crate::Plugin::check(&plugin, &config, &path);
+                    errors
+                        .into_iter()
+                        .map($crate::wit_guest::convert_lint_error)
+                        .collect()
+                }
+            }
+
+    $crate::wit_guest::export!(ComponentExport with_types_in $crate::wit_guest);
         };
     };
 }

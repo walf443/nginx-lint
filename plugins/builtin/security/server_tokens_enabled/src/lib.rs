@@ -95,7 +95,9 @@ impl Plugin for ServerTokensEnabledPlugin {
     }
 }
 
-// Export the plugin
+// Export the plugin as a WIT component (use export_plugin! for legacy core module export)
+nginx_lint_plugin::export_component_plugin!(ServerTokensEnabledPlugin);
+// Keep legacy export for backward compatibility with core module builds
 nginx_lint_plugin::export_plugin!(ServerTokensEnabledPlugin);
 
 #[cfg(test)]

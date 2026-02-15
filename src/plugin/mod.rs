@@ -6,6 +6,8 @@
 #[cfg(feature = "plugins")]
 pub mod builtin;
 #[cfg(feature = "plugins")]
+mod component_rule;
+#[cfg(feature = "plugins")]
 mod error;
 #[cfg(feature = "plugins")]
 mod loader;
@@ -14,6 +16,8 @@ pub mod native_builtin;
 #[cfg(feature = "plugins")]
 mod wasm_rule;
 
+#[cfg(feature = "plugins")]
+pub use component_rule::ComponentLintRule;
 #[cfg(feature = "plugins")]
 pub use error::PluginError;
 #[cfg(feature = "plugins")]

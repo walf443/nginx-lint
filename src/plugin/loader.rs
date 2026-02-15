@@ -1,18 +1,46 @@
 //! WASM plugin loader
 //!
 //! Handles discovering, loading, and validating WASM plugins from a directory.
+//! Supports both core WASM modules (legacy) and component model plugins.
 
+use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
 use super::wasm_rule::WasmLintRule;
+use crate::linter::LintRule;
 use std::fs;
 use std::path::Path;
-use wasmi::{Config, Engine};
+use wasmtime::{Config, Engine};
 
 /// Memory limit for plugins (256 MB)
 const MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Fuel limit for CPU metering (prevents infinite loops)
 const FUEL_LIMIT: u64 = 10_000_000_000;
+
+/// Detected WASM format
+enum WasmFormat {
+    /// Core WASM module (version 01 00 00 00)
+    CoreModule,
+    /// Component model (version 0d 00 01 00)
+    Component,
+}
+
+/// Detect whether a WASM binary is a core module or a component
+fn detect_wasm_format(bytes: &[u8]) -> Option<WasmFormat> {
+    if bytes.len() < 8 {
+        return None;
+    }
+    // Check magic number: \0asm
+    if &bytes[0..4] != b"\0asm" {
+        return None;
+    }
+    // Check version field (bytes 4-7)
+    match &bytes[4..8] {
+        [0x01, 0x00, 0x00, 0x00] => Some(WasmFormat::CoreModule),
+        [0x0d, 0x00, 0x01, 0x00] => Some(WasmFormat::Component),
+        _ => Some(WasmFormat::CoreModule), // Default to core module for unknown versions
+    }
+}
 
 /// Plugin loader that discovers and loads WASM plugins from a directory
 pub struct PluginLoader {
@@ -36,12 +64,13 @@ impl PluginLoader {
     }
 
     fn with_options(enable_fuel: bool) -> Result<Self, PluginError> {
-        let mut config = Config::default();
+        let mut config = Config::new();
 
         // Enable fuel-based metering only for untrusted plugins
         config.consume_fuel(enable_fuel);
 
-        let engine = Engine::new(&config);
+        let engine = Engine::new(&config)
+            .map_err(|e| PluginError::compile_error("engine", e.to_string()))?;
 
         Ok(Self {
             engine,
@@ -69,30 +98,23 @@ impl PluginLoader {
         self.fuel_enabled
     }
 
-    /// Load all WASM plugins from a directory
-    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<WasmLintRule>, PluginError> {
-        if !dir.exists() {
+    /// Load all WASM plugins from a directory (returns trait objects to support both formats)
+    pub fn load_plugins_dynamic(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        if !dir.exists() || !dir.is_dir() {
             return Err(PluginError::directory_not_found(dir));
         }
 
-        if !dir.is_dir() {
-            return Err(PluginError::directory_not_found(dir));
-        }
-
-        let mut plugins = Vec::new();
-
+        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
         let entries = fs::read_dir(dir).map_err(|e| PluginError::io_error(dir, e))?;
 
         for entry in entries {
             let entry = entry.map_err(|e| PluginError::io_error(dir, e))?;
             let path = entry.path();
 
-            // Only load .wasm files
             if path.extension().is_some_and(|ext| ext == "wasm") {
-                match self.load_plugin(&path) {
+                match self.load_plugin_dynamic(&path) {
                     Ok(plugin) => plugins.push(plugin),
                     Err(e) => {
-                        // Log error but continue loading other plugins
                         eprintln!("Warning: Failed to load plugin {:?}: {}", path, e);
                     }
                 }
@@ -102,26 +124,96 @@ impl PluginLoader {
         Ok(plugins)
     }
 
-    /// Load a single WASM plugin from a file
-    pub fn load_plugin(&self, path: &Path) -> Result<WasmLintRule, PluginError> {
-        // Read the WASM bytes
+    /// Load a single WASM plugin, auto-detecting format (core module or component)
+    pub fn load_plugin_dynamic(&self, path: &Path) -> Result<Box<dyn LintRule>, PluginError> {
         let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
 
-        // Validate it's a WASM file (magic number: \0asm)
+        match detect_wasm_format(&wasm_bytes) {
+            Some(WasmFormat::Component) => {
+                let rule = self.load_component_from_bytes(path, &wasm_bytes)?;
+                Ok(Box::new(rule))
+            }
+            Some(WasmFormat::CoreModule) => {
+                let rule = self.load_core_module_from_bytes(path, &wasm_bytes)?;
+                Ok(Box::new(rule))
+            }
+            None => Err(PluginError::invalid_wasm_file(path)),
+        }
+    }
+
+    /// Load a single WASM plugin from a file (core module only, for backward compatibility)
+    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<WasmLintRule>, PluginError> {
+        if !dir.exists() || !dir.is_dir() {
+            return Err(PluginError::directory_not_found(dir));
+        }
+
+        let mut plugins = Vec::new();
+        let entries = fs::read_dir(dir).map_err(|e| PluginError::io_error(dir, e))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| PluginError::io_error(dir, e))?;
+            let path = entry.path();
+
+            if path.extension().is_some_and(|ext| ext == "wasm") {
+                match self.load_plugin(&path) {
+                    Ok(plugin) => plugins.push(plugin),
+                    Err(e) => {
+                        eprintln!("Warning: Failed to load plugin {:?}: {}", path, e);
+                    }
+                }
+            }
+        }
+
+        Ok(plugins)
+    }
+
+    /// Load a single core module WASM plugin from a file
+    pub fn load_plugin(&self, path: &Path) -> Result<WasmLintRule, PluginError> {
+        let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
+
         if wasm_bytes.len() < 4 || &wasm_bytes[0..4] != b"\0asm" {
             return Err(PluginError::invalid_wasm_file(path));
         }
 
-        // Create the WASM lint rule
+        self.load_core_module_from_bytes(path, &wasm_bytes)
+    }
+
+    /// Load a core module from bytes
+    fn load_core_module_from_bytes(
+        &self,
+        path: &Path,
+        wasm_bytes: &[u8],
+    ) -> Result<WasmLintRule, PluginError> {
         let fuel_limit = if self.fuel_enabled {
             self.fuel_limit()
         } else {
-            0 // No fuel limit for trusted plugins
+            0
         };
         WasmLintRule::new(
             &self.engine,
             path.to_path_buf(),
-            &wasm_bytes,
+            wasm_bytes,
+            self.memory_limit(),
+            fuel_limit,
+            self.fuel_enabled,
+        )
+    }
+
+    /// Load a component from bytes
+    pub fn load_component_from_bytes(
+        &self,
+        path: &Path,
+        component_bytes: &[u8],
+    ) -> Result<ComponentLintRule, PluginError> {
+        let fuel_limit = if self.fuel_enabled {
+            self.fuel_limit()
+        } else {
+            0
+        };
+        ComponentLintRule::new(
+            &self.engine,
+            path.to_path_buf(),
+            component_bytes,
             self.memory_limit(),
             fuel_limit,
             self.fuel_enabled,
@@ -171,5 +263,37 @@ mod tests {
 
         let result = loader.load_plugin(&wasm_path);
         assert!(matches!(result, Err(PluginError::InvalidWasmFile { .. })));
+    }
+
+    #[test]
+    fn test_detect_core_module() {
+        // Core module: magic + version 01 00 00 00
+        let bytes = b"\0asm\x01\x00\x00\x00";
+        assert!(matches!(
+            detect_wasm_format(bytes),
+            Some(WasmFormat::CoreModule)
+        ));
+    }
+
+    #[test]
+    fn test_detect_component() {
+        // Component: magic + version 0d 00 01 00
+        let bytes = b"\0asm\x0d\x00\x01\x00";
+        assert!(matches!(
+            detect_wasm_format(bytes),
+            Some(WasmFormat::Component)
+        ));
+    }
+
+    #[test]
+    fn test_detect_invalid() {
+        let bytes = b"not wasm";
+        assert!(detect_wasm_format(bytes).is_none());
+    }
+
+    #[test]
+    fn test_detect_too_short() {
+        let bytes = b"\0asm";
+        assert!(detect_wasm_format(bytes).is_none());
     }
 }
