@@ -222,7 +222,9 @@ impl WasmLintRule {
             fuel_enabled,
         )?;
 
-        // Leak strings for 'static lifetime (these live for the program duration)
+        // Leak strings for 'static lifetime required by the LintRule trait.
+        // These live for the entire program duration. Since plugins are loaded once
+        // at startup and never unloaded, this is acceptable.
         let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
         let category: &'static str = Box::leak(spec.category.clone().into_boxed_str());
         let description: &'static str = Box::leak(spec.description.clone().into_boxed_str());

@@ -128,7 +128,9 @@ impl ComponentLintRule {
         )?;
         let spec = convert_plugin_spec(&spec_wit);
 
-        // Leak strings for 'static lifetime
+        // Leak strings for 'static lifetime required by the LintRule trait.
+        // These live for the entire program duration. Since plugins are loaded once
+        // at startup and never unloaded, this is acceptable.
         let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
         let category: &'static str = Box::leak(spec.category.clone().into_boxed_str());
         let description: &'static str = Box::leak(spec.description.clone().into_boxed_str());
@@ -299,5 +301,201 @@ impl LintRule for ComponentLintRule {
 
     fn references(&self) -> Option<Vec<String>> {
         self.spec.references.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_severity_error() {
+        let wit_severity = bindings::nginx_lint::plugin::types::Severity::Error;
+        assert!(matches!(convert_severity(&wit_severity), Severity::Error));
+    }
+
+    #[test]
+    fn test_convert_severity_warning() {
+        let wit_severity = bindings::nginx_lint::plugin::types::Severity::Warning;
+        assert!(matches!(convert_severity(&wit_severity), Severity::Warning));
+    }
+
+    #[test]
+    fn test_convert_fix_basic() {
+        let wit_fix = bindings::nginx_lint::plugin::types::Fix {
+            line: 10,
+            old_text: Some("old".to_string()),
+            new_text: "new".to_string(),
+            delete_line: false,
+            insert_after: true,
+            start_offset: Some(5),
+            end_offset: Some(8),
+        };
+        let fix = convert_fix(&wit_fix);
+        assert_eq!(fix.line, 10);
+        assert_eq!(fix.old_text.as_deref(), Some("old"));
+        assert_eq!(fix.new_text, "new");
+        assert!(!fix.delete_line);
+        assert!(fix.insert_after);
+        assert_eq!(fix.start_offset, Some(5));
+        assert_eq!(fix.end_offset, Some(8));
+    }
+
+    #[test]
+    fn test_convert_fix_optional_fields_none() {
+        let wit_fix = bindings::nginx_lint::plugin::types::Fix {
+            line: 1,
+            old_text: None,
+            new_text: "text".to_string(),
+            delete_line: true,
+            insert_after: false,
+            start_offset: None,
+            end_offset: None,
+        };
+        let fix = convert_fix(&wit_fix);
+        assert!(fix.old_text.is_none());
+        assert!(fix.delete_line);
+        assert!(fix.start_offset.is_none());
+        assert!(fix.end_offset.is_none());
+    }
+
+    #[test]
+    fn test_convert_lint_error_with_location() {
+        let wit_error = bindings::nginx_lint::plugin::types::LintError {
+            rule: "test-rule".to_string(),
+            category: "test-cat".to_string(),
+            message: "test message".to_string(),
+            severity: bindings::nginx_lint::plugin::types::Severity::Warning,
+            line: Some(42),
+            column: Some(10),
+            fixes: vec![],
+        };
+        let error = convert_lint_error(&wit_error);
+        assert_eq!(error.rule, "test-rule");
+        assert_eq!(error.category, "test-cat");
+        assert_eq!(error.message, "test message");
+        assert!(matches!(error.severity, Severity::Warning));
+        assert_eq!(error.line, Some(42));
+        assert_eq!(error.column, Some(10));
+    }
+
+    #[test]
+    fn test_convert_lint_error_line_only() {
+        let wit_error = bindings::nginx_lint::plugin::types::LintError {
+            rule: "rule".to_string(),
+            category: "cat".to_string(),
+            message: "msg".to_string(),
+            severity: bindings::nginx_lint::plugin::types::Severity::Error,
+            line: Some(5),
+            column: None,
+            fixes: vec![],
+        };
+        let error = convert_lint_error(&wit_error);
+        assert_eq!(error.line, Some(5));
+        assert_eq!(error.column, Some(1)); // defaults to column 1
+    }
+
+    #[test]
+    fn test_convert_lint_error_no_location() {
+        let wit_error = bindings::nginx_lint::plugin::types::LintError {
+            rule: "rule".to_string(),
+            category: "cat".to_string(),
+            message: "msg".to_string(),
+            severity: bindings::nginx_lint::plugin::types::Severity::Error,
+            line: None,
+            column: None,
+            fixes: vec![],
+        };
+        let error = convert_lint_error(&wit_error);
+        assert_eq!(error.line, None);
+        assert_eq!(error.column, None);
+    }
+
+    #[test]
+    fn test_convert_lint_error_with_fixes() {
+        let wit_error = bindings::nginx_lint::plugin::types::LintError {
+            rule: "rule".to_string(),
+            category: "cat".to_string(),
+            message: "msg".to_string(),
+            severity: bindings::nginx_lint::plugin::types::Severity::Warning,
+            line: Some(1),
+            column: Some(1),
+            fixes: vec![bindings::nginx_lint::plugin::types::Fix {
+                line: 1,
+                old_text: Some("bad".to_string()),
+                new_text: "good".to_string(),
+                delete_line: false,
+                insert_after: false,
+                start_offset: None,
+                end_offset: None,
+            }],
+        };
+        let error = convert_lint_error(&wit_error);
+        assert_eq!(error.fixes.len(), 1);
+        assert_eq!(error.fixes[0].new_text, "good");
+    }
+
+    #[test]
+    fn test_convert_plugin_spec() {
+        let wit_spec = bindings::nginx_lint::plugin::types::PluginSpec {
+            name: "test-plugin".to_string(),
+            category: "security".to_string(),
+            description: "A test plugin".to_string(),
+            api_version: "1.0".to_string(),
+            severity: Some("warning".to_string()),
+            why: Some("because".to_string()),
+            bad_example: Some("bad".to_string()),
+            good_example: Some("good".to_string()),
+            references: Some(vec!["https://example.com".to_string()]),
+        };
+        let spec = convert_plugin_spec(&wit_spec);
+        assert_eq!(spec.name, "test-plugin");
+        assert_eq!(spec.category, "security");
+        assert_eq!(spec.description, "A test plugin");
+        assert_eq!(spec.api_version, "1.0");
+        assert_eq!(spec.severity.as_deref(), Some("warning"));
+        assert_eq!(spec.why.as_deref(), Some("because"));
+        assert_eq!(spec.bad_example.as_deref(), Some("bad"));
+        assert_eq!(spec.good_example.as_deref(), Some("good"));
+        assert_eq!(
+            spec.references,
+            Some(vec!["https://example.com".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_convert_plugin_spec_optional_none() {
+        let wit_spec = bindings::nginx_lint::plugin::types::PluginSpec {
+            name: "minimal".to_string(),
+            category: "test".to_string(),
+            description: "Minimal".to_string(),
+            api_version: "1.0".to_string(),
+            severity: None,
+            why: None,
+            bad_example: None,
+            good_example: None,
+            references: None,
+        };
+        let spec = convert_plugin_spec(&wit_spec);
+        assert_eq!(spec.name, "minimal");
+        assert!(spec.severity.is_none());
+        assert!(spec.why.is_none());
+        assert!(spec.references.is_none());
+    }
+
+    #[test]
+    fn test_new_with_invalid_bytes() {
+        let mut config = wasmtime::Config::new();
+        config.wasm_component_model(true);
+        let engine = Engine::new(&config).unwrap();
+        let result = ComponentLintRule::new(
+            &engine,
+            PathBuf::from("test.wasm"),
+            b"not a wasm component",
+            256 * 1024 * 1024,
+            10_000_000,
+            true,
+        );
+        assert!(matches!(result, Err(PluginError::CompileError { .. })));
     }
 }

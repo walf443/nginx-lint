@@ -31,6 +31,7 @@ run-web-embed: build-web
 
 # Build all WASM builtin plugins as WIT components (requires: cargo install wasm-tools)
 build-plugins:
+	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
 	@echo "Building plugins..."
 	@for name in $(PLUGIN_NAMES); do \
 		dir=$$(find plugins/builtin -type d -name "$$name" 2>/dev/null | head -1); \
