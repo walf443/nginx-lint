@@ -103,7 +103,7 @@ jobs:
         run: |
           find plugins/builtin -name "*.wasm.component.wasm" \
             | tar czf "wasm-components-${{ matrix.chunk }}.tar.gz" -T -
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: wasm-plugins-${{ matrix.chunk }}
           path: wasm-components-${{ matrix.chunk }}.tar.gz
@@ -119,7 +119,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "wasm-integration"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           pattern: wasm-plugins-*
           merge-multiple: true
