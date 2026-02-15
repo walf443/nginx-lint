@@ -166,6 +166,29 @@ impl config_api::HostConfig for ComponentStoreData {
 }
 
 impl config_api::HostDirective for ComponentStoreData {
+    fn data(
+        &mut self,
+        self_: Resource<DirectiveResource>,
+    ) -> wasmtime::Result<config_api::DirectiveData> {
+        let dir = &self.table.get(&self_)?.directive;
+        Ok(config_api::DirectiveData {
+            name: dir.name.clone(),
+            args: dir.args.iter().map(convert_argument_to_wit).collect(),
+            line: dir.span.start.line as u32,
+            column: dir.span.start.column as u32,
+            start_offset: dir.span.start.offset as u32,
+            end_offset: dir.span.end.offset as u32,
+            leading_whitespace: dir.leading_whitespace.clone(),
+            trailing_whitespace: dir.trailing_whitespace.clone(),
+            space_before_terminator: dir.space_before_terminator.clone(),
+            has_block: dir.block.is_some(),
+            block_is_raw: dir
+                .block
+                .as_ref()
+                .map_or(false, |b| b.raw_content.is_some()),
+        })
+    }
+
     fn name(&mut self, self_: Resource<DirectiveResource>) -> wasmtime::Result<String> {
         Ok(self.table.get(&self_)?.directive.name.clone())
     }

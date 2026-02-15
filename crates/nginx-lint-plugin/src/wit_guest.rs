@@ -118,63 +118,74 @@ fn reconstruct_config_items(
         .collect()
 }
 
+/// Convert a WIT argument-info to a parser Argument.
+fn convert_wit_argument(
+    a: &nginx_lint::plugin::config_api::ArgumentInfo,
+) -> crate::parser::ast::Argument {
+    use crate::parser::ast;
+
+    let value = match a.arg_type {
+        nginx_lint::plugin::config_api::ArgumentType::Literal => {
+            ast::ArgumentValue::Literal(a.value.clone())
+        }
+        nginx_lint::plugin::config_api::ArgumentType::QuotedString => {
+            ast::ArgumentValue::QuotedString(a.value.clone())
+        }
+        nginx_lint::plugin::config_api::ArgumentType::SingleQuotedString => {
+            ast::ArgumentValue::SingleQuotedString(a.value.clone())
+        }
+        nginx_lint::plugin::config_api::ArgumentType::Variable => {
+            ast::ArgumentValue::Variable(a.value.clone())
+        }
+    };
+    ast::Argument {
+        value,
+        span: ast::Span::new(
+            ast::Position::new(a.line as usize, a.column as usize, a.start_offset as usize),
+            ast::Position::new(
+                a.line as usize,
+                a.column as usize + a.raw.len(),
+                a.end_offset as usize,
+            ),
+        ),
+        raw: a.raw.clone(),
+    }
+}
+
 /// Reconstruct a parser Directive from a WIT directive resource handle.
+///
+/// Uses the bulk `data()` method to fetch all flat properties in a single
+/// WIT boundary crossing, then only calls `block_items()` if the directive
+/// has a block (1 additional crossing per block, recursive).
 fn reconstruct_directive(
     handle: &nginx_lint::plugin::config_api::Directive,
 ) -> crate::parser::ast::Directive {
     use crate::parser::ast;
 
-    let name = handle.name();
-    let args: Vec<ast::Argument> = handle
-        .args()
-        .iter()
-        .map(|a| {
-            let value = match a.arg_type {
-                nginx_lint::plugin::config_api::ArgumentType::Literal => {
-                    ast::ArgumentValue::Literal(a.value.clone())
-                }
-                nginx_lint::plugin::config_api::ArgumentType::QuotedString => {
-                    ast::ArgumentValue::QuotedString(a.value.clone())
-                }
-                nginx_lint::plugin::config_api::ArgumentType::SingleQuotedString => {
-                    ast::ArgumentValue::SingleQuotedString(a.value.clone())
-                }
-                nginx_lint::plugin::config_api::ArgumentType::Variable => {
-                    ast::ArgumentValue::Variable(a.value.clone())
-                }
-            };
-            ast::Argument {
-                value,
-                span: ast::Span::new(
-                    ast::Position::new(a.line as usize, a.column as usize, a.start_offset as usize),
-                    ast::Position::new(
-                        a.line as usize,
-                        a.column as usize + a.raw.len(),
-                        a.end_offset as usize,
-                    ),
-                ),
-                raw: a.raw.clone(),
-            }
-        })
-        .collect();
+    // Single WIT call to get all flat properties
+    let d = handle.data();
 
-    let line = handle.line() as usize;
-    let column = handle.column() as usize;
-    let start_offset = handle.start_offset() as usize;
-    let end_offset = handle.end_offset() as usize;
-    let leading_whitespace = handle.leading_whitespace();
-    let trailing_whitespace = handle.trailing_whitespace();
-    let space_before_terminator = handle.space_before_terminator();
+    let args: Vec<ast::Argument> = d.args.iter().map(convert_wit_argument).collect();
 
-    let block = if handle.has_block() {
+    let line = d.line as usize;
+    let column = d.column as usize;
+    let start_offset = d.start_offset as usize;
+    let end_offset = d.end_offset as usize;
+
+    let block = if d.has_block {
+        // One additional WIT call for block items (recursive)
         let block_items = reconstruct_config_items(&handle.block_items());
         Some(ast::Block {
             items: block_items,
             span: ast::Span::new(
-                ast::Position::new(line, column + name.len() + 1, start_offset + name.len() + 1),
+                ast::Position::new(
+                    line,
+                    column + d.name.len() + 1,
+                    start_offset + d.name.len() + 1,
+                ),
                 ast::Position::new(line, column, end_offset),
             ),
-            raw_content: if handle.block_is_raw() {
+            raw_content: if d.block_is_raw {
                 Some(String::new()) // marker for raw block
             } else {
                 None
@@ -186,9 +197,9 @@ fn reconstruct_directive(
         None
     };
 
-    let name_len = name.len();
+    let name_len = d.name.len();
     ast::Directive {
-        name,
+        name: d.name,
         name_span: ast::Span::new(
             ast::Position::new(line, column, start_offset),
             ast::Position::new(line, column + name_len, start_offset + name_len),
@@ -200,8 +211,8 @@ fn reconstruct_directive(
             ast::Position::new(line, column, end_offset),
         ),
         trailing_comment: None,
-        leading_whitespace,
-        space_before_terminator,
-        trailing_whitespace,
+        leading_whitespace: d.leading_whitespace,
+        space_before_terminator: d.space_before_terminator,
+        trailing_whitespace: d.trailing_whitespace,
     }
 }

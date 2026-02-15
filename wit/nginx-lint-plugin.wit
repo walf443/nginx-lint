@@ -86,6 +86,21 @@ interface config-api {
         blank-line-item(blank-line-info),
     }
 
+    /// All flat properties of a directive (for bulk retrieval)
+    record directive-data {
+        name: string,
+        args: list<argument-info>,
+        line: u32,
+        column: u32,
+        start-offset: u32,
+        end-offset: u32,
+        leading-whitespace: string,
+        trailing-whitespace: string,
+        space-before-terminator: string,
+        has-block: bool,
+        block-is-raw: bool,
+    }
+
     /// A directive paired with its parent block context
     record directive-context {
         directive: directive,
@@ -95,6 +110,8 @@ interface config-api {
 
     /// An nginx directive (resource backed by host data)
     resource directive {
+        /// Get all flat properties in a single call (optimized for reconstruction)
+        data: func() -> directive-data;
         /// Get the directive name
         name: func() -> string;
         /// Check if the directive has the given name
