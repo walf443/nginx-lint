@@ -58,3 +58,150 @@ pub fn convert_lint_error(error: super::LintError) -> nginx_lint::plugin::types:
         fixes: error.fixes.into_iter().map(convert_fix).collect(),
     }
 }
+
+/// Reconstruct a parser Config from a WIT config resource handle.
+///
+/// This calls host functions to retrieve the config data and builds
+/// a parser::Config that plugins can use unchanged.
+pub fn reconstruct_config(
+    config: &nginx_lint::plugin::config_api::Config,
+) -> crate::parser::ast::Config {
+    use crate::parser::ast;
+
+    let items = reconstruct_config_items(&config.items());
+    let include_context = config.include_context();
+
+    ast::Config {
+        items,
+        include_context,
+    }
+}
+
+/// Reconstruct parser ConfigItems from WIT ConfigItems.
+fn reconstruct_config_items(
+    items: &[nginx_lint::plugin::config_api::ConfigItem],
+) -> Vec<crate::parser::ast::ConfigItem> {
+    use crate::parser::ast;
+    use nginx_lint::plugin::config_api::ConfigItem as WitConfigItem;
+
+    items
+        .iter()
+        .map(|item| match item {
+            WitConfigItem::DirectiveItem(dir_handle) => {
+                ast::ConfigItem::Directive(Box::new(reconstruct_directive(dir_handle)))
+            }
+            WitConfigItem::CommentItem(c) => ast::ConfigItem::Comment(ast::Comment {
+                text: c.text.clone(),
+                span: ast::Span::new(
+                    ast::Position::new(c.line as usize, c.column as usize, c.start_offset as usize),
+                    ast::Position::new(
+                        c.line as usize,
+                        c.column as usize + c.text.len(),
+                        c.end_offset as usize,
+                    ),
+                ),
+                leading_whitespace: c.leading_whitespace.clone(),
+                trailing_whitespace: c.trailing_whitespace.clone(),
+            }),
+            WitConfigItem::BlankLineItem(b) => ast::ConfigItem::BlankLine(ast::BlankLine {
+                span: ast::Span::new(
+                    ast::Position::new(b.line as usize, 1, b.start_offset as usize),
+                    ast::Position::new(
+                        b.line as usize,
+                        1 + b.content.len(),
+                        b.start_offset as usize + b.content.len(),
+                    ),
+                ),
+                content: b.content.clone(),
+            }),
+        })
+        .collect()
+}
+
+/// Reconstruct a parser Directive from a WIT directive resource handle.
+fn reconstruct_directive(
+    handle: &nginx_lint::plugin::config_api::Directive,
+) -> crate::parser::ast::Directive {
+    use crate::parser::ast;
+
+    let name = handle.name();
+    let args: Vec<ast::Argument> = handle
+        .args()
+        .iter()
+        .map(|a| {
+            let value = match a.arg_type {
+                nginx_lint::plugin::config_api::ArgumentType::Literal => {
+                    ast::ArgumentValue::Literal(a.value.clone())
+                }
+                nginx_lint::plugin::config_api::ArgumentType::QuotedString => {
+                    ast::ArgumentValue::QuotedString(a.value.clone())
+                }
+                nginx_lint::plugin::config_api::ArgumentType::SingleQuotedString => {
+                    ast::ArgumentValue::SingleQuotedString(a.value.clone())
+                }
+                nginx_lint::plugin::config_api::ArgumentType::Variable => {
+                    ast::ArgumentValue::Variable(a.value.clone())
+                }
+            };
+            ast::Argument {
+                value,
+                span: ast::Span::new(
+                    ast::Position::new(a.line as usize, a.column as usize, a.start_offset as usize),
+                    ast::Position::new(
+                        a.line as usize,
+                        a.column as usize + a.raw.len(),
+                        a.end_offset as usize,
+                    ),
+                ),
+                raw: a.raw.clone(),
+            }
+        })
+        .collect();
+
+    let line = handle.line() as usize;
+    let column = handle.column() as usize;
+    let start_offset = handle.start_offset() as usize;
+    let end_offset = handle.end_offset() as usize;
+    let leading_whitespace = handle.leading_whitespace();
+    let trailing_whitespace = handle.trailing_whitespace();
+    let space_before_terminator = handle.space_before_terminator();
+
+    let block = if handle.has_block() {
+        let block_items = reconstruct_config_items(&handle.block_items());
+        Some(ast::Block {
+            items: block_items,
+            span: ast::Span::new(
+                ast::Position::new(line, column + name.len() + 1, start_offset + name.len() + 1),
+                ast::Position::new(line, column, end_offset),
+            ),
+            raw_content: if handle.block_is_raw() {
+                Some(String::new()) // marker for raw block
+            } else {
+                None
+            },
+            closing_brace_leading_whitespace: String::new(),
+            trailing_whitespace: String::new(),
+        })
+    } else {
+        None
+    };
+
+    let name_len = name.len();
+    ast::Directive {
+        name,
+        name_span: ast::Span::new(
+            ast::Position::new(line, column, start_offset),
+            ast::Position::new(line, column + name_len, start_offset + name_len),
+        ),
+        args,
+        block,
+        span: ast::Span::new(
+            ast::Position::new(line, column, start_offset),
+            ast::Position::new(line, column, end_offset),
+        ),
+        trailing_comment: None,
+        leading_whitespace,
+        space_before_terminator,
+        trailing_whitespace,
+    }
+}

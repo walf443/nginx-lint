@@ -164,21 +164,13 @@ impl ErrorBuilder {
     }
 
     /// Create an error from a directive's location
-    pub fn error_at(&self, message: &str, directive: &Directive) -> LintError {
-        self.error(
-            message,
-            directive.span.start.line,
-            directive.span.start.column,
-        )
+    pub fn error_at(&self, message: &str, directive: &(impl DirectiveExt + ?Sized)) -> LintError {
+        self.error(message, directive.line(), directive.column())
     }
 
     /// Create a warning from a directive's location
-    pub fn warning_at(&self, message: &str, directive: &Directive) -> LintError {
-        self.warning(
-            message,
-            directive.span.start.line,
-            directive.span.start.column,
-        )
+    pub fn warning_at(&self, message: &str, directive: &(impl DirectiveExt + ?Sized)) -> LintError {
+        self.warning(message, directive.line(), directive.column())
     }
 }
 
@@ -709,6 +701,10 @@ pub trait DirectiveExt {
     fn has_arg(&self, value: &str) -> bool;
     /// Return the number of arguments.
     fn arg_count(&self) -> usize;
+    /// Get the start line number (1-based).
+    fn line(&self) -> usize;
+    /// Get the start column number (1-based).
+    fn column(&self) -> usize;
     /// Get the byte offset including leading whitespace.
     fn full_start_offset(&self) -> usize;
     /// Create a [`Fix`] that replaces this directive with new text, preserving indentation.
@@ -754,6 +750,14 @@ impl DirectiveExt for Directive {
         self.args.len()
     }
 
+    fn line(&self) -> usize {
+        self.span.start.line
+    }
+
+    fn column(&self) -> usize {
+        self.span.start.column
+    }
+
     fn full_start_offset(&self) -> usize {
         self.span.start.offset - self.leading_whitespace.len()
     }
@@ -795,6 +799,108 @@ impl DirectiveExt for Directive {
             .collect();
         let line_start_offset = self.span.start.offset - (self.span.start.column - 1);
         Fix::replace_range(line_start_offset, line_start_offset, &fix_text)
+    }
+}
+
+impl<T: DirectiveExt + ?Sized> DirectiveExt for &T {
+    fn is(&self, name: &str) -> bool {
+        (**self).is(name)
+    }
+    fn first_arg(&self) -> Option<&str> {
+        (**self).first_arg()
+    }
+    fn first_arg_is(&self, value: &str) -> bool {
+        (**self).first_arg_is(value)
+    }
+    fn arg_at(&self, index: usize) -> Option<&str> {
+        (**self).arg_at(index)
+    }
+    fn last_arg(&self) -> Option<&str> {
+        (**self).last_arg()
+    }
+    fn has_arg(&self, value: &str) -> bool {
+        (**self).has_arg(value)
+    }
+    fn arg_count(&self) -> usize {
+        (**self).arg_count()
+    }
+    fn line(&self) -> usize {
+        (**self).line()
+    }
+    fn column(&self) -> usize {
+        (**self).column()
+    }
+    fn full_start_offset(&self) -> usize {
+        (**self).full_start_offset()
+    }
+    fn replace_with(&self, new_text: &str) -> Fix {
+        (**self).replace_with(new_text)
+    }
+    fn delete_line(&self) -> Fix {
+        (**self).delete_line()
+    }
+    fn insert_after(&self, new_text: &str) -> Fix {
+        (**self).insert_after(new_text)
+    }
+    fn insert_after_many(&self, lines: &[&str]) -> Fix {
+        (**self).insert_after_many(lines)
+    }
+    fn insert_before(&self, new_text: &str) -> Fix {
+        (**self).insert_before(new_text)
+    }
+    fn insert_before_many(&self, lines: &[&str]) -> Fix {
+        (**self).insert_before_many(lines)
+    }
+}
+
+impl DirectiveExt for Box<Directive> {
+    fn is(&self, name: &str) -> bool {
+        (**self).is(name)
+    }
+    fn first_arg(&self) -> Option<&str> {
+        (**self).first_arg()
+    }
+    fn first_arg_is(&self, value: &str) -> bool {
+        (**self).first_arg_is(value)
+    }
+    fn arg_at(&self, index: usize) -> Option<&str> {
+        (**self).arg_at(index)
+    }
+    fn last_arg(&self) -> Option<&str> {
+        (**self).last_arg()
+    }
+    fn has_arg(&self, value: &str) -> bool {
+        (**self).has_arg(value)
+    }
+    fn arg_count(&self) -> usize {
+        (**self).arg_count()
+    }
+    fn line(&self) -> usize {
+        (**self).line()
+    }
+    fn column(&self) -> usize {
+        (**self).column()
+    }
+    fn full_start_offset(&self) -> usize {
+        (**self).full_start_offset()
+    }
+    fn replace_with(&self, new_text: &str) -> Fix {
+        (**self).replace_with(new_text)
+    }
+    fn delete_line(&self) -> Fix {
+        (**self).delete_line()
+    }
+    fn insert_after(&self, new_text: &str) -> Fix {
+        (**self).insert_after(new_text)
+    }
+    fn insert_after_many(&self, lines: &[&str]) -> Fix {
+        (**self).insert_after_many(lines)
+    }
+    fn insert_before(&self, new_text: &str) -> Fix {
+        (**self).insert_before(new_text)
+    }
+    fn insert_before_many(&self, lines: &[&str]) -> Fix {
+        (**self).insert_before_many(lines)
     }
 }
 

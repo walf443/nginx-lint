@@ -1,4 +1,4 @@
-package nginx-lint:plugin@2.0.0;
+package nginx-lint:plugin@3.0.0;
 
 interface types {
     enum severity {
@@ -39,12 +39,152 @@ interface types {
     }
 }
 
+interface config-api {
+    use types.{fix};
+
+    /// Argument value type
+    enum argument-type {
+        literal,
+        quoted-string,
+        single-quoted-string,
+        variable,
+    }
+
+    /// Argument data (returned as a record since it's small)
+    record argument-info {
+        value: string,
+        raw: string,
+        arg-type: argument-type,
+        line: u32,
+        column: u32,
+        start-offset: u32,
+        end-offset: u32,
+    }
+
+    /// Comment data
+    record comment-info {
+        text: string,
+        line: u32,
+        column: u32,
+        leading-whitespace: string,
+        trailing-whitespace: string,
+        start-offset: u32,
+        end-offset: u32,
+    }
+
+    /// Blank line data
+    record blank-line-info {
+        line: u32,
+        content: string,
+        start-offset: u32,
+    }
+
+    /// A config item (directive, comment, or blank line)
+    variant config-item {
+        directive-item(directive),
+        comment-item(comment-info),
+        blank-line-item(blank-line-info),
+    }
+
+    /// A directive paired with its parent block context
+    record directive-context {
+        directive: directive,
+        parent-stack: list<string>,
+        depth: u32,
+    }
+
+    /// An nginx directive (resource backed by host data)
+    resource directive {
+        /// Get the directive name
+        name: func() -> string;
+        /// Check if the directive has the given name
+        is: func(name: string) -> bool;
+
+        /// Get the first argument value
+        first-arg: func() -> option<string>;
+        /// Check if the first argument equals the given value
+        first-arg-is: func(value: string) -> bool;
+        /// Get the argument at the given index
+        arg-at: func(index: u32) -> option<string>;
+        /// Get the last argument value
+        last-arg: func() -> option<string>;
+        /// Check if any argument equals the given value
+        has-arg: func(value: string) -> bool;
+        /// Return the number of arguments
+        arg-count: func() -> u32;
+        /// Get all arguments as records
+        args: func() -> list<argument-info>;
+
+        /// Get the start line number (1-based)
+        line: func() -> u32;
+        /// Get the start column number (1-based)
+        column: func() -> u32;
+        /// Get the start byte offset (0-based)
+        start-offset: func() -> u32;
+        /// Get the end byte offset (0-based)
+        end-offset: func() -> u32;
+        /// Get the leading whitespace before the directive
+        leading-whitespace: func() -> string;
+        /// Get the trailing whitespace after the directive
+        trailing-whitespace: func() -> string;
+        /// Get the space before the terminator (; or {)
+        space-before-terminator: func() -> string;
+
+        /// Check if the directive has a block
+        has-block: func() -> bool;
+        /// Get the items inside the directive's block
+        block-items: func() -> list<config-item>;
+        /// Check if the block contains raw content (e.g., lua blocks)
+        block-is-raw: func() -> bool;
+
+        /// Create a fix that replaces this directive with new text
+        replace-with: func(new-text: string) -> fix;
+        /// Create a fix that deletes this directive's line
+        delete-line-fix: func() -> fix;
+        /// Create a fix that inserts a new line after this directive
+        insert-after: func(new-text: string) -> fix;
+        /// Create a fix that inserts a new line before this directive
+        insert-before: func(new-text: string) -> fix;
+        /// Create a fix that inserts multiple lines after this directive
+        insert-after-many: func(lines: list<string>) -> fix;
+        /// Create a fix that inserts multiple lines before this directive
+        insert-before-many: func(lines: list<string>) -> fix;
+    }
+
+    /// The parsed nginx configuration (resource backed by host data)
+    resource config {
+        /// Iterate over all directives recursively with parent context
+        all-directives-with-context: func() -> list<directive-context>;
+        /// Iterate over all directives recursively
+        all-directives: func() -> list<directive>;
+        /// Get the top-level config items
+        items: func() -> list<config-item>;
+
+        /// Get the include context (parent block names from include directive)
+        include-context: func() -> list<string>;
+        /// Check if this config is included from within a specific context
+        is-included-from: func(context: string) -> bool;
+        /// Check if included from http context
+        is-included-from-http: func() -> bool;
+        /// Check if included from http > server context
+        is-included-from-http-server: func() -> bool;
+        /// Check if included from http > ... > location context
+        is-included-from-http-location: func() -> bool;
+        /// Check if included from stream context
+        is-included-from-stream: func() -> bool;
+        /// Get the immediate parent context
+        immediate-parent-context: func() -> option<string>;
+    }
+}
+
 world plugin {
     use types.{plugin-spec, lint-error};
+    use config-api.{config};
+    import config-api;
 
     /// Return plugin metadata
     export spec: func() -> plugin-spec;
 
-    /// Check config (JSON) and return lint errors
-    export check: func(config-json: string, path: string) -> list<lint-error>;
+    /// Check config and return lint errors
+    export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
 }
