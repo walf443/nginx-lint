@@ -106,9 +106,11 @@ pub mod prelude {
     pub use super::types::*;
 }
 
-/// Macro to export a plugin implementation
+/// Macro to export a plugin implementation (legacy core module format)
 ///
-/// This macro generates all the required WASM exports for your plugin.
+/// **Deprecated**: Use [`export_component_plugin!`] instead, which generates
+/// WIT component model exports. This macro generates legacy core WASM module
+/// exports and will be removed in a future version.
 ///
 /// # Example
 ///
@@ -128,11 +130,18 @@ pub mod prelude {
 ///     }
 /// }
 ///
-/// export_plugin!(MyPlugin);
+/// // Preferred:
+/// export_component_plugin!(MyPlugin);
 /// ```
+#[deprecated(since = "0.7.0", note = "Use export_component_plugin! instead for WIT component model support")]
+#[doc(hidden)]
+pub fn _export_plugin_deprecated() {}
+
 #[macro_export]
 macro_rules! export_plugin {
     ($plugin_type:ty) => {
+        const _: fn() = $crate::_export_plugin_deprecated;
+
         #[cfg(all(target_arch = "wasm32", feature = "wasm-export"))]
         const _: () = {
             static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
