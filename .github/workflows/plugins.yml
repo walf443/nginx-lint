@@ -137,7 +137,7 @@ jobs:
       - name: Build nginx-lint (release)
         run: cargo build --release --features plugins
       - name: Run WASM integration tests
-        run: cargo test --test wasm_plugin_test --features plugins
+        run: cargo test --test wasm_plugin_test --features plugins --release
       - name: Test TypeScript plugin integration
         run: |
           NGINX_LINT=./target/release/nginx-lint
