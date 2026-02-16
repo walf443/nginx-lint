@@ -6,7 +6,7 @@
  * interface so we can test plugin logic without the WASM host.
  */
 
-import type { Config, Directive, DirectiveContext } from "./types.js";
+import type { Config, ConfigItem, Directive, DirectiveContext, DirectiveData } from "./types.js";
 
 /** Create a mock of a WIT `directive` resource. */
 export function mockDirective(opts: {
@@ -21,6 +21,17 @@ export function mockDirective(opts: {
   const column = opts.column ?? 1;
 
   return {
+    data(): DirectiveData {
+      return {
+        name, args: [], line, column, startOffset: 0, endOffset: 0,
+        endLine: line, endColumn: column, leadingWhitespace: "", trailingWhitespace: "",
+        spaceBeforeTerminator: "", hasBlock: false, blockIsRaw: false,
+        blockRawContent: undefined, closingBraceLeadingWhitespace: undefined,
+        blockTrailingWhitespace: undefined, trailingCommentText: undefined,
+        nameEndColumn: column, nameEndOffset: 0,
+        blockStartLine: undefined, blockStartColumn: undefined, blockStartOffset: undefined,
+      };
+    },
     is(n: string) { return name === n; },
     name() { return name; },
     firstArg() { return args[0] ?? undefined; },
@@ -38,6 +49,7 @@ export function mockDirective(opts: {
     trailingWhitespace() { return ""; },
     spaceBeforeTerminator() { return ""; },
     hasBlock() { return false; },
+    blockItems(): ConfigItem[] { return []; },
     blockIsRaw() { return false; },
     replaceWith(newText: string) {
       return { line: 0, oldText: undefined, newText, deleteLine: false, insertAfter: false, startOffset: undefined, endOffset: undefined };
@@ -61,16 +73,21 @@ export function mockDirective(opts: {
 }
 
 /** Create a mock of a WIT `config` resource. */
-export function mockConfig(contexts: DirectiveContext[]): Config {
+export function mockConfig(
+  contexts: DirectiveContext[],
+  opts?: { includeContext?: string[] },
+): Config {
+  const inclCtx = opts?.includeContext ?? [];
   return {
     allDirectivesWithContext() { return contexts; },
     allDirectives() { return contexts.map((c) => c.directive); },
-    includeContext() { return []; },
-    isIncludedFrom() { return false; },
-    isIncludedFromHttp() { return false; },
-    isIncludedFromHttpServer() { return false; },
-    isIncludedFromHttpLocation() { return false; },
-    isIncludedFromStream() { return false; },
-    immediateParentContext() { return undefined; },
+    items(): ConfigItem[] { return []; },
+    includeContext() { return inclCtx; },
+    isIncludedFrom(context: string) { return inclCtx.includes(context); },
+    isIncludedFromHttp() { return inclCtx.includes("http"); },
+    isIncludedFromHttpServer() { return inclCtx.includes("http") && inclCtx.includes("server"); },
+    isIncludedFromHttpLocation() { return inclCtx.includes("http") && inclCtx.includes("location"); },
+    isIncludedFromStream() { return inclCtx.includes("stream"); },
+    immediateParentContext() { return inclCtx.length > 0 ? inclCtx[inclCtx.length - 1] : undefined; },
   };
 }

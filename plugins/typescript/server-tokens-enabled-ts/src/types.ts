@@ -55,8 +55,60 @@ export interface ArgumentInfo {
   endOffset: number;
 }
 
+/** Comment data from WIT `comment-info` record. */
+export interface CommentInfo {
+  text: string;
+  line: number;
+  column: number;
+  leadingWhitespace: string;
+  trailingWhitespace: string;
+  startOffset: number;
+  endOffset: number;
+}
+
+/** Blank line data from WIT `blank-line-info` record. */
+export interface BlankLineInfo {
+  line: number;
+  content: string;
+  startOffset: number;
+}
+
+/** WIT `config-item` variant — a directive, comment, or blank line. */
+export type ConfigItem =
+  | { tag: "directive-item"; val: Directive }
+  | { tag: "comment-item"; val: CommentInfo }
+  | { tag: "blank-line-item"; val: BlankLineInfo };
+
+/** WIT `directive-data` record — all flat properties in a single call. */
+export interface DirectiveData {
+  name: string;
+  args: ArgumentInfo[];
+  line: number;
+  column: number;
+  startOffset: number;
+  endOffset: number;
+  endLine: number;
+  endColumn: number;
+  leadingWhitespace: string;
+  trailingWhitespace: string;
+  spaceBeforeTerminator: string;
+  hasBlock: boolean;
+  blockIsRaw: boolean;
+  blockRawContent: string | undefined;
+  closingBraceLeadingWhitespace: string | undefined;
+  blockTrailingWhitespace: string | undefined;
+  trailingCommentText: string | undefined;
+  nameEndColumn: number;
+  nameEndOffset: number;
+  blockStartLine: number | undefined;
+  blockStartColumn: number | undefined;
+  blockStartOffset: number | undefined;
+}
+
 /** WIT `directive` resource — host-backed object with methods. */
 export interface Directive {
+  /** Get all flat properties in a single call (optimized for bulk retrieval). */
+  data(): DirectiveData;
   name(): string;
   is(name: string): boolean;
 
@@ -77,6 +129,8 @@ export interface Directive {
   spaceBeforeTerminator(): string;
 
   hasBlock(): boolean;
+  /** Get the items inside the directive's block. */
+  blockItems(): ConfigItem[];
   blockIsRaw(): boolean;
 
   replaceWith(newText: string): Fix;
@@ -97,6 +151,8 @@ export interface DirectiveContext {
 export interface Config {
   allDirectivesWithContext(): DirectiveContext[];
   allDirectives(): Directive[];
+  /** Get the top-level config items. */
+  items(): ConfigItem[];
 
   includeContext(): string[];
   isIncludedFrom(context: string): boolean;

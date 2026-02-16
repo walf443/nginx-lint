@@ -130,4 +130,128 @@ describe("check", () => {
     const errors = check(cfg, "test.conf");
     assert.equal(errors.length, 0);
   });
+
+  it("no warning for file included from http context (parent should set server_tokens)", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "server", line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+        {
+          directive: mockDirective({ name: "listen", args: ["80"], line: 2 }),
+          parentStack: ["server"],
+          depth: 1,
+        },
+      ],
+      { includeContext: ["http"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 0);
+  });
+
+  it("detects server_tokens on in file included from http context", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "server", line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+        {
+          directive: mockDirective({ name: "server_tokens", args: ["on"], line: 2, column: 5 }),
+          parentStack: ["server"],
+          depth: 1,
+        },
+      ],
+      { includeContext: ["http"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("should be 'off'"));
+    assert.equal(errors[0].line, 2);
+  });
+
+  it("no error for server_tokens off in file included from http context", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "server", line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+        {
+          directive: mockDirective({ name: "server_tokens", args: ["off"], line: 2 }),
+          parentStack: ["server"],
+          depth: 1,
+        },
+      ],
+      { includeContext: ["http"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 0);
+  });
+
+  it("no warning for file included from http > server context", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "location", line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+        {
+          directive: mockDirective({ name: "root", args: ["/var/www"], line: 2 }),
+          parentStack: ["location"],
+          depth: 1,
+        },
+      ],
+      { includeContext: ["http", "server"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 0);
+  });
+
+  it("detects server_tokens on in file included from http > server context", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "server_tokens", args: ["on"], line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+      ],
+      { includeContext: ["http", "server"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("should be 'off'"));
+  });
+
+  it("ignores file included from stream context", () => {
+    const cfg = mockConfig(
+      [
+        {
+          directive: mockDirective({ name: "server", line: 1 }),
+          parentStack: [],
+          depth: 0,
+        },
+        {
+          directive: mockDirective({ name: "server_tokens", args: ["on"], line: 2 }),
+          parentStack: ["server"],
+          depth: 1,
+        },
+      ],
+      { includeContext: ["stream"] },
+    );
+
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 0);
+  });
 });

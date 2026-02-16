@@ -46,6 +46,12 @@ export function check(cfg: Config, path: string): LintError[] {
   let hasServerTokensOn = false;
   let httpBlockLine: number | undefined;
 
+  // Check if this file is included from an http context.
+  // When included from http (or http > server, etc.), directives are
+  // implicitly inside the http context even without an explicit http block.
+  const includeCtx = cfg.includeContext();
+  const includedFromHttp = includeCtx.includes("http");
+
   const contexts = cfg.allDirectivesWithContext();
 
   for (const ctx of contexts) {
@@ -57,8 +63,13 @@ export function check(cfg: Config, path: string): LintError[] {
       httpBlockLine = directive.line();
     }
 
-    // Only check server_tokens in http context
-    const insideHttp = parentStack.includes("http") || directive.is("http");
+    // Only check server_tokens in http context.
+    // include_context means the file is included from within http,
+    // so all top-level directives are effectively inside http.
+    const insideHttp =
+      parentStack.includes("http") ||
+      directive.is("http") ||
+      includedFromHttp;
     if (!insideHttp) {
       continue;
     }
@@ -88,8 +99,11 @@ export function check(cfg: Config, path: string): LintError[] {
 
   // If we have an http block in THIS file but no server_tokens off/build, warn
   // about the default. Skip if we already warned about explicit 'on'.
+  // Don't warn if this file is included from another config — the parent
+  // config's http block should set server_tokens.
   if (
     httpBlockLine !== undefined &&
+    !includedFromHttp &&
     !hasServerTokensOff &&
     !hasServerTokensOn
   ) {
