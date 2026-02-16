@@ -135,9 +135,9 @@ jobs:
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
       - name: Build nginx-lint (release)
-        run: cargo build --release --features plugins
+        run: cargo build --release --no-default-features --features cli,plugins
       - name: Run WASM integration tests
-        run: cargo test --test wasm_plugin_test --features plugins --release
+        run: cargo test --test wasm_plugin_test --no-default-features --features cli,plugins --release
       - name: Test TypeScript plugin integration
         run: |
           NGINX_LINT=./target/release/nginx-lint
