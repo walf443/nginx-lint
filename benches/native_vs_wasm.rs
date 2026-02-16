@@ -3,16 +3,17 @@
 //! Compares the performance of running server-tokens-enabled as a WASM plugin
 //! versus running the same logic natively via NativePluginRule.
 //!
+//! Prerequisites:
+//!   - `make build-plugins` must be run before this benchmark
+//!
 //! Run with:
-//!   cargo bench --features "wasm-builtin-plugins,native-builtin-plugins" --bench native_vs_wasm
+//!   cargo bench --features "plugins,native-builtin-plugins" --bench native_vs_wasm
 
 use nginx_lint::LintRule;
 use nginx_lint::parser::parse_string;
-use std::path::Path;
+use nginx_lint::plugin::PluginLoader;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-
-// WASM plugin loading
-use nginx_lint::plugin::builtin::load_builtin_plugins;
 
 // Native plugin
 use nginx_lint_plugin::native::NativePluginRule;
@@ -55,17 +56,37 @@ http {
 
 const ITERATIONS: u32 = 1000;
 
+/// Find the WASM component file for a plugin
+fn find_plugin_wasm(plugin_name: &str) -> PathBuf {
+    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let wasm_name = format!("{}_plugin", plugin_name.replace('-', "_"));
+    let wasm_path = project_root
+        .join("plugins/builtin/security")
+        .join(plugin_name)
+        .join("target/wasm32-unknown-unknown/release")
+        .join(format!("{wasm_name}.wasm.component.wasm"));
+
+    if !wasm_path.exists() {
+        panic!(
+            "WASM plugin not found at {:?}. Run `make build-plugins` first.",
+            wasm_path
+        );
+    }
+    wasm_path
+}
+
 fn bench_wasm(
     config: &nginx_lint::parser::ast::Config,
     path: &Path,
 ) -> (Duration, Duration, usize) {
-    // Cold start: includes loading/compiling the WASM module
+    let wasm_path = find_plugin_wasm("server_tokens_enabled");
+
+    // Cold start: includes creating engine, loading, and compiling the WASM component
     let cold_start = Instant::now();
-    let plugins = load_builtin_plugins().expect("Failed to load builtin plugins");
-    let wasm_rule = plugins
-        .iter()
-        .find(|p| p.name() == "server-tokens-enabled")
-        .expect("server-tokens-enabled plugin not found");
+    let loader = PluginLoader::new_trusted().expect("Failed to create PluginLoader");
+    let wasm_rule = loader
+        .load_plugin_dynamic(&wasm_path)
+        .expect("Failed to load WASM plugin");
     let cold_errors = wasm_rule.check(config, path);
     let cold_duration = cold_start.elapsed();
 

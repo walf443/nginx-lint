@@ -149,4 +149,4 @@ required-features = ["cli"]
 [[bench]]
 name = "native_vs_wasm"
 harness = false
-required-features = ["wasm-builtin-plugins", "native-builtin-plugins"]
+required-features = ["plugins", "native-builtin-plugins"]
