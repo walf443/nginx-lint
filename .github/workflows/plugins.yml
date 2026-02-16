@@ -12,6 +12,7 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - ".github/workflows/plugins.yml"
       - "plugins/**"
       - "crates/**"
       - "src/**"
@@ -58,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [0, 1, 2, 3]
+        chunk: [0, 1]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -78,7 +79,7 @@ jobs:
         run: |
           plugins=(plugins/builtin/*/*/)
           total=${#plugins[@]}
-          chunks=4
+          chunks=2
           chunk=${{ matrix.chunk }}
           start=$(( chunk * total / chunks ))
           end=$(( (chunk + 1) * total / chunks ))
@@ -109,16 +110,36 @@ jobs:
           path: wasm-components-${{ matrix.chunk }}.tar.gz
           retention-days: 1
 
-  wasm-integration:
-    name: WASM Integration Test
-    needs: [wasm-build, typescript-plugin]
+  build-host:
+    name: Build Host Binaries
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "wasm-integration"
+          shared-key: "build-host"
+      - name: Build nginx-lint and test binary
+        run: |
+          cargo build --release --no-default-features --features cli,plugins
+          cargo test --test wasm_plugin_test --no-default-features --features cli,plugins --release --no-run
+      - name: Package binaries
+        run: |
+          mkdir -p artifacts
+          cp target/release/nginx-lint artifacts/
+          find target/release/deps -name 'wasm_plugin_test-*' -type f -executable | head -1 | xargs -I{} cp {} artifacts/wasm_plugin_test
+      - uses: actions/upload-artifact@v6
+        with:
+          name: host-binaries
+          path: artifacts/
+          retention-days: 1
+
+  wasm-integration:
+    name: WASM Integration Test
+    needs: [wasm-build, typescript-plugin, build-host]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v7
         with:
           pattern: wasm-plugins-*
@@ -127,6 +148,10 @@ jobs:
         with:
           name: ts-plugin
           path: target/ts-plugins
+      - uses: actions/download-artifact@v7
+        with:
+          name: host-binaries
+          path: artifacts
       - name: Extract WASM plugins
         run: |
           for f in wasm-components-*.tar.gz; do
@@ -134,13 +159,14 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
-      - name: Build nginx-lint (release)
-        run: cargo build --release --features plugins
       - name: Run WASM integration tests
-        run: cargo test --test wasm_plugin_test --features plugins --release
+        run: |
+          chmod +x artifacts/wasm_plugin_test
+          ./artifacts/wasm_plugin_test
       - name: Test TypeScript plugin integration
         run: |
-          NGINX_LINT=./target/release/nginx-lint
+          chmod +x artifacts/nginx-lint
+          NGINX_LINT=./artifacts/nginx-lint
 
           # bad.conf should produce warnings from the TS plugin
           output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
