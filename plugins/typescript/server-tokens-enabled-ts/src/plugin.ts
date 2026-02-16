@@ -11,7 +11,7 @@
  *   plugins/builtin/security/server_tokens_enabled/
  */
 
-import type { Config, LintError, PluginSpec } from "./types.js";
+import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
 
 /**
  * Return plugin metadata.
@@ -23,7 +23,7 @@ export function spec(): PluginSpec {
     category: "security",
     description:
       "Detects when server_tokens is enabled (exposes nginx version) [TypeScript]",
-    apiVersion: "3.0.0",
+    apiVersion: "1.0",
     severity: "warning",
     why: "When server_tokens is 'on' (the default), nginx includes its version number in " +
       "the Server response header and on default error pages. This information can help " +
