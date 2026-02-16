@@ -134,17 +134,21 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
+      - name: Build nginx-lint
+        run: cargo build --features plugins
       - name: Run WASM integration tests
         run: cargo test --test wasm_plugin_test --features plugins
       - name: Test TypeScript plugin integration
         run: |
+          NGINX_LINT=./target/debug/nginx-lint
+
           # bad.conf should produce warnings from the TS plugin
-          output=$(cargo run --features plugins -- --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf 2>/dev/null || true)
+          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
           echo "$output"
           echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
 
           # good.conf should NOT produce warnings from the TS plugin
-          output=$(cargo run --features plugins -- --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf 2>/dev/null || true)
+          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf || true)
           echo "$output"
           if echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null 2>&1; then
             echo "ERROR: good.conf should not produce errors from server-tokens-enabled-ts"
