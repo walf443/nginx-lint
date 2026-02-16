@@ -11,7 +11,7 @@
  *   plugins/builtin/security/server_tokens_enabled/
  */
 
-import type { Config, LintError, PluginSpec } from "./types.js";
+import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
 
 /**
  * Return plugin metadata.

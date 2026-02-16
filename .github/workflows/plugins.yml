@@ -189,6 +189,11 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+      - name: Build shared library
+        working-directory: plugins/typescript/nginx-lint-plugin
+        run: |
+          npm install
+          npm run build
       - name: Build TypeScript plugin
         working-directory: plugins/typescript/server-tokens-enabled-ts
         run: |

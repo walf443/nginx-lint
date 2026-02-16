@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spec, check } from "./plugin.js";
-import { mockConfig, mockDirective } from "./test-helpers.js";
+import { mockConfig, mockDirective } from "nginx-lint-plugin/test-helpers";
 
 describe("spec", () => {
   it("returns valid plugin metadata", () => {

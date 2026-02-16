@@ -4,9 +4,12 @@
  * In the real WASM runtime, `config` and `directive` are host-backed resources
  * with methods. For unit testing, we create plain objects that mimic the same
  * interface so we can test plugin logic without the WASM host.
+ *
+ * Usage:
+ *   import { mockConfig, mockDirective } from "nginx-lint-plugin/test-helpers";
  */
 
-import type { Config, ConfigItem, Directive, DirectiveContext, DirectiveData } from "./types.js";
+import type { Config, ConfigItem, Directive, DirectiveContext, DirectiveData } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
 
 /** Create a mock of a WIT `directive` resource. */
 export function mockDirective(opts: {

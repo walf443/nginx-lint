@@ -6,6 +6,9 @@
     "build": "tsc && jco componentize dist/plugin.js -w ../../../wit -n plugin --disable all -o server-tokens-enabled-ts.wasm",
     "test": "tsc && node --test dist/plugin.test.js"
   },
+  "dependencies": {
+    "nginx-lint-plugin": "file:../nginx-lint-plugin"
+  },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.19.0",
     "@bytecodealliance/jco": "^1",
