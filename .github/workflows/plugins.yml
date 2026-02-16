@@ -111,7 +111,7 @@ jobs:
 
   wasm-integration:
     name: WASM Integration Test
-    needs: wasm-build
+    needs: [wasm-build, typescript-plugin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -123,6 +123,10 @@ jobs:
         with:
           pattern: wasm-plugins-*
           merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          name: ts-plugin
+          path: target/ts-plugins
       - name: Extract WASM plugins
         run: |
           for f in wasm-components-*.tar.gz; do
@@ -132,34 +136,8 @@ jobs:
           find plugins/builtin -name "*.wasm.component.wasm" | sort
       - name: Run WASM integration tests
         run: cargo test --test wasm_plugin_test --features plugins
-
-  typescript-plugin:
-    name: TypeScript Plugin
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "typescript-plugin"
-      - name: Build TypeScript plugin
-        working-directory: plugins/typescript/server-tokens-enabled-ts
+      - name: Test TypeScript plugin integration
         run: |
-          npm install
-          npm run build
-      - name: Run TypeScript unit tests
-        working-directory: plugins/typescript/server-tokens-enabled-ts
-        run: npm test
-      - name: Build nginx-lint with plugins feature
-        run: cargo build --features plugins
-      - name: Test TypeScript plugin
-        run: |
-          mkdir -p target/ts-plugins
-          cp plugins/typescript/server-tokens-enabled-ts/server-tokens-enabled-ts.wasm target/ts-plugins/
-
           # bad.conf should produce warnings from the TS plugin
           output=$(cargo run --features plugins -- --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf 2>/dev/null || true)
           echo "$output"
@@ -172,3 +150,26 @@ jobs:
             echo "ERROR: good.conf should not produce errors from server-tokens-enabled-ts"
             exit 1
           fi
+
+  typescript-plugin:
+    name: TypeScript Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build TypeScript plugin
+        working-directory: plugins/typescript/server-tokens-enabled-ts
+        run: |
+          npm install
+          npm run build
+      - name: Run TypeScript unit tests
+        working-directory: plugins/typescript/server-tokens-enabled-ts
+        run: npm test
+      - name: Upload TypeScript WASM plugin
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-plugin
+          path: plugins/typescript/server-tokens-enabled-ts/server-tokens-enabled-ts.wasm
+          retention-days: 1
