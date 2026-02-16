@@ -111,7 +111,7 @@ jobs:
 
   wasm-integration:
     name: WASM Integration Test
-    needs: wasm-build
+    needs: [wasm-build, typescript-plugin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -123,6 +123,10 @@ jobs:
         with:
           pattern: wasm-plugins-*
           merge-multiple: true
+      - uses: actions/download-artifact@v7
+        with:
+          name: ts-plugin
+          path: target/ts-plugins
       - name: Extract WASM plugins
         run: |
           for f in wasm-components-*.tar.gz; do
@@ -130,5 +134,46 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
+      - name: Build nginx-lint (release)
+        run: cargo build --release --features plugins
       - name: Run WASM integration tests
-        run: cargo test --test wasm_plugin_test --features plugins
+        run: cargo test --test wasm_plugin_test --features plugins --release
+      - name: Test TypeScript plugin integration
+        run: |
+          NGINX_LINT=./target/release/nginx-lint
+
+          # bad.conf should produce warnings from the TS plugin
+          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
+          echo "$output"
+          echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
+
+          # good.conf should NOT produce warnings from the TS plugin
+          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf || true)
+          echo "$output"
+          if echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null 2>&1; then
+            echo "ERROR: good.conf should not produce errors from server-tokens-enabled-ts"
+            exit 1
+          fi
+
+  typescript-plugin:
+    name: TypeScript Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build TypeScript plugin
+        working-directory: plugins/typescript/server-tokens-enabled-ts
+        run: |
+          npm install
+          npm run build
+      - name: Run TypeScript unit tests
+        working-directory: plugins/typescript/server-tokens-enabled-ts
+        run: npm test
+      - name: Upload TypeScript WASM plugin
+        uses: actions/upload-artifact@v6
+        with:
+          name: ts-plugin
+          path: plugins/typescript/server-tokens-enabled-ts/server-tokens-enabled-ts.wasm
+          retention-days: 1
