@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chunk: [0, 1, 2, 3]
+        chunk: [0, 1]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -79,7 +79,7 @@ jobs:
         run: |
           plugins=(plugins/builtin/*/*/)
           total=${#plugins[@]}
-          chunks=4
+          chunks=2
           chunk=${{ matrix.chunk }}
           start=$(( chunk * total / chunks ))
           end=$(( (chunk + 1) * total / chunks ))
