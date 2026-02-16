@@ -134,13 +134,13 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
-      - name: Build nginx-lint
-        run: cargo build --features plugins
+      - name: Build nginx-lint (release)
+        run: cargo build --release --features plugins
       - name: Run WASM integration tests
         run: cargo test --test wasm_plugin_test --features plugins
       - name: Test TypeScript plugin integration
         run: |
-          NGINX_LINT=./target/debug/nginx-lint
+          NGINX_LINT=./target/release/nginx-lint
 
           # bad.conf should produce warnings from the TS plugin
           output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
