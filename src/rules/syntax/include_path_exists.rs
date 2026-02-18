@@ -13,7 +13,7 @@ pub static DOC: RuleDoc = RuleDoc {
     severity: "error",
     why: r#"When an include directive references a file that does not exist,
 nginx will fail to start. Glob patterns that match no files are
-accepted by nginx but may indicate a misconfiguration."#,
+accepted by nginx without error, so only literal paths are checked."#,
     bad_example: include_str!("include_path_exists/bad.conf"),
     good_example: include_str!("include_path_exists/good.conf"),
     references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
@@ -91,33 +91,23 @@ impl LintRule for IncludePathExists {
             let resolved = resolve_include_pattern(&mapped_pattern, parent_dir, &[]);
 
             if resolved.is_empty() {
+                // Glob patterns matching zero files are accepted by nginx, so skip them
+                if is_glob_pattern(&mapped_pattern) {
+                    continue;
+                }
+
                 let line = directive.span.start.line;
                 let column = directive.span.start.column;
 
-                if is_glob_pattern(&mapped_pattern) {
-                    errors.push(
-                        LintError::new(
-                            self.name(),
-                            self.category(),
-                            &format!(
-                                "Include pattern '{}' does not match any files",
-                                mapped_pattern
-                            ),
-                            Severity::Warning,
-                        )
-                        .with_location(line, column),
-                    );
-                } else {
-                    errors.push(
-                        LintError::new(
-                            self.name(),
-                            self.category(),
-                            &format!("Included file '{}' does not exist", mapped_pattern),
-                            Severity::Error,
-                        )
-                        .with_location(line, column),
-                    );
-                }
+                errors.push(
+                    LintError::new(
+                        self.name(),
+                        self.category(),
+                        &format!("Included file '{}' does not exist", mapped_pattern),
+                        Severity::Error,
+                    )
+                    .with_location(line, column),
+                );
             }
         }
 
@@ -209,13 +199,16 @@ mod tests {
 
     #[test]
     fn test_glob_pattern_no_match() {
+        // nginx accepts glob patterns that match zero files without error
         let temp = TempDir::new().unwrap();
         let dir = temp.path();
 
         let errors = parse_and_check(dir, "nginx.conf", "include conf.d/*.conf;", vec![]);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].severity, Severity::Warning);
-        assert!(errors[0].message.contains("does not match any files"));
+        assert!(
+            errors.is_empty(),
+            "Glob patterns matching no files should not produce errors, got: {:?}",
+            errors
+        );
     }
 
     #[test]
