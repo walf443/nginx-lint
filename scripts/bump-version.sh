@@ -57,7 +57,14 @@ for file in "${CARGO_FILES[@]}"; do
     echo "  Updated $relative"
 done
 
+# Update TypeScript plugin package.json
+TS_PLUGIN_PKG="$ROOT_DIR/plugins/typescript/nginx-lint-plugin/package.json"
+if [ -f "$TS_PLUGIN_PKG" ]; then
+    sed_inplace "s/\"version\": \"[0-9]*\.[0-9]*\.[0-9]*\"/\"version\": \"$NEW_VERSION\"/" "$TS_PLUGIN_PKG"
+    echo "  Updated plugins/typescript/nginx-lint-plugin/package.json"
+fi
+
 echo ""
-echo "Done! Updated ${#CARGO_FILES[@]} files to version $NEW_VERSION."
+echo "Done! Updated ${#CARGO_FILES[@]} Cargo.toml files and TypeScript plugin to version $NEW_VERSION."
 echo ""
-echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml"
+echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json"
