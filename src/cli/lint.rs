@@ -508,16 +508,24 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         let mut included_files: Vec<IncludedFile> = Vec::new();
 
+        let path_mappings = lint_config
+            .as_ref()
+            .map(|c| c.include_path_mappings())
+            .unwrap_or(&[]);
+
         for file_path in &file_paths {
             let files_for_path = if initial_context.is_empty() {
-                collect_included_files(file_path, |path| {
-                    parse_config(path).map_err(|e| e.to_string())
-                })
+                collect_included_files(
+                    file_path,
+                    |path| parse_config(path).map_err(|e| e.to_string()),
+                    path_mappings,
+                )
             } else {
                 collect_included_files_with_context(
                     file_path,
                     |path| parse_config(path).map_err(|e| e.to_string()),
                     initial_context.clone(),
+                    path_mappings,
                 )
             };
 

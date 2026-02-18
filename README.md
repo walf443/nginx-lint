@@ -148,6 +148,39 @@ location /api {
 
 This is equivalent to `--context http,server` on the command line.
 
+## Include Resolution
+
+nginx-lint automatically follows `include` directives and lints the included files as well. Both absolute paths and glob patterns (e.g. `include /etc/nginx/conf.d/*.conf;`) are supported.
+
+### Path Mapping
+
+In production, nginx configs often include files from a directory that is populated at runtime via symlinks (e.g. `sites-enabled/`), while the actual source files live elsewhere (e.g. `sites-available/`). You can configure path mappings in `.nginx-lint.toml` so that nginx-lint reads from the correct location:
+
+```toml
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+```
+
+With this configuration, an `include sites-enabled/*.conf;` directive will be resolved as `sites-available/*.conf` during linting.
+
+Key behaviors:
+
+- **Component-level matching** — `from` is matched against exact path segments, so `sites-enabled` will not match `asites-enabled` or `sites-enabled-old`.
+- **Multi-segment values** — `from = "nginx/sites-enabled"` matches consecutive path components.
+- **Chained application** — Multiple `[[include.path_map]]` entries are applied in declaration order, with each mapping receiving the output of the previous one.
+
+```toml
+# Chained example: sites-enabled → sites-available → conf
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+
+[[include.path_map]]
+from = "sites-available"
+to   = "conf"
+```
+
 ## Web UI
 
 Try the Web UI online without installation: [Demo](https://walf443.github.io/nginx-lint/)
