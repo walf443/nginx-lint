@@ -353,10 +353,9 @@ http {
             "conf.d/server.conf",
             "server {\n    include snippets/upstream.conf;\n}",
         );
-        let config = crate::parser::parse_string(
-            "server {\n    include snippets/upstream.conf;\n}",
-        )
-        .unwrap();
+        let config =
+            crate::parser::parse_string("server {\n    include snippets/upstream.conf;\n}")
+                .unwrap();
 
         // Without prefix: resolves from conf.d/ → error
         let rule = IncludePathExists::new();
@@ -368,10 +367,8 @@ http {
         );
 
         // With prefix: resolves from base/ → no error
-        let rule = IncludePathExists::with_path_mappings_and_prefix(
-            Vec::new(),
-            Some(base.to_path_buf()),
-        );
+        let rule =
+            IncludePathExists::with_path_mappings_and_prefix(Vec::new(), Some(base.to_path_buf()));
         let errors = rule.check(&config, &config_path);
         assert!(
             errors.is_empty(),
