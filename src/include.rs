@@ -234,7 +234,7 @@ fn find_includes_recursive(
 ///
 /// Both `from` and `to` may span multiple segments (e.g. `from = "a/b"`).
 /// All occurrences of the segment sequence are replaced.
-fn apply_path_mapping(pattern: &str, mapping: &PathMapping) -> String {
+pub(crate) fn apply_path_mapping(pattern: &str, mapping: &PathMapping) -> String {
     let from_comps: Vec<&str> = mapping.from.split('/').filter(|s| !s.is_empty()).collect();
     let to_comps: Vec<&str> = mapping.to.split('/').filter(|s| !s.is_empty()).collect();
 
@@ -289,7 +289,7 @@ fn apply_path_mapping(pattern: &str, mapping: &PathMapping) -> String {
 
 /// Resolve an include pattern (which may contain glob wildcards) to actual file paths.
 /// Path mappings are applied in order before glob expansion.
-fn resolve_include_pattern(
+pub(crate) fn resolve_include_pattern(
     pattern: &str,
     parent_dir: &Path,
     path_mappings: &[PathMapping],

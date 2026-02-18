@@ -23,6 +23,8 @@ impl Linter {
         use crate::rules::{
             Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
         };
+        #[cfg(feature = "cli")]
+        use crate::rules::IncludePathExists;
 
         let mut linter = Self::new();
 
@@ -41,6 +43,20 @@ impl Linter {
         }
         if is_enabled("missing-semicolon") {
             linter.add_rule(Box::new(MissingSemicolon));
+        }
+        #[cfg(feature = "cli")]
+        if is_enabled("include-path-exists") {
+            let rule = if let Some(c) = config {
+                let mappings = c.include_path_mappings();
+                if mappings.is_empty() {
+                    IncludePathExists::new()
+                } else {
+                    IncludePathExists::with_path_mappings(mappings.to_vec())
+                }
+            } else {
+                IncludePathExists::new()
+            };
+            linter.add_rule(Box::new(rule));
         }
         // invalid-directive-context: use native implementation when additional_contexts is configured
         // (for extension modules like nginx-rtmp-module); otherwise use WASM/native plugin

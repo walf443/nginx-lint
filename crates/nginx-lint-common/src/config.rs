@@ -154,6 +154,9 @@ enabled = true
 # Example for nginx-rtmp-module:
 # additional_contexts = { server = ["rtmp"], upstream = ["rtmp"] }
 
+[rules.include-path-exists]
+enabled = true
+
 # =============================================================================
 # Security Rules
 # =============================================================================
@@ -681,6 +684,7 @@ impl LintConfig {
                     "try-files-with-proxy",
                     "if-is-evil-in-location",
                     "directive-inheritance",
+                    "include-path-exists",
                 ]
                 .into_iter()
                 .collect();

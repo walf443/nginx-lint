@@ -68,6 +68,20 @@ pub fn get_rule_doc(name: &str) -> Option<&'static RuleDoc> {
 }
 
 /// Get all rule documentation (native rules only)
+/// Rule documentation for include-path-exists (cli-only rule, but docs are always available)
+static INCLUDE_PATH_EXISTS_DOC: RuleDoc = RuleDoc {
+    name: "include-path-exists",
+    category: "syntax",
+    description: "Detects include directives that reference non-existent files",
+    severity: "error",
+    why: r#"When an include directive references a file that does not exist,
+nginx will fail to start. Glob patterns that match no files are
+accepted by nginx but may indicate a misconfiguration."#,
+    bad_example: include_str!("rules/syntax/include_path_exists/bad.conf"),
+    good_example: include_str!("rules/syntax/include_path_exists/good.conf"),
+    references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
+};
+
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
     use crate::rules::{
         style::indent,
@@ -80,6 +94,7 @@ pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
         &unclosed_quote::DOC,
         &missing_semicolon::DOC,
         &invalid_directive_context::DOC,
+        &INCLUDE_PATH_EXISTS_DOC,
         // Style
         &indent::DOC,
     ];
@@ -309,6 +324,11 @@ mod example_tests {
                 continue;
             }
 
+            // Skip rules that require real filesystem access
+            if doc.name == "include-path-exists" {
+                continue;
+            }
+
             // Parse bad example and check for errors
             let config = match parse_string(doc.bad_example) {
                 Ok(c) => c,
@@ -349,6 +369,11 @@ mod example_tests {
                 || doc.name == "missing-semicolon"
                 || doc.name == "unmatched-braces"
             {
+                continue;
+            }
+
+            // Skip rules that require real filesystem access
+            if doc.name == "include-path-exists" {
                 continue;
             }
 
