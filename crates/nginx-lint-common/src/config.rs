@@ -100,6 +100,7 @@ warning = "yellow"
 # =============================================================================
 # Include Resolution Settings
 # =============================================================================
+[include]
 
 # Base directory for resolving relative include paths (similar to nginx -p prefix).
 # When set, all relative include paths are resolved from this directory

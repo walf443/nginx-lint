@@ -466,6 +466,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             })
     });
 
+    if cli.verbose {
+        if let Some(ref prefix) = include_prefix {
+            eprintln!("Include prefix: {}", prefix.display());
+        }
+    }
+
     // 8. Create linter and load plugins
     #[allow(unused_mut)]
     let mut linter = Linter::with_config(lint_config.as_ref(), include_prefix.as_deref());
