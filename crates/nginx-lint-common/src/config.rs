@@ -100,6 +100,12 @@ warning = "yellow"
 # =============================================================================
 # Include Resolution Settings
 # =============================================================================
+[include]
+
+# Base directory for resolving relative include paths (similar to nginx -p prefix).
+# When set, all relative include paths are resolved from this directory
+# instead of the directory containing the config file with the include directive.
+# prefix = "/etc/nginx"
 
 # Path mappings applied to include patterns before resolving them.
 # Mappings are applied in declaration order, each receiving the output of the
@@ -319,6 +325,10 @@ pub struct IncludeConfig {
     /// Applied in declaration order; each mapping receives the output of the previous one.
     #[serde(default)]
     pub path_map: Vec<PathMapping>,
+    /// Base directory for resolving relative include paths (similar to nginx `-p` prefix).
+    /// When set, all relative include paths are resolved from this directory
+    /// instead of the directory containing the config file with the include directive.
+    pub prefix: Option<String>,
 }
 
 /// Color output configuration
@@ -508,14 +518,18 @@ impl LintConfig {
         toml::from_str(content).map_err(|e| e.to_string())
     }
 
-    /// Find and load .nginx-lint.toml from the given directory or its parents
-    pub fn find_and_load(dir: &Path) -> Option<Self> {
+    /// Find and load .nginx-lint.toml from the given directory or its parents.
+    ///
+    /// Returns the loaded config along with the path of the config file found.
+    pub fn find_and_load(dir: &Path) -> Option<(Self, std::path::PathBuf)> {
         let mut current = dir.to_path_buf();
 
         loop {
             let config_path = current.join(".nginx-lint.toml");
             if config_path.exists() {
-                return Self::from_file(&config_path).ok();
+                return Self::from_file(&config_path)
+                    .ok()
+                    .map(|cfg| (cfg, config_path));
             }
 
             if !current.pop() {
@@ -558,6 +572,11 @@ impl LintConfig {
     /// Get include path mappings (applied in order to include patterns before resolving)
     pub fn include_path_mappings(&self) -> &[PathMapping] {
         &self.include.path_map
+    }
+
+    /// Get include prefix (base directory for resolving relative include paths)
+    pub fn include_prefix(&self) -> Option<&str> {
+        self.include.prefix.as_deref()
     }
 
     /// Get additional contexts for invalid-directive-context rule
@@ -652,7 +671,8 @@ impl LintConfig {
 
             // Validate [include] section
             if let Some(toml::Value::Table(include)) = root.get("include") {
-                let known_include_keys: HashSet<&str> = ["path_map"].into_iter().collect();
+                let known_include_keys: HashSet<&str> =
+                    ["path_map", "prefix"].into_iter().collect();
 
                 for key in include.keys() {
                     if !known_include_keys.contains(key.as_str()) {
@@ -1262,5 +1282,53 @@ unknown_key = "value"
             }
             other => panic!("expected UnknownField, got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_include_prefix_none_by_default() {
+        let config = LintConfig::default();
+        assert!(config.include_prefix().is_none());
+    }
+
+    #[test]
+    fn test_include_prefix_parsed() {
+        let toml_content = r#"
+[include]
+prefix = "/etc/nginx"
+"#;
+        let config = LintConfig::parse(toml_content).unwrap();
+        assert_eq!(config.include_prefix(), Some("/etc/nginx"));
+    }
+
+    #[test]
+    fn test_include_prefix_with_path_map() {
+        let toml_content = r#"
+[include]
+prefix = "."
+
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+"#;
+        let config = LintConfig::parse(toml_content).unwrap();
+        assert_eq!(config.include_prefix(), Some("."));
+        assert_eq!(config.include_path_mappings().len(), 1);
+    }
+
+    #[test]
+    fn test_include_prefix_validation_accepted() {
+        let toml_content = r#"
+[include]
+prefix = "/etc/nginx"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert!(
+            errors.is_empty(),
+            "prefix should be a valid include field, got errors: {:?}",
+            errors
+        );
     }
 }

@@ -190,7 +190,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     let mut errors = pre_parse_errors;
 
     // Create linter to get rule names for ignore validation
-    let linter = Linter::with_config(lint_config.as_ref());
+    let linter = Linter::with_config(lint_config.as_ref(), None);
 
     // Build ignore tracker with rule name validation using linter's rule names
     let valid_rules = linter.rule_names();

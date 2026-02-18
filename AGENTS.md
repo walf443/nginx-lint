@@ -64,6 +64,7 @@ cargo build                    # Build
 cargo test                     # Run tests
 cargo run -- <file>            # Run CLI
 cargo clippy                   # Lint
+cargo fmt                      # format
 
 # Build with embedded WASM plugins
 make build-plugins             # Build all WASM plugins

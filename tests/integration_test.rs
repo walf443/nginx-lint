@@ -25,7 +25,7 @@ enabled = true
 enabled = true
 "#;
         let config: LintConfig = LintConfig::parse(config_toml).unwrap();
-        Linter::with_config(Some(&config))
+        Linter::with_config(Some(&config), None)
     })
 }
 
@@ -409,6 +409,7 @@ fn test_context_comment_prevents_invalid_context_error() {
         file.path(),
         |path| parse_config(path).map_err(|e| e.to_string()),
         &[],
+        None,
     );
 
     assert_eq!(included_files.len(), 1);
@@ -452,6 +453,7 @@ fn test_no_context_comment_causes_invalid_context_error() {
         file.path(),
         |path| parse_config(path).map_err(|e| e.to_string()),
         &[],
+        None,
     );
 
     assert_eq!(included_files.len(), 1);
@@ -2015,6 +2017,7 @@ fn test_include_path_map_resolves_mapped_directory() {
         &root,
         |path| parse_config(path).map_err(|e| e.to_string()),
         &mappings,
+        None,
     );
 
     // Should have collected nginx.conf + sites-available/app.conf
@@ -2061,6 +2064,7 @@ fn test_include_path_map_chained_resolves_in_order() {
         &root,
         |path| parse_config(path).map_err(|e| e.to_string()),
         &mappings,
+        None,
     );
 
     assert_eq!(files.len(), 2, "Expected 2 files after chained mapping");
@@ -2102,6 +2106,7 @@ to   = "sites-available"
         &root,
         |path| parse_config(path).map_err(|e| e.to_string()),
         mappings,
+        None,
     );
 
     assert_eq!(

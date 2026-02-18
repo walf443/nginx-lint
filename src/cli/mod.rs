@@ -60,6 +60,11 @@ pub struct Cli {
     /// Show profiling information (time spent per rule)
     #[arg(long)]
     pub profile: bool,
+
+    /// Base directory for resolving relative include paths (similar to nginx -p prefix).
+    /// Overrides include.prefix in .nginx-lint.toml.
+    #[arg(short = 'p', long, value_name = "DIR")]
+    pub prefix: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]

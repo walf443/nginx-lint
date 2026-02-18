@@ -385,13 +385,14 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     };
 
     // 3. Load configuration
-    let lint_config = if let Some(config_path) = &cli.config {
+    let (lint_config, config_dir) = if let Some(config_path) = &cli.config {
         match LintConfig::from_file(config_path) {
             Ok(cfg) => {
                 if cli.verbose {
                     eprintln!("Using config: {}", config_path.display());
                 }
-                Some(cfg)
+                let dir = config_path.parent().map(|p| p.to_path_buf());
+                (Some(cfg), dir)
             }
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -407,11 +408,16 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                 .and_then(|p| p.parent())
                 .unwrap_or(Path::new("."))
         };
-        let config = LintConfig::find_and_load(search_dir);
-        if cli.verbose && config.is_some() {
-            eprintln!("Found .nginx-lint.toml");
+        match LintConfig::find_and_load(search_dir) {
+            Some((cfg, config_path)) => {
+                if cli.verbose {
+                    eprintln!("Found .nginx-lint.toml: {}", config_path.display());
+                }
+                let dir = config_path.parent().map(|p| p.to_path_buf());
+                (Some(cfg), dir)
+            }
+            None => (None, None),
         }
-        config
     };
 
     // 4. Configure color output (CLI flags take precedence over config)
@@ -445,9 +451,35 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         eprintln!("Using context: {}", initial_context.join(" > "));
     }
 
-    // 7. Create linter and load plugins
+    // 7. Resolve include prefix (CLI --prefix takes precedence over config)
+    // Priority: CLI --prefix > config include.prefix > config file directory (default)
+    let include_prefix: Option<PathBuf> = cli.prefix.clone().or_else(|| {
+        if let Some(ref config) = lint_config {
+            if let Some(p) = config.include_prefix() {
+                let path = PathBuf::from(p);
+                Some(if path.is_relative() {
+                    config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
+                } else {
+                    path
+                })
+            } else {
+                // Config exists but no prefix set: default to config file directory
+                config_dir.clone()
+            }
+        } else {
+            None
+        }
+    });
+
+    if cli.verbose
+        && let Some(ref prefix) = include_prefix
+    {
+        eprintln!("Include prefix: {}", prefix.display());
+    }
+
+    // 8. Create linter and load plugins
     #[allow(unused_mut)]
-    let mut linter = Linter::with_config(lint_config.as_ref());
+    let mut linter = Linter::with_config(lint_config.as_ref(), include_prefix.as_deref());
 
     // Show builtin plugins in verbose mode
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
@@ -519,6 +551,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     file_path,
                     |path| parse_config(path).map_err(|e| e.to_string()),
                     path_mappings,
+                    include_prefix.as_deref(),
                 )
             } else {
                 collect_included_files_with_context(
@@ -526,6 +559,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     |path| parse_config(path).map_err(|e| e.to_string()),
                     initial_context.clone(),
                     path_mappings,
+                    include_prefix.as_deref(),
                 )
             };
 

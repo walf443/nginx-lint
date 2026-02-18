@@ -16,10 +16,10 @@ impl Linter {
     }
 
     pub fn with_default_rules() -> Self {
-        Self::with_config(None)
+        Self::with_config(None, None)
     }
 
-    pub fn with_config(config: Option<&LintConfig>) -> Self {
+    pub fn with_config(config: Option<&LintConfig>, include_prefix: Option<&Path>) -> Self {
         #[cfg(feature = "cli")]
         use crate::rules::IncludePathExists;
         use crate::rules::{
@@ -48,11 +48,19 @@ impl Linter {
         if is_enabled("include-path-exists") {
             let rule = if let Some(c) = config {
                 let mappings = c.include_path_mappings();
-                if mappings.is_empty() {
+                if mappings.is_empty() && include_prefix.is_none() {
                     IncludePathExists::new()
                 } else {
-                    IncludePathExists::with_path_mappings(mappings.to_vec())
+                    IncludePathExists::with_path_mappings_and_prefix(
+                        mappings.to_vec(),
+                        include_prefix.map(|p| p.to_path_buf()),
+                    )
                 }
+            } else if include_prefix.is_some() {
+                IncludePathExists::with_path_mappings_and_prefix(
+                    Vec::new(),
+                    include_prefix.map(|p| p.to_path_buf()),
+                )
             } else {
                 IncludePathExists::new()
             };

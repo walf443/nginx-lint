@@ -3,7 +3,7 @@ use crate::include::{apply_path_mapping, resolve_include_pattern};
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use nginx_lint_common::config::PathMapping;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Rule documentation
 pub static DOC: RuleDoc = RuleDoc {
@@ -22,6 +22,7 @@ accepted by nginx without error, so only literal paths are checked."#,
 /// Check that files referenced by include directives exist
 pub struct IncludePathExists {
     path_mappings: Vec<PathMapping>,
+    prefix: Option<PathBuf>,
 }
 
 impl Default for IncludePathExists {
@@ -34,11 +35,25 @@ impl IncludePathExists {
     pub fn new() -> Self {
         Self {
             path_mappings: Vec::new(),
+            prefix: None,
         }
     }
 
     pub fn with_path_mappings(path_mappings: Vec<PathMapping>) -> Self {
-        Self { path_mappings }
+        Self {
+            path_mappings,
+            prefix: None,
+        }
+    }
+
+    pub fn with_path_mappings_and_prefix(
+        path_mappings: Vec<PathMapping>,
+        prefix: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            path_mappings,
+            prefix,
+        }
     }
 }
 
@@ -63,6 +78,7 @@ impl LintRule for IncludePathExists {
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
         let mut errors = Vec::new();
         let parent_dir = path.parent().unwrap_or(Path::new("."));
+        let resolve_dir = self.prefix.as_deref().unwrap_or(parent_dir);
 
         for directive in config.all_directives() {
             if !directive.is("include") {
@@ -88,7 +104,7 @@ impl LintRule for IncludePathExists {
             }
 
             // Resolve the pattern and check if any files match
-            let resolved = resolve_include_pattern(&mapped_pattern, parent_dir, &[]);
+            let resolved = resolve_include_pattern(&mapped_pattern, resolve_dir, &[]);
 
             if resolved.is_empty() {
                 // Glob patterns matching zero files are accepted by nginx, so skip them
@@ -321,5 +337,43 @@ http {
         let rule = IncludePathExists::new();
         let errors = rule.check(&config, &config_path);
         assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_prefix_resolves_include_from_subdirectory() {
+        // Simulates: conf.d/server.conf contains "include snippets/upstream.conf;"
+        // Without prefix, it resolves relative to conf.d/ → conf.d/snippets/upstream.conf (not found)
+        // With prefix=base, it resolves relative to base/ → base/snippets/upstream.conf (found)
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        create_test_file(base, "snippets/upstream.conf", "upstream backend {}");
+        let config_path = create_test_file(
+            base,
+            "conf.d/server.conf",
+            "server {\n    include snippets/upstream.conf;\n}",
+        );
+        let config =
+            crate::parser::parse_string("server {\n    include snippets/upstream.conf;\n}")
+                .unwrap();
+
+        // Without prefix: resolves from conf.d/ → error
+        let rule = IncludePathExists::new();
+        let errors = rule.check(&config, &config_path);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Without prefix, include should not resolve from subdirectory"
+        );
+
+        // With prefix: resolves from base/ → no error
+        let rule =
+            IncludePathExists::with_path_mappings_and_prefix(Vec::new(), Some(base.to_path_buf()));
+        let errors = rule.check(&config, &config_path);
+        assert!(
+            errors.is_empty(),
+            "With prefix, include should resolve from base dir, got: {:?}",
+            errors
+        );
     }
 }
