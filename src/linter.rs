@@ -20,11 +20,11 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>) -> Self {
+        #[cfg(feature = "cli")]
+        use crate::rules::IncludePathExists;
         use crate::rules::{
             Indent, InvalidDirectiveContext, MissingSemicolon, UnclosedQuote, UnmatchedBraces,
         };
-        #[cfg(feature = "cli")]
-        use crate::rules::IncludePathExists;
 
         let mut linter = Self::new();
 
