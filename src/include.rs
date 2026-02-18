@@ -36,11 +36,12 @@ pub fn collect_included_files<F>(
     root_path: &Path,
     parse_fn: F,
     path_mappings: &[PathMapping],
+    prefix: Option<&Path>,
 ) -> Vec<IncludedFile>
 where
     F: Fn(&Path) -> Result<Config, String> + Copy,
 {
-    collect_included_files_with_context(root_path, parse_fn, Vec::new(), path_mappings)
+    collect_included_files_with_context(root_path, parse_fn, Vec::new(), path_mappings, prefix)
 }
 
 /// Collect all files to lint with a specified initial context.
@@ -62,6 +63,7 @@ pub fn collect_included_files_with_context<F>(
     parse_fn: F,
     initial_context: Vec<String>,
     path_mappings: &[PathMapping],
+    prefix: Option<&Path>,
 ) -> Vec<IncludedFile>
 where
     F: Fn(&Path) -> Result<Config, String> + Copy,
@@ -76,6 +78,7 @@ where
         parse_fn,
         initial_context,
         path_mappings,
+        prefix,
     );
 
     result
@@ -88,6 +91,7 @@ fn collect_recursive<F>(
     parse_fn: F,
     include_context: Vec<String>,
     path_mappings: &[PathMapping],
+    prefix: Option<&Path>,
 ) where
     F: Fn(&Path) -> Result<Config, String> + Copy,
 {
@@ -132,7 +136,7 @@ fn collect_recursive<F>(
             config.include_context = effective_context.clone();
 
             // Find include directives with their contexts and resolve them
-            let includes = find_include_paths_with_context(&config, path, path_mappings);
+            let includes = find_include_paths_with_context(&config, path, path_mappings, prefix);
 
             // Add this file to results
             result.push(IncludedFile {
@@ -151,6 +155,7 @@ fn collect_recursive<F>(
                     parse_fn,
                     child_context,
                     path_mappings,
+                    prefix,
                 );
             }
         }
@@ -170,9 +175,11 @@ fn find_include_paths_with_context(
     config: &Config,
     parent_path: &Path,
     path_mappings: &[PathMapping],
+    prefix: Option<&Path>,
 ) -> Vec<(PathBuf, Vec<String>)> {
     let mut results = Vec::new();
     let parent_dir = parent_path.parent().unwrap_or(Path::new("."));
+    let resolve_dir = prefix.unwrap_or(parent_dir);
 
     // Start with the include context from the config (from parent file)
     let base_context = config.include_context.clone();
@@ -180,7 +187,7 @@ fn find_include_paths_with_context(
     // Recursively find includes and track their context
     find_includes_recursive(
         &config.items,
-        parent_dir,
+        resolve_dir,
         &base_context,
         path_mappings,
         &mut results,
@@ -651,5 +658,74 @@ mod tests {
             "absolute path mapped to relative should resolve against parent_dir"
         );
         assert!(paths[0].ends_with("app.conf"));
+    }
+
+    #[test]
+    fn test_collect_included_files_with_prefix() {
+        // Simulate nested includes where paths are relative to a prefix directory,
+        // not the directory of the file containing the include.
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        // Directory structure:
+        //   base/
+        //     nginx.conf            -> include conf.d/server.conf;
+        //     conf.d/
+        //       server.conf         -> include snippets/upstream.conf;
+        //     snippets/
+        //       upstream.conf
+        //
+        // Without prefix: conf.d/server.conf includes "snippets/upstream.conf"
+        // which would resolve to conf.d/snippets/upstream.conf (wrong).
+        // With prefix=base: it resolves to base/snippets/upstream.conf (correct).
+
+        create_test_file(base, "nginx.conf", "include conf.d/server.conf;");
+        create_test_file(
+            base,
+            "conf.d/server.conf",
+            "server {\n    include snippets/upstream.conf;\n}",
+        );
+        create_test_file(base, "snippets/upstream.conf", "upstream backend {}");
+
+        let root = base.join("nginx.conf");
+
+        // Without prefix: nested include fails to resolve
+        let files = collect_included_files(
+            &root,
+            |path| {
+                let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+                crate::parser::parse_string(&content).map_err(|e| e.to_string())
+            },
+            &[],
+            None,
+        );
+        // Should have nginx.conf + conf.d/server.conf, but snippets/upstream.conf
+        // would fail because it's resolved relative to conf.d/
+        let found_upstream_without_prefix = files
+            .iter()
+            .any(|f| f.path.ends_with("snippets/upstream.conf") && f.config.is_some());
+        assert!(
+            !found_upstream_without_prefix,
+            "Without prefix, nested include should not resolve snippets/upstream.conf from base"
+        );
+
+        // With prefix: nested include resolves correctly from base directory
+        let files = collect_included_files(
+            &root,
+            |path| {
+                let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+                crate::parser::parse_string(&content).map_err(|e| e.to_string())
+            },
+            &[],
+            Some(base),
+        );
+        let found_upstream_with_prefix = files
+            .iter()
+            .any(|f| f.path.ends_with("snippets/upstream.conf") && f.config.is_some());
+        assert!(
+            found_upstream_with_prefix,
+            "With prefix, nested include should resolve snippets/upstream.conf from base dir"
+        );
+        assert_eq!(files.len(), 3, "Should collect all 3 files with prefix");
     }
 }
