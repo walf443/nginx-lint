@@ -317,10 +317,7 @@ pub(crate) fn resolve_include_pattern(
     // (e.g., from="/etc/nginx/", to="" strips the absolute prefix).
     // Re-resolve relative patterns against parent_dir so glob works correctly.
     let full_pattern = if !Path::new(&full_pattern).is_absolute() {
-        parent_dir
-            .join(&full_pattern)
-            .to_string_lossy()
-            .to_string()
+        parent_dir.join(&full_pattern).to_string_lossy().to_string()
     } else {
         full_pattern
     };
@@ -647,8 +644,7 @@ mod tests {
             },
         ];
 
-        let paths =
-            resolve_include_pattern("/etc/nginx/sites-enabled/*.conf", dir, &mappings);
+        let paths = resolve_include_pattern("/etc/nginx/sites-enabled/*.conf", dir, &mappings);
         assert_eq!(
             paths.len(),
             1,
