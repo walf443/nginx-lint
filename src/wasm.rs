@@ -307,9 +307,11 @@ struct JsRuleSpec {
 /// Get rule spec (name -> extended spec mapping) as JSON
 #[wasm_bindgen]
 pub fn get_rule_spec() -> String {
+    use crate::docs::all_rule_docs;
     use std::collections::HashMap;
+
     let linter = Linter::with_default_rules();
-    let spec: HashMap<&str, JsRuleSpec> = linter
+    let mut spec: HashMap<&str, JsRuleSpec> = linter
         .rules()
         .iter()
         .map(|r| {
@@ -327,6 +329,36 @@ pub fn get_rule_spec() -> String {
             )
         })
         .collect();
+
+    // Include docs-only rules (e.g. cli-only rules not registered in WASM linter)
+    for doc in all_rule_docs() {
+        spec.entry(doc.name).or_insert_with(|| JsRuleSpec {
+            category: doc.category.to_string(),
+            severity: doc.severity.to_string(),
+            description: doc.description.to_string(),
+            why: if doc.why.is_empty() {
+                None
+            } else {
+                Some(doc.why.to_string())
+            },
+            bad_example: if doc.bad_example.is_empty() {
+                None
+            } else {
+                Some(doc.bad_example.to_string())
+            },
+            good_example: if doc.good_example.is_empty() {
+                None
+            } else {
+                Some(doc.good_example.to_string())
+            },
+            references: if doc.references.is_empty() {
+                None
+            } else {
+                Some(doc.references.iter().map(|s| s.to_string()).collect())
+            },
+        });
+    }
+
     serde_json::to_string(&spec).unwrap_or_else(|_| "{}".to_string())
 }
 
