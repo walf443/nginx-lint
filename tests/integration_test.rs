@@ -405,9 +405,11 @@ fn test_context_comment_prevents_invalid_context_error() {
     file.flush().unwrap();
 
     // Collect files (this should pick up the context comment)
-    let included_files = collect_included_files(file.path(), |path| {
-        parse_config(path).map_err(|e| e.to_string())
-    });
+    let included_files = collect_included_files(
+        file.path(),
+        |path| parse_config(path).map_err(|e| e.to_string()),
+        &[],
+    );
 
     assert_eq!(included_files.len(), 1);
 
@@ -446,9 +448,11 @@ fn test_no_context_comment_causes_invalid_context_error() {
     file.flush().unwrap();
 
     // Collect files
-    let included_files = collect_included_files(file.path(), |path| {
-        parse_config(path).map_err(|e| e.to_string())
-    });
+    let included_files = collect_included_files(
+        file.path(),
+        |path| parse_config(path).map_err(|e| e.to_string()),
+        &[],
+    );
 
     assert_eq!(included_files.len(), 1);
 
@@ -1967,5 +1971,146 @@ http {
         inheritance_errors.is_empty(),
         "Expected no warning when child has no proxy_set_header, got: {:?}",
         inheritance_errors
+    );
+}
+
+// ============================================================================
+// include path_map tests
+// ============================================================================
+
+/// Helper: create a directory + file inside a tempdir
+fn create_temp_file(dir: &std::path::Path, rel: &str, content: &str) {
+    let path = dir.join(rel);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, content).unwrap();
+}
+
+#[test]
+fn test_include_path_map_resolves_mapped_directory() {
+    use nginx_lint::{PathMapping, collect_included_files};
+
+    // Layout:
+    //   <tmp>/nginx.conf          → includes sites-enabled/*.conf
+    //   <tmp>/sites-available/    → actual files live here
+    // No files in sites-enabled; mapping redirects to sites-available.
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    create_temp_file(dir, "sites-available/app.conf", "server { listen 80; }");
+    create_temp_file(
+        dir,
+        "nginx.conf",
+        "http {\n    include sites-enabled/*.conf;\n}\n",
+    );
+
+    let mappings = vec![PathMapping {
+        from: "sites-enabled".to_string(),
+        to: "sites-available".to_string(),
+    }];
+
+    let root = dir.join("nginx.conf");
+    let files = collect_included_files(
+        &root,
+        |path| parse_config(path).map_err(|e| e.to_string()),
+        &mappings,
+    );
+
+    // Should have collected nginx.conf + sites-available/app.conf
+    assert_eq!(
+        files.len(),
+        2,
+        "Expected 2 files, got: {:?}",
+        files.iter().map(|f| &f.path).collect::<Vec<_>>()
+    );
+    assert!(
+        files.iter().any(|f| f.path.ends_with("app.conf")),
+        "Expected sites-available/app.conf to be collected via path mapping"
+    );
+}
+
+#[test]
+fn test_include_path_map_chained_resolves_in_order() {
+    use nginx_lint::{PathMapping, collect_included_files};
+
+    // Two-step mapping: sites-enabled → sites-available → conf
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    create_temp_file(dir, "conf/app.conf", "server { listen 80; }");
+    create_temp_file(
+        dir,
+        "nginx.conf",
+        "http {\n    include sites-enabled/*.conf;\n}\n",
+    );
+
+    let mappings = vec![
+        PathMapping {
+            from: "sites-enabled".to_string(),
+            to: "sites-available".to_string(),
+        },
+        PathMapping {
+            from: "sites-available".to_string(),
+            to: "conf".to_string(),
+        },
+    ];
+
+    let root = dir.join("nginx.conf");
+    let files = collect_included_files(
+        &root,
+        |path| parse_config(path).map_err(|e| e.to_string()),
+        &mappings,
+    );
+
+    assert_eq!(files.len(), 2, "Expected 2 files after chained mapping");
+    assert!(
+        files.iter().any(|f| f.path.ends_with("app.conf")),
+        "Expected conf/app.conf to be collected via chained path mapping"
+    );
+}
+
+#[test]
+fn test_include_path_map_loaded_from_lint_config() {
+    use nginx_lint::{LintConfig, collect_included_files};
+    use std::io::Write;
+
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path();
+
+    create_temp_file(dir, "sites-available/app.conf", "server { listen 80; }");
+    create_temp_file(
+        dir,
+        "nginx.conf",
+        "http {\n    include sites-enabled/*.conf;\n}\n",
+    );
+
+    // Write a .nginx-lint.toml with the mapping
+    let config_toml = r#"
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+"#;
+    let mut config_file = NamedTempFile::new().unwrap();
+    write!(config_file, "{}", config_toml).unwrap();
+
+    let lint_config = LintConfig::from_file(config_file.path()).unwrap();
+    let mappings = lint_config.include_path_mappings();
+
+    let root = dir.join("nginx.conf");
+    let files = collect_included_files(
+        &root,
+        |path| parse_config(path).map_err(|e| e.to_string()),
+        mappings,
+    );
+
+    assert_eq!(
+        files.len(),
+        2,
+        "Expected 2 files when mapping loaded from LintConfig"
+    );
+    assert!(
+        files.iter().any(|f| f.path.ends_with("app.conf")),
+        "Expected sites-available/app.conf to be collected via LintConfig mapping"
     );
 }

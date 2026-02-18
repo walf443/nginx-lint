@@ -98,6 +98,20 @@ error = "red"
 warning = "yellow"
 
 # =============================================================================
+# Include Resolution Settings
+# =============================================================================
+
+# Path mappings applied to include patterns before resolving them.
+# Mappings are applied in declaration order, each receiving the output of the
+# previous one (chained).  Useful when the config references a directory that
+# differs from where the actual files live (e.g. sites-enabled → sites-available).
+#
+# Example:
+# [[include.path_map]]
+# from = "sites-enabled"
+# to   = "sites-available"
+
+# =============================================================================
 # Style Rules
 # =============================================================================
 
@@ -248,6 +262,9 @@ pub struct LintConfig {
     /// Parser-level settings (e.g. additional block directives for extension modules).
     #[serde(default)]
     pub parser: ParserConfig,
+    /// Include resolution settings (e.g. path mappings for include directives).
+    #[serde(default)]
+    pub include: IncludeConfig,
 }
 
 /// Parser configuration
@@ -257,6 +274,33 @@ pub struct ParserConfig {
     /// These are added to the built-in list of block directives
     #[serde(default)]
     pub block_directives: Vec<String>,
+}
+
+/// A single path mapping rule for include directive resolution.
+///
+/// When an `include` directive's path contains the `from` string, it is
+/// replaced with `to` before the path is resolved on disk.  This is useful
+/// when the production config references a directory (e.g. `sites-enabled`)
+/// that is only populated at runtime via symlinks, and you want nginx-lint to
+/// evaluate the actual source files (e.g. `sites-available`) instead.
+///
+/// Mappings are applied in declaration order and chained, so the output of one
+/// mapping is fed into the next.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PathMapping {
+    /// Substring to search for in the include path
+    pub from: String,
+    /// Replacement string
+    pub to: String,
+}
+
+/// Include resolution configuration.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct IncludeConfig {
+    /// Path mappings applied to include patterns before resolving them.
+    /// Applied in declaration order; each mapping receives the output of the previous one.
+    #[serde(default)]
+    pub path_map: Vec<PathMapping>,
 }
 
 /// Color output configuration
@@ -493,6 +537,11 @@ impl LintConfig {
         &self.parser.block_directives
     }
 
+    /// Get include path mappings (applied in order to include patterns before resolving)
+    pub fn include_path_mappings(&self) -> &[PathMapping] {
+        &self.include.path_map
+    }
+
     /// Get additional contexts for invalid-directive-context rule
     pub fn additional_contexts(&self) -> Option<&HashMap<String, Vec<String>>> {
         self.rules
@@ -535,7 +584,9 @@ impl LintConfig {
 
         if let toml::Value::Table(root) = value {
             // Known top-level keys
-            let known_top_level: HashSet<&str> = ["rules", "color", "parser"].into_iter().collect();
+            let known_top_level: HashSet<&str> = ["rules", "color", "parser", "include"]
+                .into_iter()
+                .collect();
 
             for key in root.keys() {
                 if !known_top_level.contains(key.as_str()) {
@@ -576,6 +627,22 @@ impl LintConfig {
                             path: format!("parser.{}", key),
                             line,
                             suggestion: suggest_field(key, &known_parser_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [include] section
+            if let Some(toml::Value::Table(include)) = root.get("include") {
+                let known_include_keys: HashSet<&str> = ["path_map"].into_iter().collect();
+
+                for key in include.keys() {
+                    if !known_include_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("include"), key);
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("include.{}", key),
+                            line,
+                            suggestion: suggest_field(key, &known_include_keys),
                         });
                     }
                 }
@@ -1116,6 +1183,65 @@ unknown_option = 42
                 assert_eq!(option, "unknown_option");
             }
             other => panic!("expected UnknownRuleOption, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_include_path_map_empty_by_default() {
+        let config = LintConfig::default();
+        assert!(config.include_path_mappings().is_empty());
+    }
+
+    #[test]
+    fn test_include_path_map_single_entry() {
+        let toml_content = r#"
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+"#;
+        let config = LintConfig::parse(toml_content).unwrap();
+        let mappings = config.include_path_mappings();
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].from, "sites-enabled");
+        assert_eq!(mappings[0].to, "sites-available");
+    }
+
+    #[test]
+    fn test_include_path_map_multiple_entries_preserve_order() {
+        let toml_content = r#"
+[[include.path_map]]
+from = "sites-enabled"
+to   = "sites-available"
+
+[[include.path_map]]
+from = "/etc/nginx"
+to   = "/usr/local/nginx"
+"#;
+        let config = LintConfig::parse(toml_content).unwrap();
+        let mappings = config.include_path_mappings();
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].from, "sites-enabled");
+        assert_eq!(mappings[0].to, "sites-available");
+        assert_eq!(mappings[1].from, "/etc/nginx");
+        assert_eq!(mappings[1].to, "/usr/local/nginx");
+    }
+
+    #[test]
+    fn test_include_validation_rejects_unknown_field() {
+        let toml_content = r#"
+[include]
+unknown_key = "value"
+"#;
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert_eq!(errors.len(), 1);
+        match &errors[0] {
+            ValidationError::UnknownField { path, .. } => {
+                assert_eq!(path, "include.unknown_key");
+            }
+            other => panic!("expected UnknownField, got: {:?}", other),
         }
     }
 }

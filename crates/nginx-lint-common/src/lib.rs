@@ -36,7 +36,9 @@ pub mod linter;
 pub use nginx_lint_parser as parser;
 
 // Re-export commonly used types
-pub use config::{Color, ColorConfig, ColorMode, LintConfig, ValidationError};
+pub use config::{
+    Color, ColorConfig, ColorMode, IncludeConfig, LintConfig, PathMapping, ValidationError,
+};
 pub use docs::{RuleDoc, RuleDocOwned};
 pub use ignore::{
     FilterResult, IgnoreTracker, IgnoreWarning, filter_errors, parse_context_comment,

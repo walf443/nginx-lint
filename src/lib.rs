@@ -24,8 +24,9 @@ pub mod plugin;
 
 // Re-export commonly used types from nginx-lint-common
 pub use nginx_lint_common::{
-    Color, ColorConfig, ColorMode, FilterResult, IgnoreTracker, IgnoreWarning, LintConfig,
-    ValidationError, filter_errors, parse_config, parse_context_comment, parse_string,
+    Color, ColorConfig, ColorMode, FilterResult, IgnoreTracker, IgnoreWarning, IncludeConfig,
+    LintConfig, PathMapping, ValidationError, filter_errors, parse_config, parse_context_comment,
+    parse_string,
 };
 
 // Re-export from local modules
