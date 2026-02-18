@@ -323,8 +323,8 @@ fn resolve_include_pattern(
             }
         }
         Err(_) => {
-            // If glob fails, try as literal path
-            let literal_path = parent_dir.join(pattern);
+            // If glob fails, try as literal path (use the mapped pattern, not the original)
+            let literal_path = PathBuf::from(&full_pattern);
             if literal_path.is_file() {
                 paths.push(literal_path);
             }
@@ -582,5 +582,31 @@ mod tests {
         let paths = resolve_include_pattern("sites-enabled/*.conf", dir, &mappings);
         assert_eq!(paths.len(), 1);
         assert!(paths[0].ends_with("app.conf"));
+    }
+
+    #[test]
+    fn test_resolve_include_pattern_glob_error_fallback_uses_mapped_path() {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        // A filename containing an unclosed `[` causes glob to return PatternError,
+        // triggering the literal-path fallback.
+        create_test_file(dir, "sites-available/app[.conf", "server {}");
+
+        let mappings = vec![PathMapping {
+            from: "sites-enabled".to_string(),
+            to: "sites-available".to_string(),
+        }];
+
+        // The pattern includes `[` which is invalid glob syntax.
+        // After mapping: sites-enabled → sites-available, so the fallback should
+        // try the mapped literal path and find the file.
+        let paths = resolve_include_pattern("sites-enabled/app[.conf", dir, &mappings);
+        assert_eq!(
+            paths.len(),
+            1,
+            "glob error fallback should use the mapped path"
+        );
+        assert!(paths[0].ends_with("app[.conf"));
     }
 }
