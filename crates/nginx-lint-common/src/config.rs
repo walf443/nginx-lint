@@ -106,10 +106,19 @@ warning = "yellow"
 # previous one (chained).  Useful when the config references a directory that
 # differs from where the actual files live (e.g. sites-enabled → sites-available).
 #
-# Example:
+# Example (for Debian nginx package):
+
+# [[include.path_map]]
+# from = "/etc/nginx/"
+# to   = ""
+#
 # [[include.path_map]]
 # from = "sites-enabled"
 # to   = "sites-available"
+#
+# [[include.path_map]]
+# from = "modules-enabled"
+# to   = "modules-available"
 
 # =============================================================================
 # Style Rules

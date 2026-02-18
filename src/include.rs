@@ -313,6 +313,15 @@ pub(crate) fn resolve_include_pattern(
         .iter()
         .fold(full_pattern, |p, mapping| apply_path_mapping(&p, mapping));
 
+    // After path mappings, the pattern may have become relative
+    // (e.g., from="/etc/nginx/", to="" strips the absolute prefix).
+    // Re-resolve relative patterns against parent_dir so glob works correctly.
+    let full_pattern = if !Path::new(&full_pattern).is_absolute() {
+        parent_dir.join(&full_pattern).to_string_lossy().to_string()
+    } else {
+        full_pattern
+    };
+
     // Expand glob pattern
     match glob(&full_pattern) {
         Ok(entries) => {
@@ -608,5 +617,39 @@ mod tests {
             "glob error fallback should use the mapped path"
         );
         assert!(paths[0].ends_with("app[.conf"));
+    }
+
+    #[test]
+    fn test_resolve_include_pattern_absolute_to_relative_via_mapping() {
+        // Simulates the user scenario:
+        //   include /etc/nginx/sites-enabled/*;
+        // with path_map:
+        //   from = "/etc/nginx/" to = ""
+        //   from = "sites-enabled" to = "sites-available"
+        // The absolute path becomes relative after stripping the prefix,
+        // and should be resolved relative to parent_dir.
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path();
+
+        create_test_file(dir, "sites-available/app.conf", "server {}");
+
+        let mappings = vec![
+            PathMapping {
+                from: "/etc/nginx/".to_string(),
+                to: "".to_string(),
+            },
+            PathMapping {
+                from: "sites-enabled".to_string(),
+                to: "sites-available".to_string(),
+            },
+        ];
+
+        let paths = resolve_include_pattern("/etc/nginx/sites-enabled/*.conf", dir, &mappings);
+        assert_eq!(
+            paths.len(),
+            1,
+            "absolute path mapped to relative should resolve against parent_dir"
+        );
+        assert!(paths[0].ends_with("app.conf"));
     }
 }
