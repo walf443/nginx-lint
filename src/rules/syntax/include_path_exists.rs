@@ -338,4 +338,45 @@ http {
         let errors = rule.check(&config, &config_path);
         assert!(errors.is_empty());
     }
+
+    #[test]
+    fn test_prefix_resolves_include_from_subdirectory() {
+        // Simulates: conf.d/server.conf contains "include snippets/upstream.conf;"
+        // Without prefix, it resolves relative to conf.d/ → conf.d/snippets/upstream.conf (not found)
+        // With prefix=base, it resolves relative to base/ → base/snippets/upstream.conf (found)
+        let temp = TempDir::new().unwrap();
+        let base = temp.path();
+
+        create_test_file(base, "snippets/upstream.conf", "upstream backend {}");
+        let config_path = create_test_file(
+            base,
+            "conf.d/server.conf",
+            "server {\n    include snippets/upstream.conf;\n}",
+        );
+        let config = crate::parser::parse_string(
+            "server {\n    include snippets/upstream.conf;\n}",
+        )
+        .unwrap();
+
+        // Without prefix: resolves from conf.d/ → error
+        let rule = IncludePathExists::new();
+        let errors = rule.check(&config, &config_path);
+        assert_eq!(
+            errors.len(),
+            1,
+            "Without prefix, include should not resolve from subdirectory"
+        );
+
+        // With prefix: resolves from base/ → no error
+        let rule = IncludePathExists::with_path_mappings_and_prefix(
+            Vec::new(),
+            Some(base.to_path_buf()),
+        );
+        let errors = rule.check(&config, &config_path);
+        assert!(
+            errors.is_empty(),
+            "With prefix, include should resolve from base dir, got: {:?}",
+            errors
+        );
+    }
 }

@@ -56,6 +56,11 @@ impl Linter {
                         include_prefix.map(|p| p.to_path_buf()),
                     )
                 }
+            } else if include_prefix.is_some() {
+                IncludePathExists::with_path_mappings_and_prefix(
+                    Vec::new(),
+                    include_prefix.map(|p| p.to_path_buf()),
+                )
             } else {
                 IncludePathExists::new()
             };
