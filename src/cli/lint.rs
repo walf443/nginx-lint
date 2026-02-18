@@ -459,10 +459,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             .map(|p| {
                 let path = PathBuf::from(p);
                 if path.is_relative() {
-                    config_dir
-                        .as_deref()
-                        .unwrap_or(Path::new("."))
-                        .join(&path)
+                    config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
                 } else {
                     path
                 }
