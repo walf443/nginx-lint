@@ -451,9 +451,27 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         eprintln!("Using context: {}", initial_context.join(" > "));
     }
 
-    // 7. Create linter and load plugins
+    // 7. Resolve include prefix (CLI --prefix takes precedence over config)
+    let include_prefix: Option<PathBuf> = cli.prefix.clone().or_else(|| {
+        lint_config
+            .as_ref()
+            .and_then(|c| c.include_prefix())
+            .map(|p| {
+                let path = PathBuf::from(p);
+                if path.is_relative() {
+                    config_dir
+                        .as_deref()
+                        .unwrap_or(Path::new("."))
+                        .join(&path)
+                } else {
+                    path
+                }
+            })
+    });
+
+    // 8. Create linter and load plugins
     #[allow(unused_mut)]
-    let mut linter = Linter::with_config(lint_config.as_ref(), config_dir.as_deref());
+    let mut linter = Linter::with_config(lint_config.as_ref(), include_prefix.as_deref());
 
     // Show builtin plugins in verbose mode
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
@@ -519,30 +537,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             .map(|c| c.include_path_mappings())
             .unwrap_or(&[]);
 
-        let prefix_buf: Option<PathBuf> = lint_config
-            .as_ref()
-            .and_then(|c| c.include_prefix())
-            .map(|p| {
-                let path = PathBuf::from(p);
-                if path.is_relative() {
-                    // Resolve relative prefix against the config file's directory
-                    config_dir
-                        .as_deref()
-                        .unwrap_or(Path::new("."))
-                        .join(&path)
-                } else {
-                    path
-                }
-            });
-        let prefix = prefix_buf.as_deref();
-
         for file_path in &file_paths {
             let files_for_path = if initial_context.is_empty() {
                 collect_included_files(
                     file_path,
                     |path| parse_config(path).map_err(|e| e.to_string()),
                     path_mappings,
-                    prefix,
+                    include_prefix.as_deref(),
                 )
             } else {
                 collect_included_files_with_context(
@@ -550,7 +551,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     |path| parse_config(path).map_err(|e| e.to_string()),
                     initial_context.clone(),
                     path_mappings,
-                    prefix,
+                    include_prefix.as_deref(),
                 )
             };
 
