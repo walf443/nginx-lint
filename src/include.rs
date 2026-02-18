@@ -252,9 +252,13 @@ fn apply_path_mapping(pattern: &str, mapping: &PathMapping) -> String {
     }
 
     let mut result: Vec<&str> = Vec::with_capacity(n);
+    let mut matched_at_start = false;
     let mut i = 0;
     while i < n {
         if i + m <= n && pat_comps[i..i + m] == from_comps[..] {
+            if i == 0 {
+                matched_at_start = true;
+            }
             result.extend_from_slice(&to_comps);
             i += m;
         } else {
@@ -263,7 +267,20 @@ fn apply_path_mapping(pattern: &str, mapping: &PathMapping) -> String {
         }
     }
 
-    if is_absolute {
+    // When the match starts at the beginning of the path, the result's
+    // absolute/relative nature may change:
+    //   - `to` is empty  → prefix removed, result becomes relative
+    //   - `to` starts with `/` → result becomes absolute
+    //   - otherwise → keep the original absolute/relative nature
+    let result_is_absolute = if matched_at_start && to_comps.is_empty() {
+        false
+    } else if matched_at_start && mapping.to.starts_with('/') {
+        true
+    } else {
+        is_absolute
+    };
+
+    if result_is_absolute {
         format!("/{}", result.join("/"))
     } else {
         result.join("/")
@@ -391,6 +408,32 @@ mod tests {
         assert_eq!(
             apply_path_mapping("/foo/baz/foo/qux", &m),
             "/bar/baz/bar/qux"
+        );
+    }
+
+    #[test]
+    fn test_apply_path_mapping_to_empty_converts_absolute_to_relative() {
+        // from = "/etc/nginx", to = "" strips the prefix and makes the path relative
+        let m = PathMapping {
+            from: "/etc/nginx".to_string(),
+            to: "".to_string(),
+        };
+        assert_eq!(
+            apply_path_mapping("/etc/nginx/sites-enabled/app.conf", &m),
+            "sites-enabled/app.conf"
+        );
+    }
+
+    #[test]
+    fn test_apply_path_mapping_to_empty_mid_path_keeps_absolute() {
+        // When the empty-to match is NOT at the start, the path stays absolute
+        let m = PathMapping {
+            from: "sites-enabled".to_string(),
+            to: "".to_string(),
+        };
+        assert_eq!(
+            apply_path_mapping("/etc/nginx/sites-enabled/app.conf", &m),
+            "/etc/nginx/app.conf"
         );
     }
 

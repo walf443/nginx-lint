@@ -278,19 +278,25 @@ pub struct ParserConfig {
 
 /// A single path mapping rule for include directive resolution.
 ///
-/// When an `include` directive's path contains the `from` string, it is
-/// replaced with `to` before the path is resolved on disk.  This is useful
-/// when the production config references a directory (e.g. `sites-enabled`)
-/// that is only populated at runtime via symlinks, and you want nginx-lint to
-/// evaluate the actual source files (e.g. `sites-available`) instead.
+/// When an `include` directive's path contains path segment(s) that exactly
+/// match `from`, they are replaced with `to` before the path is resolved on
+/// disk.  Matching is performed at the path-component level (split by `/`),
+/// so `from = "sites-enabled"` matches `.../sites-enabled/...` but does NOT
+/// match `.../asites-enabled/...`.  Multi-segment values like
+/// `from = "nginx/sites-enabled"` match consecutive components.
+///
+/// This is useful when the production config references a directory
+/// (e.g. `sites-enabled`) that is only populated at runtime via symlinks,
+/// and you want nginx-lint to evaluate the actual source files
+/// (e.g. `sites-available`) instead.
 ///
 /// Mappings are applied in declaration order and chained, so the output of one
 /// mapping is fed into the next.
 #[derive(Debug, Clone, Deserialize)]
 pub struct PathMapping {
-    /// Substring to search for in the include path
+    /// Path segment(s) to match in the include path (compared component-wise)
     pub from: String,
-    /// Replacement string
+    /// Replacement path segment(s)
     pub to: String,
 }
 
