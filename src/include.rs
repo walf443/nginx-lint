@@ -303,6 +303,10 @@ fn resolve_include_pattern(
         parent_dir.join(pattern).to_string_lossy().to_string()
     };
 
+    // Normalize path separators to `/` so that path mappings (which split on `/`)
+    // and glob patterns behave consistently across platforms, including Windows.
+    let full_pattern = full_pattern.replace('\\', "/");
+
     // Apply path mappings in order (chained: each mapping receives the output of the previous).
     // Matching is done at the path-component level to avoid partial name matches.
     let full_pattern = path_mappings
