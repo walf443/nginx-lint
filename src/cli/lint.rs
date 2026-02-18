@@ -452,24 +452,29 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // 7. Resolve include prefix (CLI --prefix takes precedence over config)
+    // Priority: CLI --prefix > config include.prefix > config file directory (default)
     let include_prefix: Option<PathBuf> = cli.prefix.clone().or_else(|| {
-        lint_config
-            .as_ref()
-            .and_then(|c| c.include_prefix())
-            .map(|p| {
+        if let Some(ref config) = lint_config {
+            if let Some(p) = config.include_prefix() {
                 let path = PathBuf::from(p);
-                if path.is_relative() {
+                Some(if path.is_relative() {
                     config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
                 } else {
                     path
-                }
-            })
+                })
+            } else {
+                // Config exists but no prefix set: default to config file directory
+                config_dir.clone()
+            }
+        } else {
+            None
+        }
     });
 
-    if cli.verbose {
-        if let Some(ref prefix) = include_prefix {
-            eprintln!("Include prefix: {}", prefix.display());
-        }
+    if cli.verbose
+        && let Some(ref prefix) = include_prefix
+    {
+        eprintln!("Include prefix: {}", prefix.display());
     }
 
     // 8. Create linter and load plugins
