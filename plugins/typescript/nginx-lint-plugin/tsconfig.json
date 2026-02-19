@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES2025",
-    "module": "ES2025",
+    "target": "ES2024",
+    "module": "ES2024",
     "moduleResolution": "bundler",
     "outDir": "dist",
     "strict": true,
