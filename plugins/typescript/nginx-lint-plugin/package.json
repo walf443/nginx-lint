@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./test-helpers": "./dist/test-helpers.js"
+    "./test-helpers": "./dist/test-helpers.js",
+    "./testing": "./dist/plugin-test-runner.js"
   },
   "scripts": {
     "generate": "jco types ../../../wit -n plugin -o src/generated",

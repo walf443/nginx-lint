@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spec, check } from "./plugin.js";
 import { mockConfig, mockDirective } from "nginx-lint-plugin/test-helpers";
+import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
 
 describe("spec", () => {
   it("returns valid plugin metadata", () => {
@@ -253,5 +254,39 @@ describe("check", () => {
 
     const errors = check(cfg, "test.conf");
     assert.equal(errors.length, 0);
+  });
+});
+
+describe("check with parseConfig", () => {
+  const runner = new PluginTestRunner(spec, check);
+
+  it("detects server_tokens on", () => {
+    runner.assertErrors("http {\n    server_tokens on;\n}", 1);
+  });
+
+  it("no error when server_tokens off", () => {
+    runner.assertErrors("http {\n    server_tokens off;\n}", 0);
+  });
+
+  it("warns when http block has no server_tokens directive", () => {
+    runner.assertErrors("http {\n    server {\n        listen 80;\n    }\n}", 1);
+  });
+
+  it("no warning for config without http block", () => {
+    runner.assertErrors("events {\n    worker_connections 1024;\n}", 0);
+  });
+
+  it("detects server_tokens on in included file", () => {
+    const cfg = parseConfig("server_tokens on;", { includeContext: ["http"] });
+    const errors = check(cfg, "test.conf");
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].message.includes("should be 'off'"));
+  });
+
+  it("testExamples with bad/good conf", () => {
+    runner.testExamples(
+      "http {\n    server_tokens on;\n    server {\n        listen 80;\n    }\n}",
+      "http {\n    server_tokens off;\n    server {\n        listen 80;\n    }\n}",
+    );
   });
 });

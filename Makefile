@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins clean test lint lint-plugin-examples doc help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins build-parser-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -84,6 +84,13 @@ build-with-wasm-plugins: collect-plugins
 	cargo build --release --no-default-features --features cli,wasm-builtin-plugins
 	@echo "Done."
 
+# Build nginx-lint-parser as WASM for TypeScript plugin testing
+build-parser-wasm:
+	cd crates/nginx-lint-parser && wasm-pack build --target nodejs --features wasm
+	@mkdir -p plugins/typescript/nginx-lint-plugin/wasm
+	cp crates/nginx-lint-parser/pkg/* plugins/typescript/nginx-lint-plugin/wasm/
+	@echo "Parser WASM built to plugins/typescript/nginx-lint-plugin/wasm/"
+
 # Run tests
 test:
 	cargo test
@@ -147,6 +154,7 @@ help:
 	@echo "  make build              - Build CLI with native plugins (release, default)"
 	@echo "  make build-plugins      - Build WASM builtin plugins as WIT components"
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
+	@echo "  make build-parser-wasm  - Build parser WASM for TypeScript plugin testing"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"
 	@echo "  make build-web          - Build web server with embedded WASM (with plugins)"

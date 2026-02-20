@@ -7,6 +7,15 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen", "dep:serde_json"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+wasm-bindgen = { version = "0.2", optional = true }
+serde_json = { version = "1", optional = true }
