@@ -70,27 +70,100 @@ jobs:
 
   publish-crates:
     name: Publish to crates.io
+    needs: docker
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - name: Publish nginx-lint-parser
         run: cargo publish -p nginx-lint-parser
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
       - name: Wait for crates.io index
         run: sleep 30
       - name: Publish nginx-lint-common
         run: cargo publish -p nginx-lint-common
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
       - name: Wait for crates.io index
         run: sleep 30
       - name: Publish nginx-lint-plugin
         run: cargo publish -p nginx-lint-plugin
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  build-npm:
+    name: Build npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasm-parser
+      - name: Install wasm-tools
+        run: cargo install wasm-tools
+      - name: Build parser WASM component
+        run: |
+          cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
+            --target wasm32-unknown-unknown --release --features wasm
+          wasm-tools component new \
+            target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm \
+            -o target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: npm install
+        working-directory: plugins/typescript/nginx-lint-plugin
+      - name: Transpile parser WASM to JS
+        run: npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm -o wasm/parser --name parser
+        working-directory: plugins/typescript/nginx-lint-plugin
+      - name: Build package
+        run: npm run build
+        working-directory: plugins/typescript/nginx-lint-plugin
+      - name: Upload dist
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-package-dist
+          path: plugins/typescript/nginx-lint-plugin/dist/
+      - name: Upload wit
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-package-wit
+          path: plugins/typescript/nginx-lint-plugin/wit/
+
+  publish-npm:
+    name: Publish to npm
+    needs: [docker, build-npm]
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-package-dist
+          path: plugins/typescript/nginx-lint-plugin/dist/
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-package-wit
+          path: plugins/typescript/nginx-lint-plugin/wit/
+      - name: Publish
+        run: npm publish --provenance --access public --ignore-scripts
+        working-directory: plugins/typescript/nginx-lint-plugin
 
   docker:
     name: Docker Image
