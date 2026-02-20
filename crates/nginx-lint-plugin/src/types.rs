@@ -428,6 +428,7 @@ pub trait Plugin: Default {
 pub use nginx_lint_common::parser::ast::{
     Argument, ArgumentValue, Block, Comment, Config, ConfigItem, Directive, Position, Span,
 };
+pub use nginx_lint_common::parser::context::{AllDirectivesWithContextIter, DirectiveWithContext};
 
 /// Extension trait for [`Config`] providing iteration and include-context helpers.
 ///
@@ -464,7 +465,7 @@ pub trait ConfigExt {
     /// Iterate over all directives recursively.
     ///
     /// Traverses the entire config tree depth-first, yielding each [`Directive`].
-    fn all_directives(&self) -> AllDirectivesIter<'_>;
+    fn all_directives(&self) -> nginx_lint_common::parser::ast::AllDirectives<'_>;
 
     /// Iterate over all directives with parent context information.
     ///
@@ -493,170 +494,38 @@ pub trait ConfigExt {
 }
 
 impl ConfigExt for Config {
-    fn all_directives(&self) -> AllDirectivesIter<'_> {
-        AllDirectivesIter {
-            stack: vec![self.items.iter()],
-        }
+    fn all_directives(&self) -> nginx_lint_common::parser::ast::AllDirectives<'_> {
+        // Delegate to Config's inherent method
+        Config::all_directives(self)
     }
 
     fn all_directives_with_context(&self) -> AllDirectivesWithContextIter<'_> {
-        let initial_context: Vec<String> = self.include_context.clone();
-        AllDirectivesWithContextIter::new(&self.items, initial_context)
+        // Delegate to Config's inherent method
+        Config::all_directives_with_context(self)
     }
 
     fn is_included_from(&self, context: &str) -> bool {
-        self.include_context.iter().any(|c| c == context)
+        Config::is_included_from(self, context)
     }
 
     fn is_included_from_http(&self) -> bool {
-        self.is_included_from("http")
+        Config::is_included_from_http(self)
     }
 
     fn is_included_from_http_server(&self) -> bool {
-        let ctx = &self.include_context;
-        ctx.iter().any(|c| c == "http")
-            && ctx.iter().any(|c| c == "server")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server")
+        Config::is_included_from_http_server(self)
     }
 
     fn is_included_from_http_location(&self) -> bool {
-        let ctx = &self.include_context;
-        ctx.iter().any(|c| c == "http")
-            && ctx.iter().any(|c| c == "location")
-            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location")
+        Config::is_included_from_http_location(self)
     }
 
     fn is_included_from_stream(&self) -> bool {
-        self.is_included_from("stream")
+        Config::is_included_from_stream(self)
     }
 
     fn immediate_parent_context(&self) -> Option<&str> {
-        self.include_context.last().map(|s| s.as_str())
-    }
-}
-
-/// Iterator over all directives in a config (recursively)
-pub struct AllDirectivesIter<'a> {
-    stack: Vec<std::slice::Iter<'a, ConfigItem>>,
-}
-
-impl<'a> Iterator for AllDirectivesIter<'a> {
-    type Item = &'a Directive;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some(iter) = self.stack.last_mut() {
-            if let Some(item) = iter.next() {
-                if let ConfigItem::Directive(directive) = item {
-                    if let Some(block) = &directive.block {
-                        self.stack.push(block.items.iter());
-                    }
-                    return Some(directive.as_ref());
-                }
-            } else {
-                self.stack.pop();
-            }
-        }
-        None
-    }
-}
-
-/// A directive paired with its parent block context.
-///
-/// Yielded by [`ConfigExt::all_directives_with_context()`]. Provides methods to
-/// query the parent block hierarchy without manually tracking nesting.
-///
-/// # Example
-///
-/// ```
-/// use nginx_lint_plugin::prelude::*;
-///
-/// let config = nginx_lint_plugin::parse_string(
-///     "http {\n    server {\n        listen 80;\n    }\n}"
-/// ).unwrap();
-///
-/// for ctx in config.all_directives_with_context() {
-///     if ctx.is_inside("http") && ctx.directive.is("listen") {
-///         assert!(ctx.parent_is("server"));
-///         assert_eq!(ctx.depth, 2);
-///     }
-/// }
-/// ```
-#[derive(Debug, Clone)]
-pub struct DirectiveWithContext<'a> {
-    /// The directive itself.
-    pub directive: &'a Directive,
-    /// Stack of parent directive names (e.g., `["http", "server"]`).
-    pub parent_stack: Vec<String>,
-    /// Nesting depth (0 = root level).
-    pub depth: usize,
-}
-
-impl<'a> DirectiveWithContext<'a> {
-    /// Get the immediate parent directive name, if any
-    pub fn parent(&self) -> Option<&str> {
-        self.parent_stack.last().map(|s| s.as_str())
-    }
-
-    /// Check if this directive is inside a specific parent context
-    pub fn is_inside(&self, parent_name: &str) -> bool {
-        self.parent_stack.iter().any(|p| p == parent_name)
-    }
-
-    /// Check if the immediate parent is a specific directive
-    pub fn parent_is(&self, parent_name: &str) -> bool {
-        self.parent() == Some(parent_name)
-    }
-
-    /// Check if this directive is at root level
-    pub fn is_at_root(&self) -> bool {
-        self.parent_stack.is_empty()
-    }
-}
-
-/// Iterator over all directives with their parent context
-pub struct AllDirectivesWithContextIter<'a> {
-    stack: Vec<(std::slice::Iter<'a, ConfigItem>, Option<String>)>,
-    current_parents: Vec<String>,
-}
-
-impl<'a> AllDirectivesWithContextIter<'a> {
-    fn new(items: &'a [ConfigItem], initial_context: Vec<String>) -> Self {
-        Self {
-            stack: vec![(items.iter(), None)],
-            current_parents: initial_context,
-        }
-    }
-}
-
-impl<'a> Iterator for AllDirectivesWithContextIter<'a> {
-    type Item = DirectiveWithContext<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while let Some((iter, _)) = self.stack.last_mut() {
-            if let Some(item) = iter.next() {
-                if let ConfigItem::Directive(directive) = item {
-                    let context = DirectiveWithContext {
-                        directive: directive.as_ref(),
-                        parent_stack: self.current_parents.clone(),
-                        depth: self.current_parents.len(),
-                    };
-
-                    if let Some(block) = &directive.block {
-                        self.current_parents.push(directive.name.clone());
-                        self.stack
-                            .push((block.items.iter(), Some(directive.name.clone())));
-                    }
-
-                    return Some(context);
-                }
-            } else {
-                let (_, parent_name) = self.stack.pop().unwrap();
-                if parent_name.is_some() {
-                    self.current_parents.pop();
-                }
-            }
-        }
-        None
+        Config::immediate_parent_context(self)
     }
 }
 
