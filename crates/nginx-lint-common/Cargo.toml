@@ -1,6 +1,6 @@
 [package]
 name = "nginx-lint-common"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2024"
 description = "Common types and parser for nginx-lint"
 license = "MIT"
@@ -8,7 +8,7 @@ repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
 [dependencies]
-nginx-lint-parser = { version = "0.8.2", path = "../nginx-lint-parser" }
+nginx-lint-parser = { version = "0.8.3", path = "../nginx-lint-parser" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

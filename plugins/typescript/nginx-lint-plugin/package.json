@@ -1,6 +1,6 @@
 {
   "name": "nginx-lint-plugin",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -16,6 +16,7 @@
   },
   "files": [
     "dist",
+    "wasm",
     "wit"
   ],
   "scripts": {

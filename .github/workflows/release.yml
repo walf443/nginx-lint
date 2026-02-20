@@ -139,6 +139,11 @@ jobs:
         with:
           name: npm-package-wit
           path: plugins/typescript/nginx-lint-plugin/wit/
+      - name: Upload wasm
+        uses: actions/upload-artifact@v6
+        with:
+          name: npm-package-wasm
+          path: plugins/typescript/nginx-lint-plugin/wasm/
 
   publish-npm:
     name: Publish to npm
@@ -161,6 +166,10 @@ jobs:
         with:
           name: npm-package-wit
           path: plugins/typescript/nginx-lint-plugin/wit/
+      - uses: actions/download-artifact@v7
+        with:
+          name: npm-package-wasm
+          path: plugins/typescript/nginx-lint-plugin/wasm/
       - name: Publish
         run: npm publish --provenance --access public --ignore-scripts
         working-directory: plugins/typescript/nginx-lint-plugin
