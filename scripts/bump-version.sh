@@ -64,7 +64,14 @@ if [ -f "$TS_PLUGIN_PKG" ]; then
     echo "  Updated plugins/typescript/nginx-lint-plugin/package.json"
 fi
 
+# Update TypeScript plugin README.md
+TS_PLUGIN_README="$ROOT_DIR/plugins/typescript/nginx-lint-plugin/README.md"
+if [ -f "$TS_PLUGIN_README" ]; then
+    sed_inplace "s/\"nginx-lint-plugin\": \"\\^[0-9]*\.[0-9]*\.[0-9]*\"/\"nginx-lint-plugin\": \"\\^$NEW_VERSION\"/" "$TS_PLUGIN_README"
+    echo "  Updated plugins/typescript/nginx-lint-plugin/README.md"
+fi
+
 echo ""
 echo "Done! Updated ${#CARGO_FILES[@]} Cargo.toml files and TypeScript plugin to version $NEW_VERSION."
 echo ""
-echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json"
+echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json && grep 'nginx-lint-plugin' plugins/typescript/nginx-lint-plugin/README.md"

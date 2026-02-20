@@ -32,7 +32,7 @@ resolver = "2"
 
 [package]
 name = "nginx-lint"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 description = "A linter for nginx configuration files with WASM plugin support"
 license = "MIT"
@@ -87,7 +87,7 @@ native-builtin-plugins = [
 
 [dependencies]
 # Internal crates
-nginx-lint-common = { version = "0.8.0", path = "crates/nginx-lint-common" }
+nginx-lint-common = { version = "0.8.1", path = "crates/nginx-lint-common" }
 
 # CLI dependencies
 clap = { version = "4", features = ["derive"], optional = true }
@@ -111,7 +111,7 @@ console_error_panic_hook = { version = "0.1", optional = true }
 wasmtime = { version = "41", features = ["component-model"], optional = true }
 
 # Native plugin dependencies
-nginx-lint-plugin = { version = "0.8.0", path = "crates/nginx-lint-plugin", optional = true }
+nginx-lint-plugin = { version = "0.8.1", path = "crates/nginx-lint-plugin", optional = true }
 server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_enabled", optional = true, default-features = false }
 autoindex-enabled-plugin = { path = "plugins/builtin/security/autoindex_enabled", optional = true, default-features = false }
 deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_ssl_protocol", optional = true, default-features = false }
