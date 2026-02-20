@@ -51,6 +51,62 @@ export function check(cfg: Config, path: string): LintError[] {
 }
 ```
 
+## Testing
+
+The `nginx-lint-plugin/testing` entry provides parser-based testing utilities. Tests parse real nginx configuration strings using the same Rust parser that powers the production linter.
+
+```typescript
+import { describe, it } from "node:test";
+import { spec, check } from "./plugin.js";
+import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
+
+describe("my-rule", () => {
+  const runner = new PluginTestRunner(spec, check);
+
+  it("detects the issue", () => {
+    runner.assertErrors("http {\n    proxy_pass http://bad;\n}", 1);
+  });
+
+  it("passes valid config", () => {
+    runner.assertErrors("http {\n    proxy_pass http://good;\n}", 0);
+  });
+
+  it("checks error on specific line", () => {
+    runner.assertErrorOnLine("http {\n    proxy_pass http://bad;\n}", 2);
+  });
+
+  it("validates bad/good examples", () => {
+    runner.testExamples(
+      "http {\n    proxy_pass http://bad;\n}",
+      "http {\n    proxy_pass http://good;\n}",
+    );
+  });
+});
+```
+
+### Testing with include context
+
+Use `parseConfig` directly to simulate files included from specific blocks:
+
+```typescript
+it("handles included files", () => {
+  const cfg = parseConfig("server_tokens off;", {
+    includeContext: ["http", "server"],
+  });
+  const errors = check(cfg, "test.conf");
+  assert.equal(errors.length, 0);
+});
+```
+
+### PluginTestRunner
+
+| Method | Description |
+|--------|-------------|
+| `checkString(content, opts?)` | Parse and check, returning errors from this rule |
+| `assertErrors(content, count)` | Assert exactly N errors |
+| `assertErrorOnLine(content, line)` | Assert error on a specific line |
+| `testExamples(badConf, goodConf)` | Validate bad config produces errors, good config does not |
+
 ## Building a Plugin
 
 ### package.json
@@ -193,62 +249,6 @@ import type {
 }
 ```
 
-## Testing
-
-The `nginx-lint-plugin/testing` entry provides parser-based testing utilities. Tests parse real nginx configuration strings using the same Rust parser that powers the production linter.
-
-```typescript
-import { describe, it } from "node:test";
-import { spec, check } from "./plugin.js";
-import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
-
-describe("my-rule", () => {
-  const runner = new PluginTestRunner(spec, check);
-
-  it("detects the issue", () => {
-    runner.assertErrors("http {\n    proxy_pass http://bad;\n}", 1);
-  });
-
-  it("passes valid config", () => {
-    runner.assertErrors("http {\n    proxy_pass http://good;\n}", 0);
-  });
-
-  it("checks error on specific line", () => {
-    runner.assertErrorOnLine("http {\n    proxy_pass http://bad;\n}", 2);
-  });
-
-  it("validates bad/good examples", () => {
-    runner.testExamples(
-      "http {\n    proxy_pass http://bad;\n}",
-      "http {\n    proxy_pass http://good;\n}",
-    );
-  });
-});
-```
-
-### Testing with include context
-
-Use `parseConfig` directly to simulate files included from specific blocks:
-
-```typescript
-it("handles included files", () => {
-  const cfg = parseConfig("server_tokens off;", {
-    includeContext: ["http", "server"],
-  });
-  const errors = check(cfg, "test.conf");
-  assert.equal(errors.length, 0);
-});
-```
-
-### PluginTestRunner
-
-| Method | Description |
-|--------|-------------|
-| `checkString(content, opts?)` | Parse and check, returning errors from this rule |
-| `assertErrors(content, count)` | Assert exactly N errors |
-| `assertErrorOnLine(content, line)` | Assert error on a specific line |
-| `testExamples(badConf, goodConf)` | Validate bad config produces errors, good config does not |
-
 ## License
 
-See the [nginx-lint repository](https://github.com/walf443/nginx-lint) for license information.
+MIT
