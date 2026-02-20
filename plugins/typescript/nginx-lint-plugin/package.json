@@ -8,9 +8,14 @@
     ".": "./dist/index.js",
     "./testing": "./dist/plugin-test-runner.js"
   },
+  "files": [
+    "dist",
+    "wit"
+  ],
   "scripts": {
-    "generate": "jco types ../../../wit -n plugin -o src/generated",
-    "build": "npm run generate && tsc",
+    "copy-wit": "mkdir -p wit && cp ../../../wit/nginx-lint-plugin.wit wit/",
+    "generate": "jco types wit -n plugin -o src/generated",
+    "build": "npm run copy-wit && npm run generate && tsc",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
