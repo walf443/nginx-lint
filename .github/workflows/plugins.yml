@@ -189,6 +189,16 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build-parser-wasm"
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build parser WASM for TypeScript
+        run: make build-parser-wasm
       - name: Build shared library
         working-directory: plugins/typescript/nginx-lint-plugin
         run: |
