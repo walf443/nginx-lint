@@ -117,7 +117,7 @@ jobs:
           wasm-tools component new \
             target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm \
             -o target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
       - name: Install dependencies
@@ -149,7 +149,7 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
