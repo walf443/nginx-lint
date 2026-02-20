@@ -6,7 +6,6 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./test-helpers": "./dist/test-helpers.js",
     "./testing": "./dist/plugin-test-runner.js"
   },
   "scripts": {

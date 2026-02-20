@@ -1,9 +1,8 @@
 /**
  * Shared include-context helpers for Config implementations.
  *
- * Both config-builder.ts (real parser output) and test-helpers.ts (mocks)
- * need identical include-context logic. This module provides a single
- * implementation to avoid duplication.
+ * Provides the include-context portion of the Config interface so that
+ * config-builder.ts can reuse a single, tested implementation.
  */
 
 export interface IncludeContextMethods {
