@@ -221,5 +221,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ts-plugin
-          path: plugins/typescript/server-tokens-enabled-ts/server-tokens-enabled-ts.wasm
+          path: plugins/typescript/server-tokens-enabled-ts/dist/server-tokens-enabled-ts.wasm
           retention-days: 1

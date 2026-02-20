@@ -118,7 +118,7 @@ The WIT definition file is bundled with this package, so `jco componentize` can 
   "name": "my-plugin",
   "type": "module",
   "scripts": {
-    "build": "tsc && jco componentize dist/plugin.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o my-plugin.wasm",
+    "build": "tsc && jco componentize dist/plugin.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/my-plugin.wasm",
     "test": "tsc && node --test dist/plugin.test.js"
   },
   "dependencies": {
@@ -153,8 +153,10 @@ The WIT definition file is bundled with this package, so `jco componentize` can 
 
 ```bash
 npm run build
-nginx-lint --plugins ./my-plugin.wasm path/to/nginx.conf
+nginx-lint --plugins ./dist path/to/nginx.conf
 ```
+
+The `--plugins` option takes a directory path. nginx-lint automatically loads all `.wasm` files found in that directory.
 
 ## API Reference
 
