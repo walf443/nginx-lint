@@ -16,6 +16,7 @@
   },
   "files": [
     "dist",
+    "wasm",
     "wit"
   ],
   "scripts": {
