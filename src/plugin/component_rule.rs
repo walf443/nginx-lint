@@ -86,6 +86,8 @@ impl ComponentStoreData {
 
 impl bindings::nginx_lint::plugin::types::Host for ComponentStoreData {}
 
+impl bindings::nginx_lint::plugin::data_types::Host for ComponentStoreData {}
+
 impl config_api::Host for ComponentStoreData {}
 
 impl config_api::HostConfig for ComponentStoreData {
