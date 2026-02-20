@@ -17,6 +17,7 @@ import type {
   ArgumentInfo,
 } from "./generated/interfaces/nginx-lint-plugin-data-types.js";
 import type { Fix } from "./generated/interfaces/nginx-lint-plugin-types.js";
+import { makeIncludeContextMethods } from "./include-context.js";
 import type {
   ParseOutput,
   ConfigItem as ParserConfigItem,
@@ -144,12 +145,6 @@ export function buildConfigFromParseOutput(output: ParseOutput): Config {
     allDirectivesWithContext() { return directiveContexts; },
     allDirectives() { return directiveContexts.map((c) => c.directive); },
     items() { return topLevelItems; },
-    includeContext() { return inclCtx; },
-    isIncludedFrom(context: string) { return inclCtx.includes(context); },
-    isIncludedFromHttp() { return inclCtx.includes("http"); },
-    isIncludedFromHttpServer() { return inclCtx.includes("http") && inclCtx.includes("server"); },
-    isIncludedFromHttpLocation() { return inclCtx.includes("http") && inclCtx.includes("location"); },
-    isIncludedFromStream() { return inclCtx.includes("stream"); },
-    immediateParentContext() { return inclCtx.length > 0 ? inclCtx[inclCtx.length - 1] : undefined; },
+    ...makeIncludeContextMethods(inclCtx),
   } as Config;
 }

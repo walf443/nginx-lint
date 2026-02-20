@@ -10,6 +10,7 @@
  */
 
 import type { Config, ConfigItem, Directive, DirectiveContext, DirectiveData } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
+import { makeIncludeContextMethods } from "./include-context.js";
 
 /** Create a mock of a WIT `directive` resource. */
 export function mockDirective(opts: {
@@ -85,12 +86,6 @@ export function mockConfig(
     allDirectivesWithContext() { return contexts; },
     allDirectives() { return contexts.map((c) => c.directive); },
     items(): ConfigItem[] { return []; },
-    includeContext() { return inclCtx; },
-    isIncludedFrom(context: string) { return inclCtx.includes(context); },
-    isIncludedFromHttp() { return inclCtx.includes("http"); },
-    isIncludedFromHttpServer() { return inclCtx.includes("http") && inclCtx.includes("server"); },
-    isIncludedFromHttpLocation() { return inclCtx.includes("http") && inclCtx.includes("location"); },
-    isIncludedFromStream() { return inclCtx.includes("stream"); },
-    immediateParentContext() { return inclCtx.length > 0 ? inclCtx[inclCtx.length - 1] : undefined; },
+    ...makeIncludeContextMethods(inclCtx),
   };
 }
