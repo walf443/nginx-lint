@@ -141,11 +141,13 @@ jobs:
     needs: [docker, build-npm]
     runs-on: ubuntu-latest
     environment: release
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - uses: actions/download-artifact@v7
         with:
@@ -156,10 +158,8 @@ jobs:
           name: npm-package-wit
           path: plugins/typescript/nginx-lint-plugin/wit/
       - name: Publish
-        run: npm publish --access public --ignore-scripts
+        run: npm publish --provenance --access public --ignore-scripts
         working-directory: plugins/typescript/nginx-lint-plugin
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   docker:
     name: Docker Image
