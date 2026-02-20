@@ -1,4 +1,6 @@
 node_modules/
 dist/
 src/generated/
+wasm/
+wit/
 package-lock.json

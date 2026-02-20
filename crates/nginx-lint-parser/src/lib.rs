@@ -81,8 +81,12 @@
 //! ```
 
 pub mod ast;
+pub mod context;
 pub mod error;
 pub mod lexer;
+
+#[cfg(feature = "wasm")]
+mod wasm;
 
 use ast::{
     Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Position,

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && jco componentize dist/plugin.js -w ../../../wit -n plugin --disable all -o server-tokens-enabled-ts.wasm",
+    "build": "tsc && jco componentize dist/plugin.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/server-tokens-enabled-ts.wasm",
     "test": "tsc && node --test dist/plugin.test.js"
   },
   "dependencies": {

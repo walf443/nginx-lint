@@ -189,11 +189,26 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "build-parser-wasm"
+      - name: Install wasm-tools
+        run: |
+          WASM_TOOLS_VERSION=1.245.1
+          curl -sSfL "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/wasm-tools-${WASM_TOOLS_VERSION}-x86_64-linux.tar.gz" \
+            | tar xz --strip-components=1 --wildcards "*/wasm-tools"
+          mv wasm-tools /usr/local/bin/
+      - name: Install shared library dependencies
+        working-directory: plugins/typescript/nginx-lint-plugin
+        run: npm install
+      - name: Build parser WASM component
+        run: make build-parser-wasm
       - name: Build shared library
         working-directory: plugins/typescript/nginx-lint-plugin
-        run: |
-          npm install
-          npm run build
+        run: npm run build
       - name: Build TypeScript plugin
         working-directory: plugins/typescript/server-tokens-enabled-ts
         run: |
@@ -206,5 +221,5 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ts-plugin
-          path: plugins/typescript/server-tokens-enabled-ts/server-tokens-enabled-ts.wasm
+          path: plugins/typescript/server-tokens-enabled-ts/dist/server-tokens-enabled-ts.wasm
           retention-days: 1

@@ -110,6 +110,51 @@ impl Config {
         AllDirectives::new(&self.items)
     }
 
+    /// Returns an iterator over all directives with parent context information.
+    ///
+    /// Each item is a [`DirectiveWithContext`](crate::context::DirectiveWithContext) that includes
+    /// the parent block stack and nesting depth. The `include_context` is used as the initial
+    /// parent context.
+    pub fn all_directives_with_context(&self) -> crate::context::AllDirectivesWithContextIter<'_> {
+        crate::context::AllDirectivesWithContextIter::new(&self.items, self.include_context.clone())
+    }
+
+    /// Check if this config is included from within a specific context.
+    pub fn is_included_from(&self, context: &str) -> bool {
+        self.include_context.iter().any(|c| c == context)
+    }
+
+    /// Check if this config is included from within `http` context.
+    pub fn is_included_from_http(&self) -> bool {
+        self.is_included_from("http")
+    }
+
+    /// Check if this config is included from within `http > server` context.
+    pub fn is_included_from_http_server(&self) -> bool {
+        let ctx = &self.include_context;
+        ctx.iter().any(|c| c == "http")
+            && ctx.iter().any(|c| c == "server")
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "server")
+    }
+
+    /// Check if this config is included from within `http > ... > location` context.
+    pub fn is_included_from_http_location(&self) -> bool {
+        let ctx = &self.include_context;
+        ctx.iter().any(|c| c == "http")
+            && ctx.iter().any(|c| c == "location")
+            && ctx.iter().position(|c| c == "http") < ctx.iter().position(|c| c == "location")
+    }
+
+    /// Check if this config is included from within `stream` context.
+    pub fn is_included_from_stream(&self) -> bool {
+        self.is_included_from("stream")
+    }
+
+    /// Get the immediate parent context (last element in include_context).
+    pub fn immediate_parent_context(&self) -> Option<&str> {
+        self.include_context.last().map(|s| s.as_str())
+    }
+
     /// Reconstruct source code from AST (for autofix)
     pub fn to_source(&self) -> String {
         let mut output = String::new();

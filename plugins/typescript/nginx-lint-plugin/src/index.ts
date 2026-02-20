@@ -16,13 +16,17 @@ export type {
   PluginSpec,
 } from "./generated/interfaces/nginx-lint-plugin-types.js";
 
-// --- config-api interface (directive, config, argument-info, etc.) ---
+// --- data-types interface (shared record types) ---
 export type {
   ArgumentType,
   ArgumentInfo,
   CommentInfo,
   BlankLineInfo,
   DirectiveData,
+} from "./generated/interfaces/nginx-lint-plugin-data-types.js";
+
+// --- config-api interface (resource-based directive, config, etc.) ---
+export type {
   ConfigItem,
   ConfigItemDirectiveItem,
   ConfigItemCommentItem,
