@@ -39,9 +39,9 @@ interface types {
     }
 }
 
-interface config-api {
-    use types.{fix};
-
+/// Shared data types used by both the plugin config-api (resource-based)
+/// and the parser output (record-based).
+interface data-types {
     /// Argument value type
     enum argument-type {
         literal,
@@ -79,13 +79,6 @@ interface config-api {
         start-offset: u32,
     }
 
-    /// A config item (directive, comment, or blank line)
-    variant config-item {
-        directive-item(directive),
-        comment-item(comment-info),
-        blank-line-item(blank-line-info),
-    }
-
     /// All flat properties of a directive (for bulk retrieval)
     record directive-data {
         name: string,
@@ -119,6 +112,18 @@ interface config-api {
         block-start-column: option<u32>,
         /// Start byte offset of the block's opening brace (0-based); none if no block
         block-start-offset: option<u32>,
+    }
+}
+
+interface config-api {
+    use types.{fix};
+    use data-types.{argument-type, argument-info, comment-info, blank-line-info, directive-data};
+
+    /// A config item (directive, comment, or blank line)
+    variant config-item {
+        directive-item(directive),
+        comment-item(comment-info),
+        blank-line-item(blank-line-info),
     }
 
     /// A directive paired with its parent block context
@@ -214,6 +219,48 @@ interface config-api {
     }
 }
 
+/// Record-based types for parser output (no resources, no recursion).
+/// Uses index-based references to represent the tree structure:
+/// all config items are stored in a flat array, with child-indices
+/// pointing to children within that array.
+interface parser-types {
+    use data-types.{comment-info, blank-line-info, directive-data};
+
+    /// The kind of a config item (non-recursive)
+    variant config-item-value {
+        directive-item(directive-data),
+        comment-item(comment-info),
+        blank-line-item(blank-line-info),
+    }
+
+    /// A config item in the flat all-items array.
+    /// For directive items with blocks, child-indices contains the indices
+    /// of child items within the all-items array.
+    record config-item {
+        value: config-item-value,
+        child-indices: list<u32>,
+    }
+
+    /// A directive paired with its parent block context
+    record directive-context {
+        data: directive-data,
+        /// Indices of block items in the all-items array
+        block-item-indices: list<u32>,
+        parent-stack: list<string>,
+        depth: u32,
+    }
+
+    /// Complete parser output
+    record parse-output {
+        directives-with-context: list<directive-context>,
+        include-context: list<string>,
+        /// Flat array of all config items (DFS order)
+        all-items: list<config-item>,
+        /// Indices of top-level items in all-items
+        top-level-indices: list<u32>,
+    }
+}
+
 world plugin {
     use types.{plugin-spec, lint-error};
     use config-api.{config};
@@ -224,4 +271,11 @@ world plugin {
 
     /// Check config and return lint errors
     export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
+}
+
+world parser {
+    use parser-types.{parse-output};
+
+    /// Parse nginx config source and return structured output
+    export parse-config: func(source: string, include-context: list<string>) -> result<parse-output, string>;
 }

@@ -84,12 +84,19 @@ build-with-wasm-plugins: collect-plugins
 	cargo build --release --no-default-features --features cli,wasm-builtin-plugins
 	@echo "Done."
 
-# Build nginx-lint-parser as WASM for TypeScript plugin testing
+# Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm:
-	cd crates/nginx-lint-parser && wasm-pack build --target nodejs --features wasm
-	@mkdir -p plugins/typescript/nginx-lint-plugin/wasm
-	cp crates/nginx-lint-parser/pkg/* plugins/typescript/nginx-lint-plugin/wasm/
-	@echo "Parser WASM built to plugins/typescript/nginx-lint-plugin/wasm/"
+	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
+	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm
+	wasm-tools component new \
+		target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm \
+		-o target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm
+	cd plugins/typescript/nginx-lint-plugin && \
+		npx jco transpile \
+			../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm \
+			-o wasm/parser --name parser
+	@echo "Parser component built and transpiled."
 
 # Run tests
 test:

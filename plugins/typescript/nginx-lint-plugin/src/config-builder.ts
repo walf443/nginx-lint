@@ -1,9 +1,9 @@
 /**
- * Builds WIT-compatible Config/Directive objects from pre-computed WIT JSON.
+ * Builds WIT-compatible Config/Directive objects from parser component output.
  *
- * The nginx-lint-parser WASM module's `parse_to_wit_json` returns data
- * that closely matches the WIT interface types. This module wraps that
- * JSON data with the method-based Directive/Config interfaces.
+ * The parser WASM component returns a ParseOutput with an index-based tree
+ * representation (to avoid recursive types in WIT). This module reconstructs
+ * the method-based Directive/Config interfaces from that flat representation.
  */
 
 import type {
@@ -11,40 +11,23 @@ import type {
   ConfigItem,
   Directive,
   DirectiveContext,
+} from "./generated/interfaces/nginx-lint-plugin-config-api.js";
+import type {
   DirectiveData,
   ArgumentInfo,
-  CommentInfo,
-  BlankLineInfo,
-} from "./generated/interfaces/nginx-lint-plugin-config-api.js";
+} from "./generated/interfaces/nginx-lint-plugin-data-types.js";
 import type { Fix } from "./generated/interfaces/nginx-lint-plugin-types.js";
-
-// ── JSON types from parse_to_wit_json output ────────────────────────
-
-/** Top-level output from parse_to_wit_json */
-export interface WitOutput {
-  directivesWithContext: WitDirectiveContext[];
-  includeContext: string[];
-  items: WitConfigItem[];
-  error?: string;
-}
-
-interface WitDirectiveContext {
-  data: DirectiveData;
-  blockItems: WitConfigItem[];
-  parentStack: string[];
-  depth: number;
-}
-
-type WitConfigItem =
-  | { tag: "directive-item"; data: DirectiveData; blockItems: WitConfigItem[] }
-  | { tag: "comment-item"; val: CommentInfo }
-  | { tag: "blank-line-item"; val: BlankLineInfo };
+import type {
+  ParseOutput,
+  ConfigItem as ParserConfigItem,
+  DirectiveContext as ParserDirectiveContext,
+} from "../wasm/parser/interfaces/nginx-lint-plugin-parser-types.js";
 
 // ── Wrap DirectiveData with Directive interface ─────────────────────
 
 function wrapDirective(
   data: DirectiveData,
-  blockItems: WitConfigItem[],
+  resolveBlockItems: () => ConfigItem[],
 ): Directive {
   const argValues = data.args.map((a) => a.value);
 
@@ -67,7 +50,7 @@ function wrapDirective(
     trailingWhitespace() { return data.trailingWhitespace; },
     spaceBeforeTerminator() { return data.spaceBeforeTerminator; },
     hasBlock() { return data.hasBlock; },
-    blockItems(): ConfigItem[] { return blockItems.map(toConfigItem); },
+    blockItems(): ConfigItem[] { return resolveBlockItems(); },
     blockIsRaw() { return data.blockIsRaw; },
     replaceWith(newText: string): Fix {
       return {
@@ -114,33 +97,53 @@ function wrapDirective(
   } as Directive;
 }
 
-// ── Convert WitConfigItem to ConfigItem ─────────────────────────────
+// ── Resolve index-based items to ConfigItem tree ────────────────────
 
-function toConfigItem(item: WitConfigItem): ConfigItem {
-  if (item.tag === "directive-item") {
-    return { tag: "directive-item", val: wrapDirective(item.data, item.blockItems) };
+function resolveConfigItem(
+  allItems: ParserConfigItem[],
+  index: number,
+): ConfigItem {
+  const item = allItems[index];
+  if (item.value.tag === "directive-item") {
+    const data = item.value.val;
+    const childIndices = item.childIndices;
+    return {
+      tag: "directive-item",
+      val: wrapDirective(data, () =>
+        Array.from(childIndices).map((i) => resolveConfigItem(allItems, i)),
+      ),
+    };
   }
-  if (item.tag === "comment-item") {
-    return { tag: "comment-item", val: item.val };
+  if (item.value.tag === "comment-item") {
+    return { tag: "comment-item", val: item.value.val };
   }
-  return { tag: "blank-line-item", val: item.val };
+  return { tag: "blank-line-item", val: item.value.val };
 }
 
-// ── Build Config from WIT output ────────────────────────────────────
+// ── Build Config from ParseOutput ───────────────────────────────────
 
-export function buildConfigFromWit(output: WitOutput): Config {
+export function buildConfigFromParseOutput(output: ParseOutput): Config {
   const inclCtx = output.includeContext;
+  const allItems = output.allItems;
 
-  const directiveContexts: DirectiveContext[] = output.directivesWithContext.map((ctx) => ({
-    directive: wrapDirective(ctx.data, ctx.blockItems),
-    parentStack: ctx.parentStack,
-    depth: ctx.depth,
-  }));
+  const directiveContexts: DirectiveContext[] = output.directivesWithContext.map(
+    (ctx: ParserDirectiveContext) => ({
+      directive: wrapDirective(ctx.data, () =>
+        Array.from(ctx.blockItemIndices).map((i) => resolveConfigItem(allItems, i)),
+      ),
+      parentStack: ctx.parentStack,
+      depth: ctx.depth,
+    }),
+  );
+
+  const topLevelItems: ConfigItem[] = Array.from(output.topLevelIndices).map(
+    (i) => resolveConfigItem(allItems, i),
+  );
 
   return {
     allDirectivesWithContext() { return directiveContexts; },
     allDirectives() { return directiveContexts.map((c) => c.directive); },
-    items() { return output.items.map(toConfigItem); },
+    items() { return topLevelItems; },
     includeContext() { return inclCtx; },
     isIncludedFrom(context: string) { return inclCtx.includes(context); },
     isIncludedFromHttp() { return inclCtx.includes("http"); },

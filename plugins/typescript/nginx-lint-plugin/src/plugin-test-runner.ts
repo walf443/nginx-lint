@@ -9,16 +9,15 @@
  *   import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
  */
 
-import { parse_to_wit_json } from "../wasm/nginx_lint_parser.js";
-import { buildConfigFromWit } from "./config-builder.js";
-import type { WitOutput } from "./config-builder.js";
+import { parseConfig as parseConfigWasm } from "../wasm/parser/parser.js";
+import { buildConfigFromParseOutput } from "./config-builder.js";
 import type { Config } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
 import type { LintError, PluginSpec } from "./generated/interfaces/nginx-lint-plugin-types.js";
 
 /**
  * Parse an nginx configuration string into a WIT-compatible Config object.
  *
- * Uses the nginx-lint-parser WASM module for accurate parsing identical
+ * Uses the nginx-lint-parser WASM component for accurate parsing identical
  * to the production Rust parser. The DFS traversal (allDirectivesWithContext)
  * is computed on the Rust side.
  */
@@ -26,15 +25,8 @@ export function parseConfig(
   source: string,
   opts?: { includeContext?: string[] },
 ): Config {
-  const includeContextJson = opts?.includeContext
-    ? JSON.stringify(opts.includeContext)
-    : "";
-  const json = parse_to_wit_json(source, includeContextJson);
-  const parsed = JSON.parse(json) as WitOutput;
-  if (parsed.error) {
-    throw new Error(`Failed to parse nginx config: ${parsed.error}`);
-  }
-  return buildConfigFromWit(parsed);
+  const output = parseConfigWasm(source, opts?.includeContext ?? []);
+  return buildConfigFromParseOutput(output);
 }
 
 type SpecFn = () => PluginSpec;
