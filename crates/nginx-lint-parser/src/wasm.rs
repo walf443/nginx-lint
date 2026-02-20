@@ -10,9 +10,8 @@ use crate::ast::{Argument, ArgumentValue, Comment, Config, ConfigItem, Directive
 #[wasm_bindgen]
 pub fn parse_string_to_json(source: &str) -> String {
     match crate::parse_string(source) {
-        Ok(config) => serde_json::to_string(&config).unwrap_or_else(|e| {
-            format!(r#"{{"error":"serialization error: {}"}}"#, e)
-        }),
+        Ok(config) => serde_json::to_string(&config)
+            .unwrap_or_else(|e| format!(r#"{{"error":"serialization error: {}"}}"#, e)),
         Err(e) => {
             let msg = e.to_string().replace('\\', "\\\\").replace('"', "\\\"");
             format!(r#"{{"error":"{}"}}"#, msg)
@@ -40,9 +39,8 @@ pub fn parse_to_wit_json(source: &str, include_context_json: &str) -> String {
                 }
             }
             let output = build_wit_output(&config);
-            serde_json::to_string(&output).unwrap_or_else(|e| {
-                format!(r#"{{"error":"serialization error: {}"}}"#, e)
-            })
+            serde_json::to_string(&output)
+                .unwrap_or_else(|e| format!(r#"{{"error":"serialization error: {}"}}"#, e))
         }
         Err(e) => {
             let msg = e.to_string().replace('\\', "\\\\").replace('"', "\\\"");
