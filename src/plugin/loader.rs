@@ -70,6 +70,8 @@ impl PluginLoader {
         config.consume_fuel(enable_fuel);
         // Enable component model support for WIT-based plugins
         config.wasm_component_model(true);
+        // Enable Wasm GC support (needed for GC-based languages like wado)
+        config.wasm_gc(true);
 
         let engine = Engine::new(&config)
             .map_err(|e| PluginError::compile_error("engine", e.to_string()))?;
