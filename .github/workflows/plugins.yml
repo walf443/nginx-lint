@@ -104,7 +104,7 @@ jobs:
         run: |
           find plugins/builtin -name "*.wasm.component.wasm" \
             | tar czf "wasm-components-${{ matrix.chunk }}.tar.gz" -T -
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: wasm-plugins-${{ matrix.chunk }}
           path: wasm-components-${{ matrix.chunk }}.tar.gz
@@ -128,7 +128,7 @@ jobs:
           mkdir -p artifacts
           cp target/release/nginx-lint artifacts/
           find target/release/deps -name 'wasm_plugin_test-*' -type f -executable | head -1 | xargs -I{} cp {} artifacts/wasm_plugin_test
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: host-binaries
           path: artifacts/
@@ -140,15 +140,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: wasm-plugins-*
           merge-multiple: true
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ts-plugin
           path: target/ts-plugins
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: host-binaries
           path: artifacts
@@ -218,7 +218,7 @@ jobs:
         working-directory: plugins/typescript/server-tokens-enabled-ts
         run: npm test
       - name: Upload TypeScript WASM plugin
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ts-plugin
           path: plugins/typescript/server-tokens-enabled-ts/dist/server-tokens-enabled-ts.wasm
