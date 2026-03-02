@@ -49,7 +49,7 @@ jobs:
           for (( i=start; i<end; i++ )); do
             dir="${plugins[$i]}"
             if [ -f "$dir/Cargo.toml" ]; then
-              echo "Testing $(basename $dir)..."
+              echo "Testing $(basename "$dir")..."
               (cd "$dir" && cargo test)
             fi
           done
