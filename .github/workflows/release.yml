@@ -204,7 +204,7 @@ jobs:
           COPY nginx-lint-${TARGETARCH} /usr/local/bin/nginx-lint
           ENTRYPOINT ["nginx-lint"]
           DOCKERFILE
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
