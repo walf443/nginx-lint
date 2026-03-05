@@ -111,23 +111,6 @@ pub fn parse_string_rowan(source: &str) -> (SyntaxNode, Vec<parser::SyntaxError>
     (SyntaxNode::new_root(green), errors)
 }
 
-/// Parse a source string into an AST [`Config`] using the rowan-based parser.
-///
-/// This is now equivalent to [`parse_string`]. Prefer using [`parse_string`] directly.
-///
-/// ```
-/// use nginx_lint_parser::parse_string_via_rowan;
-///
-/// let config = parse_string_via_rowan("listen 80;").unwrap();
-/// let d = config.directives().next().unwrap();
-/// assert_eq!(d.name, "listen");
-/// assert_eq!(d.first_arg(), Some("80"));
-/// ```
-#[deprecated(note = "Use parse_string() instead, which now uses rowan internally")]
-pub fn parse_string_via_rowan(source: &str) -> ParseResult<Config> {
-    parse_string(source)
-}
-
 use ast::Config;
 use error::{ParseError, ParseResult};
 use std::fs;
