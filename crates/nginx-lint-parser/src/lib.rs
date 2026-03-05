@@ -87,7 +87,9 @@ pub mod lexer;
 pub mod syntax_kind;
 
 pub mod lexer_rowan;
+pub mod line_index;
 pub mod parser;
+pub mod rowan_to_ast;
 
 #[cfg(feature = "wasm")]
 mod wasm;
@@ -109,6 +111,31 @@ pub fn parse_string_rowan(source: &str) -> (SyntaxNode, Vec<parser::SyntaxError>
     let tokens = lexer_rowan::tokenize(source);
     let (green, errors) = parser::parse(tokens);
     (SyntaxNode::new_root(green), errors)
+}
+
+/// Parse a source string into an AST [`Config`] using the rowan-based parser.
+///
+/// This is functionally equivalent to [`parse_string`] but uses the lossless
+/// rowan CST internally and then converts to the existing AST types.
+///
+/// ```
+/// use nginx_lint_parser::parse_string_via_rowan;
+///
+/// let config = parse_string_via_rowan("listen 80;").unwrap();
+/// let d = config.directives().next().unwrap();
+/// assert_eq!(d.name, "listen");
+/// assert_eq!(d.first_arg(), Some("80"));
+/// ```
+pub fn parse_string_via_rowan(source: &str) -> ParseResult<Config> {
+    let (root, errors) = parse_string_rowan(source);
+    if let Some(err) = errors.first() {
+        return Err(ParseError::UnexpectedToken {
+            expected: "valid syntax".to_string(),
+            found: err.message.clone(),
+            position: line_index::LineIndex::new(source).position(err.offset),
+        });
+    }
+    Ok(rowan_to_ast::convert(&root, source))
 }
 
 use ast::{
