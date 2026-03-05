@@ -6,7 +6,8 @@
 use wasm_bindgen::prelude::*;
 
 use crate::linter::{LintError, Linter, Severity};
-use crate::parser::parse_string;
+use crate::parser::parse_string_with_errors;
+use crate::syntax_errors_to_lint_errors;
 
 /// Initialize the WASM module (sets up panic hook for better error messages)
 #[wasm_bindgen(start)]
@@ -181,12 +182,6 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
             .extend(rule.check_content_with_extras(content, &additional_block_directives));
     }
 
-    // If there are pre-parse errors with Severity::Error, return them
-    // (don't try to parse, as it will likely fail)
-    let has_syntax_errors = pre_parse_errors
-        .iter()
-        .any(|e| e.severity == Severity::Error);
-
     let mut errors = pre_parse_errors;
 
     // Create linter to get rule names for ignore validation
@@ -197,15 +192,14 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     let (mut tracker, ignore_warnings) =
         IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
 
-    // Only parse and run AST-based rules if there are no syntax errors
-    if !has_syntax_errors {
-        // Parse the nginx configuration
-        if let Ok(config) = parse_string(content) {
-            // Lint the configuration (use a dummy path since we're linting a string)
-            let lint_errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
-            errors.extend(lint_errors);
-        }
-        // If parsing fails, we already have pre-parse errors or no errors
+    // Parse with error recovery — always produces an AST even with syntax errors
+    let (config, syntax_errors) = parse_string_with_errors(content);
+    let lint_errors = linter.lint(&config, std::path::Path::new("nginx.conf"));
+    errors.extend(lint_errors);
+
+    // Convert syntax errors to lint errors
+    if !syntax_errors.is_empty() {
+        errors.extend(syntax_errors_to_lint_errors(&syntax_errors, content));
     }
 
     // Run indentation check directly on content (always, as it doesn't need AST)
