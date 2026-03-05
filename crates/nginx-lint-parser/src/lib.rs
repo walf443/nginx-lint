@@ -84,9 +84,32 @@ pub mod ast;
 pub mod context;
 pub mod error;
 pub mod lexer;
+pub mod syntax_kind;
+
+pub mod lexer_rowan;
+pub mod parser;
 
 #[cfg(feature = "wasm")]
 mod wasm;
+
+use syntax_kind::SyntaxNode;
+
+/// Parse a source string into a rowan lossless concrete syntax tree.
+///
+/// Returns the root `SyntaxNode` and any parse errors encountered.
+///
+/// ```
+/// use nginx_lint_parser::parse_string_rowan;
+///
+/// let (root, errors) = parse_string_rowan("listen 80;");
+/// assert!(errors.is_empty());
+/// assert_eq!(root.text().to_string(), "listen 80;");
+/// ```
+pub fn parse_string_rowan(source: &str) -> (SyntaxNode, Vec<parser::SyntaxError>) {
+    let tokens = lexer_rowan::tokenize(source);
+    let (green, errors) = parser::parse(tokens);
+    (SyntaxNode::new_root(green), errors)
+}
 
 use ast::{
     Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Position,
