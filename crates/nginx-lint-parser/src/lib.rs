@@ -30,7 +30,7 @@
 //!
 //! - [`ast`] — AST types: [`ast::Config`], [`ast::Directive`], [`ast::Block`],
 //!   [`ast::Argument`], [`ast::Span`], [`ast::Position`]
-//! - [`error`] — Error types: [`error::ParseError`], [`error::LexerError`]
+//! - [`error`] — Error types: [`error::ParseError`]
 //!
 //! # Common Patterns
 //!
