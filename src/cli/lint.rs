@@ -5,7 +5,7 @@ use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content, collect_included_files,
     collect_included_files_with_context, parse_config, parse_string_with_errors,
-    pre_parse_checks_from_content, pre_parse_checks_with_config, syntax_errors_to_lint_errors,
+    pre_parse_checks_from_content, syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -152,8 +152,8 @@ fn lint_file(
 
     let content = std::fs::read_to_string(path).unwrap_or_default();
 
-    // Run pre-parse checks (unmatched braces, unclosed quotes, missing semicolons)
-    let pre_parse_errors = pre_parse_checks_with_config(path, lint_config);
+    // Run pre-parse checks on already-read content to avoid reading the file twice
+    let pre_parse_errors = pre_parse_checks_from_content(&content, lint_config);
 
     // Always parse with error recovery — rowan produces a usable AST even with errors
     let (config, syntax_errors) = if let Some(ref config) = included.config {
@@ -166,6 +166,8 @@ fn lint_file(
     let mut result = run_lint_on_config(&config, path, &content, linter, profile);
 
     // Merge pre-parse errors and syntax errors into lint errors
+    // TODO: pre_parse_checks (unmatched-braces, etc.) and rowan syntax-error may report
+    // the same issue. Consider deduplicating or unifying these in a future refactor.
     let FileResult::LintErrors { ref mut errors, .. } = result;
     errors.extend(pre_parse_errors);
     if !syntax_errors.is_empty() {
@@ -268,6 +270,7 @@ fn lint_content(
     let mut result = run_lint_on_config(&parse_result, path, content, linter, profile);
 
     // Merge pre-parse errors and syntax errors into lint errors
+    // TODO: pre_parse_checks and rowan syntax-error may overlap (see lint_file TODO)
     let FileResult::LintErrors { ref mut errors, .. } = result;
     errors.extend(pre_parse_errors);
     if !syntax_errors.is_empty() {

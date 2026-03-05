@@ -2241,13 +2241,20 @@ fn test_lint_runs_on_config_with_syntax_errors() {
         "Expected syntax error for missing closing brace"
     );
 
-    // Lint should still be able to run on the partial AST
+    // Lint should still be able to run on the partial AST without panicking
     let linter = get_default_linter();
-    let errors = linter.lint(&config, Path::new("test.conf"));
+    let lint_errors = linter.lint(&config, Path::new("test.conf"));
 
-    // The linter should not panic and should return results (possibly empty)
-    // The key assertion is that linting completes without error
-    let _ = errors;
+    // Combine syntax errors and lint errors — this is what the CLI does
+    let syntax_lint_errors = syntax_errors_to_lint_errors(&syntax_errors, source);
+    let mut all_errors = lint_errors;
+    all_errors.extend(syntax_lint_errors);
+
+    // Should have at least the syntax error
+    assert!(
+        all_errors.iter().any(|e| e.rule == "syntax-error"),
+        "Expected syntax-error in combined results"
+    );
 
     // The AST should contain directives from the valid part
     let dirs: Vec<_> = config.all_directives().collect();
