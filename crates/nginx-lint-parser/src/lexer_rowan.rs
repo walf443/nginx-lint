@@ -621,7 +621,7 @@ mod tests {
                 (SyntaxKind::WHITESPACE, " "),
                 (SyntaxKind::ARGUMENT, "~*"),
                 (SyntaxKind::WHITESPACE, " "),
-                (SyntaxKind::IDENT, "foo#bar"),
+                (SyntaxKind::ARGUMENT, "foo#bar"),
                 (SyntaxKind::WHITESPACE, " "),
                 (SyntaxKind::L_BRACE, "{"),
             ]
