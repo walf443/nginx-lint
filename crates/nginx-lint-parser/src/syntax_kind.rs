@@ -13,7 +13,6 @@
 #[repr(u16)]
 pub enum SyntaxKind {
     // ── Tokens (leaf nodes) ─────────────────────────────────────────
-
     /// Horizontal whitespace (spaces / tabs).
     WHITESPACE = 0,
     /// A newline character (`\n`).
@@ -42,7 +41,6 @@ pub enum SyntaxKind {
     ERROR,
 
     // ── Composite nodes (interior nodes) ────────────────────────────
-
     /// The root node, corresponding to `Config`.
     ROOT,
     /// A directive node (name + arguments + optional block).

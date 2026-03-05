@@ -7,7 +7,7 @@
 use nginx_lint_parser::ast::{
     Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Span,
 };
-use nginx_lint_parser::{parse_string, parse_string_via_rowan};
+use nginx_lint_parser::{parse_string, parse_string_legacy};
 use std::path::PathBuf;
 
 // ── Deep comparison helpers ──────────────────────────────────────────────────
@@ -371,8 +371,8 @@ fn test_compare_ast_and_rowan_full_fields() {
             panic!("Failed to read {}: {}", path.display(), e);
         });
 
-        // Parse with AST parser
-        let ast_config = match parse_string(&source) {
+        // Parse with legacy AST parser
+        let ast_config = match parse_string_legacy(&source) {
             Ok(config) => config,
             Err(_) => {
                 skipped += 1;
@@ -380,8 +380,8 @@ fn test_compare_ast_and_rowan_full_fields() {
             }
         };
 
-        // Parse with rowan → AST pipeline
-        let rowan_config = match parse_string_via_rowan(&source) {
+        // Parse with rowan-based parser (now the default parse_string)
+        let rowan_config = match parse_string(&source) {
             Ok(config) => config,
             Err(_) => {
                 skipped += 1;
@@ -430,11 +430,11 @@ fn test_inline_comparisons() {
     ];
 
     for source in cases {
-        let ast_config = parse_string(source).unwrap_or_else(|e| {
-            panic!("AST parse failed for {:?}: {:?}", source, e);
+        let ast_config = parse_string_legacy(source).unwrap_or_else(|e| {
+            panic!("Legacy parse failed for {:?}: {:?}", source, e);
         });
-        let rowan_config = parse_string_via_rowan(source).unwrap_or_else(|e| {
-            panic!("rowan parse failed for {:?}: {:?}", source, e);
+        let rowan_config = parse_string(source).unwrap_or_else(|e| {
+            panic!("Rowan parse failed for {:?}: {:?}", source, e);
         });
 
         let diffs = diff_configs(&ast_config, &rowan_config);

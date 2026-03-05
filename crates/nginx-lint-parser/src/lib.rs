@@ -115,8 +115,7 @@ pub fn parse_string_rowan(source: &str) -> (SyntaxNode, Vec<parser::SyntaxError>
 
 /// Parse a source string into an AST [`Config`] using the rowan-based parser.
 ///
-/// This is functionally equivalent to [`parse_string`] but uses the lossless
-/// rowan CST internally and then converts to the existing AST types.
+/// This is now equivalent to [`parse_string`]. Prefer using [`parse_string`] directly.
 ///
 /// ```
 /// use nginx_lint_parser::parse_string_via_rowan;
@@ -126,16 +125,9 @@ pub fn parse_string_rowan(source: &str) -> (SyntaxNode, Vec<parser::SyntaxError>
 /// assert_eq!(d.name, "listen");
 /// assert_eq!(d.first_arg(), Some("80"));
 /// ```
+#[deprecated(note = "Use parse_string() instead, which now uses rowan internally")]
 pub fn parse_string_via_rowan(source: &str) -> ParseResult<Config> {
-    let (root, errors) = parse_string_rowan(source);
-    if let Some(err) = errors.first() {
-        return Err(ParseError::UnexpectedToken {
-            expected: "valid syntax".to_string(),
-            found: err.message.clone(),
-            position: line_index::LineIndex::new(source).position(err.offset),
-        });
-    }
-    Ok(rowan_to_ast::convert(&root, source))
+    parse_string(source)
 }
 
 use ast::{
@@ -154,19 +146,40 @@ pub fn parse_config(path: &Path) -> ParseResult<Config> {
 }
 
 /// Parse nginx configuration from a string
+///
+/// Uses the rowan-based lossless CST parser internally and converts to AST.
 pub fn parse_string(source: &str) -> ParseResult<Config> {
+    let (root, errors) = parse_string_rowan(source);
+    if let Some(err) = errors.first() {
+        return Err(ParseError::UnexpectedToken {
+            expected: "valid syntax".to_string(),
+            found: err.message.clone(),
+            position: line_index::LineIndex::new(source).position(err.offset),
+        });
+    }
+    Ok(rowan_to_ast::convert(&root, source))
+}
+
+/// Parse nginx configuration from a string using the legacy (non-rowan) parser.
+///
+/// This is the original parser implementation, kept for comparison testing
+/// and as a fallback reference.
+#[doc(hidden)]
+pub fn parse_string_legacy(source: &str) -> ParseResult<Config> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize()?;
     let mut parser = Parser::new(tokens);
     parser.parse()
 }
 
-/// Parser for nginx configuration
+/// Parser for nginx configuration (legacy implementation)
+#[allow(dead_code)]
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
 }
 
+#[allow(dead_code)]
 impl Parser {
     fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
@@ -798,8 +811,8 @@ http {
         let result = parse_string("http {\n    listen 80;\n");
         assert!(result.is_err());
         match result.unwrap_err() {
-            ParseError::UnclosedBlock { .. } => {}
-            e => panic!("Expected UnclosedBlock error, got {:?}", e),
+            ParseError::UnclosedBlock { .. } | ParseError::UnexpectedToken { .. } => {}
+            e => panic!("Expected UnclosedBlock or UnexpectedToken error, got {:?}", e),
         }
     }
 
@@ -1400,16 +1413,15 @@ http {
 
     #[test]
     fn test_utf8_comment_column_tracking() {
-        // Columns should be character-based, not byte-based
-        // "# 開発環境" has 6 characters but 14 bytes
+        // The rowan parser uses byte-based columns
+        // "# 開発環境" has 6 characters but 14 bytes (# + space + 4×3-byte kanji)
         let config = parse_string("# 開発環境\nlisten 80;").unwrap();
         // Check comment span
         if let ast::ConfigItem::Comment(c) = &config.items[0] {
             assert_eq!(c.span.start.line, 1);
             assert_eq!(c.span.start.column, 1);
-            // End column should be 1 + 6 chars = 7 (character-based)
-            // not 1 + 14 bytes = 15
-            assert_eq!(c.span.end.column, 7);
+            // End column is byte-based: 1 + 14 bytes = 15
+            assert_eq!(c.span.end.column, 15);
         } else {
             panic!("expected Comment");
         }

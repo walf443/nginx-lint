@@ -122,7 +122,10 @@ impl<'a> RowanLexer<'a> {
                     // with argument-chars like / or . become ARGUMENT).
                     self.eat_ident_or_argument();
                     let text = &self.source[start..self.pos];
-                    let kind = if text.chars().all(|c| is_ident_continue(c) || is_ident_start(c)) {
+                    let kind = if text
+                        .chars()
+                        .all(|c| is_ident_continue(c) || is_ident_start(c))
+                    {
                         SyntaxKind::IDENT
                     } else {
                         SyntaxKind::ARGUMENT
@@ -174,9 +177,7 @@ impl<'a> RowanLexer<'a> {
     fn preceded_by_whitespace(&self) -> bool {
         matches!(
             self.tokens.last(),
-            Some((SyntaxKind::WHITESPACE, _))
-                | Some((SyntaxKind::NEWLINE, _))
-                | None
+            Some((SyntaxKind::WHITESPACE, _)) | Some((SyntaxKind::NEWLINE, _)) | None
         )
     }
 
@@ -351,10 +352,7 @@ impl<'a> RowanLexer<'a> {
                 let _ = idx;
                 // Byte length from '{' up to and including '}'
                 chars.next();
-                let end_offset = chars
-                    .peek()
-                    .map(|(i, _)| *i)
-                    .unwrap_or(remaining.len());
+                let end_offset = chars.peek().map(|(i, _)| *i).unwrap_or(remaining.len());
                 Some(end_offset)
             }
             Some(&(_, ',')) => {
@@ -368,10 +366,7 @@ impl<'a> RowanLexer<'a> {
                 }
                 if chars.peek().map(|(_, ch)| *ch) == Some('}') {
                     chars.next();
-                    let end_offset = chars
-                        .peek()
-                        .map(|(i, _)| *i)
-                        .unwrap_or(remaining.len());
+                    let end_offset = chars.peek().map(|(i, _)| *i).unwrap_or(remaining.len());
                     Some(end_offset)
                 } else {
                     None

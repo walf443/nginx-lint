@@ -76,7 +76,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-
     /// Consume whitespace and newline tokens (trivia), adding them to the tree.
     fn eat_trivia(&mut self) {
         while let Some(kind) = self.current() {
@@ -417,7 +416,12 @@ mod tests {
         let kinds = child_kinds(&dir);
         assert_eq!(
             kinds,
-            vec![SyntaxKind::IDENT, SyntaxKind::WHITESPACE, SyntaxKind::ARGUMENT, SyntaxKind::SEMICOLON]
+            vec![
+                SyntaxKind::IDENT,
+                SyntaxKind::WHITESPACE,
+                SyntaxKind::ARGUMENT,
+                SyntaxKind::SEMICOLON
+            ]
         );
     }
 
@@ -431,7 +435,12 @@ mod tests {
         let kinds = child_kinds(&dir);
         assert_eq!(
             kinds,
-            vec![SyntaxKind::IDENT, SyntaxKind::WHITESPACE, SyntaxKind::IDENT, SyntaxKind::SEMICOLON]
+            vec![
+                SyntaxKind::IDENT,
+                SyntaxKind::WHITESPACE,
+                SyntaxKind::IDENT,
+                SyntaxKind::SEMICOLON
+            ]
         );
     }
 
@@ -537,7 +546,8 @@ mod tests {
 
     #[test]
     fn lua_block_nested_braces() {
-        let source = "content_by_lua_block {\n    if true then\n        local t = {1, 2}\n    end\n}";
+        let source =
+            "content_by_lua_block {\n    if true then\n        local t = {1, 2}\n    end\n}";
         assert_no_errors(source);
         assert_lossless(source);
     }
