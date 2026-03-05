@@ -268,10 +268,12 @@ impl<'a> Parser<'a> {
     }
 
     /// Eat optional trailing whitespace + comment on the same line as a semicolon.
+    ///
+    /// WHITESPACE is only consumed when followed by COMMENT — bare trailing
+    /// whitespace belongs to the directive's `space_before_terminator` or
+    /// `trailing_whitespace` and is handled by the AST conversion layer.
     fn eat_trailing_comment(&mut self) {
-        // Eat whitespace (but not newlines)
         if self.at(SyntaxKind::WHITESPACE) {
-            // Check if comment follows
             let next = self.tokens.get(self.pos + 1).map(|(k, _)| *k);
             if next == Some(SyntaxKind::COMMENT) {
                 self.bump(); // WHITESPACE

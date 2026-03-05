@@ -535,7 +535,7 @@ impl<'a> ConvertCtx<'a> {
                     i += 1;
                 }
                 SyntaxKind::R_BRACE => {
-                    depth -= 1;
+                    depth = depth.saturating_sub(1);
                     if depth > 0 {
                         content.push('}');
                     }

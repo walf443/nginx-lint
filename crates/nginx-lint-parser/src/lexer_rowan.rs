@@ -729,7 +729,7 @@ mod tests {
     #[test]
     fn ident_classification() {
         // Pure identifiers should be IDENT
-        let tokens = tokenize("server_name example;");
+        let _tokens = tokenize("server_name example;");
         assert_eq!(kinds("server_name"), vec![SyntaxKind::IDENT]);
         // Identifiers with argument chars become ARGUMENT
         let toks = tokenize("text/plain");
