@@ -10,7 +10,6 @@
 /// nodes) group tokens into higher-level constructs like directives and blocks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
-#[repr(u16)]
 pub enum SyntaxKind {
     // ── Tokens (leaf nodes) ─────────────────────────────────────────
     /// Horizontal whitespace (spaces / tabs).
@@ -49,10 +48,6 @@ pub enum SyntaxKind {
     BLOCK,
     /// A blank line (whitespace-only line).
     BLANK_LINE,
-
-    /// Sentinel – not a real kind; used to derive the count.
-    #[doc(hidden)]
-    __LAST,
 }
 
 impl SyntaxKind {
@@ -60,12 +55,35 @@ impl SyntaxKind {
     pub fn is_trivia(self) -> bool {
         matches!(self, Self::WHITESPACE | Self::NEWLINE | Self::COMMENT)
     }
+
+    /// Convert a `SyntaxKind` to its raw `u16` discriminant.
+    fn to_raw(self) -> u16 {
+        match self {
+            Self::WHITESPACE => 0,
+            Self::NEWLINE => 1,
+            Self::COMMENT => 2,
+            Self::IDENT => 3,
+            Self::ARGUMENT => 4,
+            Self::DOUBLE_QUOTED_STRING => 5,
+            Self::SINGLE_QUOTED_STRING => 6,
+            Self::VARIABLE => 7,
+            Self::SEMICOLON => 8,
+            Self::L_BRACE => 9,
+            Self::R_BRACE => 10,
+            Self::RAW_CONTENT => 11,
+            Self::ERROR => 12,
+            Self::ROOT => 13,
+            Self::DIRECTIVE => 14,
+            Self::BLOCK => 15,
+            Self::BLANK_LINE => 16,
+        }
+    }
 }
 
 /// Converts `SyntaxKind` to a raw `u16` for rowan.
 impl From<SyntaxKind> for rowan::SyntaxKind {
     fn from(kind: SyntaxKind) -> Self {
-        Self(kind as u16)
+        Self(kind.to_raw())
     }
 }
 
@@ -73,13 +91,39 @@ impl From<SyntaxKind> for rowan::SyntaxKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum NginxLanguage {}
 
+impl SyntaxKind {
+    /// Convert a raw `u16` discriminant back to a `SyntaxKind`.
+    ///
+    /// Panics if the value is out of range.
+    fn from_raw(raw: u16) -> Self {
+        match raw {
+            0 => Self::WHITESPACE,
+            1 => Self::NEWLINE,
+            2 => Self::COMMENT,
+            3 => Self::IDENT,
+            4 => Self::ARGUMENT,
+            5 => Self::DOUBLE_QUOTED_STRING,
+            6 => Self::SINGLE_QUOTED_STRING,
+            7 => Self::VARIABLE,
+            8 => Self::SEMICOLON,
+            9 => Self::L_BRACE,
+            10 => Self::R_BRACE,
+            11 => Self::RAW_CONTENT,
+            12 => Self::ERROR,
+            13 => Self::ROOT,
+            14 => Self::DIRECTIVE,
+            15 => Self::BLOCK,
+            16 => Self::BLANK_LINE,
+            _ => panic!("invalid SyntaxKind raw value: {raw}"),
+        }
+    }
+}
+
 impl rowan::Language for NginxLanguage {
     type Kind = SyntaxKind;
 
     fn kind_from_raw(raw: rowan::SyntaxKind) -> Self::Kind {
-        assert!(raw.0 < SyntaxKind::__LAST as u16);
-        // SAFETY: SyntaxKind is `#[repr(u16)]` and we checked the range.
-        unsafe { std::mem::transmute::<u16, SyntaxKind>(raw.0) }
+        SyntaxKind::from_raw(raw.0)
     }
 
     fn kind_to_raw(kind: Self::Kind) -> rowan::SyntaxKind {
@@ -99,12 +143,34 @@ mod tests {
     use super::*;
     use rowan::Language;
 
+    /// All valid `SyntaxKind` variants (excluding `__LAST`).
+    const ALL_KINDS: &[SyntaxKind] = &[
+        SyntaxKind::WHITESPACE,
+        SyntaxKind::NEWLINE,
+        SyntaxKind::COMMENT,
+        SyntaxKind::IDENT,
+        SyntaxKind::ARGUMENT,
+        SyntaxKind::DOUBLE_QUOTED_STRING,
+        SyntaxKind::SINGLE_QUOTED_STRING,
+        SyntaxKind::VARIABLE,
+        SyntaxKind::SEMICOLON,
+        SyntaxKind::L_BRACE,
+        SyntaxKind::R_BRACE,
+        SyntaxKind::RAW_CONTENT,
+        SyntaxKind::ERROR,
+        SyntaxKind::ROOT,
+        SyntaxKind::DIRECTIVE,
+        SyntaxKind::BLOCK,
+        SyntaxKind::BLANK_LINE,
+    ];
+
     #[test]
     fn kind_round_trip() {
-        for raw in 0..SyntaxKind::__LAST as u16 {
-            let kind: SyntaxKind = unsafe { std::mem::transmute(raw) };
+        for (raw, &expected) in ALL_KINDS.iter().enumerate() {
+            let kind = SyntaxKind::from_raw(raw as u16);
+            assert_eq!(kind, expected);
             let rowan_kind: rowan::SyntaxKind = kind.into();
-            assert_eq!(rowan_kind.0, raw);
+            assert_eq!(rowan_kind.0, raw as u16);
             let back = NginxLanguage::kind_from_raw(rowan_kind);
             assert_eq!(back, kind);
         }
