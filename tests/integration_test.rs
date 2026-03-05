@@ -2128,7 +2128,10 @@ to   = "sites-available"
 #[test]
 fn test_parse_string_with_errors_returns_config_on_valid_input() {
     let (config, errors) = parse_string_with_errors("http { server { listen 80; } }");
-    assert!(errors.is_empty(), "Expected no syntax errors for valid input");
+    assert!(
+        errors.is_empty(),
+        "Expected no syntax errors for valid input"
+    );
     let dirs: Vec<_> = config.all_directives().collect();
     assert!(
         dirs.iter().any(|d| d.name == "listen"),
