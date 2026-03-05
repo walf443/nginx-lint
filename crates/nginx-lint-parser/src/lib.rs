@@ -812,7 +812,10 @@ http {
         assert!(result.is_err());
         match result.unwrap_err() {
             ParseError::UnclosedBlock { .. } | ParseError::UnexpectedToken { .. } => {}
-            e => panic!("Expected UnclosedBlock or UnexpectedToken error, got {:?}", e),
+            e => panic!(
+                "Expected UnclosedBlock or UnexpectedToken error, got {:?}",
+                e
+            ),
         }
     }
 
