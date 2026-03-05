@@ -15,7 +15,6 @@ pub fn convert(root: &SyntaxNode, source: &str) -> Config {
     let line_index = LineIndex::new(source);
     let ctx = ConvertCtx {
         line_index: &line_index,
-        _source: source,
     };
     let items = ctx.convert_items(root);
     Config {
@@ -27,7 +26,6 @@ pub fn convert(root: &SyntaxNode, source: &str) -> Config {
 /// Shared context for the conversion.
 struct ConvertCtx<'a> {
     line_index: &'a LineIndex,
-    _source: &'a str,
 }
 
 impl<'a> ConvertCtx<'a> {
@@ -75,12 +73,14 @@ impl<'a> ConvertCtx<'a> {
                 SyntaxKind::COMMENT => {
                     let token = child.as_token().unwrap();
                     let leading_ws = self.collect_leading_whitespace(&children, i);
-                    let trailing_ws = self.collect_comment_trailing_whitespace(&children, i);
                     let comment = Comment {
                         text: token.text().to_string(),
                         span: self.span_of_token(token),
                         leading_whitespace: leading_ws,
-                        trailing_whitespace: trailing_ws,
+                        // Comments consume everything up to (but not including)
+                        // '\n', so there is no trailing whitespace between
+                        // COMMENT and NEWLINE in the rowan tree.
+                        trailing_whitespace: String::new(),
                     };
                     items.push(ConfigItem::Comment(comment));
                     consecutive_newlines = 0;
@@ -162,25 +162,6 @@ impl<'a> ConvertCtx<'a> {
         String::new()
     }
 
-    /// Collect trailing whitespace for a top-level COMMENT.
-    ///
-    /// In the original parser, this is the `leading_whitespace` of the
-    /// *following* Newline token. In the rowan tree, trailing whitespace
-    /// after a comment would be whitespace between the COMMENT and the next
-    /// NEWLINE.
-    fn collect_comment_trailing_whitespace(&self, children: &[SyntaxElement], i: usize) -> String {
-        // In the original parser the comment's trailing_whitespace is captured
-        // from the Newline token's leading_whitespace. But in the rowan tree,
-        // comments consume everything up to (but not including) `\n`, so there
-        // is no whitespace between COMMENT and NEWLINE.
-        //
-        // The original lexer emits: Comment("# text  ") (with trailing spaces
-        // inside the comment text) and then Newline with empty leading_whitespace.
-        // So trailing_whitespace is typically empty.
-        let _ = (children, i);
-        String::new()
-    }
-
     // ── directive ────────────────────────────────────────────────────
 
     fn convert_directive(
@@ -193,7 +174,7 @@ impl<'a> ConvertCtx<'a> {
         let children: Vec<SyntaxElement> = node.children_with_tokens().collect();
 
         // 1. Find directive name (first non-trivia token)
-        let (name, name_raw, name_span, name_idx) = self.find_directive_name(&children);
+        let (name, name_span, name_idx) = self.find_directive_name(&children);
 
         // 2. Collect arguments (tokens after name, before terminator/block)
         let args = self.collect_arguments(&children, name_idx);
@@ -264,7 +245,6 @@ impl<'a> ConvertCtx<'a> {
         }
 
         let dir_span = Span::new(name_span.start, dir_span_end);
-        let _ = name_raw;
 
         Directive {
             name,
@@ -280,7 +260,7 @@ impl<'a> ConvertCtx<'a> {
     }
 
     /// Find the directive name: first non-trivia token.
-    fn find_directive_name(&self, children: &[SyntaxElement]) -> (String, String, Span, usize) {
+    fn find_directive_name(&self, children: &[SyntaxElement]) -> (String, Span, usize) {
         for (idx, child) in children.iter().enumerate() {
             match child.kind() {
                 SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => continue,
@@ -295,13 +275,13 @@ impl<'a> ConvertCtx<'a> {
                             _ => raw.clone(),
                         };
                         let span = self.span_of_token(token);
-                        return (name, raw, span, idx);
+                        return (name, span, idx);
                     }
                 }
             }
         }
         // Should not happen for valid DIRECTIVE nodes
-        (String::new(), String::new(), Span::default(), 0)
+        (String::new(), Span::default(), 0)
     }
 
     /// Collect arguments from tokens after the directive name.

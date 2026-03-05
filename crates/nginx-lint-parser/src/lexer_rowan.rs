@@ -348,8 +348,7 @@ impl<'a> RowanLexer<'a> {
             }
         }
         match chars.peek() {
-            Some(&(idx, '}')) => {
-                let _ = idx;
+            Some(&(_, '}')) => {
                 // Byte length from '{' up to and including '}'
                 chars.next();
                 let end_offset = chars.peek().map(|(i, _)| *i).unwrap_or(remaining.len());

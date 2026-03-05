@@ -8,6 +8,9 @@
 /// Token kinds (leaf nodes) represent individual lexical elements such as
 /// identifiers, strings, punctuation, and whitespace.  Node kinds (interior
 /// nodes) group tokens into higher-level constructs like directives and blocks.
+///
+/// **Maintenance note:** When adding a new variant, you must also update
+/// `to_raw()`, `from_raw()`, and the `ALL_KINDS` array in the tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[allow(non_camel_case_types)]
 pub enum SyntaxKind {

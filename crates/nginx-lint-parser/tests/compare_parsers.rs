@@ -5,7 +5,7 @@
 //! whitespace fields, comments, blank lines, and block contents.
 
 use nginx_lint_parser::ast::{
-    Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive, Span,
+    Argument, ArgumentValue, BlankLine, Block, Comment, Config, ConfigItem, Directive,
 };
 use nginx_lint_parser::{parse_string, parse_string_legacy};
 use std::path::PathBuf;
@@ -64,21 +64,12 @@ fn diff_config_item(ast: &ConfigItem, rowan: &ConfigItem, path: &str) -> Vec<Str
         (ConfigItem::Directive(a), ConfigItem::Directive(r)) => diff_directive(a, r, path),
         (ConfigItem::Comment(a), ConfigItem::Comment(r)) => diff_comment(a, r, path),
         (ConfigItem::BlankLine(a), ConfigItem::BlankLine(r)) => diff_blank_line(a, r, path),
-        _ => vec![
-            format!(
-                "{}: item kind mismatch: AST={}, rowan={}",
-                path,
-                item_summary(&ConfigItem::Directive(Box::new(dummy_directive()))),
-                item_summary(rowan),
-            )
-            .replace(
-                &format!(
-                    "AST={}",
-                    item_summary(&ConfigItem::Directive(Box::new(dummy_directive())))
-                ),
-                &format!("AST={}", item_summary(ast)),
-            ),
-        ],
+        _ => vec![format!(
+            "{}: item kind mismatch: AST={}, rowan={}",
+            path,
+            item_summary(ast),
+            item_summary(rowan),
+        )],
     }
 }
 
@@ -321,20 +312,6 @@ fn diff_block(ast: &Block, rowan: &Block, path: &str) -> Vec<String> {
     diffs.extend(diff_items(&ast.items, &rowan.items, path));
 
     diffs
-}
-
-fn dummy_directive() -> Directive {
-    Directive {
-        name: String::new(),
-        name_span: Span::default(),
-        args: Vec::new(),
-        block: None,
-        span: Span::default(),
-        trailing_comment: None,
-        leading_whitespace: String::new(),
-        space_before_terminator: String::new(),
-        trailing_whitespace: String::new(),
-    }
 }
 
 // ── Test ──────────────────────────────────────────────────────────────────────

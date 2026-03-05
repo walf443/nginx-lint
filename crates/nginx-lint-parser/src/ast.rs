@@ -37,11 +37,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// Lines and columns are 1-based; `offset` is a 0-based byte offset suitable
 /// for slicing the original source string.
+///
+/// **Note:** `column` is byte-based (not character-based), so for non-ASCII text
+/// the column value may be larger than the visible character count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Position {
     /// 1-based line number.
     pub line: usize,
-    /// 1-based column number.
+    /// 1-based column number (byte-based, not character-based).
     pub column: usize,
     /// 0-based byte offset in the source string.
     pub offset: usize,
