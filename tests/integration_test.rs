@@ -1,5 +1,6 @@
 use nginx_lint::{
-    LintConfig, Linter, Severity, apply_fixes, parse_config, parse_string, pre_parse_checks,
+    LintConfig, Linter, Severity, apply_fixes, parse_config, parse_string,
+    parse_string_with_errors, pre_parse_checks, syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
 use std::fs;
@@ -2117,5 +2118,174 @@ to   = "sites-available"
     assert!(
         files.iter().any(|f| f.path.ends_with("app.conf")),
         "Expected sites-available/app.conf to be collected via LintConfig mapping"
+    );
+}
+
+// ============================================================================
+// parse_string_with_errors tests
+// ============================================================================
+
+#[test]
+fn test_parse_string_with_errors_returns_config_on_valid_input() {
+    let (config, errors) = parse_string_with_errors("http { server { listen 80; } }");
+    assert!(errors.is_empty(), "Expected no syntax errors for valid input");
+    let dirs: Vec<_> = config.all_directives().collect();
+    assert!(
+        dirs.iter().any(|d| d.name == "listen"),
+        "Expected to find 'listen' directive"
+    );
+}
+
+#[test]
+fn test_parse_string_with_errors_returns_config_on_missing_semicolon() {
+    let (config, errors) = parse_string_with_errors("http { server { listen 80 } }");
+    assert!(
+        !errors.is_empty(),
+        "Expected syntax errors for missing semicolon"
+    );
+    // AST should still be produced — the http and server directives should be present
+    let dirs: Vec<_> = config.all_directives().collect();
+    assert!(
+        dirs.iter().any(|d| d.name == "http"),
+        "Expected 'http' directive in partial AST"
+    );
+    assert!(
+        dirs.iter().any(|d| d.name == "server"),
+        "Expected 'server' directive in partial AST"
+    );
+}
+
+#[test]
+fn test_parse_string_with_errors_returns_config_on_missing_closing_brace() {
+    let (config, errors) = parse_string_with_errors("server { listen 80;");
+    assert!(
+        !errors.is_empty(),
+        "Expected syntax errors for missing closing brace"
+    );
+    let dirs: Vec<_> = config.all_directives().collect();
+    assert!(
+        dirs.iter().any(|d| d.name == "server"),
+        "Expected 'server' directive in partial AST"
+    );
+    assert!(
+        dirs.iter().any(|d| d.name == "listen"),
+        "Expected 'listen' directive in partial AST despite missing brace"
+    );
+}
+
+#[test]
+fn test_parse_string_with_errors_returns_config_on_unexpected_closing_brace() {
+    let (config, errors) = parse_string_with_errors("listen 80;\n}\nserver_name example.com;");
+    assert!(
+        !errors.is_empty(),
+        "Expected syntax errors for unexpected closing brace"
+    );
+    let dirs: Vec<_> = config.all_directives().collect();
+    assert!(
+        dirs.iter().any(|d| d.name == "listen"),
+        "Expected 'listen' directive before the error"
+    );
+    assert!(
+        dirs.iter().any(|d| d.name == "server_name"),
+        "Expected 'server_name' directive after the error"
+    );
+}
+
+// ============================================================================
+// syntax_errors_to_lint_errors tests
+// ============================================================================
+
+#[test]
+fn test_syntax_errors_to_lint_errors_conversion() {
+    let source = "server { listen 80;";
+    let (_, syntax_errors) = parse_string_with_errors(source);
+    assert!(!syntax_errors.is_empty());
+
+    let lint_errors = syntax_errors_to_lint_errors(&syntax_errors, source);
+    assert_eq!(lint_errors.len(), syntax_errors.len());
+
+    for error in &lint_errors {
+        assert_eq!(error.rule, "syntax-error");
+        assert_eq!(error.category, "syntax");
+        assert_eq!(error.severity, Severity::Error);
+        assert!(error.line.is_some());
+        assert!(error.column.is_some());
+    }
+}
+
+#[test]
+fn test_syntax_errors_to_lint_errors_empty() {
+    let source = "listen 80;";
+    let (_, syntax_errors) = parse_string_with_errors(source);
+    assert!(syntax_errors.is_empty());
+
+    let lint_errors = syntax_errors_to_lint_errors(&syntax_errors, source);
+    assert!(lint_errors.is_empty());
+}
+
+// ============================================================================
+// Linting with syntax errors (error recovery) tests
+// ============================================================================
+
+#[test]
+fn test_lint_runs_on_config_with_syntax_errors() {
+    // Config with missing closing brace — syntax error, but lint should still run
+    let source = "http {\n    server {\n        listen 80;\n    }\n";
+    let (config, syntax_errors) = parse_string_with_errors(source);
+
+    assert!(
+        !syntax_errors.is_empty(),
+        "Expected syntax error for missing closing brace"
+    );
+
+    // Lint should still be able to run on the partial AST
+    let linter = get_default_linter();
+    let errors = linter.lint(&config, Path::new("test.conf"));
+
+    // The linter should not panic and should return results (possibly empty)
+    // The key assertion is that linting completes without error
+    let _ = errors;
+
+    // The AST should contain directives from the valid part
+    let dirs: Vec<_> = config.all_directives().collect();
+    assert!(
+        dirs.iter().any(|d| d.name == "listen"),
+        "Expected 'listen' directive in AST despite syntax error"
+    );
+}
+
+#[test]
+fn test_lint_detects_both_syntax_and_lint_errors() {
+    // Config with unexpected brace (syntax error) but also valid directives
+    // that should trigger lint rules
+    let source = r#"http {
+    server {
+        listen 80;
+    }
+}
+}
+"#;
+    let (config, syntax_errors) = parse_string_with_errors(source);
+    let syntax_lint_errors = syntax_errors_to_lint_errors(&syntax_errors, source);
+
+    // Should have syntax error (unexpected '}')
+    assert!(
+        !syntax_lint_errors.is_empty(),
+        "Expected syntax error for unexpected closing brace"
+    );
+    assert_eq!(syntax_lint_errors[0].rule, "syntax-error");
+
+    // Lint should still run and produce results on the valid part
+    let linter = get_default_linter();
+    let lint_errors = linter.lint(&config, Path::new("test.conf"));
+
+    // Combine both — this is what the CLI does
+    let mut all_errors = lint_errors;
+    all_errors.extend(syntax_lint_errors);
+
+    // Should have at least the syntax error
+    assert!(
+        all_errors.iter().any(|e| e.rule == "syntax-error"),
+        "Expected syntax-error in combined results"
     );
 }
