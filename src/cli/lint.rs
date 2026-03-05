@@ -4,8 +4,8 @@ use colored::control;
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content, collect_included_files,
-    collect_included_files_with_context, parse_config, parse_string, pre_parse_checks_from_content,
-    pre_parse_checks_with_config,
+    collect_included_files_with_context, parse_config, parse_string_with_errors,
+    pre_parse_checks_from_content, syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -15,14 +15,6 @@ use std::process::ExitCode;
 
 /// Result of linting a single file
 enum FileResult {
-    PreParseErrors {
-        path: PathBuf,
-        errors: Vec<LintError>,
-    },
-    ParseError {
-        path: PathBuf,
-        error: String,
-    },
     LintErrors {
         path: PathBuf,
         errors: Vec<LintError>,
@@ -158,40 +150,31 @@ fn lint_file(
 ) -> FileResult {
     let path = &included.path;
 
-    // Run pre-parse checks first
-    let pre_parse_errors = pre_parse_checks_with_config(path, lint_config);
+    let content = std::fs::read_to_string(path).unwrap_or_default();
 
-    // If there are pre-parse errors (like unmatched braces), return them
-    if pre_parse_errors
-        .iter()
-        .any(|e| e.severity == Severity::Error)
-    {
-        return FileResult::PreParseErrors {
-            path: path.clone(),
-            errors: pre_parse_errors,
-        };
-    }
+    // Run pre-parse checks on already-read content to avoid reading the file twice
+    let pre_parse_errors = pre_parse_checks_from_content(&content, lint_config);
 
-    // Handle parse errors
-    if let Some(ref error) = included.parse_error {
-        return FileResult::ParseError {
-            path: path.clone(),
-            error: error.clone(),
-        };
-    }
-
-    // Lint the parsed config
-    if let Some(ref config) = included.config {
-        let content = std::fs::read_to_string(path).unwrap_or_default();
-        run_lint_on_config(config, path, &content, linter, profile)
+    // Always parse with error recovery — rowan produces a usable AST even with errors
+    let (config, syntax_errors) = if let Some(ref config) = included.config {
+        (config.clone(), Vec::new())
     } else {
-        FileResult::LintErrors {
-            path: path.clone(),
-            errors: Vec::new(),
-            ignored_count: 0,
-            profiles: None,
-        }
+        let (config, errors) = parse_string_with_errors(&content);
+        (config, errors)
+    };
+
+    let mut result = run_lint_on_config(&config, path, &content, linter, profile);
+
+    // Merge pre-parse errors and syntax errors into lint errors
+    // TODO: pre_parse_checks (unmatched-braces, etc.) and rowan syntax-error may report
+    // the same issue. Consider deduplicating or unifying these in a future refactor.
+    let FileResult::LintErrors { ref mut errors, .. } = result;
+    errors.extend(pre_parse_errors);
+    if !syntax_errors.is_empty() {
+        errors.extend(syntax_errors_to_lint_errors(&syntax_errors, &content));
     }
+
+    result
 }
 
 /// Process lint results: report errors, apply fixes, and determine exit code
@@ -204,42 +187,10 @@ fn process_results(
     stdin_content: Option<&str>,
 ) -> ExitCode {
     let mut all_errors = Vec::new();
-    let mut has_fatal_error = false;
     let mut all_profiles: Vec<RuleProfile> = Vec::new();
 
     for result in results {
         match result {
-            FileResult::PreParseErrors { path, errors } => {
-                if fix {
-                    if let Some(content) = stdin_content {
-                        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
-                        let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
-                        if count > 0 {
-                            print!("{}", fixed_content);
-                        } else {
-                            reporter.report(&errors, &path, 0);
-                        }
-                    } else {
-                        match apply_fixes(&path, &errors) {
-                            Ok(count) => {
-                                if count > 0 {
-                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                            }
-                        }
-                    }
-                } else {
-                    reporter.report(&errors, &path, 0);
-                }
-                has_fatal_error = true;
-            }
-            FileResult::ParseError { path, error } => {
-                eprintln!("Error parsing {}: {}", path.display(), error);
-                has_fatal_error = true;
-            }
             FileResult::LintErrors {
                 path,
                 errors,
@@ -283,10 +234,6 @@ fn process_results(
         display_profile(&all_profiles);
     }
 
-    if has_fatal_error {
-        return ExitCode::from(1);
-    }
-
     let has_issues = if no_fail_on_warnings {
         all_errors.iter().any(|e| e.severity == Severity::Error)
     } else {
@@ -312,33 +259,25 @@ fn lint_content(
     // Run pre-parse checks on the content
     let pre_parse_errors = pre_parse_checks_from_content(content, lint_config);
 
-    if pre_parse_errors
-        .iter()
-        .any(|e| e.severity == Severity::Error)
-    {
-        return FileResult::PreParseErrors {
-            path: path.to_path_buf(),
-            errors: pre_parse_errors,
-        };
-    }
-
-    // Parse the content
-    let mut parse_result = match parse_string(content) {
-        Ok(config) => config,
-        Err(e) => {
-            return FileResult::ParseError {
-                path: path.to_path_buf(),
-                error: e.to_string(),
-            };
-        }
-    };
+    // Parse the content (always produces AST, even with syntax errors)
+    let (mut parse_result, syntax_errors) = parse_string_with_errors(content);
 
     // Set context if specified
     if !initial_context.is_empty() {
         parse_result.include_context = initial_context;
     }
 
-    run_lint_on_config(&parse_result, path, content, linter, profile)
+    let mut result = run_lint_on_config(&parse_result, path, content, linter, profile);
+
+    // Merge pre-parse errors and syntax errors into lint errors
+    // TODO: pre_parse_checks and rowan syntax-error may overlap (see lint_file TODO)
+    let FileResult::LintErrors { ref mut errors, .. } = result;
+    errors.extend(pre_parse_errors);
+    if !syntax_errors.is_empty() {
+        errors.extend(syntax_errors_to_lint_errors(&syntax_errors, content));
+    }
+
+    result
 }
 
 pub fn run_lint(cli: Cli) -> ExitCode {

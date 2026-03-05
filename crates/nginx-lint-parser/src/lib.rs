@@ -148,6 +148,7 @@ pub fn parse_config(path: &Path) -> ParseResult<Config> {
 /// Parse nginx configuration from a string
 ///
 /// Uses the rowan-based lossless CST parser internally and converts to AST.
+/// Returns an error if the source contains syntax errors.
 pub fn parse_string(source: &str) -> ParseResult<Config> {
     let (root, errors) = parse_string_rowan(source);
     if let Some(err) = errors.first() {
@@ -158,6 +159,17 @@ pub fn parse_string(source: &str) -> ParseResult<Config> {
         });
     }
     Ok(rowan_to_ast::convert(&root, source))
+}
+
+/// Parse nginx configuration from a string, returning AST even when syntax errors exist.
+///
+/// Unlike [`parse_string`], this function always produces a [`Config`] AST by
+/// leveraging rowan's error-recovery. Syntax errors are returned alongside the
+/// AST so callers can report them without aborting the lint pipeline.
+pub fn parse_string_with_errors(source: &str) -> (Config, Vec<parser::SyntaxError>) {
+    let (root, errors) = parse_string_rowan(source);
+    let config = rowan_to_ast::convert(&root, source);
+    (config, errors)
 }
 
 /// Parse nginx configuration from a string using the legacy (non-rowan) parser.

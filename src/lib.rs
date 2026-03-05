@@ -26,7 +26,7 @@ pub mod plugin;
 pub use nginx_lint_common::{
     Color, ColorConfig, ColorMode, FilterResult, IgnoreTracker, IgnoreWarning, IncludeConfig,
     LintConfig, PathMapping, ValidationError, filter_errors, parse_config, parse_context_comment,
-    parse_string,
+    parse_string, parse_string_with_errors,
 };
 
 // Re-export from local modules
@@ -45,6 +45,31 @@ pub use reporter::{OutputFormat, Reporter};
 use std::fs;
 #[cfg(feature = "cli")]
 use std::path::Path;
+
+/// Convert parser `SyntaxError`s into `LintError`s.
+///
+/// Each syntax error is reported as severity `Error` with rule name `"syntax-error"`.
+pub fn syntax_errors_to_lint_errors(
+    syntax_errors: &[nginx_lint_common::parser::parser::SyntaxError],
+    source: &str,
+) -> Vec<LintError> {
+    let line_index = nginx_lint_common::parser::line_index::LineIndex::new(source);
+    syntax_errors
+        .iter()
+        .map(|e| {
+            let pos = line_index.position(e.offset);
+            LintError {
+                rule: "syntax-error".to_string(),
+                category: "syntax".to_string(),
+                message: e.message.clone(),
+                severity: Severity::Error,
+                line: Some(pos.line),
+                column: Some(pos.column),
+                fixes: Vec::new(),
+            }
+        })
+        .collect()
+}
 
 /// Run pre-parse checks that can detect errors before parsing
 /// These checks work on the raw file content and don't require a valid AST
