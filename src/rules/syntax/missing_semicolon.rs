@@ -46,6 +46,16 @@ impl MissingSemicolon {
         let lines: Vec<&str> = content.lines().collect();
         let num_lines = lines.len();
 
+        // Pre-calculate line start offsets for range-based fixes
+        let mut line_offsets: Vec<usize> = Vec::with_capacity(lines.len());
+        {
+            let mut offset = 0;
+            for line in &lines {
+                line_offsets.push(offset);
+                offset += line.len() + 1; // +1 for '\n'
+            }
+        }
+
         for (line_num, line) in lines.iter().enumerate() {
             let line_number = line_num + 1;
             let trimmed = line.trim();
@@ -146,7 +156,11 @@ impl MissingSemicolon {
                     };
 
                     if !is_continuation {
-                        let fix = Fix::replace(line_number, code_part, &format!("{};", code_part));
+                        // Find code_part within the line to get exact offset
+                        let line_start = line_offsets[line_num];
+                        let code_start = line_start + line.find(code_part).unwrap_or(0);
+                        let code_end = code_start + code_part.len();
+                        let fix = Fix::replace_range(code_end, code_end, ";");
                         errors.push(
                             LintError::new(
                                 self.name(),

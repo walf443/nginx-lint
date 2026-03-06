@@ -183,7 +183,14 @@ impl UnmatchedBraces {
                     if brace_stack.pop().is_none() {
                         // Extra closing brace - no matching opening brace
                         let fix = if line.trim() == "}" {
-                            Some(Fix::delete(line_number))
+                            let line_start = line_offsets[line_num];
+                            let line_end = line_start + line.len();
+                            // Remove the preceding newline to delete the line
+                            if line_start > 0 {
+                                Some(Fix::replace_range(line_start - 1, line_end, ""))
+                            } else {
+                                Some(Fix::replace_range(line_start, line_end + 1, ""))
+                            }
                         } else {
                             None
                         };
@@ -292,6 +299,18 @@ impl UnmatchedBraces {
 
         for (insert_after_line, error_line, indent) in missing_close_braces {
             let closing_brace = format!("{}}}", " ".repeat(indent));
+            // Compute insert offset: right after the end of the target line
+            let insert_offset = if insert_after_line < line_offsets.len() {
+                line_offsets[insert_after_line - 1] + lines[insert_after_line - 1].len() + 1
+            } else {
+                // Past end of file
+                content.len()
+            };
+            let new_text = if insert_offset >= content.len() && !content.ends_with('\n') {
+                format!("\n{}", closing_brace)
+            } else {
+                format!("{}\n", closing_brace)
+            };
             // Find the corresponding error by matching the error's line number
             for error in &mut errors {
                 if error.fixes.is_empty()
@@ -300,7 +319,7 @@ impl UnmatchedBraces {
                 {
                     error
                         .fixes
-                        .push(Fix::insert_after(insert_after_line, &closing_brace));
+                        .push(Fix::replace_range(insert_offset, insert_offset, &new_text));
                     break;
                 }
             }
