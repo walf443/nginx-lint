@@ -500,3 +500,124 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
 
     (result, fix_count)
 }
+
+#[cfg(test)]
+mod fix_tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_line_starts() {
+        let starts = compute_line_starts("abc\ndef\nghi");
+        // line 1 starts at 0, line 2 at 4, line 3 at 8, sentinel at 11
+        assert_eq!(starts, vec![0, 4, 8, 11]);
+    }
+
+    #[test]
+    fn test_compute_line_starts_trailing_newline() {
+        let starts = compute_line_starts("abc\n");
+        // line 1 at 0, line 2 at 4 (empty), sentinel at 4
+        assert_eq!(starts, vec![0, 4, 4]);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_normalize_replace() {
+        let content = "listen 80;\nserver_name example.com;\n";
+        let line_starts = compute_line_starts(content);
+        let fix = Fix::replace(1, "80", "8080");
+        let normalized = normalize_line_fix(&fix, content, &line_starts).unwrap();
+        assert!(normalized.is_range_based());
+        assert_eq!(normalized.start_offset, Some(7));
+        assert_eq!(normalized.end_offset, Some(9));
+        assert_eq!(normalized.new_text, "8080");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_normalize_delete() {
+        let content = "line1\nline2\nline3\n";
+        let line_starts = compute_line_starts(content);
+        let fix = Fix::delete(2);
+        let normalized = normalize_line_fix(&fix, content, &line_starts).unwrap();
+        assert!(normalized.is_range_based());
+        // Should delete "line2\n" (offset 6..12)
+        assert_eq!(normalized.start_offset, Some(6));
+        assert_eq!(normalized.end_offset, Some(12));
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_normalize_insert_after() {
+        let content = "line1\nline2\n";
+        let line_starts = compute_line_starts(content);
+        let fix = Fix::insert_after(1, "inserted");
+        let normalized = normalize_line_fix(&fix, content, &line_starts).unwrap();
+        assert!(normalized.is_range_based());
+        // Insert at offset 6 (start of line 2)
+        assert_eq!(normalized.start_offset, Some(6));
+        assert_eq!(normalized.end_offset, Some(6));
+        assert_eq!(normalized.new_text, "inserted\n");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_normalize_out_of_range() {
+        let content = "line1\n";
+        let line_starts = compute_line_starts(content);
+        let fix = Fix::delete(99);
+        assert!(normalize_line_fix(&fix, content, &line_starts).is_none());
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_normalize_replace_not_found() {
+        let content = "listen 80;\n";
+        let line_starts = compute_line_starts(content);
+        let fix = Fix::replace(1, "nonexistent", "new");
+        assert!(normalize_line_fix(&fix, content, &line_starts).is_none());
+    }
+
+    #[test]
+    fn test_apply_range_fix() {
+        let content = "listen 80;\n";
+        let fix = Fix::replace_range(7, 9, "8080");
+        let fixes: Vec<&Fix> = vec![&fix];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, "listen 8080;\n");
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_apply_multiple_fixes_same_line() {
+        // Two fixes on the same line should both apply
+        let content = "proxy_set_header Host $host;\n";
+        let fix1 = Fix::replace_range(17, 21, "X-Real-IP");
+        let fix2 = Fix::replace_range(22, 27, "$remote_addr");
+        let fixes: Vec<&Fix> = vec![&fix1, &fix2];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, "proxy_set_header X-Real-IP $remote_addr;\n");
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_apply_overlapping_fixes_skips() {
+        let content = "abcdef\n";
+        let fix1 = Fix::replace_range(0, 3, "XYZ"); // replace "abc"
+        let fix2 = Fix::replace_range(2, 5, "QQQ"); // overlaps with fix1
+        let fixes: Vec<&Fix> = vec![&fix1, &fix2];
+        let (_, count) = apply_fixes_to_content(content, &fixes);
+        // Only one fix should apply (the other is skipped due to overlap)
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_apply_deprecated_fix_via_normalization() {
+        let content = "listen 80;\nserver_name old;\n";
+        let fix = Fix::replace(2, "old", "new");
+        let fixes: Vec<&Fix> = vec![&fix];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, "listen 80;\nserver_name new;\n");
+        assert_eq!(count, 1);
+    }
+}
