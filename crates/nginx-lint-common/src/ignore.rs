@@ -250,6 +250,9 @@ impl IgnoreTracker {
     }
 
     /// Add an ignore rule for a specific line
+    ///
+    /// Note: fix offsets are set to dummy values (0, 0) since this helper
+    /// is only used to test filtering logic, not fix generation.
     #[cfg(test)]
     pub fn add_ignore(&mut self, rule: &str, line: usize) {
         self.ignored_lines
@@ -905,6 +908,45 @@ server_tokens on;
             &fix.new_text,
         );
         assert_eq!(fixed, "\nserver_tokens off;\n");
+    }
+
+    #[test]
+    fn test_unused_comment_on_first_line_fix() {
+        let content = "# nginx-lint:ignore server-tokens-enabled reason\nserver_tokens off;\n";
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        let errors: Vec<LintError> = vec![];
+        let result = filter_errors(errors, &mut tracker);
+
+        assert_eq!(result.unused_warnings.len(), 1);
+        let fix = &result.unused_warnings[0].fixes[0];
+        assert!(fix.is_range_based());
+        let mut fixed = content.to_string();
+        fixed.replace_range(
+            fix.start_offset.unwrap()..fix.end_offset.unwrap(),
+            &fix.new_text,
+        );
+        assert_eq!(fixed, "server_tokens off;\n");
+    }
+
+    #[test]
+    fn test_unused_comment_on_last_line_no_trailing_newline_fix() {
+        let content = "server_tokens off;\n# nginx-lint:ignore server-tokens-enabled reason";
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        let errors: Vec<LintError> = vec![];
+        let result = filter_errors(errors, &mut tracker);
+
+        assert_eq!(result.unused_warnings.len(), 1);
+        let fix = &result.unused_warnings[0].fixes[0];
+        assert!(fix.is_range_based());
+        let mut fixed = content.to_string();
+        fixed.replace_range(
+            fix.start_offset.unwrap()..fix.end_offset.unwrap(),
+            &fix.new_text,
+        );
+        // Should remove the preceding newline + comment line
+        assert_eq!(fixed, "server_tokens off;");
     }
 
     // Context comment tests
