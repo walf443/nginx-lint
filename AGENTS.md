@@ -23,7 +23,7 @@ nginx-lint/
 │   ├── plugin/                # WASM plugin system
 │   │   ├── mod.rs
 │   │   ├── loader.rs          # Plugin loader
-│   │   ├── wasm_rule.rs       # WASM rule wrapper
+│   │   ├── component_rule.rs   # Component model rule wrapper
 │   │   ├── builtin.rs         # Embedded builtin plugins
 │   │   └── error.rs           # Plugin errors
 │   ├── rules/                 # Native lint rules
@@ -129,7 +129,7 @@ impl Plugin for MyPlugin {
     }
 }
 
-nginx_lint_plugin::export_plugin!(MyPlugin);
+nginx_lint_plugin::export_component_plugin!(MyPlugin);
 ```
 
 3. Add `examples/bad.conf` and `examples/good.conf`

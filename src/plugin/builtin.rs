@@ -4,7 +4,7 @@
 //! Use `make build-with-plugins` to build with embedded plugins.
 
 #[cfg(feature = "wasm-builtin-plugins")]
-use super::{PluginError, PluginLoader, WasmLintRule};
+use super::{ComponentLintRule, PluginError, PluginLoader};
 
 /// Embedded WASM bytes for builtin plugins
 #[cfg(feature = "wasm-builtin-plugins")]
@@ -98,7 +98,8 @@ static PLUGIN_LOADER_CACHE: std::sync::OnceLock<PluginLoader> = std::sync::OnceL
 /// Global cache for compiled builtin plugins
 /// This avoids recompiling WASM modules on every Linter creation
 #[cfg(feature = "wasm-builtin-plugins")]
-static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<WasmLintRule>> = std::sync::OnceLock::new();
+static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<ComponentLintRule>> =
+    std::sync::OnceLock::new();
 
 /// Load all builtin plugins (with caching)
 ///
@@ -107,7 +108,7 @@ static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<WasmLintRule>> = std::sync
 ///
 /// Builtin plugins use a trusted loader with fuel metering disabled for better performance.
 #[cfg(feature = "wasm-builtin-plugins")]
-pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
+pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
     // Try to get from cache first
     if let Some(cached) = BUILTIN_PLUGINS_CACHE.get() {
         return Ok(cached.clone());
@@ -128,271 +129,59 @@ pub fn load_builtin_plugins() -> Result<Vec<WasmLintRule>, PluginError> {
 
 /// Compile all builtin plugins from embedded WASM bytes
 #[cfg(feature = "wasm-builtin-plugins")]
-fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<WasmLintRule>, PluginError> {
+fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<ComponentLintRule>, PluginError> {
     use std::path::PathBuf;
 
+    let plugin_entries: &[(&str, &[u8])] = &[
+        ("server-tokens-enabled", embedded::SERVER_TOKENS_ENABLED),
+        ("autoindex-enabled", embedded::AUTOINDEX_ENABLED),
+        ("gzip-not-enabled", embedded::GZIP_NOT_ENABLED),
+        ("duplicate-directive", embedded::DUPLICATE_DIRECTIVE),
+        ("space-before-semicolon", embedded::SPACE_BEFORE_SEMICOLON),
+        ("trailing-whitespace", embedded::TRAILING_WHITESPACE),
+        ("block-lines", embedded::BLOCK_LINES),
+        ("proxy-pass-domain", embedded::PROXY_PASS_DOMAIN),
+        (
+            "upstream-server-no-resolve",
+            embedded::UPSTREAM_SERVER_NO_RESOLVE,
+        ),
+        ("directive-inheritance", embedded::DIRECTIVE_INHERITANCE),
+        ("root-in-location", embedded::ROOT_IN_LOCATION),
+        (
+            "alias-location-slash-mismatch",
+            embedded::ALIAS_LOCATION_SLASH_MISMATCH,
+        ),
+        ("proxy-pass-with-uri", embedded::PROXY_PASS_WITH_URI),
+        ("proxy-keepalive", embedded::PROXY_KEEPALIVE),
+        ("try-files-with-proxy", embedded::TRY_FILES_WITH_PROXY),
+        ("if-is-evil-in-location", embedded::IF_IS_EVIL_IN_LOCATION),
+        ("unreachable-location", embedded::UNREACHABLE_LOCATION),
+        ("missing-error-log", embedded::MISSING_ERROR_LOG),
+        ("deprecated-ssl-protocol", embedded::DEPRECATED_SSL_PROTOCOL),
+        ("weak-ssl-ciphers", embedded::WEAK_SSL_CIPHERS),
+        (
+            "invalid-directive-context",
+            embedded::INVALID_DIRECTIVE_CONTEXT,
+        ),
+        ("map-missing-default", embedded::MAP_MISSING_DEFAULT),
+        ("ssl-on-deprecated", embedded::SSL_ON_DEPRECATED),
+        ("listen-http2-deprecated", embedded::LISTEN_HTTP2_DEPRECATED),
+        (
+            "proxy-missing-host-header",
+            embedded::PROXY_MISSING_HOST_HEADER,
+        ),
+        (
+            "client-max-body-size-not-set",
+            embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
+        ),
+    ];
+
     let mut plugins = Vec::new();
-    let fuel_enabled = loader.fuel_enabled();
-
-    // Load server-tokens-enabled
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:server-tokens-enabled"),
-        embedded::SERVER_TOKENS_ENABLED,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load autoindex-enabled
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:autoindex-enabled"),
-        embedded::AUTOINDEX_ENABLED,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load gzip-not-enabled
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:gzip-not-enabled"),
-        embedded::GZIP_NOT_ENABLED,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load duplicate-directive
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:duplicate-directive"),
-        embedded::DUPLICATE_DIRECTIVE,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load space-before-semicolon
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:space-before-semicolon"),
-        embedded::SPACE_BEFORE_SEMICOLON,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load trailing-whitespace
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:trailing-whitespace"),
-        embedded::TRAILING_WHITESPACE,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load block-lines
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:block-lines"),
-        embedded::BLOCK_LINES,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load proxy-pass-domain
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:proxy-pass-domain"),
-        embedded::PROXY_PASS_DOMAIN,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load upstream-server-no-resolve
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:upstream-server-no-resolve"),
-        embedded::UPSTREAM_SERVER_NO_RESOLVE,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load directive-inheritance
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:directive-inheritance"),
-        embedded::DIRECTIVE_INHERITANCE,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load root-in-location
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:root-in-location"),
-        embedded::ROOT_IN_LOCATION,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load alias-location-slash-mismatch
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:alias-location-slash-mismatch"),
-        embedded::ALIAS_LOCATION_SLASH_MISMATCH,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load proxy-pass-with-uri
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:proxy-pass-with-uri"),
-        embedded::PROXY_PASS_WITH_URI,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load proxy-keepalive
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:proxy-keepalive"),
-        embedded::PROXY_KEEPALIVE,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load try-files-with-proxy
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:try-files-with-proxy"),
-        embedded::TRY_FILES_WITH_PROXY,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load if-is-evil-in-location
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:if-is-evil-in-location"),
-        embedded::IF_IS_EVIL_IN_LOCATION,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load unreachable-location
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:unreachable-location"),
-        embedded::UNREACHABLE_LOCATION,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load missing-error-log
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:missing-error-log"),
-        embedded::MISSING_ERROR_LOG,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load deprecated-ssl-protocol
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:deprecated-ssl-protocol"),
-        embedded::DEPRECATED_SSL_PROTOCOL,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load weak-ssl-ciphers
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:weak-ssl-ciphers"),
-        embedded::WEAK_SSL_CIPHERS,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load invalid-directive-context
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:invalid-directive-context"),
-        embedded::INVALID_DIRECTIVE_CONTEXT,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load map-missing-default
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:map-missing-default"),
-        embedded::MAP_MISSING_DEFAULT,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load ssl-on-deprecated
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:ssl-on-deprecated"),
-        embedded::SSL_ON_DEPRECATED,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load listen-http2-deprecated
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:listen-http2-deprecated"),
-        embedded::LISTEN_HTTP2_DEPRECATED,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load proxy-missing-host-header
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:proxy-missing-host-header"),
-        embedded::PROXY_MISSING_HOST_HEADER,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
-
-    // Load client-max-body-size-not-set
-    plugins.push(WasmLintRule::new(
-        loader.engine(),
-        PathBuf::from("builtin:client-max-body-size-not-set"),
-        embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
-        loader.memory_limit(),
-        loader.fuel_limit(),
-        fuel_enabled,
-    )?);
+    for (name, bytes) in plugin_entries {
+        plugins.push(
+            loader.load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes)?,
+        );
+    }
 
     Ok(plugins)
 }

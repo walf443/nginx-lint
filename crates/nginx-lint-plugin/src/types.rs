@@ -368,7 +368,7 @@ impl LintError {
 /// - **Metadata** ([`spec()`](Plugin::spec)) describing the rule name, category, severity, and documentation
 /// - **Logic** ([`check()`](Plugin::check)) that inspects the parsed nginx config and reports errors
 ///
-/// Plugins must also derive [`Default`], which is used by [`export_plugin!`](crate::export_plugin)
+/// Plugins must also derive [`Default`], which is used by [`export_component_plugin!`](crate::export_component_plugin)
 /// to instantiate the plugin.
 ///
 /// # Example
@@ -398,7 +398,7 @@ impl LintError {
 ///     }
 /// }
 ///
-/// // export_plugin!(MyPlugin);  // Required for WASM build
+/// // export_component_plugin!(MyPlugin);  // Required for WASM build
 ///
 /// // Verify it works
 /// let plugin = MyPlugin;

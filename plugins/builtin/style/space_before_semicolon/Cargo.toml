@@ -13,4 +13,3 @@ nginx-lint-plugin = { path = "../../../../crates/nginx-lint-plugin" }
 [features]
 default = ["wit-export"]
 wit-export = ["nginx-lint-plugin/wit-export"]
-wasm-export = []

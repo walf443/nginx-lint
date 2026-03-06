@@ -103,7 +103,7 @@ impl<P: Plugin> NativePluginRule<P> {
     pub fn with_plugin(plugin: P) -> Self {
         let spec = plugin.spec();
 
-        // Leak strings for 'static lifetime (same approach as WasmLintRule)
+        // Leak strings for 'static lifetime (same approach as ComponentLintRule)
         let name: &'static str = Box::leak(spec.name.into_boxed_str());
         let category: &'static str = Box::leak(spec.category.into_boxed_str());
         let description: &'static str = Box::leak(spec.description.into_boxed_str());

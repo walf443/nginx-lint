@@ -14,16 +14,11 @@ mod loader;
 #[cfg(feature = "native-builtin-plugins")]
 pub mod native_builtin;
 #[cfg(feature = "plugins")]
-mod wasm_rule;
-
-#[cfg(feature = "plugins")]
 pub use component_rule::ComponentLintRule;
 #[cfg(feature = "plugins")]
 pub use error::PluginError;
 #[cfg(feature = "plugins")]
 pub use loader::PluginLoader;
-#[cfg(feature = "plugins")]
-pub use wasm_rule::WasmLintRule;
 
 /// Current API version for the plugin interface.
 ///

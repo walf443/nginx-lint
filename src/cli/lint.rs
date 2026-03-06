@@ -436,7 +436,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         use nginx_lint::plugin::PluginLoader;
 
         match PluginLoader::new() {
-            Ok(loader) => match loader.load_plugins_dynamic(plugins_dir) {
+            Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {
                         eprintln!(
