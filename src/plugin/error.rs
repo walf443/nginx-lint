@@ -42,6 +42,9 @@ pub enum PluginError {
 
     #[error("Invalid WASM file '{path}': not a valid WebAssembly module")]
     InvalidWasmFile { path: PathBuf },
+
+    #[error("Unsupported WASM format '{path}': {message}")]
+    UnsupportedFormat { path: PathBuf, message: String },
 }
 
 impl PluginError {
@@ -108,5 +111,12 @@ impl PluginError {
 
     pub fn invalid_wasm_file(path: impl Into<PathBuf>) -> Self {
         Self::InvalidWasmFile { path: path.into() }
+    }
+
+    pub fn unsupported_format(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self::UnsupportedFormat {
+            path: path.into(),
+            message: message.into(),
+        }
     }
 }

@@ -127,7 +127,7 @@ impl PluginLoader {
                 let rule = self.load_component_from_bytes(path, &wasm_bytes)?;
                 Ok(Box::new(rule))
             }
-            Some(false) => Err(PluginError::execution_error(
+            Some(false) => Err(PluginError::unsupported_format(
                 path,
                 "Legacy core WASM modules are no longer supported. Please rebuild your plugin with export_component_plugin! and wasm-tools component new.",
             )),
@@ -210,7 +210,7 @@ mod tests {
         fs::write(&wasm_path, b"\0asm\x01\x00\x00\x00").unwrap();
 
         let result = loader.load_plugin(&wasm_path);
-        assert!(matches!(result, Err(PluginError::ExecutionError { .. })));
+        assert!(matches!(result, Err(PluginError::UnsupportedFormat { .. })));
     }
 
     #[test]

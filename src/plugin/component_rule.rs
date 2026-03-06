@@ -7,14 +7,14 @@
 use super::error::PluginError;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::{self, Config};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmtime::component::{Resource, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder, Trap};
 
 /// Plugin spec returned by the plugin
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PluginSpec {
     pub name: String,
     pub category: String,
