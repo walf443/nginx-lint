@@ -572,9 +572,7 @@ impl TestCase {
         for expected_line in &self.expected_fix_on_lines {
             let has_fix_on_line = rule_errors.iter().flat_map(|e| e.fixes.iter()).any(|f| {
                 if f.is_range_based() {
-                    let start = f.start_offset.unwrap_or(0);
-                    let line = offset_to_line(&self.content, start);
-                    line == *expected_line
+                    fix_covers_line(&self.content, f, *expected_line)
                 } else {
                     f.line == *expected_line
                 }
@@ -588,7 +586,20 @@ impl TestCase {
                     .flat_map(|e| e.fixes.iter().map(|f| {
                         if f.is_range_based() {
                             let start = f.start_offset.unwrap_or(0);
-                            offset_to_line(&self.content, start)
+                            let end = f.end_offset.unwrap_or(start);
+                            let start_line = offset_to_line(&self.content, start);
+                            let end_line = offset_to_line(&self.content, end);
+                            if start_line == end_line {
+                                start_line
+                            } else {
+                                // Show the primary target line (after any leading newline)
+                                let first_byte = self.content.as_bytes().get(start);
+                                if first_byte == Some(&b'\n') {
+                                    start_line + 1
+                                } else {
+                                    start_line
+                                }
+                            }
                         } else {
                             f.line
                         }
@@ -622,6 +633,20 @@ impl TestCase {
 fn offset_to_line(content: &str, offset: usize) -> usize {
     let offset = offset.min(content.len());
     content[..offset].chars().filter(|&c| c == '\n').count() + 1
+}
+
+/// Check if a range-based fix covers (affects) the given line.
+///
+/// A fix that deletes a line often includes the preceding `\n`, so checking
+/// only `start_offset` would point to the previous line. This function checks
+/// whether the fix's byte range [start, end) spans any byte on the target line.
+fn fix_covers_line(content: &str, fix: &Fix, line: usize) -> bool {
+    let start = fix.start_offset.unwrap_or(0);
+    let end = fix.end_offset.unwrap_or(start);
+    let start_line = offset_to_line(content, start);
+    // end is exclusive, so subtract 1 to get the line of the last affected byte
+    let end_line = offset_to_line(content, end.max(1) - if end > start { 1 } else { 0 });
+    line >= start_line && line <= end_line
 }
 
 /// Apply fixes to content and return the result.
