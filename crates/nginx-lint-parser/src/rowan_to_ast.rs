@@ -491,11 +491,12 @@ impl<'a> ConvertCtx<'a> {
 
         if is_raw {
             let raw_content = self.extract_raw_content(block_node);
+            let closing_ws = self.closing_brace_leading_whitespace(block_node);
             return Block {
                 items: Vec::new(),
                 span,
                 raw_content: Some(raw_content),
-                closing_brace_leading_whitespace: String::new(),
+                closing_brace_leading_whitespace: closing_ws,
                 trailing_whitespace: String::new(),
             };
         }

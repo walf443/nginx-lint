@@ -202,7 +202,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         errors.extend(syntax_errors_to_lint_errors(&syntax_errors, content));
     }
 
-    // Run indentation check directly on content (always, as it doesn't need AST)
+    // Run indentation check using the already-parsed AST
     if is_enabled("indent") {
         let indent_rule = if let Some(indent_size) = lint_config
             .as_ref()
@@ -213,7 +213,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         } else {
             Indent::default()
         };
-        errors.extend(indent_rule.check_content(content));
+        errors.extend(indent_rule.check_config(&config));
     }
 
     // Note: trailing-whitespace and space-before-semicolon are plugin rules.
