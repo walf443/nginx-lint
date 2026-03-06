@@ -626,6 +626,9 @@ fn offset_to_line(content: &str, offset: usize) -> usize {
 
 /// Compute byte offset of the start of each line.
 /// Returns vec where index 0 = offset of line 1, plus an extra entry = content.len().
+///
+/// NOTE: This is intentionally duplicated from `src/lib.rs` because the plugin crate
+/// cannot depend on the top-level nginx-lint crate (it would create a circular dependency).
 fn compute_line_starts(content: &str) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, b) in content.bytes().enumerate() {

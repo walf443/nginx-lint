@@ -297,16 +297,11 @@ impl UnmatchedBraces {
         // Sort by insert line descending so outer blocks end up at the bottom
         missing_close_braces.sort_by(|a, b| b.0.cmp(&a.0));
 
-        for (insert_after_line, error_line, indent) in missing_close_braces {
+        for (_insert_after_line, error_line, indent) in missing_close_braces {
             let closing_brace = format!("{}}}", " ".repeat(indent));
-            // Compute insert offset: right after the end of the target line
-            let insert_offset = if insert_after_line < line_offsets.len() {
-                line_offsets[insert_after_line - 1] + lines[insert_after_line - 1].len() + 1
-            } else {
-                // Past end of file
-                content.len()
-            };
-            let new_text = if insert_offset >= content.len() && !content.ends_with('\n') {
+            // Insert at end of file (unclosed braces are always closed at EOF)
+            let insert_offset = content.len();
+            let new_text = if !content.ends_with('\n') {
                 format!("\n{}", closing_brace)
             } else {
                 format!("{}\n", closing_brace)
