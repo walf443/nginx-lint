@@ -110,7 +110,6 @@ pub mod prelude {
 /// Macro to export a plugin as a WIT component
 ///
 /// This generates the WIT component model exports for your plugin.
-/// This generates the WIT component model exports for your plugin.
 ///
 /// # Example
 ///
