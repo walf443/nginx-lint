@@ -1246,11 +1246,20 @@ http {
         .fixes
         .first()
         .expect("Expected a fix");
-    assert_eq!(fix.line, 4, "Fix should be on line 4");
-    assert!(!fix.delete_line, "Should not delete entire line");
+    assert!(fix.is_range_based(), "Fix should be range-based");
     assert_eq!(
         fix.new_text, "        server_tokens off;",
         "Fix should preserve indentation"
+    );
+    // Verify applying the fix produces correct result
+    let mut fixed = content.to_string();
+    fixed.replace_range(
+        fix.start_offset.unwrap()..fix.end_offset.unwrap(),
+        &fix.new_text,
+    );
+    assert!(
+        fixed.contains("        server_tokens off;\n    }\n"),
+        "Fix should remove the inline comment"
     );
 }
 
