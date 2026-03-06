@@ -402,7 +402,11 @@ local x = 1
 "#;
         let errors = check_content(content);
         let result = apply_range_fixes(content, &errors);
-        assert_eq!(result, expected, "Autofix should only change closing brace indentation\nGot:\n{}", result);
+        assert_eq!(
+            result, expected,
+            "Autofix should only change closing brace indentation\nGot:\n{}",
+            result
+        );
     }
 
     #[test]
@@ -425,7 +429,11 @@ content_by_lua_block {
 "#;
         let errors = check_content(content);
         let result = apply_range_fixes(content, &errors);
-        assert_eq!(result, expected, "Autofix result mismatch\nGot:\n{}", result);
+        assert_eq!(
+            result, expected,
+            "Autofix result mismatch\nGot:\n{}",
+            result
+        );
     }
 
     #[test]
@@ -454,7 +462,11 @@ content_by_lua_block {
 "#;
         let errors = check_content(content);
         let result = apply_range_fixes(content, &errors);
-        assert_eq!(result, expected, "Autofix result mismatch\nGot:\n{}", result);
+        assert_eq!(
+            result, expected,
+            "Autofix result mismatch\nGot:\n{}",
+            result
+        );
     }
 
     #[test]
