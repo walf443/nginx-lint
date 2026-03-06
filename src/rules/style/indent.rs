@@ -241,6 +241,26 @@ mod tests {
         rule.check_content(content)
     }
 
+    /// Apply range-based fixes to content (sorted by offset descending)
+    fn apply_range_fixes(content: &str, errors: &[LintError]) -> String {
+        let mut fixes: Vec<&crate::linter::Fix> =
+            errors.iter().flat_map(|e| e.fixes.iter()).collect();
+        fixes.sort_by(|a, b| {
+            b.start_offset
+                .unwrap_or(0)
+                .cmp(&a.start_offset.unwrap_or(0))
+        });
+        let mut result = content.to_string();
+        for fix in &fixes {
+            if let (Some(start), Some(end)) = (fix.start_offset, fix.end_offset) {
+                if start <= result.len() && end <= result.len() {
+                    result.replace_range(start..end, &fix.new_text);
+                }
+            }
+        }
+        result
+    }
+
     fn check_content_with_config(content: &str) -> Vec<LintError> {
         let config = crate::parser::parse_string(content).unwrap();
         let rule = Indent::default();
@@ -363,6 +383,81 @@ local x = 1
     }
 
     #[test]
+    fn test_lua_block_closing_brace_autofix() {
+        let content = r#"http {
+  server {
+    content_by_lua_block {
+      local x = 1
+}
+  }
+}
+"#;
+        let expected = r#"http {
+  server {
+    content_by_lua_block {
+      local x = 1
+    }
+  }
+}
+"#;
+        let errors = check_content(content);
+        let result = apply_range_fixes(content, &errors);
+        assert_eq!(result, expected, "Autofix should only change closing brace indentation\nGot:\n{}", result);
+    }
+
+    #[test]
+    fn test_lua_block_with_multiple_indent_errors_autofix() {
+        let content = r#"http {
+server {
+content_by_lua_block {
+      local x = 1
+}
+}
+}
+"#;
+        let expected = r#"http {
+  server {
+    content_by_lua_block {
+      local x = 1
+    }
+  }
+}
+"#;
+        let errors = check_content(content);
+        let result = apply_range_fixes(content, &errors);
+        assert_eq!(result, expected, "Autofix result mismatch\nGot:\n{}", result);
+    }
+
+    #[test]
+    fn test_lua_block_nested_braces_autofix() {
+        let content = r#"http {
+  server {
+    content_by_lua_block {
+      local t = {1, 2, 3}
+      if true then
+        ngx.say(t)
+      end
+  }
+  }
+}
+"#;
+        let expected = r#"http {
+  server {
+    content_by_lua_block {
+      local t = {1, 2, 3}
+      if true then
+        ngx.say(t)
+      end
+    }
+  }
+}
+"#;
+        let errors = check_content(content);
+        let result = apply_range_fixes(content, &errors);
+        assert_eq!(result, expected, "Autofix result mismatch\nGot:\n{}", result);
+    }
+
+    #[test]
     fn test_file_check_matches_content_check() {
         let content = r#"http {
     server {
@@ -440,6 +535,36 @@ local x = 1
         assert!(
             !errors.is_empty(),
             "Expected errors with mismatched indent size"
+        );
+    }
+
+    #[test]
+    fn test_lua_block_autofix_preserves_content() {
+        let content = concat!(
+            "http {\n",
+            "  server {\n",
+            "        location /api {\n",
+            "            content_by_lua_block {\n",
+            "                local cjson = require \"cjson\"\n",
+            "                ngx.say(cjson.encode({status = \"ok\"}))\n",
+            "            }\n",
+            "        }\n",
+            "    location /static/ {\n",
+            "      alias /var/www/static/;\n",
+            "    }\n",
+            "  }\n",
+            "}\n",
+        );
+        let errors = check_content(content);
+        let result = apply_range_fixes(content, &errors);
+
+        assert!(
+            result.contains("local cjson = require"),
+            "Lua block content should be preserved after autofix"
+        );
+        assert!(
+            result.contains("location /static/"),
+            "Directives after lua block should be preserved"
         );
     }
 }
