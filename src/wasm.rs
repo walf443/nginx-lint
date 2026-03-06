@@ -60,21 +60,25 @@ impl WasmLintResult {
 }
 
 /// A fix for JavaScript
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct JsFix {
+    #[serde(default)]
     line: usize,
+    #[serde(default)]
     old_text: Option<String>,
     new_text: String,
+    #[serde(default)]
     delete_line: bool,
+    #[serde(default)]
     insert_after: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     start_offset: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     end_offset: Option<usize>,
 }
 
 /// A single lint error for JavaScript
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct JsLintError {
     rule: String,
     category: String,
@@ -82,7 +86,7 @@ struct JsLintError {
     severity: String,
     line: Option<usize>,
     column: Option<usize>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     fixes: Vec<JsFix>,
 }
 
@@ -375,6 +379,40 @@ pub fn debug_plugin_status() -> String {
 #[wasm_bindgen]
 pub fn get_default_config() -> String {
     crate::config::DEFAULT_CONFIG_TEMPLATE.to_string()
+}
+
+/// Apply fixes to content string
+///
+/// # Arguments
+/// * `content` - The original nginx configuration content
+/// * `errors_json` - JSON string of lint errors (as returned by `lint()`)
+///
+/// # Returns
+/// The fixed content string
+#[wasm_bindgen]
+pub fn apply_fixes(content: &str, errors_json: &str) -> Result<String, JsValue> {
+    let errors: Vec<JsLintError> =
+        serde_json::from_str(errors_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    // Convert JsLintError fixes to Fix references
+    let fixes: Vec<crate::linter::Fix> = errors
+        .iter()
+        .flat_map(|e| {
+            e.fixes.iter().map(|f| crate::linter::Fix {
+                line: f.line,
+                old_text: f.old_text.clone(),
+                new_text: f.new_text.clone(),
+                delete_line: f.delete_line,
+                insert_after: f.insert_after,
+                start_offset: f.start_offset,
+                end_offset: f.end_offset,
+            })
+        })
+        .collect();
+
+    let fix_refs: Vec<&crate::linter::Fix> = fixes.iter().collect();
+    let (result, _) = crate::apply_fixes_to_content(content, &fix_refs);
+    Ok(result)
 }
 
 #[cfg(test)]

@@ -425,7 +425,7 @@ http {
     </div>
 
     <script type="module">
-        import init, { lint_with_config, version, get_rule_names, get_rule_spec, get_default_config, debug_plugin_status } from './pkg/nginx_lint.js';
+        import init, { lint_with_config, version, get_rule_names, get_rule_spec, get_default_config, debug_plugin_status, apply_fixes } from './pkg/nginx_lint.js';
 
         let wasmReady = false;
         let currentErrors = [];
@@ -581,102 +581,34 @@ http {
             }
         };
 
+        // Apply fixes using the WASM apply_fixes function (shared logic with CLI)
+        function applyFixesViaWasm(errorsToFix) {
+            const editor = document.getElementById('editor');
+            const content = editor.value;
+            const errorsJson = JSON.stringify(errorsToFix);
+
+            try {
+                const fixed = apply_fixes(content, errorsJson);
+                editor.value = fixed;
+                lintConfig();
+            } catch (e) {
+                console.error('Failed to apply fixes:', e);
+            }
+        }
+
         // Apply a single fix (applies all fixes for a single error)
         window.applyFix = function(index) {
             const error = currentErrors[index];
             if (!error || !error.fixes || error.fixes.length === 0) return;
-
-            const editor = document.getElementById('editor');
-            let content = editor.value;
-
-            // Separate range-based and line-based fixes
-            const rangeFixes = error.fixes.filter(f =>
-                f.start_offset !== null && f.start_offset !== undefined);
-            const lineFixes = error.fixes.filter(f =>
-                f.start_offset === null || f.start_offset === undefined);
-
-            // Apply range-based fixes first (sorted by start_offset descending)
-            rangeFixes.sort((a, b) => b.start_offset - a.start_offset);
-            for (const fix of rangeFixes) {
-                const before = content.substring(0, fix.start_offset);
-                const after = content.substring(fix.end_offset);
-                content = before + fix.new_text + after;
-            }
-
-            // Apply line-based fixes (sorted by line descending)
-            lineFixes.sort((a, b) => b.line - a.line);
-            if (lineFixes.length > 0) {
-                const lines = content.split('\n');
-                for (const fix of lineFixes) {
-                    const lineIndex = fix.line - 1;
-                    if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;
-
-                    if (fix.delete_line) {
-                        lines.splice(lineIndex, 1);
-                    } else if (fix.insert_after) {
-                        lines.splice(lineIndex + 1, 0, fix.new_text);
-                    } else if (fix.old_text !== null && fix.old_text !== undefined) {
-                        lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
-                    } else {
-                        lines[lineIndex] = fix.new_text;
-                    }
-                }
-                content = lines.join('\n');
-            }
-
-            editor.value = content;
-            lintConfig();
+            applyFixesViaWasm([error]);
         };
 
-        // Apply all fixes (in reverse order to maintain offsets/line numbers)
+        // Apply all fixes
         window.applyAllFixes = function() {
-            // Collect all individual fixes from all errors
-            const allFixes = [];
-            for (const err of currentErrors) {
-                if (err.fixes && err.fixes.length > 0) {
-                    for (const fix of err.fixes) {
-                        allFixes.push(fix);
-                    }
-                }
-            }
-
-            // Separate range-based and line-based fixes
-            const rangeFixes = allFixes.filter(f =>
-                f.start_offset !== null && f.start_offset !== undefined);
-            const lineFixes = allFixes.filter(f =>
-                f.start_offset === null || f.start_offset === undefined);
-
-            const editor = document.getElementById('editor');
-            let content = editor.value;
-
-            // Apply range-based fixes first (sorted by start_offset descending)
-            rangeFixes.sort((a, b) => b.start_offset - a.start_offset);
-            for (const fix of rangeFixes) {
-                const before = content.substring(0, fix.start_offset);
-                const after = content.substring(fix.end_offset);
-                content = before + fix.new_text + after;
-            }
-
-            // Apply line-based fixes (sorted by line descending)
-            lineFixes.sort((a, b) => b.line - a.line);
-            let lines = content.split('\n');
-            for (const fix of lineFixes) {
-                const lineIndex = fix.line - 1;
-                if (lineIndex < 0 || lineIndex >= lines.length + 1) continue;
-
-                if (fix.delete_line) {
-                    lines.splice(lineIndex, 1);
-                } else if (fix.insert_after) {
-                    lines.splice(lineIndex + 1, 0, fix.new_text);
-                } else if (fix.old_text !== null && fix.old_text !== undefined) {
-                    lines[lineIndex] = lines[lineIndex].replace(fix.old_text, fix.new_text);
-                } else {
-                    lines[lineIndex] = fix.new_text;
-                }
-            }
-
-            editor.value = lines.join('\n');
-            lintConfig();
+            const errorsWithFixes = currentErrors.filter(
+                err => err.fixes && err.fixes.length > 0);
+            if (errorsWithFixes.length === 0) return;
+            applyFixesViaWasm(errorsWithFixes);
         };
 
         // Ignore an error by inserting a disable comment

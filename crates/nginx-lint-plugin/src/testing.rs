@@ -572,9 +572,7 @@ impl TestCase {
         for expected_line in &self.expected_fix_on_lines {
             let has_fix_on_line = rule_errors.iter().flat_map(|e| e.fixes.iter()).any(|f| {
                 if f.is_range_based() {
-                    let start = f.start_offset.unwrap_or(0);
-                    let line = offset_to_line(&self.content, start);
-                    line == *expected_line
+                    fix_covers_line(&self.content, f, *expected_line)
                 } else {
                     f.line == *expected_line
                 }
@@ -588,7 +586,20 @@ impl TestCase {
                     .flat_map(|e| e.fixes.iter().map(|f| {
                         if f.is_range_based() {
                             let start = f.start_offset.unwrap_or(0);
-                            offset_to_line(&self.content, start)
+                            let end = f.end_offset.unwrap_or(start);
+                            let start_line = offset_to_line(&self.content, start);
+                            let end_line = offset_to_line(&self.content, end);
+                            if start_line == end_line {
+                                start_line
+                            } else {
+                                // Show the primary target line (after any leading newline)
+                                let first_byte = self.content.as_bytes().get(start);
+                                if first_byte == Some(&b'\n') {
+                                    start_line + 1
+                                } else {
+                                    start_line
+                                }
+                            }
                         } else {
                             f.line
                         }
@@ -624,64 +635,38 @@ fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].chars().filter(|&c| c == '\n').count() + 1
 }
 
-/// Apply fixes to content and return the result
+/// Check if a range-based fix covers (affects) the given line.
+///
+/// A fix that deletes a line often includes the preceding `\n`, so checking
+/// only `start_offset` would point to the previous line. This function checks
+/// whether the fix's byte range [start, end) spans any byte on the target line.
+fn fix_covers_line(content: &str, fix: &Fix, line: usize) -> bool {
+    let start = fix.start_offset.unwrap_or(0);
+    let end = fix.end_offset.unwrap_or(start);
+    let start_line = offset_to_line(content, start);
+    // end is exclusive, so subtract 1 to get the line of the last affected byte
+    let end_line = offset_to_line(content, end.max(1) - if end > start { 1 } else { 0 });
+    line >= start_line && line <= end_line
+}
+
+/// Apply fixes to content and return the result.
+///
+/// Converts plugin `Fix` to common `Fix` and delegates to
+/// `nginx_lint_common::apply_fixes_to_content` for normalization, overlap detection, and ordering.
 fn apply_fixes(content: &str, fixes: &[&Fix]) -> String {
-    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) = fixes
+    let common_fixes: Vec<nginx_lint_common::Fix> = fixes
         .iter()
-        .partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
-
-    let mut result = content.to_string();
-
-    if !range_fixes.is_empty() {
-        let mut sorted_range_fixes = range_fixes;
-        sorted_range_fixes.sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
-
-        let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
-
-        for fix in sorted_range_fixes {
-            let start = fix.start_offset.unwrap();
-            let end = fix.end_offset.unwrap();
-
-            let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
-            if overlaps {
-                continue;
-            }
-
-            if start <= result.len() && end <= result.len() && start <= end {
-                result.replace_range(start..end, &fix.new_text);
-                applied_ranges.push((start, start + fix.new_text.len()));
-            }
-        }
-    }
-
-    if !line_fixes.is_empty() {
-        let mut lines: Vec<String> = result.lines().map(|l| l.to_string()).collect();
-
-        let mut sorted_line_fixes = line_fixes;
-        sorted_line_fixes.sort_by(|a, b| b.line.cmp(&a.line));
-
-        for fix in sorted_line_fixes {
-            let line_idx = fix.line.saturating_sub(1);
-
-            if fix.delete_line {
-                if line_idx < lines.len() {
-                    lines.remove(line_idx);
-                }
-            } else if fix.insert_after {
-                if line_idx < lines.len() {
-                    lines.insert(line_idx + 1, fix.new_text.clone());
-                }
-            } else if let Some(old_text) = &fix.old_text {
-                if line_idx < lines.len() {
-                    lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
-                }
-            } else if line_idx < lines.len() {
-                lines[line_idx] = fix.new_text.clone();
-            }
-        }
-
-        result = lines.join("\n");
-    }
-
+        .map(|f| nginx_lint_common::Fix {
+            line: f.line,
+            old_text: f.old_text.clone(),
+            new_text: f.new_text.clone(),
+            delete_line: f.delete_line,
+            insert_after: f.insert_after,
+            start_offset: f.start_offset,
+            end_offset: f.end_offset,
+        })
+        .collect();
+    let common_refs: Vec<&nginx_lint_common::Fix> = common_fixes.iter().collect();
+    let (result, _) = nginx_lint_common::apply_fixes_to_content(content, &common_refs);
     result
 }

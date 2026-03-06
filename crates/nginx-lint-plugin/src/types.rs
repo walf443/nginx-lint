@@ -203,7 +203,7 @@ pub enum Severity {
 ///
 /// // Delete the directive's line
 /// let fix = directive.delete_line();
-/// assert!(fix.delete_line);
+/// assert!(fix.is_range_based());
 ///
 /// // Insert a new line after the directive
 /// let fix = directive.insert_after("add_header X-Frame-Options DENY;");
@@ -238,6 +238,7 @@ pub struct Fix {
 
 impl Fix {
     /// Create a fix that deletes an entire line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn delete(line: usize) -> Self {
         Self {
             line,
@@ -251,6 +252,7 @@ impl Fix {
     }
 
     /// Create a fix that inserts a new line after the specified line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn insert_after(line: usize, new_text: &str) -> Self {
         Self {
             line,
@@ -639,7 +641,22 @@ impl DirectiveExt for Directive {
     }
 
     fn delete_line(&self) -> Fix {
-        Fix::delete(self.span.start.line)
+        let start = self.full_start_offset();
+        let end = self.span.end.offset + self.trailing_whitespace.len();
+        // Include trailing comment if present
+        let end = if let Some(ref comment) = self.trailing_comment {
+            comment.span.end.offset + comment.trailing_whitespace.len()
+        } else {
+            end
+        };
+        // Remove the preceding newline to actually delete the line
+        // (if not the first line)
+        if start > 0 {
+            Fix::replace_range(start - 1, end, "")
+        } else {
+            // First line: remove trailing newline instead
+            Fix::replace_range(start, end + 1, "")
+        }
     }
 
     fn insert_after(&self, new_text: &str) -> Fix {
