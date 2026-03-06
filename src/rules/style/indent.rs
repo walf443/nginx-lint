@@ -96,11 +96,12 @@ impl Indent {
                         ws_start,
                     );
 
-                    if let Some(block) = &d.block
-                        && !block.is_raw()
-                    {
-                        self.check_items(&block.items, depth + 1, indent_size, errors);
-                        // Check closing brace indentation (should match the opening directive's depth)
+                    if let Some(block) = &d.block {
+                        // Recurse into non-raw blocks (raw block contents are not nginx config)
+                        if !block.is_raw() {
+                            self.check_items(&block.items, depth + 1, indent_size, errors);
+                        }
+                        // Check closing brace indentation for all blocks (including raw blocks)
                         let closing_ws = &block.closing_brace_leading_whitespace;
                         if !closing_ws.is_empty() || depth > 0 {
                             let closing_brace_offset = block.span.end.offset - 1;
@@ -334,6 +335,29 @@ local x = 1
         assert!(
             errors.is_empty(),
             "Expected no errors for Lua block content, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_lua_block_closing_brace_wrong_indentation() {
+        // Closing brace of lua_block should be checked for indentation
+        let content = r#"http {
+  server {
+    content_by_lua_block {
+      local x = 1
+}
+  }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            !errors.is_empty(),
+            "Expected indentation error for lua_block closing brace"
+        );
+        assert!(
+            errors.iter().any(|e| e.line == Some(5)),
+            "Expected error on line 5 (closing brace), got: {:?}",
             errors
         );
     }
