@@ -21,7 +21,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::linter::{Fix, LintError, Severity};
+use crate::linter::{Fix, LintError, Severity, compute_line_starts};
 
 /// A warning generated from parsing ignore comments
 #[derive(Debug, Clone)]
@@ -45,10 +45,12 @@ struct IgnoreDirective {
     rule_name: String,
     /// Whether this directive was used to ignore an error
     used: bool,
-    /// Whether this is an inline comment (vs comment-only line)
-    is_inline: bool,
-    /// For inline comments, the content before the comment (for fix)
-    content_before_comment: Option<String>,
+    /// Start byte offset for the fix (for removing unused directives)
+    fix_start_offset: usize,
+    /// End byte offset for the fix (exclusive)
+    fix_end_offset: usize,
+    /// Replacement text for the fix (empty for delete, content for inline)
+    fix_replacement: String,
 }
 
 /// Tracks ignored rules per line
@@ -86,6 +88,7 @@ impl IgnoreTracker {
     ) -> (Self, Vec<IgnoreWarning>) {
         let mut tracker = Self::new();
         let mut warnings = Vec::new();
+        let line_starts = compute_line_starts(content);
 
         // First pass: parse all ignore comments
         let lines: Vec<&str> = content.lines().collect();
@@ -140,13 +143,27 @@ impl IgnoreTracker {
                         .or_default()
                         .insert(parsed.rule_name.clone());
 
+                    // Compute byte offsets for deleting the comment line
+                    let comment_idx = parsed.comment_line - 1;
+                    let num_lines = line_starts.len() - 1;
+                    let (fix_start, fix_end) = if comment_idx + 1 < num_lines {
+                        // Not last line: include trailing newline
+                        (line_starts[comment_idx], line_starts[comment_idx + 1])
+                    } else if line_starts[comment_idx] > 0 {
+                        // Last line: include preceding newline
+                        (line_starts[comment_idx] - 1, line_starts[comment_idx + 1])
+                    } else {
+                        (line_starts[comment_idx], line_starts[comment_idx + 1])
+                    };
+
                     tracker.directives.push(IgnoreDirective {
                         comment_line: parsed.comment_line,
                         target_line: actual_target_line,
                         rule_name: parsed.rule_name.clone(),
                         used: false,
-                        is_inline: false,
-                        content_before_comment: None,
+                        fix_start_offset: fix_start,
+                        fix_end_offset: fix_end,
+                        fix_replacement: String::new(),
                     });
                 }
                 Ok(parsed) => {
@@ -170,13 +187,27 @@ impl IgnoreTracker {
                         .or_default()
                         .insert(parsed.rule_name.clone());
 
+                    // Compute byte offsets for replacing line with content before comment
+                    let comment_idx = parsed.comment_line - 1;
+                    let line_start = line_starts[comment_idx];
+                    let next_line_start = line_starts[comment_idx + 1];
+                    let line_end = if next_line_start > line_start
+                        && content.as_bytes().get(next_line_start - 1) == Some(&b'\n')
+                    {
+                        next_line_start - 1
+                    } else {
+                        next_line_start
+                    };
+                    let replacement = parsed.content_before_comment.clone().unwrap_or_default();
+
                     tracker.directives.push(IgnoreDirective {
                         comment_line: parsed.comment_line,
                         target_line: parsed.target_line,
                         rule_name: parsed.rule_name.clone(),
                         used: false,
-                        is_inline: true,
-                        content_before_comment: parsed.content_before_comment.clone(),
+                        fix_start_offset: line_start,
+                        fix_end_offset: line_end,
+                        fix_replacement: replacement,
                     });
                 }
                 Err(warning) => {
@@ -203,17 +234,8 @@ impl IgnoreTracker {
             .iter()
             .filter(|d| !d.used)
             .map(|d| {
-                // Provide fix for both comment-only lines and inline comments
-                let fixes = if d.is_inline {
-                    // For inline comments, replace line with just the content before the comment
-                    d.content_before_comment
-                        .as_ref()
-                        .map(|content| vec![Fix::replace_line(d.comment_line, content)])
-                        .unwrap_or_default()
-                } else {
-                    // For comment-only lines, delete the entire line
-                    vec![Fix::delete(d.comment_line)]
-                };
+                let fix =
+                    Fix::replace_range(d.fix_start_offset, d.fix_end_offset, &d.fix_replacement);
 
                 IgnoreWarning {
                     line: d.comment_line,
@@ -221,7 +243,7 @@ impl IgnoreTracker {
                         "unused nginx-lint:ignore comment for rule '{}'",
                         d.rule_name
                     ),
-                    fixes,
+                    fixes: vec![fix],
                 }
             })
             .collect()
@@ -239,8 +261,9 @@ impl IgnoreTracker {
             target_line: line,
             rule_name: rule.to_string(),
             used: false,
-            is_inline: false,
-            content_before_comment: None,
+            fix_start_offset: 0,
+            fix_end_offset: 0,
+            fix_replacement: String::new(),
         });
     }
 }
@@ -681,15 +704,17 @@ server_tokens on;
         let warnings = vec![IgnoreWarning {
             line: 5,
             message: "test warning".to_string(),
-            fixes: vec![Fix::delete(5)],
+            fixes: vec![Fix::replace_range(10, 50, "")],
         }];
 
         let errors = warnings_to_errors(warnings);
         assert_eq!(errors.len(), 1);
         assert!(!errors[0].fixes.is_empty());
         let fix = &errors[0].fixes[0];
-        assert_eq!(fix.line, 5);
-        assert!(fix.delete_line);
+        assert!(fix.is_range_based());
+        assert_eq!(fix.start_offset, Some(10));
+        assert_eq!(fix.end_offset, Some(50));
+        assert_eq!(fix.new_text, "");
     }
 
     #[test]
@@ -839,39 +864,47 @@ server_tokens on;
 
     #[test]
     fn test_unused_comment_only_line_fix() {
-        let content = r#"
-# nginx-lint:ignore server-tokens-enabled reason
-server_tokens off;
-"#;
+        let content = "\n# nginx-lint:ignore server-tokens-enabled reason\nserver_tokens off;\n";
         let (mut tracker, _) = IgnoreTracker::from_content(content);
 
         let errors: Vec<LintError> = vec![];
         let result = filter_errors(errors, &mut tracker);
 
-        // Should have unused warning with delete fix
+        // Should have unused warning with range-based delete fix
         assert_eq!(result.unused_warnings.len(), 1);
         let fix = &result.unused_warnings[0].fixes[0];
-        assert_eq!(fix.line, 2); // Line of comment
-        assert!(fix.delete_line);
+        assert!(fix.is_range_based());
+        // Should delete the comment line including trailing newline
+        assert_eq!(fix.new_text, "");
+        // Verify the fix removes the correct range
+        let mut fixed = content.to_string();
+        fixed.replace_range(
+            fix.start_offset.unwrap()..fix.end_offset.unwrap(),
+            &fix.new_text,
+        );
+        assert_eq!(fixed, "\nserver_tokens off;\n");
     }
 
     #[test]
     fn test_unused_inline_comment_fix() {
-        let content = r#"
-server_tokens off; # nginx-lint:ignore server-tokens-enabled reason
-"#;
+        let content = "\nserver_tokens off; # nginx-lint:ignore server-tokens-enabled reason\n";
         let (mut tracker, _) = IgnoreTracker::from_content(content);
 
         let errors: Vec<LintError> = vec![];
         let result = filter_errors(errors, &mut tracker);
 
-        // Should have unused warning with replace_line fix
+        // Should have unused warning with range-based replace fix
         assert_eq!(result.unused_warnings.len(), 1);
         let fix = &result.unused_warnings[0].fixes[0];
-        assert_eq!(fix.line, 2); // Line of inline comment
-        assert!(!fix.delete_line); // Not deleting entire line
-        assert!(fix.old_text.is_none()); // replace_line uses None for old_text
+        assert!(fix.is_range_based());
         assert_eq!(fix.new_text, "server_tokens off;");
+        // Verify the fix replaces the correct range
+        let mut fixed = content.to_string();
+        fixed.replace_range(
+            fix.start_offset.unwrap()..fix.end_offset.unwrap(),
+            &fix.new_text,
+        );
+        assert_eq!(fixed, "\nserver_tokens off;\n");
     }
 
     // Context comment tests
