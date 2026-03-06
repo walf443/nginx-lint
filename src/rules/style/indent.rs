@@ -1,9 +1,7 @@
 use crate::config::IndentSize;
 use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
-use crate::parser::ast::Config;
-use crate::parser::is_raw_block_directive;
-use std::fs;
+use crate::parser::ast::{Config, ConfigItem};
 use std::path::Path;
 
 /// Rule documentation
@@ -54,187 +52,89 @@ impl Indent {
 }
 
 impl Indent {
-    /// Check indentation on content string directly (used by WASM)
+    /// Check indentation on content string directly (used by WASM and docs)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_content_impl(content)
+        // Parse with error recovery so we get an AST even for broken configs
+        let (config, _errors) = crate::parser::parse_string_with_errors(content);
+        self.check_config(&config)
     }
 
-    /// Detect indent size from the first indented line in the content
-    fn detect_indent_size(content: &str) -> Option<usize> {
-        let mut depth = 0;
-        for line in content.lines() {
-            let trimmed = line.trim();
-
-            // Skip empty lines and comments
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-
-            // Check indentation BEFORE updating depth
-            // We want the first line that is indented at depth 1
-            if depth == 1 {
-                let leading_spaces = line.len() - line.trim_start().len();
-                if leading_spaces > 0 && !line.starts_with('\t') {
-                    // Found the first indented line at depth 1
-                    return Some(leading_spaces);
-                }
-            }
-
-            // Update depth based on braces
-            if trimmed.ends_with('{') {
-                depth += 1;
-            }
-            if trimmed.starts_with('}') {
-                depth -= 1;
-            }
-        }
-        None
-    }
-
-    /// Get the effective indent size (auto-detected or fixed)
-    fn effective_indent_size(&self, content: &str) -> usize {
-        match self.indent_size {
-            IndentSize::Fixed(size) => size,
-            IndentSize::Auto => Self::detect_indent_size(content).unwrap_or(2),
-        }
-    }
-
-    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
+    /// Check indentation using the parsed AST
+    pub fn check_config(&self, config: &Config) -> Vec<LintError> {
+        let indent_size = self.effective_indent_size(&config.items);
         let mut errors = Vec::new();
-        let mut expected_depth: i32 = 0;
-        let indent_size = self.effective_indent_size(content);
-        let mut in_raw_block = false;
-        let mut raw_block_brace_depth = 0;
-        let mut in_multiline_string = false;
-        let mut string_char: Option<char> = None;
-        let mut line_start_offset: usize = 0;
-
-        for (line_num, line) in content.lines().enumerate() {
-            let line_number = line_num + 1;
-            let trimmed = line.trim();
-            let current_line_offset = line_start_offset;
-
-            // Update offset for next line (line length + newline character)
-            line_start_offset += line.len() + 1; // +1 for '\n'
-
-            // Skip empty lines
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Track brace depth inside raw_block (must be before comment check)
-            if in_raw_block {
-                for ch in trimmed.chars() {
-                    if ch == '{' {
-                        raw_block_brace_depth += 1;
-                    } else if ch == '}' {
-                        raw_block_brace_depth -= 1;
-                        if raw_block_brace_depth == 0 {
-                            in_raw_block = false;
-                        }
-                    }
-                }
-                // Skip indentation check for lines inside raw_block (including comments)
-                if in_raw_block {
-                    continue;
-                }
-                // Handle the closing brace line of raw_block
-                if trimmed == "}" {
-                    expected_depth -= 1;
-                    check_line_indentation(
-                        &mut errors,
-                        self.name(),
-                        self.category(),
-                        line,
-                        line_number,
-                        current_line_offset,
-                        expected_depth,
-                        indent_size,
-                    );
-                    continue;
-                }
-            }
-
-            // Check indentation for comments but don't adjust depth
-            if trimmed.starts_with('#') {
-                check_line_indentation(
-                    &mut errors,
-                    self.name(),
-                    self.category(),
-                    line,
-                    line_number,
-                    current_line_offset,
-                    expected_depth,
-                    indent_size,
-                );
-                continue;
-            }
-
-            // Check if we're entering a raw block (like lua_block)
-            if !in_raw_block && !in_multiline_string && is_raw_block_line(trimmed) {
-                in_raw_block = true;
-                raw_block_brace_depth = 1;
-                // Still check indentation for the opening line
-                check_line_indentation(
-                    &mut errors,
-                    self.name(),
-                    self.category(),
-                    line,
-                    line_number,
-                    current_line_offset,
-                    expected_depth,
-                    indent_size,
-                );
-                expected_depth += 1;
-                continue;
-            }
-
-            // Track multiline strings (for mruby inline code etc.)
-            if !in_raw_block {
-                let (still_in_string, new_string_char) =
-                    track_multiline_string(trimmed, in_multiline_string, string_char);
-                if in_multiline_string && still_in_string {
-                    // Skip lines inside multiline strings
-                    in_multiline_string = still_in_string;
-                    string_char = new_string_char;
-                    continue;
-                }
-                in_multiline_string = still_in_string;
-                string_char = new_string_char;
-            }
-
-            // Handle closing brace - adjust depth before checking
-            let closes_block = trimmed.starts_with('}');
-            if closes_block {
-                expected_depth -= 1;
-            }
-
-            check_line_indentation(
-                &mut errors,
-                self.name(),
-                self.category(),
-                line,
-                line_number,
-                current_line_offset,
-                expected_depth,
-                indent_size,
-            );
-
-            // Adjust expected depth after checking if line ends with {
-            if trimmed.ends_with('{') {
-                expected_depth += 1;
-            }
-        }
-
+        self.check_items(&config.items, 0, indent_size, &mut errors);
         errors
     }
 
-    fn name(&self) -> &'static str {
-        "indent"
+    /// Get the effective indent size (auto-detected or fixed)
+    fn effective_indent_size(&self, items: &[ConfigItem]) -> usize {
+        match self.indent_size {
+            IndentSize::Fixed(size) => size,
+            IndentSize::Auto => detect_indent_size_from_ast(items).unwrap_or(2),
+        }
     }
 
-    fn category(&self) -> &'static str {
-        "style"
+    /// Recursively walk the AST and check indentation at each depth
+    fn check_items(
+        &self,
+        items: &[ConfigItem],
+        depth: usize,
+        indent_size: usize,
+        errors: &mut Vec<LintError>,
+    ) {
+        for item in items {
+            match item {
+                ConfigItem::Directive(d) => {
+                    let ws_start = d.span.start.offset - d.leading_whitespace.len();
+                    check_whitespace(
+                        errors,
+                        &d.leading_whitespace,
+                        depth,
+                        indent_size,
+                        d.span.start.line,
+                        ws_start,
+                    );
+
+                    if let Some(block) = &d.block
+                        && !block.is_raw()
+                    {
+                        self.check_items(&block.items, depth + 1, indent_size, errors);
+                        // Check closing brace indentation (should match the opening directive's depth)
+                        let closing_ws = &block.closing_brace_leading_whitespace;
+                        if !closing_ws.is_empty() || depth > 0 {
+                            let closing_brace_offset = block.span.end.offset - 1;
+                            let closing_ws_start = closing_brace_offset - closing_ws.len();
+                            let closing_line = if block.span.end.column > 1 {
+                                block.span.end.line
+                            } else {
+                                block.span.end.line.saturating_sub(1)
+                            };
+                            check_whitespace(
+                                errors,
+                                closing_ws,
+                                depth,
+                                indent_size,
+                                closing_line,
+                                closing_ws_start,
+                            );
+                        }
+                    }
+                }
+                ConfigItem::Comment(c) => {
+                    let ws_start = c.span.start.offset - c.leading_whitespace.len();
+                    check_whitespace(
+                        errors,
+                        &c.leading_whitespace,
+                        depth,
+                        indent_size,
+                        c.span.start.line,
+                        ws_start,
+                    );
+                }
+                ConfigItem::BlankLine(_) => {}
+            }
+        }
     }
 }
 
@@ -251,104 +151,81 @@ impl LintRule for Indent {
         "Detects inconsistent indentation in nginx configuration"
     }
 
-    fn check(&self, _config: &Config, path: &Path) -> Vec<LintError> {
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-
-        self.check_content_impl(&content)
+    fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
+        self.check_config(config)
     }
 }
 
-/// Check if a line starts a raw block directive (like lua_block)
-fn is_raw_block_line(line: &str) -> bool {
-    let directive_name = line.split_whitespace().next().unwrap_or("");
-    is_raw_block_directive(directive_name) && line.contains('{')
-}
-
-/// Track multiline string state
-/// Returns (still_in_string, string_char)
-fn track_multiline_string(
-    line: &str,
-    was_in_string: bool,
-    prev_string_char: Option<char>,
-) -> (bool, Option<char>) {
-    let mut in_string = was_in_string;
-    let mut current_char = prev_string_char;
-    let mut prev_ch = None;
-
-    for ch in line.chars() {
-        if (ch == '\'' || ch == '"') && prev_ch != Some('\\') {
-            if !in_string {
-                in_string = true;
-                current_char = Some(ch);
-            } else if current_char == Some(ch) {
-                in_string = false;
-                current_char = None;
+/// Detect indent size from AST by finding the first item inside a top-level block
+fn detect_indent_size_from_ast(items: &[ConfigItem]) -> Option<usize> {
+    for item in items {
+        if let ConfigItem::Directive(d) = item
+            && let Some(block) = &d.block
+        {
+            // Find the first non-blank item in this block
+            for inner in &block.items {
+                let ws = match inner {
+                    ConfigItem::Directive(d) => &d.leading_whitespace,
+                    ConfigItem::Comment(c) => &c.leading_whitespace,
+                    ConfigItem::BlankLine(_) => continue,
+                };
+                if !ws.is_empty() && !ws.contains('\t') {
+                    return Some(ws.len());
+                }
             }
         }
-        prev_ch = Some(ch);
     }
-
-    (in_string, current_char)
+    None
 }
 
-/// Check indentation for a single line
-#[allow(clippy::too_many_arguments)]
-fn check_line_indentation(
+/// Check a single leading_whitespace value against expected indentation
+fn check_whitespace(
     errors: &mut Vec<LintError>,
-    rule_name: &'static str,
-    category: &'static str,
-    line: &str,
-    line_number: usize,
-    line_start_offset: usize,
-    expected_depth: i32,
+    leading_ws: &str,
+    expected_depth: usize,
     indent_size: usize,
+    line: usize,
+    ws_start_offset: usize,
 ) {
-    // Calculate current indentation
-    let leading_spaces = line.len() - line.trim_start().len();
+    let expected_spaces = expected_depth * indent_size;
 
-    let expected_spaces = (expected_depth.max(0) as usize) * indent_size;
-
-    // Detect if line uses tabs
-    if line.starts_with('\t') {
+    // Detect tabs
+    if leading_ws.contains('\t') {
         let correct_indent = " ".repeat(expected_spaces);
-        // Use range-based fix to replace only the leading whitespace
         let fix = Fix::replace_range(
-            line_start_offset,
-            line_start_offset + leading_spaces,
+            ws_start_offset,
+            ws_start_offset + leading_ws.len(),
             &correct_indent,
         );
         errors.push(
             LintError::new(
-                rule_name,
-                category,
+                "indent",
+                "style",
                 "Use spaces instead of tabs for indentation",
                 Severity::Warning,
             )
-            .with_location(line_number, 1)
+            .with_location(line, 1)
             .with_fix(fix),
         );
         return;
     }
 
-    // Check indentation
-    if leading_spaces != expected_spaces {
+    // Check space count
+    if leading_ws.len() != expected_spaces {
         let message = format!(
             "Expected {} spaces of indentation, found {}",
-            expected_spaces, leading_spaces
+            expected_spaces,
+            leading_ws.len()
         );
         let correct_indent = " ".repeat(expected_spaces);
-        // Use range-based fix to replace only the leading whitespace
         let fix = Fix::replace_range(
-            line_start_offset,
-            line_start_offset + leading_spaces,
+            ws_start_offset,
+            ws_start_offset + leading_ws.len(),
             &correct_indent,
         );
         errors.push(
-            LintError::new(rule_name, category, &message, Severity::Warning)
-                .with_location(line_number, 1)
+            LintError::new("indent", "style", &message, Severity::Warning)
+                .with_location(line, 1)
                 .with_fix(fix),
         );
     }
@@ -357,23 +234,16 @@ fn check_line_indentation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ast::Config;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     fn check_content(content: &str) -> Vec<LintError> {
         let rule = Indent::default();
         rule.check_content(content)
     }
 
-    fn check_content_with_file(content: &str) -> Vec<LintError> {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(file, "{}", content).unwrap();
-        let path = file.path().to_path_buf();
-
+    fn check_content_with_config(content: &str) -> Vec<LintError> {
+        let config = crate::parser::parse_string(content).unwrap();
         let rule = Indent::default();
-        let config = Config::new();
-        rule.check(&config, &path)
+        rule.check(&config, Path::new("test.conf"))
     }
 
     #[test]
@@ -477,7 +347,7 @@ local x = 1
 }
 "#;
         let content_errors = check_content(content);
-        let file_errors = check_content_with_file(content);
+        let file_errors = check_content_with_config(content);
         assert_eq!(content_errors.len(), file_errors.len());
     }
 
@@ -521,15 +391,15 @@ local x = 1
     #[test]
     fn test_detect_indent_size() {
         // Test the detection function directly
-        let content_4 = "http {\n    server {\n    }\n}\n";
-        assert_eq!(Indent::detect_indent_size(content_4), Some(4));
+        let config_4 = crate::parser::parse_string("http {\n    server {\n    }\n}\n").unwrap();
+        assert_eq!(detect_indent_size_from_ast(&config_4.items), Some(4));
 
-        let content_2 = "http {\n  server {\n  }\n}\n";
-        assert_eq!(Indent::detect_indent_size(content_2), Some(2));
+        let config_2 = crate::parser::parse_string("http {\n  server {\n  }\n}\n").unwrap();
+        assert_eq!(detect_indent_size_from_ast(&config_2.items), Some(2));
 
-        let content_tab = "http {\n\tserver {\n\t}\n}\n";
+        let config_tab = crate::parser::parse_string("http {\n\tserver {\n\t}\n}\n").unwrap();
         // Tab indentation returns None (not space-based)
-        assert_eq!(Indent::detect_indent_size(content_tab), None);
+        assert_eq!(detect_indent_size_from_ast(&config_tab.items), None);
     }
 
     #[test]
