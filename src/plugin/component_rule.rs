@@ -7,34 +7,23 @@
 use super::error::PluginError;
 use crate::linter::{LintError, LintRule, Severity};
 use crate::parser::ast::{self, Config};
-use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmtime::component::{Resource, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder, Trap};
 
 /// Plugin spec returned by the plugin
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct PluginSpec {
     pub name: String,
     pub category: String,
     pub description: String,
-    #[serde(default = "default_api_version")]
     pub api_version: String,
-    #[serde(default)]
     pub severity: Option<String>,
-    #[serde(default)]
     pub why: Option<String>,
-    #[serde(default)]
     pub bad_example: Option<String>,
-    #[serde(default)]
     pub good_example: Option<String>,
-    #[serde(default)]
     pub references: Option<Vec<String>>,
-}
-
-fn default_api_version() -> String {
-    "1.0".to_string()
 }
 
 /// Host-side config resource, holding the parsed Config.

@@ -19,9 +19,6 @@ pub enum PluginError {
     #[error("Failed to instantiate WASM module '{path}': {message}")]
     InstantiateError { path: PathBuf, message: String },
 
-    #[error("Missing required export '{export}' in plugin '{path}'")]
-    MissingExport { path: PathBuf, export: String },
-
     #[error("Invalid plugin spec from '{path}': {message}")]
     InvalidPluginSpec { path: PathBuf, message: String },
 
@@ -30,12 +27,6 @@ pub enum PluginError {
 
     #[error("Plugin execution timed out in '{path}'")]
     Timeout { path: PathBuf },
-
-    #[error("Plugin exceeded memory limit in '{path}'")]
-    MemoryLimitExceeded { path: PathBuf },
-
-    #[error("Failed to parse plugin result from '{path}': {message}")]
-    ResultParseError { path: PathBuf, message: String },
 
     #[error("Plugin directory not found: {path}")]
     DirectoryNotFound { path: PathBuf },
@@ -69,13 +60,6 @@ impl PluginError {
         }
     }
 
-    pub fn missing_export(path: impl Into<PathBuf>, export: impl Into<String>) -> Self {
-        Self::MissingExport {
-            path: path.into(),
-            export: export.into(),
-        }
-    }
-
     pub fn invalid_plugin_spec(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
         Self::InvalidPluginSpec {
             path: path.into(),
@@ -92,17 +76,6 @@ impl PluginError {
 
     pub fn timeout(path: impl Into<PathBuf>) -> Self {
         Self::Timeout { path: path.into() }
-    }
-
-    pub fn memory_limit_exceeded(path: impl Into<PathBuf>) -> Self {
-        Self::MemoryLimitExceeded { path: path.into() }
-    }
-
-    pub fn result_parse_error(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
-        Self::ResultParseError {
-            path: path.into(),
-            message: message.into(),
-        }
     }
 
     pub fn directory_not_found(path: impl Into<PathBuf>) -> Self {
