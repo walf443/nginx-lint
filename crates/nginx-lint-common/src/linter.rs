@@ -72,6 +72,7 @@ pub struct Fix {
 
 impl Fix {
     /// Create a fix that replaces text on a specific line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn replace(line: usize, old_text: &str, new_text: &str) -> Self {
         Self {
             line,
@@ -85,6 +86,7 @@ impl Fix {
     }
 
     /// Create a fix that replaces an entire line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn replace_line(line: usize, new_text: &str) -> Self {
         Self {
             line,
@@ -98,6 +100,7 @@ impl Fix {
     }
 
     /// Create a fix that deletes an entire line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn delete(line: usize) -> Self {
         Self {
             line,
@@ -111,6 +114,7 @@ impl Fix {
     }
 
     /// Create a fix that inserts a new line after the specified line
+    #[deprecated(note = "Use Fix::replace_range() for offset-based fixes instead")]
     pub fn insert_after(line: usize, new_text: &str) -> Self {
         Self {
             line,

@@ -624,63 +624,119 @@ fn offset_to_line(content: &str, offset: usize) -> usize {
     content[..offset].chars().filter(|&c| c == '\n').count() + 1
 }
 
+/// Compute byte offset of the start of each line.
+/// Returns vec where index 0 = offset of line 1, plus an extra entry = content.len().
+fn compute_line_starts(content: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            starts.push(i + 1);
+        }
+    }
+    starts.push(content.len());
+    starts
+}
+
+/// Convert a line-based Fix into an offset-based one.
+fn normalize_line_fix(fix: &Fix, content: &str, line_starts: &[usize]) -> Option<Fix> {
+    if fix.line == 0 {
+        return None;
+    }
+
+    let num_lines = line_starts.len() - 1;
+
+    if fix.delete_line {
+        if fix.line > num_lines {
+            return None;
+        }
+        let start = line_starts[fix.line - 1];
+        let end = if fix.line < num_lines {
+            line_starts[fix.line]
+        } else {
+            let end = line_starts[fix.line];
+            if start > 0 && content.as_bytes().get(start - 1) == Some(&b'\n') {
+                return Some(Fix::replace_range(start - 1, end, ""));
+            }
+            end
+        };
+        return Some(Fix::replace_range(start, end, ""));
+    }
+
+    if fix.insert_after {
+        if fix.line > num_lines {
+            return None;
+        }
+        let insert_offset = if fix.line < num_lines {
+            line_starts[fix.line]
+        } else {
+            content.len()
+        };
+        let new_text = if insert_offset == content.len() && !content.ends_with('\n') {
+            format!("\n{}", fix.new_text)
+        } else {
+            format!("{}\n", fix.new_text)
+        };
+        return Some(Fix::replace_range(insert_offset, insert_offset, &new_text));
+    }
+
+    if fix.line > num_lines {
+        return None;
+    }
+
+    let line_start = line_starts[fix.line - 1];
+    let line_end_with_newline = line_starts[fix.line];
+    let line_end = if line_end_with_newline > line_start
+        && content.as_bytes().get(line_end_with_newline - 1) == Some(&b'\n')
+    {
+        line_end_with_newline - 1
+    } else {
+        line_end_with_newline
+    };
+
+    if let Some(ref old_text) = fix.old_text {
+        let line_content = &content[line_start..line_end];
+        if let Some(pos) = line_content.find(old_text.as_str()) {
+            let start = line_start + pos;
+            let end = start + old_text.len();
+            return Some(Fix::replace_range(start, end, &fix.new_text));
+        }
+        return None;
+    }
+
+    Some(Fix::replace_range(line_start, line_end, &fix.new_text))
+}
+
 /// Apply fixes to content and return the result
 fn apply_fixes(content: &str, fixes: &[&Fix]) -> String {
-    let (range_fixes, line_fixes): (Vec<&&Fix>, Vec<&&Fix>) = fixes
-        .iter()
-        .partition(|f| f.start_offset.is_some() && f.end_offset.is_some());
+    let line_starts = compute_line_starts(content);
 
-    let mut result = content.to_string();
-
-    if !range_fixes.is_empty() {
-        let mut sorted_range_fixes = range_fixes;
-        sorted_range_fixes.sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
-
-        let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
-
-        for fix in sorted_range_fixes {
-            let start = fix.start_offset.unwrap();
-            let end = fix.end_offset.unwrap();
-
-            let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
-            if overlaps {
-                continue;
-            }
-
-            if start <= result.len() && end <= result.len() && start <= end {
-                result.replace_range(start..end, &fix.new_text);
-                applied_ranges.push((start, start + fix.new_text.len()));
-            }
+    let mut range_fixes: Vec<Fix> = Vec::with_capacity(fixes.len());
+    for fix in fixes {
+        if fix.is_range_based() {
+            range_fixes.push((*fix).clone());
+        } else if let Some(normalized) = normalize_line_fix(fix, content, &line_starts) {
+            range_fixes.push(normalized);
         }
     }
 
-    if !line_fixes.is_empty() {
-        let mut lines: Vec<String> = result.lines().map(|l| l.to_string()).collect();
+    range_fixes.sort_by(|a, b| b.start_offset.unwrap().cmp(&a.start_offset.unwrap()));
 
-        let mut sorted_line_fixes = line_fixes;
-        sorted_line_fixes.sort_by(|a, b| b.line.cmp(&a.line));
+    let mut result = content.to_string();
+    let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
 
-        for fix in sorted_line_fixes {
-            let line_idx = fix.line.saturating_sub(1);
+    for fix in &range_fixes {
+        let start = fix.start_offset.unwrap();
+        let end = fix.end_offset.unwrap();
 
-            if fix.delete_line {
-                if line_idx < lines.len() {
-                    lines.remove(line_idx);
-                }
-            } else if fix.insert_after {
-                if line_idx < lines.len() {
-                    lines.insert(line_idx + 1, fix.new_text.clone());
-                }
-            } else if let Some(old_text) = &fix.old_text {
-                if line_idx < lines.len() {
-                    lines[line_idx] = lines[line_idx].replace(old_text, &fix.new_text);
-                }
-            } else if line_idx < lines.len() {
-                lines[line_idx] = fix.new_text.clone();
-            }
+        let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
+        if overlaps {
+            continue;
         }
 
-        result = lines.join("\n");
+        if start <= result.len() && end <= result.len() && start <= end {
+            result.replace_range(start..end, &fix.new_text);
+            applied_ranges.push((start, start + fix.new_text.len()));
+        }
     }
 
     result
