@@ -106,7 +106,7 @@ fn test_wasm_plugins_load_successfully() {
 
     let mut loaded = 0;
     for case in &plugins {
-        let result = loader.load_plugin_dynamic(&case.wasm_path);
+        let result = loader.load_plugin(&case.wasm_path);
         match result {
             Ok(_) => {}
             Err(e) => panic!("Failed to load WASM plugin '{}': {}", case.name, e),
@@ -130,7 +130,7 @@ fn test_wasm_plugins_detect_errors_in_bad_examples() {
         }
 
         let rule = loader
-            .load_plugin_dynamic(&case.wasm_path)
+            .load_plugin(&case.wasm_path)
             .unwrap_or_else(|e| panic!("Failed to load '{}': {}", case.name, e));
 
         let bad_conf = fs::read_to_string(&bad_conf_path)
@@ -166,7 +166,7 @@ fn test_wasm_plugins_no_errors_in_good_examples() {
         }
 
         let rule = loader
-            .load_plugin_dynamic(&case.wasm_path)
+            .load_plugin(&case.wasm_path)
             .unwrap_or_else(|e| panic!("Failed to load '{}': {}", case.name, e));
 
         let good_conf = fs::read_to_string(&good_conf_path)
@@ -207,7 +207,7 @@ fn test_wasm_plugins_fixtures_detect_errors() {
         }
 
         let rule = loader
-            .load_plugin_dynamic(&case.wasm_path)
+            .load_plugin(&case.wasm_path)
             .unwrap_or_else(|e| panic!("Failed to load '{}': {}", case.name, e));
 
         let rule_name = rule.name().to_string();
@@ -277,7 +277,7 @@ fn test_wasm_plugins_fixtures_fix_application() {
         }
 
         let rule = loader
-            .load_plugin_dynamic(&case.wasm_path)
+            .load_plugin(&case.wasm_path)
             .unwrap_or_else(|e| panic!("Failed to load '{}': {}", case.name, e));
 
         let rule_name = rule.name().to_string();
@@ -376,7 +376,7 @@ fn test_wasm_plugins_example_fix_produces_good() {
         }
 
         let rule = loader
-            .load_plugin_dynamic(&case.wasm_path)
+            .load_plugin(&case.wasm_path)
             .unwrap_or_else(|e| panic!("Failed to load '{}': {}", case.name, e));
 
         let rule_name = rule.name().to_string();

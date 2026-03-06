@@ -17,4 +17,3 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 [features]
 default = ["wit-export"]
 wit-export = ["nginx-lint-plugin/wit-export"]
-wasm-export = []  # Legacy core module export

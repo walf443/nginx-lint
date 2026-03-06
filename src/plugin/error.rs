@@ -19,9 +19,6 @@ pub enum PluginError {
     #[error("Failed to instantiate WASM module '{path}': {message}")]
     InstantiateError { path: PathBuf, message: String },
 
-    #[error("Missing required export '{export}' in plugin '{path}'")]
-    MissingExport { path: PathBuf, export: String },
-
     #[error("Invalid plugin spec from '{path}': {message}")]
     InvalidPluginSpec { path: PathBuf, message: String },
 
@@ -31,17 +28,14 @@ pub enum PluginError {
     #[error("Plugin execution timed out in '{path}'")]
     Timeout { path: PathBuf },
 
-    #[error("Plugin exceeded memory limit in '{path}'")]
-    MemoryLimitExceeded { path: PathBuf },
-
-    #[error("Failed to parse plugin result from '{path}': {message}")]
-    ResultParseError { path: PathBuf, message: String },
-
     #[error("Plugin directory not found: {path}")]
     DirectoryNotFound { path: PathBuf },
 
     #[error("Invalid WASM file '{path}': not a valid WebAssembly module")]
     InvalidWasmFile { path: PathBuf },
+
+    #[error("Unsupported WASM format '{path}': {message}")]
+    UnsupportedFormat { path: PathBuf, message: String },
 }
 
 impl PluginError {
@@ -66,13 +60,6 @@ impl PluginError {
         }
     }
 
-    pub fn missing_export(path: impl Into<PathBuf>, export: impl Into<String>) -> Self {
-        Self::MissingExport {
-            path: path.into(),
-            export: export.into(),
-        }
-    }
-
     pub fn invalid_plugin_spec(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
         Self::InvalidPluginSpec {
             path: path.into(),
@@ -91,22 +78,18 @@ impl PluginError {
         Self::Timeout { path: path.into() }
     }
 
-    pub fn memory_limit_exceeded(path: impl Into<PathBuf>) -> Self {
-        Self::MemoryLimitExceeded { path: path.into() }
-    }
-
-    pub fn result_parse_error(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
-        Self::ResultParseError {
-            path: path.into(),
-            message: message.into(),
-        }
-    }
-
     pub fn directory_not_found(path: impl Into<PathBuf>) -> Self {
         Self::DirectoryNotFound { path: path.into() }
     }
 
     pub fn invalid_wasm_file(path: impl Into<PathBuf>) -> Self {
         Self::InvalidWasmFile { path: path.into() }
+    }
+
+    pub fn unsupported_format(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self::UnsupportedFormat {
+            path: path.into(),
+            message: message.into(),
+        }
     }
 }

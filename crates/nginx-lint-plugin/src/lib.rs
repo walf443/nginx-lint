@@ -7,7 +7,7 @@
 //!
 //! 1. Create a library crate with `crate-type = ["cdylib", "rlib"]`
 //! 2. Implement the [`Plugin`] trait
-//! 3. Register with [`export_plugin!`]
+//! 3. Register with [`export_component_plugin!`]
 //! 4. Build with `cargo build --target wasm32-unknown-unknown --release`
 //!
 //! # Modules
@@ -57,7 +57,7 @@
 //!     }
 //! }
 //!
-//! // export_plugin!(MyRule);  // Required for WASM build
+//! // export_component_plugin!(MyRule);  // Required for WASM build
 //!
 //! // Verify it works
 //! let plugin = MyRule;
@@ -99,164 +99,17 @@ pub use nginx_lint_common::parser;
 ///
 /// This re-exports all core types ([`Plugin`], [`PluginSpec`], [`LintError`], [`Fix`],
 /// [`Config`], [`Directive`], etc.), extension traits ([`ConfigExt`], [`DirectiveExt`]),
-/// the [`helpers`] module, and the [`export_plugin!`] macro.
+/// the [`helpers`] module, and the [`export_component_plugin!`] macro.
 pub mod prelude {
     pub use super::export_component_plugin;
-    pub use super::export_plugin;
     pub use super::helpers;
     pub use super::types::API_VERSION;
     pub use super::types::*;
 }
 
-/// Macro to export a plugin implementation (legacy core module format)
-///
-/// **Deprecated**: Use [`export_component_plugin!`] instead, which generates
-/// WIT component model exports. This macro generates legacy core WASM module
-/// exports and will be removed in a future version.
-///
-/// # Example
-///
-/// ```
-/// use nginx_lint_plugin::prelude::*;
-///
-/// #[derive(Default)]
-/// struct MyPlugin;
-///
-/// impl Plugin for MyPlugin {
-///     fn spec(&self) -> PluginSpec {
-///         PluginSpec::new("my-plugin", "custom", "My plugin")
-///     }
-///
-///     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
-///         Vec::new()
-///     }
-/// }
-///
-/// // Preferred:
-/// export_component_plugin!(MyPlugin);
-/// ```
-#[deprecated(
-    since = "0.7.0",
-    note = "Use export_component_plugin! instead for WIT component model support"
-)]
-#[doc(hidden)]
-pub fn _export_plugin_deprecated() {}
-
-#[macro_export]
-macro_rules! export_plugin {
-    ($plugin_type:ty) => {
-        const _: fn() = $crate::_export_plugin_deprecated;
-
-        #[cfg(all(target_arch = "wasm32", feature = "wasm-export"))]
-        const _: () = {
-            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
-            static PLUGIN_SPEC_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-            static CHECK_RESULT_CACHE: std::sync::Mutex<String> =
-                std::sync::Mutex::new(String::new());
-
-            fn get_plugin() -> &'static $plugin_type {
-                PLUGIN.get_or_init(|| <$plugin_type>::default())
-            }
-
-            /// Allocate memory for the host to write data
-            #[unsafe(no_mangle)]
-            pub extern "C" fn alloc(size: u32) -> *mut u8 {
-                let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
-                unsafe { std::alloc::alloc(layout) }
-            }
-
-            /// Deallocate memory
-            #[unsafe(no_mangle)]
-            pub extern "C" fn dealloc(ptr: *mut u8, size: u32) {
-                let layout = std::alloc::Layout::from_size_align(size as usize, 1).unwrap();
-                unsafe { std::alloc::dealloc(ptr, layout) }
-            }
-
-            /// Get the length of the plugin spec JSON
-            #[unsafe(no_mangle)]
-            pub extern "C" fn plugin_spec_len() -> u32 {
-                let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
-                    let plugin = get_plugin();
-                    let info = $crate::Plugin::spec(plugin);
-                    serde_json::to_string(&info).unwrap_or_default()
-                });
-                info.len() as u32
-            }
-
-            /// Get the plugin spec JSON pointer
-            #[unsafe(no_mangle)]
-            pub extern "C" fn plugin_spec() -> *const u8 {
-                let info = PLUGIN_SPEC_CACHE.get_or_init(|| {
-                    let plugin = get_plugin();
-                    let info = $crate::Plugin::spec(plugin);
-                    serde_json::to_string(&info).unwrap_or_default()
-                });
-                info.as_ptr()
-            }
-
-            /// Run the lint check
-            #[unsafe(no_mangle)]
-            pub extern "C" fn check(
-                config_ptr: *const u8,
-                config_len: u32,
-                path_ptr: *const u8,
-                path_len: u32,
-            ) -> *const u8 {
-                // Read config JSON from memory
-                let config_json = unsafe {
-                    let slice = std::slice::from_raw_parts(config_ptr, config_len as usize);
-                    std::str::from_utf8_unchecked(slice)
-                };
-
-                // Read path from memory
-                let path = unsafe {
-                    let slice = std::slice::from_raw_parts(path_ptr, path_len as usize);
-                    std::str::from_utf8_unchecked(slice)
-                };
-
-                // Parse config
-                let config: $crate::Config = match serde_json::from_str(config_json) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let errors = vec![$crate::LintError::error(
-                            "plugin-error",
-                            "plugin",
-                            &format!("Failed to parse config: {}", e),
-                            0,
-                            0,
-                        )];
-                        let result = serde_json::to_string(&errors).unwrap_or_default();
-                        let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
-                        *cache = result;
-                        return cache.as_ptr();
-                    }
-                };
-
-                // Run the check
-                let plugin = get_plugin();
-                let errors = $crate::Plugin::check(plugin, &config, path);
-
-                // Serialize result
-                let result = serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string());
-                let mut cache = CHECK_RESULT_CACHE.lock().unwrap();
-                *cache = result;
-                cache.as_ptr()
-            }
-
-            /// Get the length of the check result
-            #[unsafe(no_mangle)]
-            pub extern "C" fn check_result_len() -> u32 {
-                let cache = CHECK_RESULT_CACHE.lock().unwrap();
-                cache.len() as u32
-            }
-        };
-    };
-}
-
 /// Macro to export a plugin as a WIT component
 ///
 /// This generates the WIT component model exports for your plugin.
-/// Use this instead of `export_plugin!` when building component model plugins.
 ///
 /// # Example
 ///

@@ -1,11 +1,9 @@
 //! WASM plugin loader
 //!
-//! Handles discovering, loading, and validating WASM plugins from a directory.
-//! Supports both core WASM modules (legacy) and component model plugins.
+//! Handles discovering, loading, and validating WASM component model plugins from a directory.
 
 use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
-use super::wasm_rule::WasmLintRule;
 use crate::linter::LintRule;
 use std::fs;
 use std::path::Path;
@@ -17,16 +15,8 @@ const MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
 /// Fuel limit for CPU metering (prevents infinite loops)
 const FUEL_LIMIT: u64 = 10_000_000_000;
 
-/// Detected WASM format
-enum WasmFormat {
-    /// Core WASM module (version 01 00 00 00)
-    CoreModule,
-    /// Component model (version 0d 00 01 00)
-    Component,
-}
-
-/// Detect whether a WASM binary is a core module or a component
-fn detect_wasm_format(bytes: &[u8]) -> Option<WasmFormat> {
+/// Detect whether a WASM binary is a component model file
+fn is_component_model(bytes: &[u8]) -> Option<bool> {
     if bytes.len() < 8 {
         return None;
     }
@@ -36,9 +26,9 @@ fn detect_wasm_format(bytes: &[u8]) -> Option<WasmFormat> {
     }
     // Check version field (bytes 4-7)
     match &bytes[4..8] {
-        [0x01, 0x00, 0x00, 0x00] => Some(WasmFormat::CoreModule),
-        [0x0d, 0x00, 0x01, 0x00] => Some(WasmFormat::Component),
-        _ => None, // Unknown version, not a valid WASM format
+        [0x0d, 0x00, 0x01, 0x00] => Some(true),
+        [0x01, 0x00, 0x00, 0x00] => Some(false), // Core module (no longer supported)
+        _ => None,
     }
 }
 
@@ -102,61 +92,13 @@ impl PluginLoader {
         self.fuel_enabled
     }
 
-    /// Load all WASM plugins from a directory (returns trait objects to support both formats)
-    pub fn load_plugins_dynamic(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+    /// Load all WASM plugins from a directory
+    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
         if !dir.exists() || !dir.is_dir() {
             return Err(PluginError::directory_not_found(dir));
         }
 
         let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
-        let entries = fs::read_dir(dir).map_err(|e| PluginError::io_error(dir, e))?;
-
-        for entry in entries {
-            let entry = entry.map_err(|e| PluginError::io_error(dir, e))?;
-            let path = entry.path();
-
-            if path.extension().is_some_and(|ext| ext == "wasm") {
-                match self.load_plugin_dynamic(&path) {
-                    Ok(plugin) => plugins.push(plugin),
-                    Err(e) => {
-                        eprintln!("Warning: Failed to load plugin {:?}: {}", path, e);
-                    }
-                }
-            }
-        }
-
-        Ok(plugins)
-    }
-
-    /// Load a single WASM plugin, auto-detecting format (core module or component)
-    pub fn load_plugin_dynamic(&self, path: &Path) -> Result<Box<dyn LintRule>, PluginError> {
-        let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
-
-        match detect_wasm_format(&wasm_bytes) {
-            Some(WasmFormat::Component) => {
-                let rule = self.load_component_from_bytes(path, &wasm_bytes)?;
-                Ok(Box::new(rule))
-            }
-            Some(WasmFormat::CoreModule) => {
-                let rule = self.load_core_module_from_bytes(path, &wasm_bytes)?;
-                Ok(Box::new(rule))
-            }
-            None => Err(PluginError::invalid_wasm_file(path)),
-        }
-    }
-
-    /// Load all WASM plugins from a directory (core module only)
-    ///
-    /// **Deprecated**: Use [`load_plugins_dynamic`] instead, which auto-detects
-    /// core modules and component model plugins.
-    #[deprecated(note = "Use load_plugins_dynamic instead")]
-    #[allow(deprecated)]
-    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<WasmLintRule>, PluginError> {
-        if !dir.exists() || !dir.is_dir() {
-            return Err(PluginError::directory_not_found(dir));
-        }
-
-        let mut plugins = Vec::new();
         let entries = fs::read_dir(dir).map_err(|e| PluginError::io_error(dir, e))?;
 
         for entry in entries {
@@ -176,40 +118,21 @@ impl PluginLoader {
         Ok(plugins)
     }
 
-    /// Load a single core module WASM plugin from a file
-    ///
-    /// **Deprecated**: Use [`load_plugin_dynamic`] instead, which auto-detects
-    /// core modules and component model plugins.
-    #[deprecated(note = "Use load_plugin_dynamic instead")]
-    pub fn load_plugin(&self, path: &Path) -> Result<WasmLintRule, PluginError> {
+    /// Load a single WASM plugin from a file
+    pub fn load_plugin(&self, path: &Path) -> Result<Box<dyn LintRule>, PluginError> {
         let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
 
-        if wasm_bytes.len() < 4 || &wasm_bytes[0..4] != b"\0asm" {
-            return Err(PluginError::invalid_wasm_file(path));
+        match is_component_model(&wasm_bytes) {
+            Some(true) => {
+                let rule = self.load_component_from_bytes(path, &wasm_bytes)?;
+                Ok(Box::new(rule))
+            }
+            Some(false) => Err(PluginError::unsupported_format(
+                path,
+                "Legacy core WASM modules are no longer supported. Please rebuild your plugin with export_component_plugin! and wasm-tools component new.",
+            )),
+            None => Err(PluginError::invalid_wasm_file(path)),
         }
-
-        self.load_core_module_from_bytes(path, &wasm_bytes)
-    }
-
-    /// Load a core module from bytes
-    fn load_core_module_from_bytes(
-        &self,
-        path: &Path,
-        wasm_bytes: &[u8],
-    ) -> Result<WasmLintRule, PluginError> {
-        let fuel_limit = if self.fuel_enabled {
-            self.fuel_limit()
-        } else {
-            0
-        };
-        WasmLintRule::new(
-            &self.engine,
-            path.to_path_buf(),
-            wasm_bytes,
-            self.memory_limit(),
-            fuel_limit,
-            self.fuel_enabled,
-        )
     }
 
     /// Load a component from bytes
@@ -255,7 +178,7 @@ mod tests {
     fn test_load_plugins_empty_dir() {
         let loader = PluginLoader::new().unwrap();
         let dir = tempdir().unwrap();
-        let plugins = loader.load_plugins_dynamic(dir.path());
+        let plugins = loader.load_plugins(dir.path());
         assert!(plugins.is_ok());
         assert!(plugins.unwrap().is_empty());
     }
@@ -263,7 +186,7 @@ mod tests {
     #[test]
     fn test_load_plugins_nonexistent_dir() {
         let loader = PluginLoader::new().unwrap();
-        let result = loader.load_plugins_dynamic(Path::new("/nonexistent/path"));
+        let result = loader.load_plugins(Path::new("/nonexistent/path"));
         assert!(matches!(result, Err(PluginError::DirectoryNotFound { .. })));
     }
 
@@ -274,97 +197,67 @@ mod tests {
         let wasm_path = dir.path().join("invalid.wasm");
         fs::write(&wasm_path, b"not a wasm file").unwrap();
 
-        let result = loader.load_plugin_dynamic(&wasm_path);
+        let result = loader.load_plugin(&wasm_path);
         assert!(matches!(result, Err(PluginError::InvalidWasmFile { .. })));
     }
 
     #[test]
-    fn test_detect_core_module() {
+    fn test_core_module_rejected() {
+        let loader = PluginLoader::new().unwrap();
+        let dir = tempdir().unwrap();
+        let wasm_path = dir.path().join("legacy.wasm");
         // Core module: magic + version 01 00 00 00
-        let bytes = b"\0asm\x01\x00\x00\x00";
-        assert!(matches!(
-            detect_wasm_format(bytes),
-            Some(WasmFormat::CoreModule)
-        ));
+        fs::write(&wasm_path, b"\0asm\x01\x00\x00\x00").unwrap();
+
+        let result = loader.load_plugin(&wasm_path);
+        assert!(matches!(result, Err(PluginError::UnsupportedFormat { .. })));
     }
 
     #[test]
     fn test_detect_component() {
         // Component: magic + version 0d 00 01 00
         let bytes = b"\0asm\x0d\x00\x01\x00";
-        assert!(matches!(
-            detect_wasm_format(bytes),
-            Some(WasmFormat::Component)
-        ));
+        assert_eq!(is_component_model(bytes), Some(true));
+    }
+
+    #[test]
+    fn test_detect_core_module() {
+        let bytes = b"\0asm\x01\x00\x00\x00";
+        assert_eq!(is_component_model(bytes), Some(false));
     }
 
     #[test]
     fn test_detect_invalid() {
         let bytes = b"not wasm";
-        assert!(detect_wasm_format(bytes).is_none());
+        assert!(is_component_model(bytes).is_none());
     }
 
     #[test]
     fn test_detect_too_short() {
         let bytes = b"\0asm";
-        assert!(detect_wasm_format(bytes).is_none());
+        assert!(is_component_model(bytes).is_none());
     }
 
     #[test]
     fn test_detect_unknown_version() {
-        // Unknown version should return None
         let bytes = b"\0asm\x02\x00\x00\x00";
-        assert!(detect_wasm_format(bytes).is_none());
+        assert!(is_component_model(bytes).is_none());
     }
 
     #[test]
-    fn test_load_plugins_dynamic_empty_dir() {
+    fn test_load_plugins_skips_non_wasm() {
         let loader = PluginLoader::new().unwrap();
         let dir = tempdir().unwrap();
-        let plugins = loader.load_plugins_dynamic(dir.path());
-        assert!(plugins.is_ok());
-        assert!(plugins.unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_load_plugins_dynamic_nonexistent_dir() {
-        let loader = PluginLoader::new().unwrap();
-        let result = loader.load_plugins_dynamic(Path::new("/nonexistent/path"));
-        assert!(matches!(result, Err(PluginError::DirectoryNotFound { .. })));
-    }
-
-    #[test]
-    fn test_load_plugin_dynamic_invalid_file() {
-        let loader = PluginLoader::new().unwrap();
-        let dir = tempdir().unwrap();
-        let wasm_path = dir.path().join("invalid.wasm");
-        fs::write(&wasm_path, b"not a wasm file").unwrap();
-
-        let result = loader.load_plugin_dynamic(&wasm_path);
-        assert!(matches!(result, Err(PluginError::InvalidWasmFile { .. })));
-    }
-
-    #[test]
-    fn test_load_plugins_dynamic_skips_non_wasm() {
-        let loader = PluginLoader::new().unwrap();
-        let dir = tempdir().unwrap();
-        // Write a non-.wasm file; it should be ignored
         fs::write(dir.path().join("readme.txt"), b"hello").unwrap();
-        let plugins = loader.load_plugins_dynamic(dir.path()).unwrap();
+        let plugins = loader.load_plugins(dir.path()).unwrap();
         assert!(plugins.is_empty());
     }
 
     #[test]
     fn test_component_model_enabled() {
-        // Verify that the engine is created with component model support
-        // by attempting to compile a minimal component
         let loader = PluginLoader::new().unwrap();
-        // A minimal component should not fail at the engine level
-        // (it may fail at validation, but not because component model is disabled)
         let bytes = b"\0asm\x0d\x00\x01\x00";
         let result = wasmtime::component::Component::new(loader.engine(), bytes);
-        // This will fail because it's not a complete component, but the error
-        // should NOT be about component model being disabled
         if let Err(e) = result {
             let msg = e.to_string();
             assert!(

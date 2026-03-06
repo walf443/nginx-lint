@@ -132,7 +132,7 @@ fn main() {
     let cold_start = Instant::now();
     let loader = PluginLoader::new_trusted().expect("Failed to create PluginLoader");
     let wasm_rule = loader
-        .load_plugin_dynamic(&wasm_path)
+        .load_plugin(&wasm_path)
         .expect("Failed to load WASM plugin");
     let wasm_cold = cold_start.elapsed();
 

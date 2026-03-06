@@ -29,8 +29,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [features]
-default = ["wasm-export"]
-wasm-export = []
+default = ["wit-export"]
+wit-export = ["nginx-lint-plugin/wit-export"]
 ```
 
 Implement the plugin in `src/lib.rs`:
@@ -71,7 +71,7 @@ impl Plugin for NoAutoindexPlugin {
     }
 }
 
-nginx_lint_plugin::export_plugin!(NoAutoindexPlugin);
+nginx_lint_plugin::export_component_plugin!(NoAutoindexPlugin);
 ```
 
 Build for WASM:

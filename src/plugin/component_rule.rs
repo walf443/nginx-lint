@@ -12,6 +12,20 @@ use std::sync::Arc;
 use wasmtime::component::{Resource, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder, Trap};
 
+/// Plugin spec returned by the plugin
+#[derive(Debug, Clone)]
+pub struct PluginSpec {
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub api_version: String,
+    pub severity: Option<String>,
+    pub why: Option<String>,
+    pub bad_example: Option<String>,
+    pub good_example: Option<String>,
+    pub references: Option<Vec<String>>,
+}
+
 /// Host-side config resource, holding the parsed Config.
 pub struct ConfigResource {
     config: Arc<Config>,
@@ -573,11 +587,9 @@ fn convert_lint_error(error: &bindings::nginx_lint::plugin::types::LintError) ->
     lint_error
 }
 
-/// Convert WIT PluginSpec to the wasm_rule PluginSpec format
-fn convert_plugin_spec(
-    spec: &bindings::nginx_lint::plugin::types::PluginSpec,
-) -> super::wasm_rule::PluginSpec {
-    super::wasm_rule::PluginSpec {
+/// Convert WIT PluginSpec to our PluginSpec format
+fn convert_plugin_spec(spec: &bindings::nginx_lint::plugin::types::PluginSpec) -> PluginSpec {
+    PluginSpec {
         name: spec.name.clone(),
         category: spec.category.clone(),
         description: spec.description.clone(),
@@ -598,7 +610,7 @@ pub struct ComponentLintRule {
     /// Path to the component file (for error reporting)
     path: PathBuf,
     /// Plugin metadata
-    spec: super::wasm_rule::PluginSpec,
+    spec: PluginSpec,
     /// Compiled component (shared across threads)
     component: Arc<wasmtime::component::Component>,
     /// WASM engine reference (shared across threads)
