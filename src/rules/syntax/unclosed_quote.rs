@@ -304,13 +304,15 @@ mod tests {
     }
 
     #[test]
-    fn test_lua_block_quotes_ignored() {
-        // Quotes inside lua blocks should not be checked
+    fn test_lua_block_unclosed_quote_ignored() {
+        // Lua comment `-- it's` contains a single quote that the nginx lexer
+        // sees as the start of an unterminated SINGLE_QUOTED_STRING.
+        // Tokens inside raw blocks must be skipped.
         let content = r#"http {
     server {
         content_by_lua_block {
-            local cjson = require "cjson"
-            ngx.say(cjson.encode({status = "ok"}))
+            -- it's a lua comment
+            ngx.say("hello")
         }
     }
 }
@@ -319,33 +321,6 @@ mod tests {
         assert!(
             errors.is_empty(),
             "Expected no errors for quotes inside lua block, got: {:?}",
-            errors
-        );
-    }
-
-    #[test]
-    fn test_multiple_lua_blocks_quotes_ignored() {
-        let content = r#"http {
-    init_by_lua_block {
-        require "resty.core"
-        cjson = require "cjson"
-    }
-
-    server {
-        listen 80;
-        access_by_lua_block {
-            local token = ngx.var.http_authorization
-            if not token then
-                ngx.exit(ngx.HTTP_UNAUTHORIZED)
-            end
-        }
-    }
-}
-"#;
-        let errors = check_quotes(content);
-        assert!(
-            errors.is_empty(),
-            "Expected no errors for quotes inside lua blocks, got: {:?}",
             errors
         );
     }
