@@ -347,6 +347,27 @@ mod tests {
     }
 
     #[test]
+    fn test_fix_keyword_in_value_treated_as_flag() {
+        // When a value happens to end with an nginx keyword (e.g. "permanent"),
+        // the fix inserts the closing quote before the keyword, treating it as
+        // a flag. This is a known limitation: the fix logic cannot distinguish
+        // between a rewrite flag and a value that coincidentally ends with a
+        // keyword.
+        let content = "add_header X-Redirect \"moved permanent;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        // The fix treats "permanent" as a flag and closes the quote before it,
+        // even though it's part of the value.
+        assert!(
+            result.contains("\"moved\" permanent;"),
+            "Fix splits before keyword (known limitation), got: {}",
+            result
+        );
+    }
+
+    #[test]
     fn test_no_fix_without_semicolon() {
         // Unclosed quote on a line without semicolon should not generate a fix
         let content = r#"server {
