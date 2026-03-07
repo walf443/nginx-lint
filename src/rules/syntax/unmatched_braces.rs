@@ -46,20 +46,16 @@ struct FlatToken {
 impl UnmatchedBraces {
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_cst(content)
+        self.check_cst(content, &[])
     }
 
     /// Check content with additional block directives
-    ///
-    /// The CST-based approach handles block structures via the parser,
-    /// so `additional_block_directives` is accepted for API compatibility
-    /// but not used.
     pub fn check_content_with_extras(
         &self,
         content: &str,
-        _additional_block_directives: &[String],
+        additional_block_directives: &[String],
     ) -> Vec<LintError> {
-        self.check_cst(content)
+        self.check_cst(content, additional_block_directives)
     }
 
     /// CST-based unmatched brace detection.
@@ -68,7 +64,7 @@ impl UnmatchedBraces {
     /// then performs line-based analysis and brace-stack matching — similar
     /// to the original text-based approach but benefiting from proper
     /// tokenization of strings, comments, and raw blocks.
-    fn check_cst(&self, source: &str) -> Vec<LintError> {
+    fn check_cst(&self, source: &str, additional_block_directives: &[String]) -> Vec<LintError> {
         let (root, _) = parse_string_rowan(source);
         let line_index = LineIndex::new(source);
 
@@ -137,7 +133,7 @@ impl UnmatchedBraces {
             }
 
             let name = &source[first.offset..first.offset + first.len];
-            if !crate::parser::is_block_directive(name) {
+            if !crate::parser::is_block_directive_with_extras(name, additional_block_directives) {
                 continue;
             }
 
@@ -155,16 +151,20 @@ impl UnmatchedBraces {
             let next_starts_with_brace = line_tokens[line_idx + 1..]
                 .iter()
                 .find_map(|next_line| {
+                    if next_line.is_empty() {
+                        return None; // skip blank lines
+                    }
+                    // Skip comment-only lines (check before filtering trivia)
+                    if next_line
+                        .iter()
+                        .all(|t| t.kind.is_trivia() || t.kind == SyntaxKind::COMMENT)
+                    {
+                        return None;
+                    }
                     let next_meaningful: Vec<&&FlatToken> =
                         next_line.iter().filter(|t| !t.kind.is_trivia()).collect();
                     if next_meaningful.is_empty() {
-                        return None; // skip blank lines
-                    }
-                    if next_meaningful
-                        .iter()
-                        .all(|t| t.kind == SyntaxKind::COMMENT)
-                    {
-                        return None; // skip comment-only lines
+                        return None;
                     }
                     Some(next_meaningful[0].kind == SyntaxKind::L_BRACE)
                 })
@@ -231,11 +231,11 @@ impl UnmatchedBraces {
         errors
     }
 
-    /// Flatten the CST into a linear token stream, skipping tokens inside
-    /// raw blocks (e.g. `content_by_lua_block { ... }`).
+    /// Flatten the CST into a linear token stream, skipping interior tokens
+    /// of raw blocks (e.g. `content_by_lua_block { ... }`).
     ///
-    /// The L_BRACE and R_BRACE of raw blocks are also skipped so they don't
-    /// affect brace counting.
+    /// The L_BRACE and R_BRACE of raw blocks are preserved so that brace
+    /// counting and line analysis work correctly.
     fn flatten_tokens(root: &SyntaxNode) -> Vec<FlatToken> {
         let mut tokens = Vec::new();
         Self::collect_tokens(root, &mut tokens);
@@ -334,7 +334,7 @@ impl LintRule for UnmatchedBraces {
             Err(_) => return Vec::new(),
         };
 
-        self.check_cst(&content)
+        self.check_cst(&content, &[])
     }
 }
 
@@ -774,10 +774,12 @@ http {
 
     #[test]
     fn test_non_block_directive_not_detected() {
-        // 'listen', 'root', etc. are not block directives
+        // 'listen', 'root', etc. are not block directives.
+        // 'listen' on its own line without ';' should not be flagged as
+        // a block directive missing braces.
         let content = r#"http {
     server {
-        listen 80;
+        listen
         root /var/www;
     }
 }
@@ -833,6 +835,83 @@ http {
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("types"));
+    }
+
+    // =========================================================================
+    // Tests with custom block directives
+    // =========================================================================
+
+    fn check_braces_with_extras(content: &str, extras: &[String]) -> Vec<LintError> {
+        let rule = UnmatchedBraces;
+        rule.check_content_with_extras(content, extras)
+    }
+
+    #[test]
+    fn test_custom_block_directive_missing_brace() {
+        // Custom block directive from extension module
+        let content = r#"http {
+    my_custom_block
+        some_directive value;
+    }
+}
+"#;
+        // Without custom directives, no block directive error
+        let errors = check_braces_with_extras(content, &[]);
+        assert!(
+            !errors.iter().any(|e| e.message.contains("my_custom_block")),
+            "Should not detect custom directive without config"
+        );
+
+        // With custom directives, should detect missing brace
+        let extras = vec!["my_custom_block".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(
+            errors[0].message.contains("my_custom_block"),
+            "Expected custom block directive in error, got: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn test_multiple_custom_block_directives() {
+        let content = r#"http {
+    custom_auth
+        auth_type basic;
+    }
+
+    custom_cache
+        cache_size 100m;
+    }
+}
+"#;
+        let extras = vec!["custom_auth".to_string(), "custom_cache".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    // =========================================================================
+    // Edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_empty_input() {
+        let errors = UnmatchedBraces.check_content("");
+        assert!(errors.is_empty(), "Expected no errors for empty input");
+    }
+
+    #[test]
+    fn test_only_braces() {
+        let errors = UnmatchedBraces.check_content("{}");
+        assert!(errors.is_empty(), "Expected no errors for matched braces");
+
+        let errors = UnmatchedBraces.check_content("{");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let errors = UnmatchedBraces.check_content("}");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Unexpected closing brace"));
     }
 
     #[test]
