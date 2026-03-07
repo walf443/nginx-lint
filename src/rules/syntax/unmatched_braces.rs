@@ -304,12 +304,23 @@ impl UnmatchedBraces {
         // line_tokens is 0-indexed; brace_line is 1-based.
         // Start scanning from the line after the brace.
         for line_toks in line_tokens.iter().skip(brace_line) {
-            // Find the first non-trivia token on this line
-            let first_meaningful = match line_toks.iter().find(|t| !t.kind.is_trivia()) {
-                Some(tok) => tok,
-                None => continue, // blank or comment-only line
-            };
+            let meaningful: Vec<&FlatToken> = line_toks
+                .iter()
+                .filter(|t| !t.kind.is_trivia())
+                .copied()
+                .collect();
 
+            if meaningful.is_empty() {
+                continue; // blank or comment-only line
+            }
+
+            // Skip lines that only contain `}` — those closing braces were
+            // already matched by the brace stack during the main loop.
+            if meaningful.len() == 1 && meaningful[0].kind == SyntaxKind::R_BRACE {
+                continue;
+            }
+
+            let first_meaningful = meaningful[0];
             let indent = Self::line_indent(source, first_meaningful.offset);
             if indent <= brace_indent {
                 // This line is at the same or lower indentation — the block
@@ -1026,6 +1037,29 @@ events {
 
         let fix = errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_upstream_skips_rbrace_line() {
+        // upstream backend { is unclosed, but the stack matches it with http's `}`.
+        // So `http {` (indent 0) is reported as unclosed.
+        // R_BRACE-only lines (`}`) are skipped, so the fix falls back to EOF
+        // rather than inserting before the existing `}`.
+        let content = "http {\n  server_tokens on;\n  autoindex on;\n\n  upstream backend {\n    server api.example.com:8080;\n  \n\n  server {\n    listen 80;\n    server_name example.com;\n  }\n}\n";
+        let rule = UnmatchedBraces;
+        let errors = rule.check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // With R_BRACE-only line skipping, the fix appends at EOF
+        // (no content line at indent ≤ 0 exists after the brace)
         assert!(
             result.ends_with("}\n"),
             "Fix should append at EOF, got:\n{}",
