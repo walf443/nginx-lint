@@ -190,15 +190,29 @@ impl UnmatchedBraces {
             });
         }
 
-        // Remaining unclosed braces
+        // Remaining unclosed braces — find the best insertion point using
+        // indentation analysis rather than always appending at EOF.
         while let Some(unclosed) = brace_stack.pop() {
             let pos = line_index.position(unclosed.offset);
+            let brace_line = pos.line;
 
             let closing_brace = format!("{}}}", " ".repeat(unclosed.indent));
-            let insert_offset = source.len();
-            let new_text = if !source.ends_with('\n') {
-                format!("\n{}", closing_brace)
+
+            // Find the insertion point: the first line after the brace where
+            // a non-trivia token starts at indentation ≤ the brace's indent.
+            // This indicates the block should have ended before that line.
+            let insert_offset =
+                Self::find_close_brace_offset(source, &line_tokens, brace_line, unclosed.indent);
+
+            let new_text = if insert_offset == source.len() {
+                // Inserting at EOF
+                if !source.ends_with('\n') {
+                    format!("\n{}", closing_brace)
+                } else {
+                    format!("{}\n", closing_brace)
+                }
             } else {
+                // Inserting before a line
                 format!("{}\n", closing_brace)
             };
 
@@ -271,6 +285,43 @@ impl UnmatchedBraces {
                 }
             }
         }
+    }
+
+    /// Find the byte offset where a closing `}` should be inserted for an
+    /// unclosed brace.
+    ///
+    /// Scans lines after `brace_line` (1-based) looking for the first line
+    /// whose first non-trivia token starts at indentation ≤ `brace_indent`.
+    /// Returns the byte offset of that line's start (so `}` is inserted
+    /// before it). Falls back to `source.len()` (EOF) if no such line exists.
+    fn find_close_brace_offset(
+        source: &str,
+        line_tokens: &[Vec<&FlatToken>],
+        brace_line: usize,
+        brace_indent: usize,
+    ) -> usize {
+        // line_tokens is 0-indexed; brace_line is 1-based.
+        // Start scanning from the line after the brace.
+        for line_toks in line_tokens.iter().skip(brace_line) {
+            // Find the first non-trivia token on this line
+            let first_meaningful = match line_toks.iter().find(|t| !t.kind.is_trivia()) {
+                Some(tok) => tok,
+                None => continue, // blank or comment-only line
+            };
+
+            let indent = Self::line_indent(source, first_meaningful.offset);
+            if indent <= brace_indent {
+                // This line is at the same or lower indentation — the block
+                // should have ended before this line. Find line start offset.
+                let line_start = source[..first_meaningful.offset]
+                    .rfind('\n')
+                    .map_or(0, |i| i + 1);
+                return line_start;
+            }
+        }
+
+        // No line with lower indentation found — insert at EOF
+        source.len()
     }
 
     /// Get the indentation (in bytes) of the line containing the given offset.
@@ -902,6 +953,83 @@ http {
         let errors = UnmatchedBraces.check_content("}");
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("Unexpected closing brace"));
+    }
+
+    // =========================================================================
+    // Tests for smart fix positioning (indentation-based)
+    // =========================================================================
+
+    fn apply_fix(content: &str, fix: &Fix) -> String {
+        let mut result = content.to_string();
+        if let (Some(start), Some(end)) = (fix.start_offset, fix.end_offset) {
+            result.replace_range(start..end, &fix.new_text);
+        }
+        result
+    }
+
+    #[test]
+    fn test_fix_unclosed_http_before_events() {
+        // `http {` is unclosed; `events {` at the same indent level indicates
+        // where `}` should be inserted (before `events`).
+        let content = r#"http {
+    server_tokens on;
+    autoindex on;
+    upstream backend {
+        server api.example.com:8080;
+    }
+
+events {
+    worker_connections 1024;
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // The closing `}` should be inserted before `events {`, not at EOF
+        assert!(
+            result.contains("}\nevents {"),
+            "Fix should insert }} before events block, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_nested_block_uses_indent() {
+        // `http {` is unclosed (only `server` has matching braces).
+        // The fix should insert `}` before EOF, matching `http`'s indent (0).
+        let content = "http {\n    server {\n        listen 80;\n    }\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // `http` is at indent 0, no line at indent ≤ 0 after it,
+        // so fix appends at EOF.
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_at_eof_fallback() {
+        // When there's no subsequent line at lower indent, fix goes at EOF
+        let content = "http {\n    server_tokens on;\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
     }
 
     #[test]
