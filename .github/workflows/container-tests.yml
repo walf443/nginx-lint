@@ -13,15 +13,31 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  # renovate: datasource=docker depName=nginx
+  NGINX_LATEST_VERSION: "1.29"
 
 jobs:
+  generate-matrix:
+    name: Generate Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        run: |
+          LATEST="${{ env.NGINX_LATEST_VERSION }}"
+          MAJOR="${LATEST%%.*}"
+          MINOR="${LATEST##*.}"
+          PREVIOUS="$MAJOR.$((MINOR - 1))"
+          echo "matrix={\"nginx-image\":[\"nginx:$LATEST\",\"nginx:$PREVIOUS\",\"openresty/openresty:noble\"]}" >> "$GITHUB_OUTPUT"
+
   container-tests:
     name: Container Tests (${{ matrix.nginx-image }})
+    needs: generate-matrix
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        nginx-image: ["nginx:1.28", "nginx:1.29", "openresty/openresty:noble"]
+      matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
