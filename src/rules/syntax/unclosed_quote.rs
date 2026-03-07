@@ -1,6 +1,9 @@
 use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
+use crate::parser::line_index::LineIndex;
+use crate::parser::parse_string_rowan;
+use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::fs;
 use std::path::Path;
 
@@ -37,44 +40,121 @@ impl UnclosedQuote {
         "always",    // add_header flag
     ];
 
-    /// Try to create a fix for an unclosed quote
-    /// Analyzes the line to find the best position to insert the closing quote
-    /// line_start_offset is the byte offset where the line starts in the content
-    fn create_fix(
-        quote: char,
-        line_content: &str,
-        line_start_offset: usize,
-        quote_start_col: usize,
-    ) -> Option<Fix> {
-        let trimmed = line_content.trim_end();
+    /// Check content directly (used by WASM)
+    pub fn check_content(&self, content: &str) -> Vec<LintError> {
+        self.check_cst(content)
+    }
 
-        // If the line doesn't end with semicolon, we can't auto-fix
-        if !trimmed.ends_with(';') {
+    /// CST-based unclosed quote detection.
+    ///
+    /// Recursively walks CST nodes, skipping raw block contents (e.g.
+    /// `content_by_lua_block`), and checks whether quoted-string tokens
+    /// are properly terminated.
+    fn check_cst(&self, source: &str) -> Vec<LintError> {
+        let (root, _syntax_errors) = parse_string_rowan(source);
+        let line_index = LineIndex::new(source);
+        let mut errors = Vec::new();
+
+        Self::walk_node(&root, &line_index, &mut errors);
+
+        errors
+    }
+
+    /// Recursively walk a CST node, collecting unclosed quote errors.
+    ///
+    /// BLOCK nodes belonging to raw block directives (lua etc.) are skipped
+    /// entirely, avoiding per-token ancestor checks.
+    fn walk_node(node: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
+        for child in node.children_with_tokens() {
+            match child {
+                SyntaxElement::Node(child_node) => {
+                    // Skip raw block contents
+                    if child_node.kind() == SyntaxKind::BLOCK
+                        && Self::is_raw_block_node(&child_node)
+                    {
+                        continue;
+                    }
+                    Self::walk_node(&child_node, line_index, errors);
+                }
+                SyntaxElement::Token(token) => {
+                    let (quote_char, quote_name) = match token.kind() {
+                        SyntaxKind::DOUBLE_QUOTED_STRING => ('"', "double quote"),
+                        SyntaxKind::SINGLE_QUOTED_STRING => ('\'', "single quote"),
+                        _ => continue,
+                    };
+
+                    let text = token.text();
+
+                    // A properly closed string starts and ends with the same quote
+                    if text.len() >= 2 && text.ends_with(quote_char) {
+                        continue;
+                    }
+
+                    // Unclosed quote detected
+                    let offset: usize = token.text_range().start().into();
+                    let pos = line_index.position(offset);
+                    let message =
+                        format!("Unclosed {} - missing closing {}", quote_name, quote_char);
+
+                    let fix = Self::create_fix(quote_char, text, offset);
+
+                    let mut error =
+                        LintError::new("unclosed-quote", "syntax", &message, Severity::Error)
+                            .with_location(pos.line, pos.column);
+
+                    if let Some(f) = fix {
+                        error = error.with_fix(f);
+                    }
+
+                    errors.push(error);
+                }
+            }
+        }
+    }
+
+    /// Check if a BLOCK node belongs to a raw block directive (e.g. `*_by_lua_block`).
+    fn is_raw_block_node(block: &SyntaxNode) -> bool {
+        let directive = match block.parent() {
+            Some(p) if p.kind() == SyntaxKind::DIRECTIVE => p,
+            _ => return false,
+        };
+        // Find the first IDENT token in the directive (the name)
+        for child in directive.children_with_tokens() {
+            if let Some(t) = child.as_token()
+                && t.kind() == SyntaxKind::IDENT
+            {
+                return crate::parser::is_raw_block_directive(t.text());
+            }
+        }
+        false
+    }
+
+    /// Try to create a fix for an unclosed quote.
+    ///
+    /// Looks at the first line of the token text to find a semicolon and
+    /// inserts the closing quote before it (or before an nginx keyword).
+    /// `token_offset` is the byte offset of the token start in the source.
+    fn create_fix(quote: char, token_text: &str, token_offset: usize) -> Option<Fix> {
+        // Only consider the first line of the token (the line where the quote opened)
+        let first_line = token_text.lines().next().unwrap_or(token_text);
+
+        // If the first line doesn't contain a semicolon, we can't auto-fix
+        let semicolon_pos = first_line.rfind(';')?;
+        let before_semicolon = &first_line[..semicolon_pos];
+
+        // The token always starts with a quote character, so before_semicolon
+        // is at least 1 byte. Guard defensively anyway.
+        if before_semicolon.is_empty() {
             return None;
         }
-
-        let semicolon_pos = trimmed.rfind(';').unwrap();
-        let before_semicolon = &trimmed[..semicolon_pos];
-
-        // Get the part after the opening quote
-        // quote_start_col is 1-based column
-        let quote_pos = quote_start_col - 1;
-        if quote_pos >= before_semicolon.len() {
-            return None;
-        }
-
-        let after_quote = &before_semicolon[quote_pos + 1..];
+        let after_quote = &before_semicolon[1..];
 
         // Check if there's an nginx keyword at the end that should be outside the string
-        // Look for pattern: "string_content keyword" where keyword is an nginx keyword
         for keyword in Self::NGINX_KEYWORDS {
-            // Check if the line ends with " keyword" (space + keyword before semicolon)
             let pattern = format!(" {}", keyword);
             if after_quote.ends_with(&pattern) {
-                // Insert quote before the space preceding the keyword
                 let keyword_start = before_semicolon.len() - keyword.len() - 1;
-                // Use range-based fix: insert quote at the keyword_start position
-                let insert_offset = line_start_offset + keyword_start;
+                let insert_offset = token_offset + keyword_start;
                 return Some(Fix::replace_range(
                     insert_offset,
                     insert_offset,
@@ -84,149 +164,12 @@ impl UnclosedQuote {
         }
 
         // Default: insert quote before semicolon
-        // Use range-based fix: insert quote right before the semicolon
-        let insert_offset = line_start_offset + semicolon_pos;
+        let insert_offset = token_offset + semicolon_pos;
         Some(Fix::replace_range(
             insert_offset,
             insert_offset,
             &quote.to_string(),
         ))
-    }
-}
-
-impl UnclosedQuote {
-    /// Check content directly (used by WASM)
-    pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_content_impl(content)
-    }
-
-    fn check_content_impl(&self, content: &str) -> Vec<LintError> {
-        let mut errors = Vec::new();
-
-        let mut in_comment = false;
-        let mut string_start: Option<(char, usize, usize, String, usize)> = None; // (quote_char, line, column, line_content, line_start_offset)
-        let mut prev_char = ' ';
-        let lines_vec: Vec<&str> = content.lines().collect();
-
-        // Track byte offsets for each line
-        let mut line_start_offset: usize = 0;
-
-        for (line_num, line) in lines_vec.iter().enumerate() {
-            let line_number = line_num + 1;
-            let current_line_offset = line_start_offset;
-            // Update offset for next line
-            line_start_offset += line.len() + 1; // +1 for '\n'
-            let chars: Vec<char> = line.chars().collect();
-
-            for (col, &ch) in chars.iter().enumerate() {
-                let column = col + 1;
-
-                // Handle comments (only outside strings)
-                if ch == '#' && string_start.is_none() {
-                    in_comment = true;
-                }
-
-                if in_comment {
-                    prev_char = ch;
-                    continue;
-                }
-
-                // Start of string
-                if (ch == '"' || ch == '\'') && string_start.is_none() {
-                    string_start = Some((
-                        ch,
-                        line_number,
-                        column,
-                        line.to_string(),
-                        current_line_offset,
-                    ));
-                    prev_char = ch;
-                    continue;
-                }
-
-                // End string only with matching quote (and not escaped)
-                if let Some((quote, _, _, _, _)) = string_start {
-                    if ch == quote && prev_char != '\\' {
-                        string_start = None;
-                    }
-                    prev_char = ch;
-                    continue;
-                }
-
-                prev_char = ch;
-            }
-
-            // At end of line, check if there's an unclosed string that started on this line
-            // and the line ends with semicolon (indicating a directive that should be complete)
-            let trimmed = line.trim_end();
-            if let Some((quote, start_line, start_col, ref start_line_content, start_line_offset)) =
-                string_start
-            {
-                // If the string started on this line and the line ends with semicolon,
-                // it's likely an unclosed quote error (not a multi-line string)
-                if start_line == line_number && trimmed.ends_with(';') {
-                    let quote_name = if quote == '"' {
-                        "double quote"
-                    } else {
-                        "single quote"
-                    };
-                    let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
-
-                    let fix =
-                        Self::create_fix(quote, start_line_content, start_line_offset, start_col);
-
-                    let mut error =
-                        LintError::new(self.name(), self.category(), &message, Severity::Error)
-                            .with_location(start_line, start_col);
-
-                    if let Some(f) = fix {
-                        error = error.with_fix(f);
-                    }
-
-                    errors.push(error);
-                    // Reset string_start since we've reported this error
-                    string_start = None;
-                }
-            }
-
-            // Reset comment flag at end of line
-            in_comment = false;
-            prev_char = ' '; // Reset prev_char at end of line for proper detection
-        }
-
-        // Report unclosed strings at end of file (for multi-line strings that never closed)
-        if let Some((quote, start_line, start_col, start_line_content, start_line_offset)) =
-            string_start
-        {
-            let quote_name = if quote == '"' {
-                "double quote"
-            } else {
-                "single quote"
-            };
-            let message = format!("Unclosed {} - missing closing {}", quote_name, quote);
-
-            // Try to create a fix: if the line ends with semicolon, insert quote before it
-            let fix = Self::create_fix(quote, &start_line_content, start_line_offset, start_col);
-
-            let mut error = LintError::new(self.name(), self.category(), &message, Severity::Error)
-                .with_location(start_line, start_col);
-
-            if let Some(f) = fix {
-                error = error.with_fix(f);
-            }
-
-            errors.push(error);
-        }
-
-        errors
-    }
-
-    fn name(&self) -> &'static str {
-        "unclosed-quote"
-    }
-
-    fn category(&self) -> &'static str {
-        "syntax"
     }
 }
 
@@ -249,25 +192,25 @@ impl LintRule for UnclosedQuote {
             Err(_) => return Vec::new(),
         };
 
-        self.check_content_impl(&content)
+        self.check_cst(&content)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ast::Config;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     fn check_quotes(content: &str) -> Vec<LintError> {
-        let mut file = NamedTempFile::new().unwrap();
-        write!(file, "{}", content).unwrap();
-        let path = file.path().to_path_buf();
-
         let rule = UnclosedQuote;
-        let config = Config::new();
-        rule.check(&config, &path)
+        rule.check_content(content)
+    }
+
+    fn apply_fix(content: &str, fix: &Fix) -> String {
+        let mut result = content.to_string();
+        if let (Some(start), Some(end)) = (fix.start_offset, fix.end_offset) {
+            result.replace_range(start..end, &fix.new_text);
+        }
+        result
     }
 
     #[test]
@@ -368,5 +311,145 @@ mod tests {
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("single quote"));
+    }
+
+    #[test]
+    fn test_fix_inserts_closing_quote_before_semicolon() {
+        let content = r#"location / {
+    add_header X-Custom "value;
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        assert_eq!(fix.new_text, "\"");
+        // The fix should insert `"` right before the `;`
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains(r#"add_header X-Custom "value";"#),
+            "Fix should close the quote before semicolon, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_inserts_closing_quote_before_keyword() {
+        let content = "rewrite ^/old \"http://example.com/new permanent;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains("\"http://example.com/new\" permanent;"),
+            "Fix should close the quote before keyword, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_keyword_in_value_treated_as_flag() {
+        // When a value happens to end with an nginx keyword (e.g. "permanent"),
+        // the fix inserts the closing quote before the keyword, treating it as
+        // a flag. This is a known limitation: the fix logic cannot distinguish
+        // between a rewrite flag and a value that coincidentally ends with a
+        // keyword.
+        let content = "add_header X-Redirect \"moved permanent;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        // The fix treats "permanent" as a flag and closes the quote before it,
+        // even though it's part of the value.
+        assert!(
+            result.contains("\"moved\" permanent;"),
+            "Fix splits before keyword (known limitation), got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_no_fix_without_semicolon() {
+        // Unclosed quote on a line without semicolon should not generate a fix
+        let content = r#"server {
+    content_by_lua_block '
+        ngx.say("hello")
+}"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].fixes.is_empty(),
+            "Expected no fix when no semicolon on the line"
+        );
+    }
+
+    #[test]
+    fn test_multiple_unclosed_quotes_same_type_even() {
+        // Two unclosed double quotes: the second `"` closes the first string
+        // from the lexer's perspective, so neither is reported as unclosed.
+        let content = r#"server {
+    add_header X-A "value1;
+    add_header X-B "value2;
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            errors.is_empty(),
+            "Even number of unclosed quotes pair up, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiple_unclosed_quotes_same_type_odd() {
+        // Three unclosed double quotes: first pairs with second, third is
+        // truly unclosed and reported.
+        let content = r#"server {
+    add_header X-A "value1;
+    add_header X-B "value2;
+    add_header X-C "value3;
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("double quote"));
+    }
+
+    #[test]
+    fn test_unclosed_quote_bare_directive() {
+        // Unclosed quote without any surrounding block context
+        let content = "add_header X-Test \"value;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("double quote"));
+        assert_eq!(errors[0].line, Some(1));
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains("\"value\""),
+            "Fix should close the quote, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_lua_block_unclosed_quote_ignored() {
+        // Lua comment `-- it's` contains a single quote that the nginx lexer
+        // sees as the start of an unterminated SINGLE_QUOTED_STRING.
+        // Tokens inside raw blocks must be skipped.
+        let content = r#"http {
+    server {
+        content_by_lua_block {
+            -- it's a lua comment
+            ngx.say("hello")
+        }
+    }
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for quotes inside lua block, got: {:?}",
+            errors
+        );
     }
 }
