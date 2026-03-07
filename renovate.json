@@ -1,10 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": [
+    "config:recommended"
+  ],
   "customManagers": [
     {
       "customType": "regex",
-      "fileMatch": ["\\.github/workflows/container-tests\\.yml$"],
+      "managerFilePatterns": [
+        "/\\.github/workflows/container-tests\\.yml$/"
+      ],
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s+\\w+:\\s+\"(?<currentValue>[^\"]+)\""
       ]
@@ -12,8 +16,12 @@
   ],
   "packageRules": [
     {
-      "matchManagers": ["cargo"],
-      "schedule": ["every weekend"],
+      "matchManagers": [
+        "cargo"
+      ],
+      "schedule": [
+        "every weekend"
+      ],
       "groupName": "rust dependencies"
     }
   ]
