@@ -70,7 +70,7 @@ impl UnclosedQuote {
                 SyntaxElement::Node(child_node) => {
                     // Skip raw block contents
                     if child_node.kind() == SyntaxKind::BLOCK
-                        && Self::is_raw_block_node(&child_node)
+                        && crate::parser::is_raw_block_cst_node(&child_node)
                     {
                         continue;
                     }
@@ -110,23 +110,6 @@ impl UnclosedQuote {
                 }
             }
         }
-    }
-
-    /// Check if a BLOCK node belongs to a raw block directive (e.g. `*_by_lua_block`).
-    fn is_raw_block_node(block: &SyntaxNode) -> bool {
-        let directive = match block.parent() {
-            Some(p) if p.kind() == SyntaxKind::DIRECTIVE => p,
-            _ => return false,
-        };
-        // Find the first IDENT token in the directive (the name)
-        for child in directive.children_with_tokens() {
-            if let Some(t) = child.as_token()
-                && t.kind() == SyntaxKind::IDENT
-            {
-                return crate::parser::is_raw_block_directive(t.text());
-            }
-        }
-        false
     }
 
     /// Try to create a fix for an unclosed quote.

@@ -1,7 +1,9 @@
 use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
-use crate::parser::is_raw_block_directive;
+use crate::parser::line_index::LineIndex;
+use crate::parser::parse_string_rowan;
+use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::fs;
 use std::path::Path;
 
@@ -27,165 +29,201 @@ pub struct MissingSemicolon;
 impl MissingSemicolon {
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_content_with_extras(content, &[])
+        self.check_cst(content)
     }
 
     /// Check content with additional block directives
+    ///
+    /// The CST-based approach handles block structures via the parser,
+    /// so `additional_block_directives` is accepted for API compatibility
+    /// but not used.
     pub fn check_content_with_extras(
         &self,
         content: &str,
-        additional_block_directives: &[String],
+        _additional_block_directives: &[String],
     ) -> Vec<LintError> {
+        self.check_cst(content)
+    }
+
+    /// CST-based missing semicolon detection.
+    ///
+    /// Walks the CST to find directives that lack a semicolon terminator.
+    /// Detects two patterns:
+    /// 1. Directives without SEMICOLON or BLOCK (e.g., at EOF or before `}`)
+    /// 2. Merged directives where a NEWLINE separates what should be
+    ///    independent directives (the parser treats newlines as whitespace)
+    fn check_cst(&self, source: &str) -> Vec<LintError> {
+        let (root, _) = parse_string_rowan(source);
+        let line_index = LineIndex::new(source);
         let mut errors = Vec::new();
 
-        let mut in_string = false;
-        let mut string_char: Option<char> = None;
-        let mut in_lua_block = false;
-        let mut lua_brace_depth = 0;
-
-        let lines: Vec<&str> = content.lines().collect();
-        let num_lines = lines.len();
-
-        // Pre-calculate line start offsets for range-based fixes
-        let mut line_offsets: Vec<usize> = Vec::with_capacity(lines.len());
-        {
-            let mut offset = 0;
-            for line in &lines {
-                line_offsets.push(offset);
-                offset += line.len() + 1; // +1 for '\n'
-            }
-        }
-
-        for (line_num, line) in lines.iter().enumerate() {
-            let line_number = line_num + 1;
-            let trimmed = line.trim();
-
-            // Skip empty lines
-            if trimmed.is_empty() {
-                continue;
-            }
-
-            // Skip comment lines
-            if trimmed.starts_with('#') {
-                continue;
-            }
-
-            // Check if we're entering a raw block (like lua_block)
-            if !in_lua_block && is_raw_block_line(trimmed) {
-                in_lua_block = true;
-                lua_brace_depth = 1;
-                continue;
-            }
-
-            // Track brace depth inside lua_block
-            if in_lua_block {
-                for ch in trimmed.chars() {
-                    if ch == '{' {
-                        lua_brace_depth += 1;
-                    } else if ch == '}' {
-                        lua_brace_depth -= 1;
-                        if lua_brace_depth == 0 {
-                            in_lua_block = false;
-                        }
-                    }
-                }
-                // Skip all lines inside lua_block
-                if in_lua_block || trimmed == "}" {
-                    continue;
-                }
-            }
-
-            // Skip lines that are just closing braces
-            if trimmed == "}" {
-                continue;
-            }
-
-            // Skip lines that end with opening brace (block directives)
-            if trimmed.ends_with('{') {
-                continue;
-            }
-
-            // Skip lines that end with closing brace
-            if trimmed.ends_with('}') {
-                continue;
-            }
-
-            // Check for string state to handle multi-line strings
-            for ch in trimmed.chars() {
-                if (ch == '"' || ch == '\'') && string_char.is_none() {
-                    string_char = Some(ch);
-                    in_string = true;
-                } else if let Some(quote) = string_char
-                    && ch == quote
-                {
-                    string_char = None;
-                    in_string = false;
-                }
-            }
-
-            // Skip if we're in a multi-line string
-            if in_string {
-                continue;
-            }
-
-            // Strip inline comments before checking for semicolon
-            let code_part = strip_inline_comment(trimmed);
-            let code_part = code_part.trim();
-
-            // Skip if the line is empty after stripping comments
-            if code_part.is_empty() {
-                continue;
-            }
-
-            // Check if line ends with semicolon
-            if !code_part.ends_with(';') {
-                // Skip known block directives (they need '{', not ';')
-                if is_block_directive_line(code_part, additional_block_directives) {
-                    continue;
-                }
-
-                // This line looks like a directive but doesn't end with semicolon
-                // Make sure it's not just a value continuation or include pattern
-                if looks_like_directive(code_part) {
-                    // Check if this might be a multi-line directive by looking at the next line
-                    let is_continuation = if line_num + 1 < num_lines {
-                        let next_line = lines[line_num + 1].trim();
-                        is_continuation_line(code_part, next_line)
-                    } else {
-                        false
-                    };
-
-                    if !is_continuation {
-                        // Find code_part within the line to get exact offset
-                        let line_start = line_offsets[line_num];
-                        let code_start = line_start + line.find(code_part).unwrap_or(0);
-                        let code_end = code_start + code_part.len();
-                        let fix = Fix::replace_range(code_end, code_end, ";");
-                        errors.push(
-                            LintError::new(
-                                self.name(),
-                                self.category(),
-                                "Missing semicolon at end of directive",
-                                Severity::Error,
-                            )
-                            .with_location(line_number, trimmed.len())
-                            .with_fix(fix),
-                        );
-                    }
-                }
-            }
-        }
+        Self::walk_node(&root, &line_index, &mut errors);
 
         errors
     }
 
-    fn name(&self) -> &'static str {
-        "missing-semicolon"
+    /// Recursively walk CST nodes, checking directives for missing semicolons.
+    ///
+    /// BLOCK nodes belonging to raw block directives (lua etc.) are skipped.
+    fn walk_node(node: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
+        for child in node.children_with_tokens() {
+            if let SyntaxElement::Node(child_node) = child {
+                match child_node.kind() {
+                    SyntaxKind::DIRECTIVE => {
+                        Self::check_directive(&child_node, line_index, errors);
+                    }
+                    SyntaxKind::BLOCK => {
+                        if !crate::parser::is_raw_block_cst_node(&child_node) {
+                            Self::walk_node(&child_node, line_index, errors);
+                        }
+                    }
+                    _ => {
+                        Self::walk_node(&child_node, line_index, errors);
+                    }
+                }
+            }
+        }
     }
 
-    fn category(&self) -> &'static str {
-        "syntax"
+    /// Check a single DIRECTIVE node for missing semicolons.
+    fn check_directive(
+        directive: &SyntaxNode,
+        line_index: &LineIndex,
+        errors: &mut Vec<LintError>,
+    ) {
+        let has_semicolon = directive
+            .children_with_tokens()
+            .any(|c| c.kind() == SyntaxKind::SEMICOLON);
+        let has_block = directive.children().any(|c| c.kind() == SyntaxKind::BLOCK);
+
+        // Check for merged directives (NEWLINE within argument list)
+        Self::check_merged_directives(directive, line_index, errors);
+
+        // Recurse into non-raw blocks
+        for child in directive.children() {
+            if child.kind() == SyntaxKind::BLOCK && !crate::parser::is_raw_block_cst_node(&child) {
+                Self::walk_node(&child, line_index, errors);
+            }
+        }
+
+        // Directive with no terminator at all (EOF or before `}`)
+        if !has_semicolon && !has_block {
+            Self::report_at_end(directive, line_index, errors);
+        }
     }
+
+    /// Report a missing semicolon at the end of a directive (the last
+    /// non-trivia token).
+    fn report_at_end(directive: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
+        let last_meaningful = directive
+            .children_with_tokens()
+            .filter(|c| !c.kind().is_trivia())
+            .last();
+
+        if let Some(last) = last_meaningful {
+            // text_range().end() is exclusive; subtract 1 to get the last character's position
+            let end_offset: usize = last.text_range().end().into();
+            let pos = line_index.position(end_offset.saturating_sub(1));
+            let fix = Fix::replace_range(end_offset, end_offset, ";");
+            errors.push(
+                LintError::new(
+                    "missing-semicolon",
+                    "syntax",
+                    "Missing semicolon at end of directive",
+                    Severity::Error,
+                )
+                .with_location(pos.line, pos.column)
+                .with_fix(fix),
+            );
+        }
+    }
+
+    /// Detect directives that were merged by the parser due to a missing
+    /// semicolon between them.
+    ///
+    /// When a semicolon is missing between two directives on adjacent lines,
+    /// the parser (which treats newlines as whitespace) merges them into a
+    /// single DIRECTIVE node. We detect this by looking for NEWLINE tokens
+    /// within a directive's children where:
+    /// - Arguments have already been seen after the directive name
+    /// - The next non-trivia token after the NEWLINE is an IDENT
+    ///   (suggesting a new directive name)
+    fn check_merged_directives(
+        directive: &SyntaxNode,
+        line_index: &LineIndex,
+        errors: &mut Vec<LintError>,
+    ) {
+        let children: Vec<SyntaxElement> = directive.children_with_tokens().collect();
+
+        let mut seen_name = false;
+        let mut seen_args = false;
+
+        for (i, child) in children.iter().enumerate() {
+            let kind = child.kind();
+
+            // Wait for the directive name (first non-trivia token)
+            if !seen_name {
+                if is_value_kind(kind) {
+                    seen_name = true;
+                }
+                continue;
+            }
+
+            // Track whether we've seen arguments after the name
+            if is_value_kind(kind) {
+                seen_args = true;
+                continue;
+            }
+
+            // Look for NEWLINE after we've seen arguments
+            if kind == SyntaxKind::NEWLINE && seen_args {
+                // Find the next non-whitespace/newline token
+                let next_ident = children[i + 1..].iter().find(|c| {
+                    c.kind() != SyntaxKind::WHITESPACE && c.kind() != SyntaxKind::NEWLINE
+                });
+
+                if let Some(next) = next_ident
+                    && next.kind() == SyntaxKind::IDENT
+                {
+                    // NEWLINE followed by IDENT after args → likely merged directive
+                    // Find the last non-trivia token before this NEWLINE
+                    let last_before = children[..i].iter().rev().find(|c| !c.kind().is_trivia());
+
+                    if let Some(last) = last_before {
+                        // text_range().end() is exclusive; subtract 1 to get the last character's position
+                        let end_offset: usize = last.text_range().end().into();
+                        let pos = line_index.position(end_offset.saturating_sub(1));
+                        let fix = Fix::replace_range(end_offset, end_offset, ";");
+                        errors.push(
+                            LintError::new(
+                                "missing-semicolon",
+                                "syntax",
+                                "Missing semicolon at end of directive",
+                                Severity::Error,
+                            )
+                            .with_location(pos.line, pos.column)
+                            .with_fix(fix),
+                        );
+                    }
+
+                    // Reset for next potential merged directive
+                    seen_args = false;
+                }
+            }
+        }
+    }
+}
+
+/// Returns `true` for token kinds that represent directive names or arguments.
+fn is_value_kind(kind: SyntaxKind) -> bool {
+    matches!(
+        kind,
+        SyntaxKind::IDENT
+            | SyntaxKind::ARGUMENT
+            | SyntaxKind::VARIABLE
+            | SyntaxKind::DOUBLE_QUOTED_STRING
+            | SyntaxKind::SINGLE_QUOTED_STRING
+    )
 }
 
 impl LintRule for MissingSemicolon {
@@ -207,134 +245,8 @@ impl LintRule for MissingSemicolon {
             Err(_) => return Vec::new(),
         };
 
-        self.check_content_with_extras(&content, &[])
+        self.check_cst(&content)
     }
-}
-
-/// Check if a line starts a raw block directive (like lua_block)
-fn is_raw_block_line(line: &str) -> bool {
-    // Extract the first word (directive name) from the line
-    let directive_name = line.split_whitespace().next().unwrap_or("");
-
-    // Check if it's a raw block directive and the line contains an opening brace
-    is_raw_block_directive(directive_name) && line.contains('{')
-}
-
-/// Strip inline comments from a line, respecting string literals
-/// In nginx, # only starts a comment when preceded by whitespace
-fn strip_inline_comment(line: &str) -> &str {
-    let mut in_string = false;
-    let mut string_char: Option<char> = None;
-    let mut prev_char: Option<char> = None;
-
-    for (i, ch) in line.char_indices() {
-        // Handle string quotes (skip if escaped)
-        if (ch == '"' || ch == '\'') && prev_char != Some('\\') {
-            if string_char.is_none() {
-                string_char = Some(ch);
-                in_string = true;
-            } else if string_char == Some(ch) {
-                string_char = None;
-                in_string = false;
-            }
-        }
-
-        // Check for comment start (only if not in a string and preceded by whitespace)
-        // In nginx, # only starts a comment when preceded by whitespace
-        if ch == '#' && !in_string {
-            let preceded_by_whitespace = prev_char.is_none_or(|c| c.is_whitespace());
-            if preceded_by_whitespace {
-                return &line[..i];
-            }
-        }
-
-        prev_char = Some(ch);
-    }
-
-    line
-}
-
-/// Check if the next line is a continuation of the current directive
-fn is_continuation_line(current_line: &str, next_line: &str) -> bool {
-    // Empty next line is not a continuation
-    if next_line.is_empty() {
-        return false;
-    }
-
-    // If next line is a closing brace, it's not a continuation
-    if next_line == "}" || next_line.starts_with('}') {
-        return false;
-    }
-
-    // If current line ends with a quote and next line starts with a quote,
-    // it's likely a continuation (multi-line string concatenation)
-    let current_ends_with_quote = current_line.ends_with('\'') || current_line.ends_with('"');
-    let next_starts_with_quote = next_line.starts_with('\'') || next_line.starts_with('"');
-
-    if current_ends_with_quote && next_starts_with_quote {
-        return true;
-    }
-
-    // If next line starts with a quote, it's a continuation
-    if next_starts_with_quote {
-        return true;
-    }
-
-    // If next line doesn't look like a directive (doesn't start with identifier),
-    // it might be a continuation of arguments
-    if !looks_like_directive(next_line) {
-        return true;
-    }
-
-    false
-}
-
-/// Check if a line looks like a directive (has a name and potentially arguments)
-fn looks_like_directive(line: &str) -> bool {
-    // A directive typically starts with an identifier
-    let trimmed = line.trim();
-
-    // Must have at least one word
-    if trimmed.is_empty() {
-        return false;
-    }
-
-    // Get the first word
-    let first_word = trimmed.split_whitespace().next().unwrap_or("");
-
-    // Must start with a letter or underscore (valid directive name)
-    if !first_word
-        .chars()
-        .next()
-        .map(|c| c.is_alphabetic() || c == '_')
-        .unwrap_or(false)
-    {
-        return false;
-    }
-
-    // If the line starts with a quote, it's likely a continuation of a multi-line directive
-    // e.g., the second line of:
-    //   log_format main '{"timestamp":"$time_iso8601",'
-    //       '"client":"$remote_addr"}';
-    if first_word.starts_with('"') || first_word.starts_with('\'') {
-        return false;
-    }
-
-    // If the first word contains a slash, it's likely a MIME type or path, not a directive
-    // e.g., "application/json" or "/path/to/file"
-    if first_word.contains('/') {
-        return false;
-    }
-
-    // Must have content (not just a single word that could be something else)
-    // Single word directives like "internal" still need semicolons
-    true
-}
-
-/// Check if a line starts with a known block directive
-fn is_block_directive_line(line: &str, additional: &[String]) -> bool {
-    let first_word = line.split_whitespace().next().unwrap_or("");
-    crate::parser::is_block_directive_with_extras(first_word, additional)
 }
 
 #[cfg(test)]
@@ -547,6 +459,64 @@ worker_processes auto;
     }
 
     #[test]
+    fn test_multiline_string_continuation_not_flagged() {
+        // Multi-line directive with quoted string continuation across lines
+        // should not be flagged (next token after NEWLINE is a string, not IDENT)
+        let content = r#"http {
+    log_format main '$remote_addr - $remote_user'
+        '$request $status';
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for multi-line string continuation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiline_variable_continuation_not_flagged() {
+        // Multi-line directive where continuation starts with a variable
+        // should not be flagged (next token after NEWLINE is VARIABLE, not IDENT)
+        let content = r#"http {
+    server {
+        proxy_set_header Host
+            $host;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for variable continuation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiline_ident_continuation_flagged() {
+        // When an IDENT token follows a NEWLINE after arguments, the heuristic
+        // treats it as a merged directive. This is a known limitation: legitimate
+        // multi-line directives where a continuation arg is an IDENT (e.g.
+        // `add_header X-H\n    value;`) will be flagged as missing semicolon.
+        // In practice, such line-splitting is uncommon in nginx configs.
+        let content = r#"http {
+    server {
+        add_header X-Header
+            value;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(
+            errors.len(),
+            1,
+            "IDENT after NEWLINE is flagged as merged directive (known limitation)"
+        );
+    }
+
+    #[test]
     fn test_hash_in_regex_not_treated_as_comment() {
         // Hash inside regex pattern should not be treated as comment start
         let content = r#"http {
@@ -562,17 +532,6 @@ worker_processes auto;
             errors.is_empty(),
             "Expected no errors for hash in regex, got: {:?}",
             errors
-        );
-    }
-
-    #[test]
-    fn test_strip_inline_comment_basic() {
-        assert_eq!(strip_inline_comment("listen 80; # port"), "listen 80; ");
-        assert_eq!(strip_inline_comment("listen 80;"), "listen 80;");
-        // Hash not preceded by whitespace should not be treated as comment
-        assert_eq!(
-            strip_inline_comment("location ~* foo#bar {"),
-            "location ~* foo#bar {"
         );
     }
 }
