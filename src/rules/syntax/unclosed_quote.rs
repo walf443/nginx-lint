@@ -362,6 +362,55 @@ mod tests {
     }
 
     #[test]
+    fn test_multiple_unclosed_quotes_same_type_even() {
+        // Two unclosed double quotes: the second `"` closes the first string
+        // from the lexer's perspective, so neither is reported as unclosed.
+        let content = r#"server {
+    add_header X-A "value1;
+    add_header X-B "value2;
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            errors.is_empty(),
+            "Even number of unclosed quotes pair up, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiple_unclosed_quotes_same_type_odd() {
+        // Three unclosed double quotes: first pairs with second, third is
+        // truly unclosed and reported.
+        let content = r#"server {
+    add_header X-A "value1;
+    add_header X-B "value2;
+    add_header X-C "value3;
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("double quote"));
+    }
+
+    #[test]
+    fn test_unclosed_quote_bare_directive() {
+        // Unclosed quote without any surrounding block context
+        let content = "add_header X-Test \"value;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("double quote"));
+        assert_eq!(errors[0].line, Some(1));
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains("\"value\""),
+            "Fix should close the quote, got: {}",
+            result
+        );
+    }
+
+    #[test]
     fn test_lua_block_unclosed_quote_ignored() {
         // Lua comment `-- it's` contains a single quote that the nginx lexer
         // sees as the start of an unterminated SINGLE_QUOTED_STRING.
