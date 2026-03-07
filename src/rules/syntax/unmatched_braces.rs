@@ -119,15 +119,12 @@ impl UnmatchedBraces {
 
             // Check for block directive missing opening brace.
             // Skip lines that are comment-only or empty.
-            let meaningful: Vec<&&FlatToken> =
-                line_toks.iter().filter(|t| !t.kind.is_trivia()).collect();
-
-            if meaningful.is_empty() {
-                continue;
-            }
+            let first = match line_toks.iter().find(|t| !t.kind.is_trivia()) {
+                Some(tok) => tok,
+                None => continue,
+            };
 
             // First meaningful token must be IDENT (directive name)
-            let first = meaningful[0];
             if first.kind != SyntaxKind::IDENT {
                 continue;
             }
@@ -138,7 +135,11 @@ impl UnmatchedBraces {
             }
 
             // Check if line ends with `{`, `;`, or `}` (last meaningful token)
-            let last = meaningful.last().unwrap();
+            let last = line_toks
+                .iter()
+                .rev()
+                .find(|t| !t.kind.is_trivia())
+                .unwrap();
             if matches!(
                 last.kind,
                 SyntaxKind::L_BRACE | SyntaxKind::SEMICOLON | SyntaxKind::R_BRACE
