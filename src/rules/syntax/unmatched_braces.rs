@@ -96,7 +96,7 @@ impl UnmatchedBraces {
                         });
                     }
                     SyntaxKind::R_BRACE => {
-                        if brace_stack.pop().is_none() {
+                        if brace_stack.is_empty() {
                             // Extra closing brace
                             let pos = line_index.position(tok.offset);
                             let fix = Self::build_remove_brace_fix(source, tok.offset);
@@ -111,6 +111,32 @@ impl UnmatchedBraces {
                                 error = error.with_fix(f);
                             }
                             errors.push(error);
+                        } else {
+                            let rbrace_indent = Self::line_indent(source, tok.offset);
+                            // Find the best matching opening brace by indent.
+                            // Search from top of stack downward for a brace
+                            // whose indent matches the closing brace's indent.
+                            let match_idx =
+                                brace_stack.iter().rposition(|b| b.indent == rbrace_indent);
+
+                            let pop_from = match match_idx {
+                                Some(idx) => idx,
+                                // No indent match; fall back to popping the top
+                                None => brace_stack.len() - 1,
+                            };
+
+                            // Everything above pop_from is unclosed
+                            while brace_stack.len() > pop_from + 1 {
+                                let unclosed = brace_stack.pop().unwrap();
+                                errors.push(Self::build_unclosed_brace_error(
+                                    source,
+                                    &line_index,
+                                    &line_tokens,
+                                    &unclosed,
+                                ));
+                            }
+                            // Pop the matched brace
+                            brace_stack.pop();
                         }
                     }
                     _ => {}
@@ -194,43 +220,12 @@ impl UnmatchedBraces {
         // Remaining unclosed braces — find the best insertion point using
         // indentation analysis rather than always appending at EOF.
         while let Some(unclosed) = brace_stack.pop() {
-            let pos = line_index.position(unclosed.offset);
-            let brace_line = pos.line;
-
-            let closing_brace = format!("{}}}", " ".repeat(unclosed.indent));
-
-            // Find the insertion point: the first line after the brace where
-            // a non-trivia token starts at indentation ≤ the brace's indent.
-            // This indicates the block should have ended before that line.
-            let insert_offset =
-                Self::find_close_brace_offset(source, &line_tokens, brace_line, unclosed.indent);
-
-            let new_text = if insert_offset == source.len() {
-                // Inserting at EOF
-                if !source.ends_with('\n') {
-                    format!("\n{}", closing_brace)
-                } else {
-                    format!("{}\n", closing_brace)
-                }
-            } else {
-                // Inserting before a line
-                format!("{}\n", closing_brace)
-            };
-
-            errors.push(
-                LintError::new(
-                    "unmatched-braces",
-                    "syntax",
-                    "Unclosed brace '{' - missing closing brace '}'",
-                    Severity::Error,
-                )
-                .with_location(pos.line, pos.column)
-                .with_fix(Fix::replace_range(
-                    insert_offset,
-                    insert_offset,
-                    &new_text,
-                )),
-            );
+            errors.push(Self::build_unclosed_brace_error(
+                source,
+                &line_index,
+                &line_tokens,
+                &unclosed,
+            ));
         }
 
         errors
@@ -288,6 +283,40 @@ impl UnmatchedBraces {
         }
     }
 
+    /// Build a `LintError` for an unclosed brace, including a fix that
+    /// inserts `}` at the best position determined by indentation analysis.
+    fn build_unclosed_brace_error(
+        source: &str,
+        line_index: &LineIndex,
+        line_tokens: &[Vec<&FlatToken>],
+        unclosed: &BraceInfo,
+    ) -> LintError {
+        let pos = line_index.position(unclosed.offset);
+        let brace_line = pos.line;
+        let closing_brace = format!("{}}}", " ".repeat(unclosed.indent));
+        let insert_offset =
+            Self::find_close_brace_offset(source, line_tokens, brace_line, unclosed.indent);
+
+        let new_text = if insert_offset == source.len() {
+            if !source.ends_with('\n') {
+                format!("\n{}", closing_brace)
+            } else {
+                format!("{}\n", closing_brace)
+            }
+        } else {
+            format!("{}\n", closing_brace)
+        };
+
+        LintError::new(
+            "unmatched-braces",
+            "syntax",
+            "Unclosed brace '{' - missing closing brace '}'",
+            Severity::Error,
+        )
+        .with_location(pos.line, pos.column)
+        .with_fix(Fix::replace_range(insert_offset, insert_offset, &new_text))
+    }
+
     /// Find the byte offset where a closing `}` should be inserted for an
     /// unclosed brace.
     ///
@@ -317,17 +346,43 @@ impl UnmatchedBraces {
             }
             let indent = Self::line_indent(source, first_meaningful.offset);
             if indent <= brace_indent {
-                // This line is at the same or lower indentation — the block
-                // should have ended before this line. Find line start offset.
-                let line_start = source[..first_meaningful.offset]
-                    .rfind('\n')
-                    .map_or(0, |i| i + 1);
-                return line_start;
+                // At same or lower indentation — treat as block boundary
+                // only if strictly lower, or if the line starts a new block
+                // (contains `{`). Simple directives at the same indent may
+                // just have broken indentation.
+                let is_block_boundary = indent < brace_indent
+                    || line_toks.iter().any(|t| t.kind == SyntaxKind::L_BRACE);
+                if is_block_boundary {
+                    let line_start = source[..first_meaningful.offset]
+                        .rfind('\n')
+                        .map_or(0, |i| i + 1);
+                    return Self::skip_blank_lines_backward(source, line_start);
+                }
             }
         }
 
         // No line with lower indentation found — insert at EOF
         source.len()
+    }
+
+    /// Given a byte offset at a line start, skip backward past any preceding
+    /// blank lines so that `}` is inserted before the blank lines rather than
+    /// after them.
+    fn skip_blank_lines_backward(source: &str, offset: usize) -> usize {
+        let mut pos = offset;
+        while pos > 0 {
+            // pos points to start of a line. The previous line ends at pos-1 ('\n').
+            // Find the start of the previous line.
+            let prev_line_start = source[..pos - 1].rfind('\n').map_or(0, |i| i + 1);
+            let prev_line = &source[prev_line_start..pos - 1];
+            if prev_line.trim().is_empty() {
+                pos = prev_line_start;
+            } else {
+                break;
+            }
+        }
+        // Don't skip past the beginning of the file
+        if pos == 0 && offset > 0 { offset } else { pos }
     }
 
     /// Get the indentation (in bytes) of the line containing the given offset.
@@ -994,10 +1049,10 @@ events {
 
         let fix = errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
-        // The closing `}` should be inserted before `events {`, not at EOF
+        // The closing `}` should be inserted before the blank line and `events {`
         assert!(
-            result.contains("}\nevents {"),
-            "Fix should insert }} before events block, got:\n{}",
+            result.contains("}\n}\n\nevents {"),
+            "Fix should insert }} before blank line, got:\n{}",
             result
         );
     }
@@ -1039,6 +1094,37 @@ events {
     }
 
     #[test]
+    fn test_skip_blank_lines_backward_stops_at_content() {
+        let source = "http {\n    server_tokens on;\n\n\nserver {\n";
+        let offset = source.find("server {").unwrap();
+        let result = UnmatchedBraces::skip_blank_lines_backward(source, offset);
+        // Should skip back past blank lines to right after "server_tokens on;\n"
+        assert!(
+            result < offset,
+            "Should skip back past blank lines, got {}",
+            result
+        );
+        // Inserting at result should place `}` right after the content line
+        assert_eq!(
+            &source[result..result + 1],
+            "\n",
+            "Result should point to start of first blank line"
+        );
+    }
+
+    #[test]
+    fn test_skip_blank_lines_backward_does_not_go_past_file_start() {
+        let source = "\n\nserver {\n";
+        let offset = source.find("server {").unwrap();
+        let result = UnmatchedBraces::skip_blank_lines_backward(source, offset);
+        assert_eq!(
+            result, offset,
+            "Should not skip past file start, got offset {}",
+            result
+        );
+    }
+
+    #[test]
     fn test_fix_unclosed_upstream_skips_rbrace_line() {
         // upstream backend { is unclosed, but the stack matches it with http's `}`.
         // So `http {` (indent 0) is reported as unclosed.
@@ -1057,6 +1143,97 @@ events {
         assert!(
             result.ends_with("}\n"),
             "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_upstream_inserts_before_server() {
+        // upstream backend { is missing its closing brace.
+        // The fix should insert `}` before `server {` (same indent level),
+        // not at EOF.
+        let content = r#"http {
+  server_tokens on;
+  autoindex on;
+
+  upstream backend {
+    server api.example.com:8080;
+
+
+  server {
+    listen 80 ;
+    server_name example.com;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+
+    location / {
+      root /var/www/html;
+    }
+
+    location /api {
+      proxy_pass http://api.example.com:8080;
+
+      add_header X-Request-ID $request_id;
+    }
+
+    location /static/ {
+      alias /var/www/static;
+    }
+  }
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // The closing `}` should be inserted before the blank lines,
+        // not right before `server {`
+        assert!(
+            result.contains("    server api.example.com:8080;\n  }\n\n\n  server {"),
+            "Fix should insert }} before blank lines, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_upstream_with_broken_indent_inside() {
+        // upstream backend { is missing its closing brace, AND one of its
+        // child directives has broken indentation (same level as upstream).
+        // The fix should still insert `}` before `server {`, not before the
+        // broken-indent line.
+        let content = r#"http {
+  server_tokens on;
+
+  upstream backend {
+    server api1.example.com:8080;
+  server api2.example.com:8080;
+
+  server {
+    listen 80;
+  }
+}
+"#;
+        let errors = check_braces(content);
+        let unclosed_errors: Vec<_> = errors
+            .iter()
+            .filter(|e| e.message.contains("Unclosed brace"))
+            .collect();
+        assert_eq!(
+            unclosed_errors.len(),
+            1,
+            "Expected 1 unclosed brace error, got: {:?}",
+            errors
+        );
+
+        let fix = unclosed_errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // The `}` should be inserted before the blank line and `server {`,
+        // not before the broken-indent `server api2` line
+        assert!(
+            result.contains("  }\n\n  server {"),
+            "Fix should insert }} before blank line, got:\n{}",
             result
         );
     }
