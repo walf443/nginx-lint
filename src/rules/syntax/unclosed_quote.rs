@@ -3,7 +3,7 @@ use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::line_index::LineIndex;
 use crate::parser::parse_string_rowan;
-use crate::parser::syntax_kind::{SyntaxKind, SyntaxToken};
+use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::fs;
 use std::path::Path;
 
@@ -47,86 +47,84 @@ impl UnclosedQuote {
 
     /// CST-based unclosed quote detection.
     ///
-    /// Walks all tokens in the rowan CST and checks whether quoted-string
-    /// tokens are properly terminated. Tokens inside raw blocks (e.g.
-    /// `content_by_lua_block`) are skipped because their content is not
-    /// nginx configuration syntax.
+    /// Recursively walks CST nodes, skipping raw block contents (e.g.
+    /// `content_by_lua_block`), and checks whether quoted-string tokens
+    /// are properly terminated.
     fn check_cst(&self, source: &str) -> Vec<LintError> {
         let (root, _syntax_errors) = parse_string_rowan(source);
         let line_index = LineIndex::new(source);
         let mut errors = Vec::new();
 
-        for element in root.descendants_with_tokens() {
-            let token = match element.as_token() {
-                Some(t) => t,
-                None => continue,
-            };
-
-            let (quote_char, quote_name) = match token.kind() {
-                SyntaxKind::DOUBLE_QUOTED_STRING => ('"', "double quote"),
-                SyntaxKind::SINGLE_QUOTED_STRING => ('\'', "single quote"),
-                _ => continue,
-            };
-
-            // Skip tokens inside raw blocks (lua code, etc.)
-            if Self::is_inside_raw_block(&token) {
-                continue;
-            }
-
-            let text = token.text();
-
-            // A properly closed string starts and ends with the same quote
-            if text.len() >= 2 && text.ends_with(quote_char) {
-                continue;
-            }
-
-            // Unclosed quote detected
-            let offset: usize = token.text_range().start().into();
-            let pos = line_index.position(offset);
-            let message = format!("Unclosed {} - missing closing {}", quote_name, quote_char);
-
-            let fix = Self::create_fix(quote_char, text, offset);
-
-            let mut error = LintError::new("unclosed-quote", "syntax", &message, Severity::Error)
-                .with_location(pos.line, pos.column);
-
-            if let Some(f) = fix {
-                error = error.with_fix(f);
-            }
-
-            errors.push(error);
-        }
+        Self::walk_node(&root, &line_index, &mut errors);
 
         errors
     }
 
-    /// Check if a token is inside a raw block directive (e.g. `*_by_lua_block`).
+    /// Recursively walk a CST node, collecting unclosed quote errors.
     ///
-    /// Walks up the CST ancestors: if the token is inside a BLOCK node whose
-    /// parent DIRECTIVE starts with a raw-block directive name, it should be
-    /// skipped.
-    fn is_inside_raw_block(token: &SyntaxToken) -> bool {
-        let mut node = token.parent();
-        while let Some(n) = node {
-            if n.kind() == SyntaxKind::BLOCK {
-                // Check if the parent DIRECTIVE is a raw block directive
-                if let Some(directive) = n.parent() {
-                    if directive.kind() == SyntaxKind::DIRECTIVE {
-                        // Find the first IDENT token in the directive (the name)
-                        for child in directive.children_with_tokens() {
-                            if let Some(t) = child.as_token() {
-                                if t.kind() == SyntaxKind::IDENT {
-                                    if crate::parser::is_raw_block_directive(t.text()) {
-                                        return true;
-                                    }
-                                    break;
-                                }
-                            }
-                        }
+    /// BLOCK nodes belonging to raw block directives (lua etc.) are skipped
+    /// entirely, avoiding per-token ancestor checks.
+    fn walk_node(node: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
+        for child in node.children_with_tokens() {
+            match child {
+                SyntaxElement::Node(child_node) => {
+                    // Skip raw block contents
+                    if child_node.kind() == SyntaxKind::BLOCK
+                        && Self::is_raw_block_node(&child_node)
+                    {
+                        continue;
                     }
+                    Self::walk_node(&child_node, line_index, errors);
+                }
+                SyntaxElement::Token(token) => {
+                    let (quote_char, quote_name) = match token.kind() {
+                        SyntaxKind::DOUBLE_QUOTED_STRING => ('"', "double quote"),
+                        SyntaxKind::SINGLE_QUOTED_STRING => ('\'', "single quote"),
+                        _ => continue,
+                    };
+
+                    let text = token.text();
+
+                    // A properly closed string starts and ends with the same quote
+                    if text.len() >= 2 && text.ends_with(quote_char) {
+                        continue;
+                    }
+
+                    // Unclosed quote detected
+                    let offset: usize = token.text_range().start().into();
+                    let pos = line_index.position(offset);
+                    let message =
+                        format!("Unclosed {} - missing closing {}", quote_name, quote_char);
+
+                    let fix = Self::create_fix(quote_char, text, offset);
+
+                    let mut error =
+                        LintError::new("unclosed-quote", "syntax", &message, Severity::Error)
+                            .with_location(pos.line, pos.column);
+
+                    if let Some(f) = fix {
+                        error = error.with_fix(f);
+                    }
+
+                    errors.push(error);
                 }
             }
-            node = n.parent();
+        }
+    }
+
+    /// Check if a BLOCK node belongs to a raw block directive (e.g. `*_by_lua_block`).
+    fn is_raw_block_node(block: &SyntaxNode) -> bool {
+        let directive = match block.parent() {
+            Some(p) if p.kind() == SyntaxKind::DIRECTIVE => p,
+            _ => return false,
+        };
+        // Find the first IDENT token in the directive (the name)
+        for child in directive.children_with_tokens() {
+            if let Some(t) = child.as_token()
+                && t.kind() == SyntaxKind::IDENT
+            {
+                return crate::parser::is_raw_block_directive(t.text());
+            }
         }
         false
     }
@@ -144,7 +142,11 @@ impl UnclosedQuote {
         let semicolon_pos = first_line.rfind(';')?;
         let before_semicolon = &first_line[..semicolon_pos];
 
-        // Content after the opening quote character
+        // The token always starts with a quote character, so before_semicolon
+        // is at least 1 byte. Guard defensively anyway.
+        if before_semicolon.is_empty() {
+            return None;
+        }
         let after_quote = &before_semicolon[1..];
 
         // Check if there's an nginx keyword at the end that should be outside the string
@@ -201,6 +203,14 @@ mod tests {
     fn check_quotes(content: &str) -> Vec<LintError> {
         let rule = UnclosedQuote;
         rule.check_content(content)
+    }
+
+    fn apply_fix(content: &str, fix: &Fix) -> String {
+        let mut result = content.to_string();
+        if let (Some(start), Some(end)) = (fix.start_offset, fix.end_offset) {
+            result.replace_range(start..end, &fix.new_text);
+        }
+        result
     }
 
     #[test]
@@ -301,6 +311,54 @@ mod tests {
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("single quote"));
+    }
+
+    #[test]
+    fn test_fix_inserts_closing_quote_before_semicolon() {
+        let content = r#"location / {
+    add_header X-Custom "value;
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        assert_eq!(fix.new_text, "\"");
+        // The fix should insert `"` right before the `;`
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains(r#"add_header X-Custom "value";"#),
+            "Fix should close the quote before semicolon, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_inserts_closing_quote_before_keyword() {
+        let content = "rewrite ^/old \"http://example.com/new permanent;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.contains("\"http://example.com/new\" permanent;"),
+            "Fix should close the quote before keyword, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_no_fix_without_semicolon() {
+        // Unclosed quote on a line without semicolon should not generate a fix
+        let content = r#"server {
+    content_by_lua_block '
+        ngx.say("hello")
+}"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].fixes.is_empty(),
+            "Expected no fix when no semicolon on the line"
+        );
     }
 
     #[test]
