@@ -3,7 +3,7 @@ use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::line_index::LineIndex;
 use crate::parser::parse_string_rowan;
-use crate::parser::syntax_kind::SyntaxKind;
+use crate::parser::syntax_kind::{SyntaxKind, SyntaxToken};
 use std::fs;
 use std::path::Path;
 
@@ -48,7 +48,9 @@ impl UnclosedQuote {
     /// CST-based unclosed quote detection.
     ///
     /// Walks all tokens in the rowan CST and checks whether quoted-string
-    /// tokens are properly terminated.
+    /// tokens are properly terminated. Tokens inside raw blocks (e.g.
+    /// `content_by_lua_block`) are skipped because their content is not
+    /// nginx configuration syntax.
     fn check_cst(&self, source: &str) -> Vec<LintError> {
         let (root, _syntax_errors) = parse_string_rowan(source);
         let line_index = LineIndex::new(source);
@@ -65,6 +67,11 @@ impl UnclosedQuote {
                 SyntaxKind::SINGLE_QUOTED_STRING => ('\'', "single quote"),
                 _ => continue,
             };
+
+            // Skip tokens inside raw blocks (lua code, etc.)
+            if Self::is_inside_raw_block(&token) {
+                continue;
+            }
 
             let text = token.text();
 
@@ -91,6 +98,37 @@ impl UnclosedQuote {
         }
 
         errors
+    }
+
+    /// Check if a token is inside a raw block directive (e.g. `*_by_lua_block`).
+    ///
+    /// Walks up the CST ancestors: if the token is inside a BLOCK node whose
+    /// parent DIRECTIVE starts with a raw-block directive name, it should be
+    /// skipped.
+    fn is_inside_raw_block(token: &SyntaxToken) -> bool {
+        let mut node = token.parent();
+        while let Some(n) = node {
+            if n.kind() == SyntaxKind::BLOCK {
+                // Check if the parent DIRECTIVE is a raw block directive
+                if let Some(directive) = n.parent() {
+                    if directive.kind() == SyntaxKind::DIRECTIVE {
+                        // Find the first IDENT token in the directive (the name)
+                        for child in directive.children_with_tokens() {
+                            if let Some(t) = child.as_token() {
+                                if t.kind() == SyntaxKind::IDENT {
+                                    if crate::parser::is_raw_block_directive(t.text()) {
+                                        return true;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            node = n.parent();
+        }
+        false
     }
 
     /// Try to create a fix for an unclosed quote.
@@ -263,5 +301,52 @@ mod tests {
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("single quote"));
+    }
+
+    #[test]
+    fn test_lua_block_quotes_ignored() {
+        // Quotes inside lua blocks should not be checked
+        let content = r#"http {
+    server {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            ngx.say(cjson.encode({status = "ok"}))
+        }
+    }
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for quotes inside lua block, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiple_lua_blocks_quotes_ignored() {
+        let content = r#"http {
+    init_by_lua_block {
+        require "resty.core"
+        cjson = require "cjson"
+    }
+
+    server {
+        listen 80;
+        access_by_lua_block {
+            local token = ngx.var.http_authorization
+            if not token then
+                ngx.exit(ngx.HTTP_UNAUTHORIZED)
+            end
+        }
+    }
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for quotes inside lua blocks, got: {:?}",
+            errors
+        );
     }
 }
