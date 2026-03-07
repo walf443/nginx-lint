@@ -73,7 +73,7 @@ impl MissingSemicolon {
                         Self::check_directive(&child_node, line_index, errors);
                     }
                     SyntaxKind::BLOCK => {
-                        if !Self::is_raw_block_node(&child_node) {
+                        if !crate::parser::is_raw_block_cst_node(&child_node) {
                             Self::walk_node(&child_node, line_index, errors);
                         }
                     }
@@ -101,7 +101,7 @@ impl MissingSemicolon {
 
         // Recurse into non-raw blocks
         for child in directive.children() {
-            if child.kind() == SyntaxKind::BLOCK && !Self::is_raw_block_node(&child) {
+            if child.kind() == SyntaxKind::BLOCK && !crate::parser::is_raw_block_cst_node(&child) {
                 Self::walk_node(&child, line_index, errors);
             }
         }
@@ -121,6 +121,7 @@ impl MissingSemicolon {
             .last();
 
         if let Some(last) = last_meaningful {
+            // text_range().end() is exclusive; subtract 1 to get the last character's position
             let end_offset: usize = last.text_range().end().into();
             let pos = line_index.position(end_offset.saturating_sub(1));
             let fix = Fix::replace_range(end_offset, end_offset, ";");
@@ -189,6 +190,7 @@ impl MissingSemicolon {
                     let last_before = children[..i].iter().rev().find(|c| !c.kind().is_trivia());
 
                     if let Some(last) = last_before {
+                        // text_range().end() is exclusive; subtract 1 to get the last character's position
                         let end_offset: usize = last.text_range().end().into();
                         let pos = line_index.position(end_offset.saturating_sub(1));
                         let fix = Fix::replace_range(end_offset, end_offset, ";");
@@ -209,22 +211,6 @@ impl MissingSemicolon {
                 }
             }
         }
-    }
-
-    /// Check if a BLOCK node belongs to a raw block directive (e.g. `*_by_lua_block`).
-    fn is_raw_block_node(block: &SyntaxNode) -> bool {
-        let directive = match block.parent() {
-            Some(p) if p.kind() == SyntaxKind::DIRECTIVE => p,
-            _ => return false,
-        };
-        for child in directive.children_with_tokens() {
-            if let Some(t) = child.as_token()
-                && t.kind() == SyntaxKind::IDENT
-            {
-                return crate::parser::is_raw_block_directive(t.text());
-            }
-        }
-        false
     }
 }
 
@@ -469,6 +455,64 @@ worker_processes auto;
             errors.is_empty(),
             "Expected no errors for semicolon with trailing comment, got: {:?}",
             errors
+        );
+    }
+
+    #[test]
+    fn test_multiline_string_continuation_not_flagged() {
+        // Multi-line directive with quoted string continuation across lines
+        // should not be flagged (next token after NEWLINE is a string, not IDENT)
+        let content = r#"http {
+    log_format main '$remote_addr - $remote_user'
+        '$request $status';
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for multi-line string continuation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiline_variable_continuation_not_flagged() {
+        // Multi-line directive where continuation starts with a variable
+        // should not be flagged (next token after NEWLINE is VARIABLE, not IDENT)
+        let content = r#"http {
+    server {
+        proxy_set_header Host
+            $host;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for variable continuation, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_multiline_ident_continuation_flagged() {
+        // When an IDENT token follows a NEWLINE after arguments, the heuristic
+        // treats it as a merged directive. This is a known limitation: legitimate
+        // multi-line directives where a continuation arg is an IDENT (e.g.
+        // `add_header X-H\n    value;`) will be flagged as missing semicolon.
+        // In practice, such line-splitting is uncommon in nginx configs.
+        let content = r#"http {
+    server {
+        add_header X-Header
+            value;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(
+            errors.len(),
+            1,
+            "IDENT after NEWLINE is flagged as merged directive (known limitation)"
         );
     }
 

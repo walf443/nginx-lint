@@ -219,6 +219,39 @@ pub fn is_block_directive_with_extras(name: &str, additional: &[String]) -> bool
     is_block_directive(name) || additional.iter().any(|s| s == name)
 }
 
+/// Check if a CST BLOCK node belongs to a raw block directive (e.g. `*_by_lua_block`).
+///
+/// Walks up to the parent DIRECTIVE node and checks if its first IDENT token
+/// is a raw block directive name.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_parser::{parse_string_rowan, is_raw_block_cst_node};
+/// use nginx_lint_parser::syntax_kind::SyntaxKind;
+///
+/// let (root, _) = parse_string_rowan("content_by_lua_block { ngx.say('hi') }");
+/// let directive = root.children().next().unwrap();
+/// let block = directive.children().find(|n| n.kind() == SyntaxKind::BLOCK).unwrap();
+/// assert!(is_raw_block_cst_node(&block));
+/// ```
+pub fn is_raw_block_cst_node(block: &SyntaxNode) -> bool {
+    use syntax_kind::SyntaxKind;
+
+    let directive = match block.parent() {
+        Some(p) if p.kind() == SyntaxKind::DIRECTIVE => p,
+        _ => return false,
+    };
+    for child in directive.children_with_tokens() {
+        if let Some(t) = child.as_token()
+            && t.kind() == SyntaxKind::IDENT
+        {
+            return is_raw_block_directive(t.text());
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
