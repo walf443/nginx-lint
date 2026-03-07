@@ -1,6 +1,9 @@
 use crate::docs::RuleDoc;
 use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
+use crate::parser::line_index::LineIndex;
+use crate::parser::parse_string_rowan;
+use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::fs;
 use std::path::Path;
 
@@ -23,53 +26,27 @@ are balanced, and that block directives have their opening brace."#,
 /// Check for unmatched braces
 pub struct UnmatchedBraces;
 
-/// Information about an opening brace
+/// Information about an opening brace on the stack.
 #[derive(Debug, Clone)]
 struct BraceInfo {
-    line: usize,
-    column: usize,
-    /// Indentation of the line containing the opening brace (for fix generation)
+    /// Byte offset of the `{` token.
+    offset: usize,
+    /// Indentation (in bytes) of the line containing the `{`.
     indent: usize,
 }
 
+/// A flattened CST token with its byte offset and context.
+#[derive(Debug, Clone)]
+struct FlatToken {
+    kind: SyntaxKind,
+    offset: usize,
+    len: usize,
+}
+
 impl UnmatchedBraces {
-    /// Strip trailing comment from a line (# preceded by whitespace)
-    /// Returns the line without the comment, trimmed
-    fn strip_trailing_comment(line: &str) -> &str {
-        let mut in_string = false;
-        let mut string_char = None;
-        let mut prev_char = ' ';
-        let chars: Vec<char> = line.chars().collect();
-
-        for (i, &ch) in chars.iter().enumerate() {
-            // Handle strings
-            if (ch == '"' || ch == '\'') && !in_string {
-                in_string = true;
-                string_char = Some(ch);
-            } else if in_string && Some(ch) == string_char && prev_char != '\\' {
-                in_string = false;
-                string_char = None;
-            } else if !in_string && ch == '#' {
-                // Check if preceded by whitespace
-                if i == 0 || chars[i - 1].is_whitespace() {
-                    // Found comment start, return everything before it (trimmed)
-                    return line[..line
-                        .char_indices()
-                        .nth(i)
-                        .map(|(idx, _)| idx)
-                        .unwrap_or(line.len())]
-                        .trim_end();
-                }
-            }
-            prev_char = ch;
-        }
-
-        line
-    }
-
     /// Check content directly (used by WASM)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
-        self.check_content_with_extras(content, &[])
+        self.check_cst(content, &[])
     }
 
     /// Check content with additional block directives
@@ -78,257 +55,310 @@ impl UnmatchedBraces {
         content: &str,
         additional_block_directives: &[String],
     ) -> Vec<LintError> {
+        self.check_cst(content, additional_block_directives)
+    }
+
+    /// CST-based unmatched brace detection.
+    ///
+    /// Flattens the CST into a token stream (skipping raw block contents),
+    /// then performs line-based analysis and brace-stack matching — similar
+    /// to the original text-based approach but benefiting from proper
+    /// tokenization of strings, comments, and raw blocks.
+    fn check_cst(&self, source: &str, additional_block_directives: &[String]) -> Vec<LintError> {
+        let (root, _) = parse_string_rowan(source);
+        let line_index = LineIndex::new(source);
+
+        // Flatten CST tokens, skipping raw block internals.
+        let tokens = Self::flatten_tokens(&root);
+
         let mut errors = Vec::new();
+        let mut brace_stack: Vec<BraceInfo> = Vec::new();
 
-        let lines: Vec<&str> = content.lines().collect();
-        let total_lines = lines.len();
-
-        // Pre-calculate line start offsets for range-based fixes
-        let mut line_offsets: Vec<usize> = Vec::with_capacity(lines.len());
-        let mut offset = 0;
-        for line in &lines {
-            line_offsets.push(offset);
-            offset += line.len() + 1; // +1 for '\n'
+        // Group tokens by line for line-based analysis.
+        let mut line_tokens: Vec<Vec<&FlatToken>> = vec![Vec::new()];
+        for token in &tokens {
+            if token.kind == SyntaxKind::NEWLINE {
+                line_tokens.push(Vec::new());
+            } else {
+                line_tokens.last_mut().unwrap().push(token);
+            }
         }
 
-        let mut brace_stack: Vec<BraceInfo> = Vec::new();
-        let mut string_char: Option<char> = None;
-        let mut in_comment = false;
-        let mut prev_char = ' ';
-        let mut in_raw_block = false;
-        let mut raw_block_depth = 0;
-
-        // Track where to insert missing closing braces
-        // (insert_after_line, error_line, indent)
-        let mut missing_close_braces: Vec<(usize, usize, usize)> = Vec::new();
-
-        for (line_num, line) in lines.iter().enumerate() {
-            let line_number = line_num + 1;
-            let chars: Vec<char> = line.chars().collect();
-            let line_indent = line.len() - line.trim_start().len();
-            let trimmed = line.trim_start();
-
-            // Check if we're entering a raw block (like lua_block)
-            if !in_raw_block
-                && let Some(first_word) = trimmed.split_whitespace().next()
-                && crate::parser::is_raw_block_directive(first_word)
-                && trimmed.contains('{')
-            {
-                in_raw_block = true;
-                raw_block_depth = 1;
-            }
-
-            // Track brace depth inside raw blocks
-            if in_raw_block {
-                for ch in trimmed.chars() {
-                    if ch == '{' && raw_block_depth > 0 {
-                        raw_block_depth += 1;
-                    } else if ch == '}' {
-                        raw_block_depth -= 1;
-                        if raw_block_depth == 0 {
-                            in_raw_block = false;
+        for (line_idx, line_toks) in line_tokens.iter().enumerate() {
+            // Process braces on this line
+            for tok in line_toks {
+                match tok.kind {
+                    SyntaxKind::L_BRACE => {
+                        let indent = Self::line_indent(source, tok.offset);
+                        brace_stack.push(BraceInfo {
+                            offset: tok.offset,
+                            indent,
+                        });
+                    }
+                    SyntaxKind::R_BRACE => {
+                        if brace_stack.pop().is_none() {
+                            // Extra closing brace
+                            let pos = line_index.position(tok.offset);
+                            let fix = Self::build_remove_brace_fix(source, tok.offset);
+                            let mut error = LintError::new(
+                                "unmatched-braces",
+                                "syntax",
+                                "Unexpected closing brace '}' without matching opening brace",
+                                Severity::Error,
+                            )
+                            .with_location(pos.line, pos.column);
+                            if let Some(f) = fix {
+                                error = error.with_fix(f);
+                            }
+                            errors.push(error);
                         }
                     }
+                    _ => {}
                 }
             }
 
-            // Skip comment-only lines for brace processing
-            if trimmed.starts_with('#') {
+            // Check for block directive missing opening brace.
+            // Skip lines that are comment-only or empty.
+            let first = match line_toks.iter().find(|t| !t.kind.is_trivia()) {
+                Some(tok) => tok,
+                None => continue,
+            };
+
+            // First meaningful token must be IDENT (directive name)
+            if first.kind != SyntaxKind::IDENT {
                 continue;
             }
 
-            for (col, &ch) in chars.iter().enumerate() {
-                let column = col + 1;
-
-                // Handle comments (only outside strings and when preceded by whitespace)
-                // In nginx, # only starts a comment when preceded by whitespace
-                if ch == '#' && string_char.is_none() && !in_comment {
-                    let preceded_by_whitespace =
-                        col == 0 || chars.get(col - 1).is_none_or(|c| c.is_whitespace());
-                    if preceded_by_whitespace {
-                        in_comment = true;
-                    }
-                }
-
-                if in_comment {
-                    prev_char = ch;
-                    continue;
-                }
-
-                // Handle strings - track which quote type started it
-                if (ch == '"' || ch == '\'') && string_char.is_none() {
-                    string_char = Some(ch);
-                    prev_char = ch;
-                    continue;
-                }
-
-                // End string only with matching quote (and not escaped)
-                if let Some(quote) = string_char {
-                    if ch == quote && prev_char != '\\' {
-                        string_char = None;
-                    }
-                    prev_char = ch;
-                    continue;
-                }
-
-                // Track braces
-                if ch == '{' {
-                    brace_stack.push(BraceInfo {
-                        line: line_number,
-                        column,
-                        indent: line_indent,
-                    });
-                } else if ch == '}' {
-                    // Simple stack-based matching (ignore indentation)
-                    if brace_stack.pop().is_none() {
-                        // Extra closing brace - no matching opening brace
-                        let fix = if line.trim() == "}" {
-                            let line_start = line_offsets[line_num];
-                            let line_end = line_start + line.len();
-                            // Remove the preceding newline to delete the line
-                            if line_start > 0 {
-                                Some(Fix::replace_range(line_start - 1, line_end, ""))
-                            } else {
-                                Some(Fix::replace_range(line_start, line_end + 1, ""))
-                            }
-                        } else {
-                            None
-                        };
-
-                        let mut error = LintError::new(
-                            self.name(),
-                            self.category(),
-                            "Unexpected closing brace '}' without matching opening brace",
-                            Severity::Error,
-                        )
-                        .with_location(line_number, column);
-                        if let Some(f) = fix {
-                            error = error.with_fix(f);
-                        }
-                        errors.push(error);
-                    }
-                }
-
-                prev_char = ch;
+            let name = &source[first.offset..first.offset + first.len];
+            if !crate::parser::is_block_directive_with_extras(name, additional_block_directives) {
+                continue;
             }
 
-            // Reset comment flag at end of line
-            in_comment = false;
-            prev_char = ' ';
-
-            // Check for block directives missing opening brace
-            // This catches cases like "location /" without "{"
-            // Skip this check inside raw blocks (like lua_block)
-            if string_char.is_none() && !in_raw_block {
-                let trimmed = line.trim();
-                // Strip trailing comment (# preceded by whitespace) before checking line ending
-                let trimmed_no_comment = Self::strip_trailing_comment(trimmed);
-                // Skip empty lines, comments, and lines ending with { ; or }
-                if !trimmed.is_empty()
-                    && !trimmed.starts_with('#')
-                    && !trimmed_no_comment.ends_with('{')
-                    && !trimmed_no_comment.ends_with(';')
-                    && !trimmed_no_comment.ends_with('}')
-                {
-                    // Get the first word (directive name)
-                    if let Some(first_word) = trimmed.split_whitespace().next()
-                        && crate::parser::is_block_directive_with_extras(
-                            first_word,
-                            additional_block_directives,
-                        )
-                    {
-                        // Check if next non-empty, non-comment line starts with '{'
-                        // This allows brace-on-next-line style
-                        let next_has_brace = lines
-                            .iter()
-                            .skip(line_num + 1)
-                            .map(|l| l.trim())
-                            .find(|l| !l.is_empty() && !l.starts_with('#'))
-                            .is_some_and(|l| l.starts_with('{'));
-
-                        if !next_has_brace {
-                            // This is a block directive missing its opening brace
-                            // Use range-based fix: replace trailing whitespace with " {"
-                            let line_start = line_offsets[line_num];
-                            let content_end = line_start + line.trim_end().len();
-                            let line_end = line_start + line.len();
-                            // Replace from end of content to end of line with " {"
-                            let fix = Fix::replace_range(content_end, line_end, " {");
-                            errors.push(
-                                LintError::new(
-                                    self.name(),
-                                    self.category(),
-                                    &format!(
-                                        "Block directive '{}' is missing opening brace '{{'",
-                                        first_word
-                                    ),
-                                    Severity::Error,
-                                )
-                                .with_location(line_number, trimmed.len())
-                                .with_fix(fix),
-                            );
-                            // Add virtual opening brace to stack so the closing brace matches
-                            brace_stack.push(BraceInfo {
-                                line: line_number,
-                                column: trimmed.len(),
-                                indent: line_indent,
-                            });
-                        }
-                    }
-                }
+            // Check if line ends with `{`, `;`, or `}` (last meaningful token)
+            let last = line_toks
+                .iter()
+                .rev()
+                .find(|t| !t.kind.is_trivia())
+                .unwrap();
+            if matches!(
+                last.kind,
+                SyntaxKind::L_BRACE | SyntaxKind::SEMICOLON | SyntaxKind::R_BRACE
+            ) {
+                continue;
             }
-        }
 
-        // Remaining unclosed braces - add closing braces at end of file
-        while let Some(unclosed) = brace_stack.pop() {
-            missing_close_braces.push((total_lines, unclosed.line, unclosed.indent));
+            // Check if the first non-empty/non-comment line after this one
+            // starts with `{` (brace-on-next-line style).
+            let next_starts_with_brace = line_tokens[line_idx + 1..]
+                .iter()
+                .find_map(|next_line| {
+                    // Skip blank lines and comment-only lines
+                    if next_line.iter().all(|t| t.kind.is_trivia()) {
+                        return None;
+                    }
+                    let first_meaningful = next_line.iter().find(|t| !t.kind.is_trivia()).unwrap();
+                    Some(first_meaningful.kind == SyntaxKind::L_BRACE)
+                })
+                .unwrap_or(false);
+
+            if next_starts_with_brace {
+                continue;
+            }
+
+            // This is a block directive missing its opening brace.
+            let pos = line_index.position(last.offset + last.len - 1);
+
+            // Fix: insert " {" after the last meaningful content on this line
+            let fix_offset = last.offset + last.len;
+            let fix = Fix::replace_range(fix_offset, fix_offset, " {");
+
             errors.push(
                 LintError::new(
-                    self.name(),
-                    self.category(),
+                    "unmatched-braces",
+                    "syntax",
+                    &format!("Block directive '{}' is missing opening brace '{{'", name),
+                    Severity::Error,
+                )
+                .with_location(pos.line, pos.column)
+                .with_fix(fix),
+            );
+
+            // Push a virtual brace so the matching `}` doesn't also get flagged
+            let indent = Self::line_indent(source, first.offset);
+            brace_stack.push(BraceInfo {
+                offset: fix_offset,
+                indent,
+            });
+        }
+
+        // Remaining unclosed braces — find the best insertion point using
+        // indentation analysis rather than always appending at EOF.
+        while let Some(unclosed) = brace_stack.pop() {
+            let pos = line_index.position(unclosed.offset);
+            let brace_line = pos.line;
+
+            let closing_brace = format!("{}}}", " ".repeat(unclosed.indent));
+
+            // Find the insertion point: the first line after the brace where
+            // a non-trivia token starts at indentation ≤ the brace's indent.
+            // This indicates the block should have ended before that line.
+            let insert_offset =
+                Self::find_close_brace_offset(source, &line_tokens, brace_line, unclosed.indent);
+
+            let new_text = if insert_offset == source.len() {
+                // Inserting at EOF
+                if !source.ends_with('\n') {
+                    format!("\n{}", closing_brace)
+                } else {
+                    format!("{}\n", closing_brace)
+                }
+            } else {
+                // Inserting before a line
+                format!("{}\n", closing_brace)
+            };
+
+            errors.push(
+                LintError::new(
+                    "unmatched-braces",
+                    "syntax",
                     "Unclosed brace '{' - missing closing brace '}'",
                     Severity::Error,
                 )
-                .with_location(unclosed.line, unclosed.column),
+                .with_location(pos.line, pos.column)
+                .with_fix(Fix::replace_range(
+                    insert_offset,
+                    insert_offset,
+                    &new_text,
+                )),
             );
-        }
-
-        // Create fixes for missing closing braces (insert after)
-        // Sort by insert line descending so outer blocks end up at the bottom
-        missing_close_braces.sort_by(|a, b| b.0.cmp(&a.0));
-
-        for (_insert_after_line, error_line, indent) in missing_close_braces {
-            let closing_brace = format!("{}}}", " ".repeat(indent));
-            // Insert at end of file (unclosed braces are always closed at EOF)
-            let insert_offset = content.len();
-            let new_text = if !content.ends_with('\n') {
-                format!("\n{}", closing_brace)
-            } else {
-                format!("{}\n", closing_brace)
-            };
-            // Find the corresponding error by matching the error's line number
-            for error in &mut errors {
-                if error.fixes.is_empty()
-                    && error.message.contains("Unclosed brace")
-                    && error.line == Some(error_line)
-                {
-                    error
-                        .fixes
-                        .push(Fix::replace_range(insert_offset, insert_offset, &new_text));
-                    break;
-                }
-            }
         }
 
         errors
     }
 
-    fn name(&self) -> &'static str {
-        "unmatched-braces"
+    /// Flatten the CST into a linear token stream, skipping interior tokens
+    /// of raw blocks (e.g. `content_by_lua_block { ... }`).
+    ///
+    /// The L_BRACE and R_BRACE of raw blocks are preserved so that brace
+    /// counting and line analysis work correctly.
+    fn flatten_tokens(root: &SyntaxNode) -> Vec<FlatToken> {
+        let mut tokens = Vec::new();
+        Self::collect_tokens(root, &mut tokens);
+        tokens
     }
 
-    fn category(&self) -> &'static str {
-        "syntax"
+    fn collect_tokens(node: &SyntaxNode, tokens: &mut Vec<FlatToken>) {
+        for child in node.children_with_tokens() {
+            match child {
+                SyntaxElement::Token(token) => {
+                    let offset: usize = token.text_range().start().into();
+                    let len = token.text_range().len().into();
+                    tokens.push(FlatToken {
+                        kind: token.kind(),
+                        offset,
+                        len,
+                    });
+                }
+                SyntaxElement::Node(child_node) => {
+                    if child_node.kind() == SyntaxKind::BLOCK
+                        && crate::parser::is_raw_block_cst_node(&child_node)
+                    {
+                        // For raw blocks, only emit L_BRACE and R_BRACE so
+                        // brace counting and line analysis work correctly.
+                        // Skip all interior tokens.
+                        for raw_child in child_node.children_with_tokens() {
+                            if let SyntaxElement::Token(t) = raw_child
+                                && (t.kind() == SyntaxKind::L_BRACE
+                                    || t.kind() == SyntaxKind::R_BRACE)
+                            {
+                                let offset: usize = t.text_range().start().into();
+                                let len = t.text_range().len().into();
+                                tokens.push(FlatToken {
+                                    kind: t.kind(),
+                                    offset,
+                                    len,
+                                });
+                            }
+                        }
+                        continue;
+                    }
+                    Self::collect_tokens(&child_node, tokens);
+                }
+            }
+        }
+    }
+
+    /// Find the byte offset where a closing `}` should be inserted for an
+    /// unclosed brace.
+    ///
+    /// Scans lines after `brace_line` (1-based) looking for the first line
+    /// whose first non-trivia token starts at indentation ≤ `brace_indent`.
+    /// Returns the byte offset of that line's start (so `}` is inserted
+    /// before it). Falls back to `source.len()` (EOF) if no such line exists.
+    fn find_close_brace_offset(
+        source: &str,
+        line_tokens: &[Vec<&FlatToken>],
+        brace_line: usize,
+        brace_indent: usize,
+    ) -> usize {
+        // line_tokens is 0-indexed; brace_line is 1-based.
+        // Start scanning from the line after the brace.
+        for line_toks in line_tokens.iter().skip(brace_line) {
+            let mut meaningful = line_toks.iter().filter(|t| !t.kind.is_trivia());
+            let first_meaningful = match meaningful.next() {
+                Some(tok) => tok,
+                None => continue, // blank or comment-only line
+            };
+
+            // Skip lines that only contain `}` — those closing braces were
+            // already matched by the brace stack during the main loop.
+            if first_meaningful.kind == SyntaxKind::R_BRACE && meaningful.next().is_none() {
+                continue;
+            }
+            let indent = Self::line_indent(source, first_meaningful.offset);
+            if indent <= brace_indent {
+                // This line is at the same or lower indentation — the block
+                // should have ended before this line. Find line start offset.
+                let line_start = source[..first_meaningful.offset]
+                    .rfind('\n')
+                    .map_or(0, |i| i + 1);
+                return line_start;
+            }
+        }
+
+        // No line with lower indentation found — insert at EOF
+        source.len()
+    }
+
+    /// Get the indentation (in bytes) of the line containing the given offset.
+    fn line_indent(source: &str, offset: usize) -> usize {
+        let line_start = source[..offset].rfind('\n').map_or(0, |i| i + 1);
+        source[line_start..]
+            .bytes()
+            .take_while(|&b| b == b' ' || b == b'\t')
+            .count()
+    }
+
+    /// Build a fix to remove a standalone `}` line, or `None` if `}` shares
+    /// the line with other content.
+    fn build_remove_brace_fix(source: &str, brace_offset: usize) -> Option<Fix> {
+        let line_start = source[..brace_offset].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = source[brace_offset..]
+            .find('\n')
+            .map_or(source.len(), |i| brace_offset + i);
+
+        let line = &source[line_start..line_end];
+        if line.trim() == "}" {
+            if line_start > 0 {
+                Some(Fix::replace_range(line_start - 1, line_end, ""))
+            } else if line_end < source.len() {
+                Some(Fix::replace_range(line_start, line_end + 1, ""))
+            } else {
+                Some(Fix::replace_range(line_start, line_end, ""))
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -351,7 +381,7 @@ impl LintRule for UnmatchedBraces {
             Err(_) => return Vec::new(),
         };
 
-        self.check_content_with_extras(&content, &[])
+        self.check_cst(&content, &[])
     }
 }
 
@@ -392,7 +422,7 @@ mod tests {
 }
 "#;
         let errors = check_braces(content);
-        assert_eq!(errors.len(), 1, "Expected 1 error");
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("Unclosed brace"));
     }
 
@@ -406,7 +436,7 @@ mod tests {
 }
 "#;
         let errors = check_braces(content);
-        assert_eq!(errors.len(), 1, "Expected 1 error");
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("Unexpected closing brace"));
     }
 
@@ -513,59 +543,6 @@ mod tests {
             errors[0].message
         );
         assert!(!errors[0].fixes.is_empty(), "Expected fix to be provided");
-    }
-
-    // =========================================================================
-    // Tests with custom block directives
-    // =========================================================================
-
-    fn check_braces_with_extras(content: &str, extras: &[String]) -> Vec<LintError> {
-        let rule = UnmatchedBraces;
-        rule.check_content_with_extras(content, extras)
-    }
-
-    #[test]
-    fn test_custom_block_directive_missing_brace() {
-        // Custom block directive from extension module
-        let content = r#"http {
-    my_custom_block
-        some_directive value;
-    }
-}
-"#;
-        // Without custom directives, no block directive error
-        let errors = check_braces_with_extras(content, &[]);
-        assert!(
-            !errors.iter().any(|e| e.message.contains("my_custom_block")),
-            "Should not detect custom directive without config"
-        );
-
-        // With custom directives, should detect missing brace
-        let extras = vec!["my_custom_block".to_string()];
-        let errors = check_braces_with_extras(content, &extras);
-        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
-        assert!(
-            errors[0].message.contains("my_custom_block"),
-            "Expected custom block directive in error, got: {}",
-            errors[0].message
-        );
-    }
-
-    #[test]
-    fn test_multiple_custom_block_directives() {
-        let content = r#"http {
-    custom_auth
-        auth_type basic;
-    }
-
-    custom_cache
-        cache_size 100m;
-    }
-}
-"#;
-        let extras = vec!["custom_auth".to_string(), "custom_cache".to_string()];
-        let errors = check_braces_with_extras(content, &extras);
-        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
     }
 
     // =========================================================================
@@ -844,7 +821,9 @@ http {
 
     #[test]
     fn test_non_block_directive_not_detected() {
-        // 'listen', 'root', etc. are not block directives
+        // 'listen', 'root', etc. are not block directives.
+        // 'listen' on its own line without ';' should not be flagged as
+        // a block directive missing braces.
         let content = r#"http {
     server {
         listen
@@ -905,6 +884,183 @@ http {
         assert!(errors[0].message.contains("types"));
     }
 
+    // =========================================================================
+    // Tests with custom block directives
+    // =========================================================================
+
+    fn check_braces_with_extras(content: &str, extras: &[String]) -> Vec<LintError> {
+        let rule = UnmatchedBraces;
+        rule.check_content_with_extras(content, extras)
+    }
+
+    #[test]
+    fn test_custom_block_directive_missing_brace() {
+        // Custom block directive from extension module
+        let content = r#"http {
+    my_custom_block
+        some_directive value;
+    }
+}
+"#;
+        // Without custom directives, no block directive error
+        let errors = check_braces_with_extras(content, &[]);
+        assert!(
+            !errors.iter().any(|e| e.message.contains("my_custom_block")),
+            "Should not detect custom directive without config"
+        );
+
+        // With custom directives, should detect missing brace
+        let extras = vec!["my_custom_block".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(
+            errors[0].message.contains("my_custom_block"),
+            "Expected custom block directive in error, got: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn test_multiple_custom_block_directives() {
+        let content = r#"http {
+    custom_auth
+        auth_type basic;
+    }
+
+    custom_cache
+        cache_size 100m;
+    }
+}
+"#;
+        let extras = vec!["custom_auth".to_string(), "custom_cache".to_string()];
+        let errors = check_braces_with_extras(content, &extras);
+        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+    }
+
+    // =========================================================================
+    // Edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_empty_input() {
+        let errors = UnmatchedBraces.check_content("");
+        assert!(errors.is_empty(), "Expected no errors for empty input");
+    }
+
+    #[test]
+    fn test_only_braces() {
+        let errors = UnmatchedBraces.check_content("{}");
+        assert!(errors.is_empty(), "Expected no errors for matched braces");
+
+        let errors = UnmatchedBraces.check_content("{");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let errors = UnmatchedBraces.check_content("}");
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("Unexpected closing brace"));
+    }
+
+    // =========================================================================
+    // Tests for smart fix positioning (indentation-based)
+    // =========================================================================
+
+    fn apply_fix(content: &str, fix: &Fix) -> String {
+        let mut result = content.to_string();
+        if let (Some(start), Some(end)) = (fix.start_offset, fix.end_offset) {
+            result.replace_range(start..end, &fix.new_text);
+        }
+        result
+    }
+
+    #[test]
+    fn test_fix_unclosed_http_before_events() {
+        // `http {` is unclosed; `events {` at the same indent level indicates
+        // where `}` should be inserted (before `events`).
+        let content = r#"http {
+    server_tokens on;
+    autoindex on;
+    upstream backend {
+        server api.example.com:8080;
+    }
+
+events {
+    worker_connections 1024;
+}
+"#;
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // The closing `}` should be inserted before `events {`, not at EOF
+        assert!(
+            result.contains("}\nevents {"),
+            "Fix should insert }} before events block, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_nested_block_uses_indent() {
+        // `http {` is unclosed (only `server` has matching braces).
+        // The fix should insert `}` before EOF, matching `http`'s indent (0).
+        let content = "http {\n    server {\n        listen 80;\n    }\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // `http` is at indent 0, no line at indent ≤ 0 after it,
+        // so fix appends at EOF.
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_at_eof_fallback() {
+        // When there's no subsequent line at lower indent, fix goes at EOF
+        let content = "http {\n    server_tokens on;\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_fix_unclosed_upstream_skips_rbrace_line() {
+        // upstream backend { is unclosed, but the stack matches it with http's `}`.
+        // So `http {` (indent 0) is reported as unclosed.
+        // R_BRACE-only lines (`}`) are skipped, so the fix falls back to EOF
+        // rather than inserting before the existing `}`.
+        let content = "http {\n  server_tokens on;\n  autoindex on;\n\n  upstream backend {\n    server api.example.com:8080;\n  \n\n  server {\n    listen 80;\n    server_name example.com;\n  }\n}\n";
+        let rule = UnmatchedBraces;
+        let errors = rule.check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // With R_BRACE-only line skipping, the fix appends at EOF
+        // (no content line at indent ≤ 0 exists after the brace)
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
     #[test]
     fn test_server_in_upstream_with_trailing_comment() {
         // server directive in upstream with trailing comment should not be
@@ -925,29 +1081,5 @@ http {
 "#;
         let errors = check_braces(content);
         assert!(errors.is_empty(), "Expected no errors, got: {:?}", errors);
-    }
-
-    #[test]
-    fn test_strip_trailing_comment() {
-        // Basic comment stripping
-        assert_eq!(
-            UnmatchedBraces::strip_trailing_comment("server 127.0.0.1:8080; # comment"),
-            "server 127.0.0.1:8080;"
-        );
-        // No comment
-        assert_eq!(
-            UnmatchedBraces::strip_trailing_comment("listen 80;"),
-            "listen 80;"
-        );
-        // Hash in string should not be treated as comment
-        assert_eq!(
-            UnmatchedBraces::strip_trailing_comment(r#"return 200 "test#value";"#),
-            r#"return 200 "test#value";"#
-        );
-        // Hash not preceded by whitespace (e.g., in regex)
-        assert_eq!(
-            UnmatchedBraces::strip_trailing_comment("location ~* foo#bar {"),
-            "location ~* foo#bar {"
-        );
     }
 }
