@@ -151,22 +151,12 @@ impl UnmatchedBraces {
             let next_starts_with_brace = line_tokens[line_idx + 1..]
                 .iter()
                 .find_map(|next_line| {
-                    if next_line.is_empty() {
-                        return None; // skip blank lines
-                    }
-                    // Skip comment-only lines (check before filtering trivia)
-                    if next_line
-                        .iter()
-                        .all(|t| t.kind.is_trivia() || t.kind == SyntaxKind::COMMENT)
-                    {
+                    // Skip blank lines and comment-only lines
+                    if next_line.iter().all(|t| t.kind.is_trivia()) {
                         return None;
                     }
-                    let next_meaningful: Vec<&&FlatToken> =
-                        next_line.iter().filter(|t| !t.kind.is_trivia()).collect();
-                    if next_meaningful.is_empty() {
-                        return None;
-                    }
-                    Some(next_meaningful[0].kind == SyntaxKind::L_BRACE)
+                    let first_meaningful = next_line.iter().find(|t| !t.kind.is_trivia()).unwrap();
+                    Some(first_meaningful.kind == SyntaxKind::L_BRACE)
                 })
                 .unwrap_or(false);
 
