@@ -356,13 +356,32 @@ impl UnmatchedBraces {
                     let line_start = source[..first_meaningful.offset]
                         .rfind('\n')
                         .map_or(0, |i| i + 1);
-                    return line_start;
+                    return Self::skip_blank_lines_backward(source, line_start);
                 }
             }
         }
 
         // No line with lower indentation found — insert at EOF
         source.len()
+    }
+
+    /// Given a byte offset at a line start, skip backward past any preceding
+    /// blank lines so that `}` is inserted before the blank lines rather than
+    /// after them.
+    fn skip_blank_lines_backward(source: &str, offset: usize) -> usize {
+        let mut pos = offset;
+        while pos > 0 {
+            // pos points to start of a line. The previous line ends at pos-1 ('\n').
+            // Find the start of the previous line.
+            let prev_line_start = source[..pos - 1].rfind('\n').map_or(0, |i| i + 1);
+            let prev_line = &source[prev_line_start..pos - 1];
+            if prev_line.trim().is_empty() {
+                pos = prev_line_start;
+            } else {
+                break;
+            }
+        }
+        pos
     }
 
     /// Get the indentation (in bytes) of the line containing the given offset.
@@ -1029,10 +1048,10 @@ events {
 
         let fix = errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
-        // The closing `}` should be inserted before `events {`, not at EOF
+        // The closing `}` should be inserted before the blank line and `events {`
         assert!(
-            result.contains("}\nevents {"),
-            "Fix should insert }} before events block, got:\n{}",
+            result.contains("}\n}\n\nevents {"),
+            "Fix should insert }} before blank line, got:\n{}",
             result
         );
     }
@@ -1137,10 +1156,11 @@ events {
 
         let fix = errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
-        // The closing `}` should be inserted before `server {`, not at EOF
+        // The closing `}` should be inserted before the blank lines,
+        // not right before `server {`
         assert!(
-            result.contains("  }\n  server {"),
-            "Fix should insert }} before server block, got:\n{}",
+            result.contains("    server api.example.com:8080;\n  }\n\n\n  server {"),
+            "Fix should insert }} before blank lines, got:\n{}",
             result
         );
     }
@@ -1177,11 +1197,11 @@ events {
 
         let fix = unclosed_errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
-        // The `}` should be inserted before `server {` block, not before
-        // the broken-indent `server api2` line
+        // The `}` should be inserted before the blank line and `server {`,
+        // not before the broken-indent `server api2` line
         assert!(
-            result.contains("  }\n  server {"),
-            "Fix should insert }} before server block, got:\n{}",
+            result.contains("  }\n\n  server {"),
+            "Fix should insert }} before blank line, got:\n{}",
             result
         );
     }
