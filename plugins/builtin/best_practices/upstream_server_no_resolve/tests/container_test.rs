@@ -16,7 +16,7 @@
 //! name cannot coexist, and sharing a process would cause server group
 //! cross-contamination.
 
-use nginx_lint_plugin::container_testing::{self, DnsTestEnv, reqwest};
+use nginx_lint_plugin::container_testing::{DnsTestEnv, reqwest};
 use std::time::Duration;
 
 /// Generate nginx config for upstream WITHOUT `resolve` (DNS cached at startup).
@@ -37,8 +37,6 @@ http {
 }
 
 /// Generate nginx config for upstream WITH `resolve` + `zone` (DNS re-resolved).
-///
-/// Requires nginx 1.27.3+ or nginx Plus.
 fn resolve_config(resolver_ip: &str) -> String {
     format!(
         r#"events {{ worker_connections 64; }}
@@ -65,18 +63,9 @@ http {{
 /// Uses two separate nginx instances to avoid upstream name collisions.
 ///
 /// **Note**: The `resolve` parameter requires nginx 1.27.3+ (OSS) or nginx Plus.
-/// OpenResty (based on nginx 1.27.1) does not support it, so this test is skipped
-/// for OpenResty images.
 #[tokio::test]
 #[ignore]
 async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
-    // The upstream `resolve` parameter requires nginx 1.27.3+ (OSS).
-    // OpenResty is based on nginx 1.27.1 and does not support it.
-    if container_testing::nginx_server_name() == "openresty" {
-        eprintln!("Skipping: OpenResty does not support upstream 'resolve' parameter");
-        return;
-    }
-
     let env = DnsTestEnv::start("nginx-upstream-dns-test").await;
 
     // --- Start nginx frontends ---

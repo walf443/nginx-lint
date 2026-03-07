@@ -40,6 +40,7 @@ pub use nginx::*;
 use std::time::Duration;
 
 use coredns::CoreDnsContainer;
+use testcontainers::core::WaitFor;
 
 // ---------------------------------------------------------------------------
 // DnsTestEnv — reusable CoreDNS + two-backend test environment
@@ -144,6 +145,7 @@ impl DnsTestEnv {
             .network(&self.network)
             .entrypoint("sh")
             .cmd(vec!["-c", &startup_script])
+            .wait_for(WaitFor::message_on_stderr("start worker process"))
             .start(config)
             .await
     }
