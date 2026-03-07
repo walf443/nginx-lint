@@ -304,23 +304,17 @@ impl UnmatchedBraces {
         // line_tokens is 0-indexed; brace_line is 1-based.
         // Start scanning from the line after the brace.
         for line_toks in line_tokens.iter().skip(brace_line) {
-            let meaningful: Vec<&FlatToken> = line_toks
-                .iter()
-                .filter(|t| !t.kind.is_trivia())
-                .copied()
-                .collect();
-
-            if meaningful.is_empty() {
-                continue; // blank or comment-only line
-            }
+            let mut meaningful = line_toks.iter().filter(|t| !t.kind.is_trivia());
+            let first_meaningful = match meaningful.next() {
+                Some(tok) => tok,
+                None => continue, // blank or comment-only line
+            };
 
             // Skip lines that only contain `}` — those closing braces were
             // already matched by the brace stack during the main loop.
-            if meaningful.len() == 1 && meaningful[0].kind == SyntaxKind::R_BRACE {
+            if first_meaningful.kind == SyntaxKind::R_BRACE && meaningful.next().is_none() {
                 continue;
             }
-
-            let first_meaningful = meaningful[0];
             let indent = Self::line_indent(source, first_meaningful.offset);
             if indent <= brace_indent {
                 // This line is at the same or lower indentation — the block
