@@ -381,7 +381,8 @@ impl UnmatchedBraces {
                 break;
             }
         }
-        pos
+        // Don't skip past the beginning of the file
+        if pos == 0 && offset > 0 { offset } else { pos }
     }
 
     /// Get the indentation (in bytes) of the line containing the given offset.
@@ -1088,6 +1089,37 @@ events {
         assert!(
             result.ends_with("}\n"),
             "Fix should append at EOF, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_skip_blank_lines_backward_stops_at_content() {
+        let source = "http {\n    server_tokens on;\n\n\nserver {\n";
+        let offset = source.find("server {").unwrap();
+        let result = UnmatchedBraces::skip_blank_lines_backward(source, offset);
+        // Should skip back past blank lines to right after "server_tokens on;\n"
+        assert!(
+            result < offset,
+            "Should skip back past blank lines, got {}",
+            result
+        );
+        // Inserting at result should place `}` right after the content line
+        assert_eq!(
+            &source[result..result + 1],
+            "\n",
+            "Result should point to start of first blank line"
+        );
+    }
+
+    #[test]
+    fn test_skip_blank_lines_backward_does_not_go_past_file_start() {
+        let source = "\n\nserver {\n";
+        let offset = source.find("server {").unwrap();
+        let result = UnmatchedBraces::skip_blank_lines_backward(source, offset);
+        assert_eq!(
+            result, offset,
+            "Should not skip past file start, got offset {}",
             result
         );
     }
