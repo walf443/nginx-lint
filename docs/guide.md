@@ -125,6 +125,16 @@ Validate your configuration:
 nginx-lint config validate
 ```
 
+View the full configuration reference:
+
+```bash
+# Human-readable Markdown format
+nginx-lint config schema --format markdown
+
+# JSON Schema (for editors and tools)
+nginx-lint config schema
+```
+
 
 ## Suppressing Warnings (Ignore Comments)
 
@@ -203,7 +213,7 @@ prefix = "/etc/nginx"
 ### GitHub Actions (recommended)
 
 ```yaml
-- uses: walf443/nginx-lint-action@v1
+- uses: walf443/nginx-lint-action@v0
   with:
     files: /etc/nginx/nginx.conf
 ```
@@ -235,3 +245,5 @@ prefix = "/etc/nginx"
 | `nginx-lint why --list` | List all rules |
 | `nginx-lint why <rule-name>` | Detailed rule documentation |
 | `nginx-lint config init` | Generate default config |
+| `nginx-lint config schema` | Output JSON Schema for config file |
+| `nginx-lint config schema --format markdown` | Configuration reference in Markdown |

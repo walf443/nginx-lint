@@ -5,6 +5,7 @@
 //! loaded from a file with [`LintConfig::from_file`] or discovered
 //! automatically with [`LintConfig::find_and_load`].
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Deserializer};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -79,6 +80,49 @@ impl<'de> Deserialize<'de> for IndentSize {
         }
 
         deserializer.deserialize_any(IndentSizeVisitor)
+    }
+}
+
+impl JsonSchema for IndentSize {
+    fn schema_name() -> String {
+        "IndentSize".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec};
+
+        let int_schema = SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::Integer))),
+            number: Some(Box::new(schemars::schema::NumberValidation {
+                minimum: Some(1.0),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+
+        let str_schema = SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![serde_json::json!("auto")]),
+            ..Default::default()
+        };
+
+        let _ = generator;
+        SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "Indentation size: a positive integer or \"auto\" for auto-detection"
+                        .to_string(),
+                ),
+                default: Some(serde_json::json!("auto")),
+                ..Default::default()
+            })),
+            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
+                one_of: Some(vec![Schema::Object(int_schema), Schema::Object(str_schema)]),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+        .into()
     }
 }
 
@@ -269,7 +313,7 @@ enabled = true
 /// [`find_and_load`](Self::find_and_load) to search the directory tree upward.
 /// A default `LintConfig` enables all rules except those listed in
 /// [`DISABLED_BY_DEFAULT`](Self::DISABLED_BY_DEFAULT).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct LintConfig {
     /// Per-rule configuration keyed by rule name (e.g. `"indent"`, `"server-tokens-enabled"`).
     #[serde(default)]
@@ -286,7 +330,7 @@ pub struct LintConfig {
 }
 
 /// Parser configuration
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ParserConfig {
     /// Additional block directives (extension modules, etc.)
     /// These are added to the built-in list of block directives
@@ -310,7 +354,7 @@ pub struct ParserConfig {
 ///
 /// Mappings are applied in declaration order and chained, so the output of one
 /// mapping is fed into the next.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PathMapping {
     /// Path segment(s) to match in the include path (compared component-wise)
     pub from: String,
@@ -319,7 +363,7 @@ pub struct PathMapping {
 }
 
 /// Include resolution configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct IncludeConfig {
     /// Path mappings applied to include patterns before resolving them.
     /// Applied in declaration order; each mapping receives the output of the previous one.
@@ -332,7 +376,7 @@ pub struct IncludeConfig {
 }
 
 /// Color output configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ColorConfig {
     /// Color mode: "auto" (default), "always", or "never"
     #[serde(default)]
@@ -385,6 +429,40 @@ pub enum Color {
     BrightWhite,
 }
 
+impl JsonSchema for Color {
+    fn schema_name() -> String {
+        "Color".to_string()
+    }
+
+    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        use schemars::schema::{InstanceType, SchemaObject, SingleOrVec};
+
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            enum_values: Some(vec![
+                serde_json::json!("black"),
+                serde_json::json!("red"),
+                serde_json::json!("green"),
+                serde_json::json!("yellow"),
+                serde_json::json!("blue"),
+                serde_json::json!("magenta"),
+                serde_json::json!("cyan"),
+                serde_json::json!("white"),
+                serde_json::json!("bright_black"),
+                serde_json::json!("bright_red"),
+                serde_json::json!("bright_green"),
+                serde_json::json!("bright_yellow"),
+                serde_json::json!("bright_blue"),
+                serde_json::json!("bright_magenta"),
+                serde_json::json!("bright_cyan"),
+                serde_json::json!("bright_white"),
+            ]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 impl<'de> Deserialize<'de> for Color {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -431,6 +509,35 @@ pub enum ColorMode {
     Never,
 }
 
+impl JsonSchema for ColorMode {
+    fn schema_name() -> String {
+        "ColorMode".to_string()
+    }
+
+    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        use schemars::schema::{InstanceType, SchemaObject, SingleOrVec};
+
+        SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                description: Some(
+                    "Color mode: \"auto\" respects NO_COLOR env and terminal detection, \"always\" forces colors, \"never\" disables colors"
+                        .to_string(),
+                ),
+                default: Some(serde_json::json!("auto")),
+                ..Default::default()
+            })),
+            enum_values: Some(vec![
+                serde_json::json!("auto"),
+                serde_json::json!("always"),
+                serde_json::json!("never"),
+            ]),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
 impl<'de> Deserialize<'de> for ColorMode {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -454,7 +561,7 @@ impl<'de> Deserialize<'de> for ColorMode {
 /// An additional directive to check for inheritance issues.
 ///
 /// Used in `[rules.directive-inheritance]` configuration.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct AdditionalDirective {
     /// The directive name (e.g., "proxy_set_cookie")
     pub name: String,
@@ -471,7 +578,7 @@ pub struct AdditionalDirective {
 /// Every `[rules.<name>]` section in `.nginx-lint.toml` is deserialized into
 /// a `RuleConfig`. The only universal field is [`enabled`](Self::enabled);
 /// the remaining fields are rule-specific options.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct RuleConfig {
     /// Whether this rule is active (`true` by default for most rules).
     #[serde(default = "default_true")]
@@ -572,6 +679,20 @@ impl LintConfig {
     /// Get include path mappings (applied in order to include patterns before resolving)
     pub fn include_path_mappings(&self) -> &[PathMapping] {
         &self.include.path_map
+    }
+
+    /// Generate the JSON Schema for the configuration file.
+    ///
+    /// The schema is derived from the Rust type definitions, so it automatically
+    /// stays in sync with the actual configuration structure.
+    pub fn json_schema() -> serde_json::Value {
+        let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
+            s.option_nullable = false;
+            s.option_add_null_type = false;
+        });
+        let generator = settings.into_generator();
+        let schema = generator.into_root_schema_for::<LintConfig>();
+        serde_json::to_value(schema).unwrap()
     }
 
     /// Get include prefix (base directory for resolving relative include paths)
@@ -1330,5 +1451,58 @@ prefix = "/etc/nginx"
             "prefix should be a valid include field, got errors: {:?}",
             errors
         );
+    }
+
+    #[test]
+    fn test_json_schema_is_valid() {
+        let schema = LintConfig::json_schema();
+
+        // Should have $schema key
+        assert_eq!(
+            schema.get("$schema").and_then(|v| v.as_str()),
+            Some("http://json-schema.org/draft-07/schema#")
+        );
+
+        // Should have properties for all top-level config sections
+        let props = schema.get("properties").unwrap().as_object().unwrap();
+        assert!(props.contains_key("rules"), "missing 'rules' property");
+        assert!(props.contains_key("color"), "missing 'color' property");
+        assert!(props.contains_key("parser"), "missing 'parser' property");
+        assert!(props.contains_key("include"), "missing 'include' property");
+    }
+
+    #[test]
+    fn test_json_schema_rule_config_has_all_fields() {
+        let schema = LintConfig::json_schema();
+
+        // RuleConfig definition should contain all fields from the struct
+        let rule_config_def = schema
+            .pointer("/definitions/RuleConfig")
+            .expect("RuleConfig definition missing from schema");
+
+        let props = rule_config_def
+            .get("properties")
+            .unwrap()
+            .as_object()
+            .unwrap();
+
+        let expected_fields = [
+            "enabled",
+            "indent_size",
+            "allowed_protocols",
+            "weak_ciphers",
+            "required_exclusions",
+            "additional_contexts",
+            "max_block_lines",
+            "excluded_directives",
+            "additional_directives",
+        ];
+
+        for field in &expected_fields {
+            assert!(
+                props.contains_key(*field),
+                "RuleConfig schema missing field '{field}'"
+            );
+        }
     }
 }
