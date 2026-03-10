@@ -9,6 +9,7 @@ fn main() -> ExitCode {
 
     match &cli.command {
         Some(Commands::Config { command }) => cli::config::run_config(command),
+        Some(Commands::Guide) => cli::guide::run_guide(),
         Some(Commands::Web { port, open }) => cli::web::run_web(*port, *open),
         Some(Commands::Why { rule, list }) => cli::why::run_why(rule.clone(), *list),
         None => cli::lint::run_lint(cli),

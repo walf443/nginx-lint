@@ -1,4 +1,5 @@
 pub mod config;
+pub mod guide;
 pub mod lint;
 pub mod web;
 pub mod why;
@@ -84,6 +85,8 @@ pub enum Commands {
         #[arg(long)]
         open: bool,
     },
+    /// Show getting started guide (installation, usage, configuration)
+    Guide,
     /// Show detailed documentation for a rule
     Why {
         /// Rule name (e.g., "server-tokens-enabled")
