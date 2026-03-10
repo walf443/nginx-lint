@@ -9,34 +9,38 @@
 //! Specify nginx version via environment variable (default: "1.27"):
 //!   NGINX_VERSION=1.26 cargo test -p autoindex-enabled-plugin --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{NginxContainer, reqwest};
+use nginx_lint_plugin::container_testing::{NginxContainer, nginx_conf_dir, reqwest};
+
+fn autoindex_config(autoindex_directive: &str) -> String {
+    let conf_dir = nginx_conf_dir();
+    format!(
+        r#"events {{
+    worker_connections 1024;
+}}
+http {{
+    server {{
+        listen 80;
+
+        location /healthz {{
+            return 200 'OK';
+        }}
+
+        location /files/ {{
+            alias {conf_dir}/;
+            {autoindex_directive}
+        }}
+    }}
+}}
+"#
+    )
+}
 
 #[tokio::test]
 #[ignore]
 async fn autoindex_on_shows_directory_listing() {
     let nginx = NginxContainer::builder()
         .health_path("/healthz")
-        .start(
-            br#"
-events {
-    worker_connections 1024;
-}
-http {
-    server {
-        listen 80;
-
-        location /healthz {
-            return 200 'OK';
-        }
-
-        location /files/ {
-            alias /etc/nginx/;
-            autoindex on;
-        }
-    }
-}
-"#,
-        )
+        .start(autoindex_config("autoindex on;"))
         .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();
@@ -55,27 +59,7 @@ http {
 async fn autoindex_off_returns_403_for_directory() {
     let nginx = NginxContainer::builder()
         .health_path("/healthz")
-        .start(
-            br#"
-events {
-    worker_connections 1024;
-}
-http {
-    server {
-        listen 80;
-
-        location /healthz {
-            return 200 'OK';
-        }
-
-        location /files/ {
-            alias /etc/nginx/;
-            autoindex off;
-        }
-    }
-}
-"#,
-        )
+        .start(autoindex_config("autoindex off;"))
         .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();
@@ -91,26 +75,7 @@ http {
 async fn autoindex_default_returns_403_for_directory() {
     let nginx = NginxContainer::builder()
         .health_path("/healthz")
-        .start(
-            br#"
-events {
-    worker_connections 1024;
-}
-http {
-    server {
-        listen 80;
-
-        location /healthz {
-            return 200 'OK';
-        }
-
-        location /files/ {
-            alias /etc/nginx/;
-        }
-    }
-}
-"#,
-        )
+        .start(autoindex_config(""))
         .await;
 
     let resp = reqwest::get(nginx.url("/files/")).await.unwrap();

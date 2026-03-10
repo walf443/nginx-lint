@@ -72,7 +72,9 @@ impl Plugin for UpstreamServerNoResolvePlugin {
              2. For older nginx: Use a variable with 'set' and 'resolver' directive to force \
              re-resolution on each request: set $backend \"domain:port\"; proxy_pass http://$backend;\n\n\
              When using 'resolve', a 'zone' directive is also required in the upstream block to store \
-             the dynamically resolved addresses in shared memory.",
+             the dynamically resolved addresses in shared memory.\n\n\
+             Note: freenginx does not support the 'resolve' parameter. Use solution 2 (variable with \
+             'set' and 'resolver' directive) instead.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
