@@ -22,12 +22,15 @@ pub enum ConfigCommands {
         #[arg(short, long, default_value = ".nginx-lint.toml")]
         config: PathBuf,
     },
+    /// Output JSON Schema for .nginx-lint.toml configuration file
+    Schema,
 }
 
 pub fn run_config(command: &ConfigCommands) -> ExitCode {
     match command {
         ConfigCommands::Init { output, force } => run_init(output.clone(), *force),
         ConfigCommands::Validate { config } => run_validate(config.clone()),
+        ConfigCommands::Schema => run_schema(),
     }
 }
 
@@ -83,4 +86,65 @@ fn run_validate(config_path: PathBuf) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+fn run_schema() -> ExitCode {
+    let mut schema = LintConfig::json_schema();
+
+    // Enrich with rule descriptions from docs/plugins
+    enrich_schema_with_rule_descriptions(&mut schema);
+
+    println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+    ExitCode::SUCCESS
+}
+
+/// Add rule descriptions from docs and plugin metadata to the schema
+fn enrich_schema_with_rule_descriptions(schema: &mut serde_json::Value) {
+    let descriptions = get_rule_descriptions();
+
+    let rules_path = if schema.pointer("/properties/rules/additionalProperties").is_some() {
+        "/properties/rules/additionalProperties"
+    } else {
+        "/properties/rules/properties"
+    };
+    if let Some(serde_json::Value::Object(obj)) = schema.pointer_mut(rules_path)
+        && !descriptions.is_empty()
+    {
+        let desc_value = serde_json::to_value(&descriptions).unwrap();
+        obj.insert("x-rule-descriptions".to_string(), desc_value);
+    }
+
+    // Add title and description to the root schema
+    if let serde_json::Value::Object(obj) = schema {
+        obj.insert(
+            "title".to_string(),
+            serde_json::json!("nginx-lint configuration"),
+        );
+        obj.insert(
+            "description".to_string(),
+            serde_json::json!("Configuration file schema for nginx-lint (.nginx-lint.toml). See https://github.com/walf443/nginx-lint for details."),
+        );
+    }
+}
+
+/// Get rule descriptions from docs and plugin metadata
+fn get_rule_descriptions() -> std::collections::HashMap<String, String> {
+    let mut descriptions = std::collections::HashMap::new();
+
+    // Native rule docs
+    for doc in nginx_lint::docs::all_rule_docs() {
+        descriptions.insert(doc.name.to_string(), doc.description.to_string());
+    }
+
+    // Plugin docs (when available)
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    {
+        for doc in nginx_lint::docs::all_rule_docs_with_plugins() {
+            descriptions
+                .entry(doc.name.clone())
+                .or_insert(doc.description);
+        }
+    }
+
+    descriptions
 }
