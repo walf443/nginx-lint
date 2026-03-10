@@ -15,6 +15,10 @@ A linter for nginx configuration files with WASM plugin support, autofix, and a 
 - **JSON output** — machine-readable output for CI integration
 - **GitHub Actions integration** — inline PR annotations with `--format github-actions`
 
+## Documentation
+
+For a comprehensive getting started guide covering installation, configuration, CI integration, and more, see [docs/guide.md](docs/guide.md) or run `nginx-lint guide`.
+
 ## Quick Start
 
 You can also try it in the browser: [Demo](https://walf443.github.io/nginx-lint/)
