@@ -84,45 +84,20 @@ impl<'de> Deserialize<'de> for IndentSize {
 }
 
 impl JsonSchema for IndentSize {
-    fn schema_name() -> String {
-        "IndentSize".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "IndentSize".into()
     }
 
-    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec};
-
-        let int_schema = SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::Integer))),
-            number: Some(Box::new(schemars::schema::NumberValidation {
-                minimum: Some(1.0),
-                ..Default::default()
-            })),
-            ..Default::default()
-        };
-
-        let str_schema = SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![serde_json::json!("auto")]),
-            ..Default::default()
-        };
-
-        let _ = generator;
-        SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                description: Some(
-                    "Indentation size: a positive integer or \"auto\" for auto-detection"
-                        .to_string(),
-                ),
-                default: Some(serde_json::json!("auto")),
-                ..Default::default()
-            })),
-            subschemas: Some(Box::new(schemars::schema::SubschemaValidation {
-                one_of: Some(vec![Schema::Object(int_schema), Schema::Object(str_schema)]),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        serde_json::from_value(serde_json::json!({
+            "description": "Indentation size: a positive integer or \"auto\" for auto-detection",
+            "default": "auto",
+            "oneOf": [
+                { "type": "integer", "minimum": 1 },
+                { "type": "string", "enum": ["auto"] }
+            ]
+        }))
+        .unwrap()
     }
 }
 
@@ -430,36 +405,20 @@ pub enum Color {
 }
 
 impl JsonSchema for Color {
-    fn schema_name() -> String {
-        "Color".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Color".into()
     }
 
-    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        use schemars::schema::{InstanceType, SchemaObject, SingleOrVec};
-
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            enum_values: Some(vec![
-                serde_json::json!("black"),
-                serde_json::json!("red"),
-                serde_json::json!("green"),
-                serde_json::json!("yellow"),
-                serde_json::json!("blue"),
-                serde_json::json!("magenta"),
-                serde_json::json!("cyan"),
-                serde_json::json!("white"),
-                serde_json::json!("bright_black"),
-                serde_json::json!("bright_red"),
-                serde_json::json!("bright_green"),
-                serde_json::json!("bright_yellow"),
-                serde_json::json!("bright_blue"),
-                serde_json::json!("bright_magenta"),
-                serde_json::json!("bright_cyan"),
-                serde_json::json!("bright_white"),
-            ]),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        serde_json::from_value(serde_json::json!({
+            "type": "string",
+            "enum": [
+                "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+                "bright_black", "bright_red", "bright_green", "bright_yellow",
+                "bright_blue", "bright_magenta", "bright_cyan", "bright_white"
+            ]
+        }))
+        .unwrap()
     }
 }
 
@@ -510,31 +469,18 @@ pub enum ColorMode {
 }
 
 impl JsonSchema for ColorMode {
-    fn schema_name() -> String {
-        "ColorMode".to_string()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ColorMode".into()
     }
 
-    fn json_schema(_generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        use schemars::schema::{InstanceType, SchemaObject, SingleOrVec};
-
-        SchemaObject {
-            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::String))),
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                description: Some(
-                    "Color mode: \"auto\" respects NO_COLOR env and terminal detection, \"always\" forces colors, \"never\" disables colors"
-                        .to_string(),
-                ),
-                default: Some(serde_json::json!("auto")),
-                ..Default::default()
-            })),
-            enum_values: Some(vec![
-                serde_json::json!("auto"),
-                serde_json::json!("always"),
-                serde_json::json!("never"),
-            ]),
-            ..Default::default()
-        }
-        .into()
+    fn json_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        serde_json::from_value(serde_json::json!({
+            "type": "string",
+            "description": "Color mode: \"auto\" respects NO_COLOR env and terminal detection, \"always\" forces colors, \"never\" disables colors",
+            "default": "auto",
+            "enum": ["auto", "always", "never"]
+        }))
+        .unwrap()
     }
 }
 
@@ -686,11 +632,7 @@ impl LintConfig {
     /// The schema is derived from the Rust type definitions, so it automatically
     /// stays in sync with the actual configuration structure.
     pub fn json_schema() -> serde_json::Value {
-        let settings = schemars::r#gen::SchemaSettings::draft07().with(|s| {
-            s.option_nullable = false;
-            s.option_add_null_type = false;
-        });
-        let generator = settings.into_generator();
+        let generator = schemars::SchemaGenerator::default();
         let schema = generator.into_root_schema_for::<LintConfig>();
         serde_json::to_value(schema).unwrap()
     }
@@ -1460,7 +1402,7 @@ prefix = "/etc/nginx"
         // Should have $schema key
         assert_eq!(
             schema.get("$schema").and_then(|v| v.as_str()),
-            Some("http://json-schema.org/draft-07/schema#")
+            Some("https://json-schema.org/draft/2020-12/schema")
         );
 
         // Should have properties for all top-level config sections
@@ -1476,8 +1418,9 @@ prefix = "/etc/nginx"
         let schema = LintConfig::json_schema();
 
         // RuleConfig definition should contain all fields from the struct
+        // schemars v1 uses "$defs" instead of "definitions"
         let rule_config_def = schema
-            .pointer("/definitions/RuleConfig")
+            .pointer("/$defs/RuleConfig")
             .expect("RuleConfig definition missing from schema");
 
         let props = rule_config_def
