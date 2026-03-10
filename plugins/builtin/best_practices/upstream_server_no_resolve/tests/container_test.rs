@@ -16,8 +16,13 @@
 //! name cannot coexist, and sharing a process would cause server group
 //! cross-contamination.
 
-use nginx_lint_plugin::container_testing::{DnsTestEnv, reqwest};
+use nginx_lint_plugin::container_testing::{DnsTestEnv, nginx_server_name, reqwest};
 use std::time::Duration;
+
+/// Check if the current image is freenginx (which does not support the `resolve` parameter).
+fn is_freenginx() -> bool {
+    nginx_server_name() == "freenginx"
+}
 
 /// Generate nginx config for upstream WITHOUT `resolve` (DNS cached at startup).
 fn no_resolve_config() -> &'static str {
@@ -63,9 +68,15 @@ http {{
 /// Uses two separate nginx instances to avoid upstream name collisions.
 ///
 /// **Note**: The `resolve` parameter requires nginx 1.27.3+ (OSS) or nginx Plus.
+/// freenginx does not support the `resolve` parameter and is skipped.
 #[tokio::test]
 #[ignore]
 async fn upstream_no_resolve_caches_dns_while_resolve_re_resolves() {
+    if is_freenginx() {
+        eprintln!("Skipping: freenginx does not support the upstream server `resolve` parameter");
+        return;
+    }
+
     let env = DnsTestEnv::start("nginx-upstream-dns-test").await;
 
     // --- Start nginx frontends ---
