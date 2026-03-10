@@ -39,6 +39,8 @@ fn nginx_image_config() -> NginxImageConfig {
         };
         let conf_path = if name.contains("openresty") {
             "/usr/local/openresty/nginx/conf/nginx.conf".to_string()
+        } else if name.contains("freenginx") {
+            "/usr/local/nginx/conf/nginx.conf".to_string()
         } else {
             "/etc/nginx/nginx.conf".to_string()
         };
@@ -63,6 +65,12 @@ fn is_openresty_image() -> bool {
         .unwrap_or(false)
 }
 
+fn is_freenginx_image() -> bool {
+    std::env::var("NGINX_IMAGE")
+        .map(|v| v.contains("freenginx"))
+        .unwrap_or(false)
+}
+
 /// Get the default HTML document root for the current container image.
 ///
 /// - nginx: `/usr/share/nginx/html`
@@ -70,6 +78,8 @@ fn is_openresty_image() -> bool {
 pub fn nginx_html_root() -> &'static str {
     if is_openresty_image() {
         "/usr/local/openresty/nginx/html"
+    } else if is_freenginx_image() {
+        "/usr/local/nginx/html"
     } else {
         "/usr/share/nginx/html"
     }
@@ -82,6 +92,8 @@ pub fn nginx_html_root() -> &'static str {
 pub fn nginx_conf_dir() -> &'static str {
     if is_openresty_image() {
         "/usr/local/openresty/nginx/conf"
+    } else if is_freenginx_image() {
+        "/usr/local/nginx/conf"
     } else {
         "/etc/nginx"
     }
@@ -94,6 +106,8 @@ pub fn nginx_conf_dir() -> &'static str {
 pub fn nginx_server_name() -> &'static str {
     if is_openresty_image() {
         "openresty"
+    } else if is_freenginx_image() {
+        "freenginx"
     } else {
         "nginx"
     }
