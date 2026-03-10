@@ -118,7 +118,10 @@ fn run_schema(format: SchemaFormat) -> ExitCode {
 fn enrich_schema_with_rule_descriptions(schema: &mut serde_json::Value) {
     let descriptions = get_rule_descriptions();
 
-    let rules_path = if schema.pointer("/properties/rules/additionalProperties").is_some() {
+    let rules_path = if schema
+        .pointer("/properties/rules/additionalProperties")
+        .is_some()
+    {
         "/properties/rules/additionalProperties"
     } else {
         "/properties/rules/properties"
