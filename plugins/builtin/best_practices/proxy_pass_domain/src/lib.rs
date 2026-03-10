@@ -32,7 +32,9 @@ impl Plugin for ProxyPassDomainPlugin {
              Solutions:\n\
              1. upstream with 'resolve' and 'zone' (nginx 1.27.3+ or nginx Plus)\n\
              2. For older nginx: Use 'set $var \"domain\"' with 'resolver' directive \
-             to force DNS re-resolution on each request",
+             to force DNS re-resolution on each request\n\n\
+             Note: freenginx does not support the 'resolve' parameter. Use solution 2 (variable with \
+             'set' and 'resolver' directive) instead.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
