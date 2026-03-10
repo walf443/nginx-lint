@@ -213,7 +213,7 @@ prefix = "/etc/nginx"
 ### GitHub Actions (recommended)
 
 ```yaml
-- uses: walf443/nginx-lint-action@v1
+- uses: walf443/nginx-lint-action@v0
   with:
     files: /etc/nginx/nginx.conf
 ```
