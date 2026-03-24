@@ -1,6 +1,9 @@
 {
   "extends": "../nginx-lint-plugin/tsconfig.base.json",
+  "type": "node",
   "compilerOptions": {
+    "rootDir": "./",
+    "types": ["node"],
     "outDir": "dist"
   },
   "include": ["src"]
