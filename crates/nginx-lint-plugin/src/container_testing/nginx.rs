@@ -119,6 +119,95 @@ pub fn nginx_version() -> String {
     std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string())
 }
 
+/// Get the effective nginx image tag, considering both `NGINX_IMAGE` and `NGINX_VERSION`.
+///
+/// When `NGINX_IMAGE` is set (e.g. `nginx:1.29`), the tag portion is returned.
+/// Otherwise falls back to `NGINX_VERSION` (default `"1.27"`).
+pub fn nginx_image_tag() -> String {
+    if let Ok(image) = std::env::var("NGINX_IMAGE") {
+        match image.rsplit_once(':') {
+            Some((_, tag)) => tag.to_string(),
+            None => "latest".to_string(),
+        }
+    } else {
+        nginx_version()
+    }
+}
+
+/// Check if the nginx image version is >= the given major.minor threshold.
+///
+/// Parses the image tag as `"major.minor"` and returns `true` if it is at least
+/// `(threshold_major, threshold_minor)`. Returns `false` if the tag cannot be
+/// parsed (e.g. `"latest"`, `"noble"` for openresty). This means non-numeric
+/// tags (such as openresty or freenginx images) are conservatively treated as
+/// *not* meeting the threshold.
+///
+/// # Example
+///
+/// ```no_run
+/// use nginx_lint_plugin::container_testing::nginx_version_at_least;
+/// // With NGINX_IMAGE=nginx:1.29
+/// assert!(nginx_version_at_least(1, 29));
+/// assert!(!nginx_version_at_least(1, 30));
+/// ```
+pub fn nginx_version_at_least(threshold_major: u32, threshold_minor: u32) -> bool {
+    let tag = nginx_image_tag();
+    parse_version_at_least(&tag, threshold_major, threshold_minor)
+}
+
+fn parse_version_at_least(tag: &str, threshold_major: u32, threshold_minor: u32) -> bool {
+    let parts: Vec<&str> = tag.split('.').collect();
+    if parts.len() >= 2 {
+        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+            return (major, minor) >= (threshold_major, threshold_minor);
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_at_least_exact_match() {
+        assert!(parse_version_at_least("1.29", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_higher_minor() {
+        assert!(parse_version_at_least("1.30", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_lower_minor() {
+        assert!(!parse_version_at_least("1.28", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_with_patch() {
+        assert!(parse_version_at_least("1.29.7", 1, 29));
+        assert!(!parse_version_at_least("1.28.3", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_non_numeric_tag() {
+        assert!(!parse_version_at_least("latest", 1, 29));
+        assert!(!parse_version_at_least("noble", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_higher_major() {
+        assert!(parse_version_at_least("2.0", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_boundary() {
+        assert!(parse_version_at_least("1.29", 1, 29));
+        assert!(!parse_version_at_least("1.29", 1, 30));
+    }
+}
+
 /// Get the (image_name, image_tag) for creating a [`GenericImage`] directly.
 ///
 /// This is useful when you need full control over container creation

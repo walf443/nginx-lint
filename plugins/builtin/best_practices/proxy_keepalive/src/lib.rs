@@ -7,6 +7,15 @@
 //! the Connection header should be cleared to prevent the default "close"
 //! value from being passed to the upstream.
 //!
+//! ## nginx 1.29.7+ note
+//!
+//! Starting with nginx 1.29.7, `proxy_http_version` defaults to `1.1` and
+//! keep-alive to upstreams is enabled by default. The explicit
+//! `proxy_set_header Connection ""` is no longer required.
+//! This rule is still useful for users running older nginx versions.
+//!
+//! See: <https://blog.nginx.org/blog/keep-alive-to-upstreams-is-now-default-in-nginx-1-29-7>
+//!
 //! Build with:
 //! ```sh
 //! cargo build --target wasm32-unknown-unknown --release
@@ -148,7 +157,10 @@ impl Plugin for ProxyKeepalivePlugin {
             "When using HTTP/1.1 or higher with upstream servers, the Connection header \
              should be cleared to enable keepalive connections. Without this, the default \
              'close' value may be passed to the upstream, preventing connection reuse.\n\n\
-             This is especially important when using the 'keepalive' directive in upstream blocks.",
+             This is especially important when using the 'keepalive' directive in upstream blocks.\n\n\
+             Note: Starting with nginx 1.29.7, proxy_http_version defaults to 1.1 and \
+             keep-alive to upstreams is enabled by default. This rule is still useful for \
+             users running nginx < 1.29.7.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
@@ -156,6 +168,7 @@ impl Plugin for ProxyKeepalivePlugin {
             "https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_http_version"
                 .to_string(),
             "https://nginx.org/en/docs/http/ngx_http_upstream_module.html#keepalive".to_string(),
+            "https://blog.nginx.org/blog/keep-alive-to-upstreams-is-now-default-in-nginx-1-29-7".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/proxy_keepalive/tests/container_test.rs".to_string(),
         ])
     }
