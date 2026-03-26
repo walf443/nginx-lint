@@ -119,6 +119,46 @@ pub fn nginx_version() -> String {
     std::env::var("NGINX_VERSION").unwrap_or_else(|_| "1.27".to_string())
 }
 
+/// Get the effective nginx image tag, considering both `NGINX_IMAGE` and `NGINX_VERSION`.
+///
+/// When `NGINX_IMAGE` is set (e.g. `nginx:1.29`), the tag portion is returned.
+/// Otherwise falls back to `NGINX_VERSION` (default `"1.27"`).
+pub fn nginx_image_tag() -> String {
+    if let Ok(image) = std::env::var("NGINX_IMAGE") {
+        match image.rsplit_once(':') {
+            Some((_, tag)) => tag.to_string(),
+            None => "latest".to_string(),
+        }
+    } else {
+        nginx_version()
+    }
+}
+
+/// Check if the nginx image version is >= the given major.minor threshold.
+///
+/// Parses the image tag as `"major.minor"` and returns `true` if it is at least
+/// `(threshold_major, threshold_minor)`. Returns `false` if the tag cannot be
+/// parsed (e.g. `"latest"`, `"noble"`).
+///
+/// # Example
+///
+/// ```
+/// # std::env::set_var("NGINX_IMAGE", "nginx:1.29");
+/// use nginx_lint_plugin::container_testing::nginx_version_at_least;
+/// assert!(nginx_version_at_least(1, 29));
+/// assert!(!nginx_version_at_least(1, 30));
+/// ```
+pub fn nginx_version_at_least(threshold_major: u32, threshold_minor: u32) -> bool {
+    let tag = nginx_image_tag();
+    let parts: Vec<&str> = tag.split('.').collect();
+    if parts.len() >= 2 {
+        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+            return (major, minor) >= (threshold_major, threshold_minor);
+        }
+    }
+    false
+}
+
 /// Get the (image_name, image_tag) for creating a [`GenericImage`] directly.
 ///
 /// This is useful when you need full control over container creation
