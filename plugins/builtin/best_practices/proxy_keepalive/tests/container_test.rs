@@ -83,15 +83,11 @@ http {
 /// With proxy_set_header Connection "", the upstream receives an empty
 /// Connection header, enabling keepalive connection reuse.
 ///
-/// Skipped on nginx >= 1.29: keepalive is default, so this explicit
-/// setting is no longer needed to achieve the same behavior.
+/// This test works on all nginx versions because the explicit
+/// `proxy_set_header Connection ""` overrides any default behavior.
 #[tokio::test]
 #[ignore]
 async fn cleared_connection_header_enables_keepalive() {
-    if should_skip() {
-        eprintln!("Skipping: nginx >= 1.29 defaults to keepalive for upstreams");
-        return;
-    }
     let nginx = NginxContainer::start(
         br#"
 events {

@@ -138,18 +138,24 @@ pub fn nginx_image_tag() -> String {
 ///
 /// Parses the image tag as `"major.minor"` and returns `true` if it is at least
 /// `(threshold_major, threshold_minor)`. Returns `false` if the tag cannot be
-/// parsed (e.g. `"latest"`, `"noble"`).
+/// parsed (e.g. `"latest"`, `"noble"` for openresty). This means non-numeric
+/// tags (such as openresty or freenginx images) are conservatively treated as
+/// *not* meeting the threshold.
 ///
 /// # Example
 ///
-/// ```
-/// # std::env::set_var("NGINX_IMAGE", "nginx:1.29");
+/// ```no_run
 /// use nginx_lint_plugin::container_testing::nginx_version_at_least;
+/// // With NGINX_IMAGE=nginx:1.29
 /// assert!(nginx_version_at_least(1, 29));
 /// assert!(!nginx_version_at_least(1, 30));
 /// ```
 pub fn nginx_version_at_least(threshold_major: u32, threshold_minor: u32) -> bool {
     let tag = nginx_image_tag();
+    parse_version_at_least(&tag, threshold_major, threshold_minor)
+}
+
+fn parse_version_at_least(tag: &str, threshold_major: u32, threshold_minor: u32) -> bool {
     let parts: Vec<&str> = tag.split('.').collect();
     if parts.len() >= 2 {
         if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
@@ -157,6 +163,49 @@ pub fn nginx_version_at_least(threshold_major: u32, threshold_minor: u32) -> boo
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_at_least_exact_match() {
+        assert!(parse_version_at_least("1.29", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_higher_minor() {
+        assert!(parse_version_at_least("1.30", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_lower_minor() {
+        assert!(!parse_version_at_least("1.28", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_with_patch() {
+        assert!(parse_version_at_least("1.29.7", 1, 29));
+        assert!(!parse_version_at_least("1.28.3", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_non_numeric_tag() {
+        assert!(!parse_version_at_least("latest", 1, 29));
+        assert!(!parse_version_at_least("noble", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_higher_major() {
+        assert!(parse_version_at_least("2.0", 1, 29));
+    }
+
+    #[test]
+    fn version_at_least_boundary() {
+        assert!(parse_version_at_least("1.29", 1, 29));
+        assert!(!parse_version_at_least("1.29", 1, 30));
+    }
 }
 
 /// Get the (image_name, image_tag) for creating a [`GenericImage`] directly.
