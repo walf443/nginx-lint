@@ -71,6 +71,9 @@ if [ -f "$TS_PLUGIN_README" ]; then
     echo "  Updated plugins/typescript/nginx-lint-plugin/README.md"
 fi
 
+echo "update Dockerfile image hashes"
+dockerfile-pin run --write
+
 echo ""
 echo "Done! Updated ${#CARGO_FILES[@]} Cargo.toml files and TypeScript plugin to version $NEW_VERSION."
 echo ""
