@@ -14,7 +14,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   # renovate: datasource=docker depName=nginx
-  NGINX_LATEST_VERSION: "1.29"
+  NGINX_LATEST_VERSION: "1.30"
 
 jobs:
   generate-matrix:
