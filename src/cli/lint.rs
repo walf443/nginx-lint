@@ -41,7 +41,7 @@ fn display_profile(profiles: &[RuleProfile]) {
 
     // Convert to vec and sort by duration (descending)
     let mut sorted: Vec<_> = aggregated.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+    sorted.sort_by_key(|b| std::cmp::Reverse(b.1.0));
 
     // Calculate total time
     let total_time: Duration = sorted.iter().map(|(_, (d, _, _))| *d).sum();

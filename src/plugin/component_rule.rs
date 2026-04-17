@@ -18,7 +18,9 @@ pub struct PluginSpec {
     pub name: String,
     pub category: String,
     pub description: String,
+    #[allow(dead_code)]
     pub api_version: String,
+    #[allow(dead_code)]
     pub severity: Option<String>,
     pub why: Option<String>,
     pub bad_example: Option<String>,
