@@ -99,12 +99,12 @@ pub fn pre_parse_checks_from_content(
     content: &str,
     lint_config: Option<&LintConfig>,
 ) -> Vec<LintError> {
-    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
+    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors};
     use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
 
     // Build ignore tracker from content without rule name validation
     // (rule name validation is done later in lint_with_content when all plugins are loaded)
-    let (mut tracker, warnings) = IgnoreTracker::from_content(content);
+    let (mut tracker, _warnings) = IgnoreTracker::from_content(content);
 
     let additional_block_directives: Vec<String> = lint_config
         .map(|c| c.additional_block_directives().to_vec())
@@ -124,15 +124,14 @@ pub fn pre_parse_checks_from_content(
     let semicolon_rule = MissingSemicolon;
     errors.extend(semicolon_rule.check_content_with_extras(content, &additional_block_directives));
 
-    // Filter ignored errors
+    // Filter ignored errors using the local tracker.
+    // Note: we intentionally do NOT emit parse warnings or unused-directive
+    // warnings here — those are emitted by `lint_with_content`, whose tracker
+    // sees errors from ALL rules (not just pre-parse ones). Emitting unused
+    // warnings here would falsely flag ignore directives that target later
+    // rules like `include-path-exists`.
     let result = filter_errors(errors, &mut tracker);
-    let mut errors = result.errors;
-
-    // Add warnings from ignore comments (parse warnings + unused warnings)
-    errors.extend(warnings_to_errors(warnings));
-    errors.extend(warnings_to_errors(result.unused_warnings));
-
-    errors
+    result.errors
 }
 
 /// Apply fixes to a file
