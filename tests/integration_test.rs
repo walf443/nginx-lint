@@ -1281,7 +1281,8 @@ http {
 fn test_ignore_include_path_exists_not_flagged_as_unused() {
     use nginx_lint::pre_parse_checks_from_content;
 
-    let content = "http {\n    include mime.types; # nginx-lint:ignore include-path-exists versioning\n}\n";
+    let content =
+        "http {\n    include mime.types; # nginx-lint:ignore include-path-exists versioning\n}\n";
 
     let tmp_dir = tempfile::tempdir().expect("create tempdir");
     let conf_path = tmp_dir.path().join("nginx.conf");
