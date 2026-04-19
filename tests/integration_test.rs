@@ -658,7 +658,10 @@ fn test_all_rule_fixtures() {
                 let mut errors = pre_parse_checks(&tc.error_path);
 
                 if let Some(ref config) = error_config {
-                    errors.extend(linter.lint(config, &tc.error_path));
+                    let content = fs::read_to_string(&tc.error_path).unwrap_or_default();
+                    let (lint_errors, _) =
+                        linter.lint_with_content(config, &tc.error_path, &content);
+                    errors.extend(lint_errors);
                 }
 
                 let rule_errors: Vec<_> = errors
@@ -679,7 +682,10 @@ fn test_all_rule_fixtures() {
                 let mut errors = pre_parse_checks(&tc.expected_path);
 
                 if let Some(ref config) = expected_config {
-                    errors.extend(linter.lint(config, &tc.expected_path));
+                    let content = fs::read_to_string(&tc.expected_path).unwrap_or_default();
+                    let (lint_errors, _) =
+                        linter.lint_with_content(config, &tc.expected_path, &content);
+                    errors.extend(lint_errors);
                 }
 
                 let rule_errors: Vec<_> = errors
@@ -704,7 +710,10 @@ fn test_all_rule_fixtures() {
 
                             let mut all_errors = pre_parse_checks(temp_path);
                             if let Ok(config) = parse_config(temp_path) {
-                                all_errors.extend(linter.lint(&config, temp_path));
+                                let content = fs::read_to_string(temp_path).unwrap_or_default();
+                                let (lint_errors, _) =
+                                    linter.lint_with_content(&config, temp_path, &content);
+                                all_errors.extend(lint_errors);
                             }
 
                             let rule_errors_with_fixes: Vec<_> = all_errors
@@ -1260,6 +1269,75 @@ http {
     assert!(
         fixed.contains("        server_tokens off;\n    }\n"),
         "Fix should remove the inline comment"
+    );
+}
+
+// Regression: pre_parse_checks_from_content must not emit "unused" warnings
+// for ignore directives whose target rule only runs later in lint_with_content
+// (e.g. include-path-exists). Previously, pre-parse built its own tracker,
+// filtered only the pre-parse rules, and prematurely flagged such directives
+// as unused.
+#[test]
+fn test_ignore_include_path_exists_not_flagged_as_unused() {
+    use nginx_lint::pre_parse_checks_from_content;
+
+    let content =
+        "http {\n    include mime.types; # nginx-lint:ignore include-path-exists versioning\n}\n";
+
+    let tmp_dir = tempfile::tempdir().expect("create tempdir");
+    let conf_path = tmp_dir.path().join("nginx.conf");
+    fs::write(&conf_path, content).expect("write conf");
+
+    let pre_parse_errors = pre_parse_checks_from_content(content, None);
+    let config = parse_string(content).expect("parse");
+    let linter = get_default_linter();
+    let (mut errors, ignored_count) = linter.lint_with_content(&config, &conf_path, content);
+    errors.extend(pre_parse_errors);
+
+    assert_eq!(ignored_count, 1, "include-path-exists should be ignored");
+    let unused: Vec<_> = errors
+        .iter()
+        .filter(|e| e.rule == "invalid-nginx-lint-ignore")
+        .collect();
+    assert!(
+        unused.is_empty(),
+        "ignore directive for a later-stage rule must not be flagged as unused, got: {:?}",
+        unused,
+    );
+}
+
+// Pre-parse rules (missing-semicolon, unmatched-braces, unclosed-quote) are
+// also registered as LintRule and re-run inside lint_with_content. Verify
+// that a genuinely unused ignore for such a rule is still reported.
+#[test]
+fn test_unused_ignore_for_pre_parse_rule_is_still_reported() {
+    use nginx_lint::pre_parse_checks_from_content;
+
+    // Well-formed file: the missing-semicolon ignore has nothing to suppress.
+    let content =
+        "http {\n    # nginx-lint:ignore missing-semicolon not needed\n    server_tokens off;\n}\n";
+
+    let tmp_dir = tempfile::tempdir().expect("create tempdir");
+    let conf_path = tmp_dir.path().join("nginx.conf");
+    fs::write(&conf_path, content).expect("write conf");
+
+    let pre_parse_errors = pre_parse_checks_from_content(content, None);
+    let config = parse_string(content).expect("parse");
+    let linter = get_default_linter();
+    let (mut errors, _) = linter.lint_with_content(&config, &conf_path, content);
+    errors.extend(pre_parse_errors);
+
+    let unused: Vec<_> = errors
+        .iter()
+        .filter(|e| {
+            e.rule == "invalid-nginx-lint-ignore" && e.message.contains("missing-semicolon")
+        })
+        .collect();
+    assert_eq!(
+        unused.len(),
+        1,
+        "unused ignore for a pre-parse rule must still be flagged, got errors: {:?}",
+        errors,
     );
 }
 
