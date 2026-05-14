@@ -58,13 +58,38 @@
 //!   NGINX_IMAGE=nginx:1.30.0 cargo test -p nginx-rift-plugin \
 //!       --test container_test -- --ignored
 
-use nginx_lint_plugin::container_testing::{NginxContainer, nginx_version_at_least, reqwest};
+use nginx_lint_plugin::container_testing::{
+    NginxContainer, nginx_image_tag, nginx_version_at_least, reqwest,
+};
 
 /// On patched builds the bug's signature is absent by design, so the
 /// observation tests have nothing to assert on. Skip them there. We do
 /// NOT skip on potentially-unpatched tags — that is what we want to test.
+///
+/// Considered "patched":
+/// - nginx >= 1.31 (major.minor check)
+/// - the floating `1.30` tag — Docker Hub now resolves it to the patched
+///   `1.30.1`, even though `nginx_version_at_least` only sees (1, 30)
+/// - any explicit `1.30.x` where x >= 1 (1.30.1 onward shipped the fix)
+///
+/// To run the observation tests against the genuine unpatched build, use
+/// the explicit pinned tag, e.g. `NGINX_IMAGE=nginx:1.30.0`.
 fn skip_on_patched_version() -> bool {
-    nginx_version_at_least(1, 31)
+    if nginx_version_at_least(1, 31) {
+        return true;
+    }
+    let tag = nginx_image_tag();
+    // Bare `1.30` is the floating Docker tag — now patched (1.30.1+).
+    if tag == "1.30" {
+        return true;
+    }
+    // Explicit 1.30.x with x >= 1 is patched.
+    if let Some(rest) = tag.strip_prefix("1.30.")
+        && let Ok(patch) = rest.parse::<u32>()
+    {
+        return patch >= 1;
+    }
+    false
 }
 
 /// Vulnerable pattern: rewrite with `?` in the replacement, followed by a
