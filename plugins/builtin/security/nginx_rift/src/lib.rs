@@ -30,7 +30,7 @@ impl Plugin for NginxRiftPlugin {
              the replacement followed by a `set` or `rewrite` using unnamed \
              captures ($1..$9) in the same scope",
         )
-        .with_severity("error")
+        .with_severity("warning")
         .with_why(
             "CVE-2026-42945 (\"NGINX Rift\") is a heap buffer overflow in \
              ngx_http_rewrite_module that affects nginx 0.6.27 through 1.30.0 \
@@ -51,10 +51,11 @@ impl Plugin for NginxRiftPlugin {
              which are resolved through a separate code path that does not \
              share the rewrite engine's `is_args` state. Note that simply \
              reordering `set` to run before `rewrite` does NOT remove the \
-             underlying bug. This rule is shipped as a default `error` \
-             until the affected versions are no longer in widespread use; \
-             it can be disabled in configuration once your fleet is fully \
-             upgraded.",
+             underlying bug. Severity is `warning` (the configuration is \
+             syntactically valid and nginx will load it; the danger is \
+             runtime-only on vulnerable builds). This rule is enabled by \
+             default; disable it in configuration once your entire fleet \
+             is on nginx >= 1.30.1 / 1.31.0.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
@@ -87,7 +88,7 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>, err: &ErrorBui
         if is_rewrite_with_question_mark(dir) {
             for next in directives.iter().skip(i + 1) {
                 if is_capture_consumer(next) && uses_unnamed_capture(next) {
-                    errors.push(err.error_at(
+                    errors.push(err.warning_at(
                         "CVE-2026-42945: `rewrite` replacement contains `?` and is \
                          followed by a directive that references an unnamed capture \
                          ($1..$9) in the same scope — this triggers a heap buffer \
