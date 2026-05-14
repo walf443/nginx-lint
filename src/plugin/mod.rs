@@ -58,6 +58,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "listen-http2-deprecated",
     "proxy-missing-host-header",
     "client-max-body-size-not-set",
+    "nginx-rift",
 ];
 
 /// Check if a rule name is a builtin plugin

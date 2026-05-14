@@ -5,6 +5,7 @@ members = [
     "plugins/builtin/security/autoindex_enabled",
     "plugins/builtin/security/deprecated_ssl_protocol",
     "plugins/builtin/security/weak_ssl_ciphers",
+    "plugins/builtin/security/nginx_rift",
     "plugins/builtin/style/space_before_semicolon",
     "plugins/builtin/style/trailing_whitespace",
     "plugins/builtin/style/block_lines",
@@ -61,6 +62,7 @@ native-builtin-plugins = [
     "dep:autoindex-enabled-plugin",
     "dep:deprecated-ssl-protocol-plugin",
     "dep:weak-ssl-ciphers-plugin",
+    "dep:nginx-rift-plugin",
     "dep:space-before-semicolon-plugin",
     "dep:trailing-whitespace-plugin",
     "dep:block-lines-plugin",
@@ -116,6 +118,7 @@ server-tokens-enabled-plugin = { path = "plugins/builtin/security/server_tokens_
 autoindex-enabled-plugin = { path = "plugins/builtin/security/autoindex_enabled", optional = true, default-features = false }
 deprecated-ssl-protocol-plugin = { path = "plugins/builtin/security/deprecated_ssl_protocol", optional = true, default-features = false }
 weak-ssl-ciphers-plugin = { path = "plugins/builtin/security/weak_ssl_ciphers", optional = true, default-features = false }
+nginx-rift-plugin = { path = "plugins/builtin/security/nginx_rift", optional = true, default-features = false }
 space-before-semicolon-plugin = { path = "plugins/builtin/style/space_before_semicolon", optional = true, default-features = false }
 trailing-whitespace-plugin = { path = "plugins/builtin/style/trailing_whitespace", optional = true, default-features = false }
 block-lines-plugin = { path = "plugins/builtin/style/block_lines", optional = true, default-features = false }
