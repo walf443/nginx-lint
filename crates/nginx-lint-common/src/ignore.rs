@@ -235,8 +235,12 @@ impl IgnoreTracker {
 
     /// Mark rule names as dormant — unused ignore directives targeting these
     /// rules will be excluded from [`unused_warnings`](Self::unused_warnings).
-    pub fn set_dormant_rules(&mut self, dormant: HashSet<String>) {
-        self.dormant_rules = dormant;
+    ///
+    /// Takes a borrowed set so the caller can reuse it across many trackers
+    /// (e.g. when linting an include tree) without paying a clone per call
+    /// site; the tracker stores its own copy internally.
+    pub fn set_dormant_rules(&mut self, dormant: &HashSet<String>) {
+        self.dormant_rules = dormant.clone();
     }
 
     /// Get warnings for unused ignore directives
@@ -862,7 +866,7 @@ server_tokens off;
         // even though no error consumed the directive.
         let mut dormant = HashSet::new();
         dormant.insert("server-tokens-enabled".to_string());
-        tracker.set_dormant_rules(dormant);
+        tracker.set_dormant_rules(&dormant);
 
         let result = filter_errors(Vec::<LintError>::new(), &mut tracker);
 
@@ -890,7 +894,7 @@ server_tokens off;
         // the unused warning.
         let mut dormant = HashSet::new();
         dormant.insert("server-tokens-enabled".to_string());
-        tracker.set_dormant_rules(dormant);
+        tracker.set_dormant_rules(&dormant);
 
         let result = filter_errors(Vec::<LintError>::new(), &mut tracker);
 

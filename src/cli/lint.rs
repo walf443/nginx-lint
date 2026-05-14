@@ -506,6 +506,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     "Error: --rule-only references unknown rule(s): {}",
                     no_such_rule.join(", ")
                 );
+                #[cfg(not(any(
+                    feature = "wasm-builtin-plugins",
+                    feature = "native-builtin-plugins"
+                )))]
+                eprintln!(
+                    "Note: this binary was built without builtin plugins, so plugin rule names cannot be recognised even if they exist in other builds."
+                );
             }
             if !not_loaded.is_empty() {
                 eprintln!(
@@ -525,10 +532,17 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         let keep: std::collections::HashSet<&str> =
             cli.rule_only.iter().map(String::as_str).collect();
         linter.remove_rules_by_name(|name| !keep.contains(name));
-        // Preserve the pre-filter rule set as "valid for ignore comments" so
-        // that existing `# nginx-lint:ignore <other-rule>` directives in the
-        // user's config do not get reported as referencing unknown rules.
-        linter.set_extra_valid_rule_names(registered);
+        // Surface *filtered-out* rules to the ignore-comment parser so
+        // existing `# nginx-lint:ignore <other-rule>` directives stay quiet
+        // (valid names + dormant for unused-warning suppression). The kept
+        // rules are intentionally excluded — their own unused-ignore
+        // directives must still produce warnings.
+        let inactive: std::collections::HashSet<String> = registered
+            .iter()
+            .filter(|name| !keep.contains(name.as_str()))
+            .cloned()
+            .collect();
+        linter.set_inactive_rules(inactive);
 
         if cli.verbose {
             eprintln!("Running only rule(s): {}", cli.rule_only.join(", "));

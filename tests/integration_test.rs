@@ -2415,8 +2415,13 @@ fn test_rule_only_filters_other_rules() {
     // `nginx-lint --rule-only indent`.
     let mut linter = Linter::with_default_rules();
     let pre_filter_names = linter.rule_names();
+    let inactive: std::collections::HashSet<String> = pre_filter_names
+        .iter()
+        .filter(|n| n.as_str() != "indent")
+        .cloned()
+        .collect();
     linter.remove_rules_by_name(|name| name != "indent");
-    linter.set_extra_valid_rule_names(pre_filter_names);
+    linter.set_inactive_rules(inactive);
 
     let (errors, _) = linter.lint_with_content(&config, &path, content);
 
@@ -2460,8 +2465,13 @@ fn test_rule_only_keeps_ignore_for_dormant_rule_quiet() {
         return;
     }
 
+    let inactive: std::collections::HashSet<String> = pre_filter_names
+        .iter()
+        .filter(|n| n.as_str() != "indent")
+        .cloned()
+        .collect();
     linter.remove_rules_by_name(|name| name != "indent");
-    linter.set_extra_valid_rule_names(pre_filter_names);
+    linter.set_inactive_rules(inactive);
 
     let (errors, _) = linter.lint_with_content(&config, &path, content);
 
@@ -2479,11 +2489,11 @@ fn test_rule_only_keeps_ignore_for_dormant_rule_quiet() {
 }
 
 #[test]
-fn test_rule_only_without_extra_valid_warns_about_unknown_ignore_target() {
-    // Sanity check: without set_extra_valid_rule_names, filtering rules out
-    // would (correctly, by the tracker's own contract) cause ignore comments
-    // for those rules to be reported as referencing unknown rules. This test
-    // documents the baseline that motivates the dormant-rules wiring.
+fn test_rule_only_without_inactive_rules_warns_about_unknown_ignore_target() {
+    // Sanity check: without set_inactive_rules, filtering rules out would
+    // (correctly, by the tracker's own contract) cause ignore comments for
+    // those rules to be reported as referencing unknown rules. This test
+    // documents the baseline that motivates the inactive-rules wiring.
     let content = concat!(
         "# nginx-lint:ignore server-tokens-enabled rule-only test reason\n",
         "http {\n",
@@ -2501,7 +2511,7 @@ fn test_rule_only_without_extra_valid_warns_about_unknown_ignore_target() {
         return;
     }
     linter.remove_rules_by_name(|name| name != "indent");
-    // Intentionally do NOT call set_extra_valid_rule_names.
+    // Intentionally do NOT call set_inactive_rules.
 
     let (errors, _) = linter.lint_with_content(&config, &path, content);
 
@@ -2512,6 +2522,48 @@ fn test_rule_only_without_extra_valid_warns_about_unknown_ignore_target() {
         errors
             .iter()
             .any(|e| e.rule == "invalid-nginx-lint-ignore"),
-        "Without extra_valid_rule_names, filtered ignore targets should warn"
+        "Without set_inactive_rules, filtered ignore targets should warn"
+    );
+}
+
+#[test]
+fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
+    // Regression test: inactive_rules must contain only the FILTERED-OUT
+    // rules, not the kept rule. If the kept rule were in the dormant set,
+    // its own unused ignore directives would be silently suppressed.
+    //
+    // Here the ignore directive targets `indent` on a line that has no
+    // indent issue (a blank line), so the directive is genuinely unused
+    // and the warning must still fire even under --rule-only indent.
+    let content = "# nginx-lint:ignore indent rule-only kept-rule reason\n\nhttp {\n}\n";
+    let (config, _) = parse_string_with_errors(content);
+    let path = PathBuf::from("test.conf");
+
+    let mut linter = Linter::with_default_rules();
+    let pre_filter_names = linter.rule_names();
+    if !pre_filter_names.contains("indent") {
+        return;
+    }
+
+    let inactive: std::collections::HashSet<String> = pre_filter_names
+        .iter()
+        .filter(|n| n.as_str() != "indent")
+        .cloned()
+        .collect();
+    linter.remove_rules_by_name(|name| name != "indent");
+    linter.set_inactive_rules(inactive);
+
+    let (errors, _) = linter.lint_with_content(&config, &path, content);
+
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.rule == "invalid-nginx-lint-ignore"
+                && e.message.contains("indent")),
+        "unused ignore for kept rule should still warn; got: {:?}",
+        errors
+            .iter()
+            .map(|e| (&e.rule, &e.message))
+            .collect::<Vec<_>>()
     );
 }
