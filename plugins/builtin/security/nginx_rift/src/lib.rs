@@ -51,11 +51,11 @@ impl Plugin for NginxRiftPlugin {
              which are resolved through a separate code path that does not \
              share the rewrite engine's `is_args` state. Note that simply \
              reordering `set` to run before `rewrite` does NOT remove the \
-             underlying bug. Severity is `warning` (the configuration is \
-             syntactically valid and nginx will load it; the danger is \
-             runtime-only on vulnerable builds). This rule is enabled by \
-             default; disable it in configuration once your entire fleet \
-             is on nginx >= 1.30.1 / 1.31.0.",
+             underlying bug. The configuration is syntactically valid and \
+             nginx will load it; the danger is runtime-only on vulnerable \
+             builds. This rule is enabled by default; disable it in \
+             configuration once your entire fleet is on nginx >= 1.30.1 / \
+             1.31.0.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
