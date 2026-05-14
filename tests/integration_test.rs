@@ -2476,11 +2476,12 @@ fn test_rule_only_keeps_ignore_for_dormant_rule_quiet() {
     let (errors, _) = linter.lint_with_content(&config, &path, content);
 
     assert!(
-        !errors
-            .iter()
-            .any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        !errors.iter().any(|e| e.rule == "invalid-nginx-lint-ignore"),
         "--rule-only should not emit unused-ignore warnings for filtered rules; got: {:?}",
-        errors.iter().map(|e| (&e.rule, &e.message)).collect::<Vec<_>>()
+        errors
+            .iter()
+            .map(|e| (&e.rule, &e.message))
+            .collect::<Vec<_>>()
     );
     assert!(
         !errors.iter().any(|e| e.rule == "server-tokens-enabled"),
@@ -2505,9 +2506,7 @@ fn test_rule_only_without_inactive_rules_warns_about_unknown_ignore_target() {
 
     let mut linter = Linter::with_default_rules();
     let pre_filter_names = linter.rule_names();
-    if !pre_filter_names.contains("indent")
-        || !pre_filter_names.contains("server-tokens-enabled")
-    {
+    if !pre_filter_names.contains("indent") || !pre_filter_names.contains("server-tokens-enabled") {
         return;
     }
     linter.remove_rules_by_name(|name| name != "indent");
@@ -2519,9 +2518,7 @@ fn test_rule_only_without_inactive_rules_warns_about_unknown_ignore_target() {
     // because it is no longer registered. This is the spurious-warning case
     // the CLI wiring exists to avoid.
     assert!(
-        errors
-            .iter()
-            .any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        errors.iter().any(|e| e.rule == "invalid-nginx-lint-ignore"),
         "Without set_inactive_rules, filtered ignore targets should warn"
     );
 }
@@ -2558,8 +2555,7 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
     assert!(
         errors
             .iter()
-            .any(|e| e.rule == "invalid-nginx-lint-ignore"
-                && e.message.contains("indent")),
+            .any(|e| e.rule == "invalid-nginx-lint-ignore" && e.message.contains("indent")),
         "unused ignore for kept rule should still warn; got: {:?}",
         errors
             .iter()

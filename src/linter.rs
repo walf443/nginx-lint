@@ -274,10 +274,7 @@ impl Linter {
     fn make_ignore_tracker(
         &self,
         content: &str,
-    ) -> (
-        IgnoreTracker,
-        Vec<nginx_lint_common::ignore::IgnoreWarning>,
-    ) {
+    ) -> (IgnoreTracker, Vec<nginx_lint_common::ignore::IgnoreWarning>) {
         let valid_rules = self.valid_rule_names_for_ignore();
         let (mut tracker, warnings) =
             IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
