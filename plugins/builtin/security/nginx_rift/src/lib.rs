@@ -411,6 +411,29 @@ http {
     }
 
     #[test]
+    fn test_capture_inside_single_quoted_string() {
+        // nginx expands `$N` inside SINGLE-quoted strings as well as
+        // double-quoted (verified empirically on nginx 1.30.0: a config
+        // with `set $x 'prefix-$1-suffix'` after a vulnerable rewrite
+        // returns `prefix-foo%2Bbar-suff` — same mis-escape + truncation
+        // signature as the double-quoted form). The lint rule must
+        // therefore flag both quote styles uniformly.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal?migrated=true;
+            set $combined 'prefix-$1-suffix';
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
     fn test_fixtures() {
         let runner = PluginTestRunner::new(NginxRiftPlugin);
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());

@@ -298,6 +298,12 @@ async fn vulnerable_rewrite_then_rewrite_misescapes_capture() {
     //   1st rewrite: URI=/bar/foo+bar, args=x=1, is_args leaked to 1
     //   2nd rewrite: URI=/baz/<$1> where $1="foo+bar". Leaked is_args
     //                applies args-escaping → final=/baz/foo%2Bbar
+    //
+    // Unlike the `set` shape, the captured value here is NOT truncated:
+    // the URI buffer used by the rewrite engine to assemble the new URI
+    // is sized through a different code path than the per-variable
+    // buffer that `set` allocates. The mis-escape alone is sufficient
+    // signature of the leaked `is_args` flag.
     let resp = reqwest::get(nginx.url("/foo/foo+bar")).await.unwrap();
     assert_eq!(resp.status(), 200);
     let body = resp.text().await.unwrap();
