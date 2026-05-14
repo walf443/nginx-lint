@@ -82,6 +82,29 @@ Rules are grouped into categories:
 | deprecation | deprecated directives (ssl on, listen http2) |
 
 
+## Running a Single Rule (`--rule-only`)
+
+`--rule-only` runs the linter with only the specified rule(s) enabled,
+ignoring every other rule (including those enabled via `.nginx-lint.toml`).
+Useful when evaluating a newly added plugin or applying `--fix` for one
+rule at a time without touching the rest of the config.
+
+```bash
+# Run only the indent rule
+nginx-lint --rule-only indent /etc/nginx/nginx.conf
+
+# Apply --fix for one rule only
+nginx-lint --fix --rule-only indent /etc/nginx/nginx.conf
+
+# Multiple rules (repeat the flag or comma-separate)
+nginx-lint --rule-only indent,missing-semicolon /etc/nginx/nginx.conf
+nginx-lint --rule-only indent --rule-only missing-semicolon /etc/nginx/nginx.conf
+```
+
+If a name doesn't match any registered rule, nginx-lint exits with code 2
+and lists the available rules. Use `nginx-lint why --list` to discover them.
+
+
 ## Configuration (.nginx-lint.toml)
 
 Generate a default configuration file:

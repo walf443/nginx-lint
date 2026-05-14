@@ -464,6 +464,41 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
+    // Apply --rule-only filter: keep only the requested rules, validate that
+    // every requested name corresponds to a registered rule.
+    if !cli.rule_only.is_empty() {
+        let registered = linter.rule_names();
+        let unknown: Vec<&String> = cli
+            .rule_only
+            .iter()
+            .filter(|name| !registered.contains(name.as_str()))
+            .collect();
+        if !unknown.is_empty() {
+            eprintln!(
+                "Error: --rule-only references unknown rule(s): {}",
+                unknown
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let mut available: Vec<String> = registered.into_iter().collect();
+            available.sort();
+            eprintln!("Available rules:");
+            for name in &available {
+                eprintln!("  - {}", name);
+            }
+            return ExitCode::from(2);
+        }
+
+        let keep: std::collections::HashSet<String> = cli.rule_only.iter().cloned().collect();
+        linter.remove_rules_by_name(|name| !keep.contains(name));
+
+        if cli.verbose {
+            eprintln!("Running only rule(s): {}", cli.rule_only.join(", "));
+        }
+    }
+
     // 8. Build results: stdin mode vs file mode
     let results: Vec<FileResult> = if let Some(ref content) = stdin_content {
         vec![lint_content(
