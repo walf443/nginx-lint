@@ -61,7 +61,6 @@ impl Plugin for NginxRiftPlugin {
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nvd.nist.gov/vuln/detail/CVE-2026-42945".to_string(),
-            "https://nginx.org/en/security_advisories.html".to_string(),
             "https://depthfirst.com/research/nginx-rift-achieving-nginx-rce-via-an-18-year-old-vulnerability".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/nginx_rift/tests/container_test.rs".to_string(),
         ])
