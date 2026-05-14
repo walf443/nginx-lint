@@ -1,18 +1,29 @@
 // Re-export core types from nginx-lint-common
 use nginx_lint_common::config::LintConfig;
+use nginx_lint_common::ignore::IgnoreTracker;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::path::Path;
 
 pub struct Linter {
     rules: Vec<Box<dyn LintRule>>,
+    /// Rule names that exist in the catalog but are intentionally not running
+    /// in this `Linter` (e.g. filtered out by the CLI's `--rule-only`). They
+    /// are still recognised by ignore-comment parsing — both as valid rule
+    /// names *and* as dormant rules whose unused ignore directives are
+    /// suppressed — so toggling the filter does not churn the user's config.
+    inactive_rules: HashSet<String>,
 }
 
 impl Linter {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            inactive_rules: HashSet::new(),
+        }
     }
 
     pub fn with_default_rules() -> Self {
@@ -230,8 +241,47 @@ impl Linter {
     }
 
     /// Get a set of all rule names registered in this linter
-    pub fn rule_names(&self) -> std::collections::HashSet<String> {
+    pub fn rule_names(&self) -> HashSet<String> {
         self.rules.iter().map(|r| r.name().to_string()).collect()
+    }
+
+    /// Register rule names that are intentionally not running in this linter
+    /// but should still be honoured by ignore-comment parsing — they will be
+    /// treated as valid rule names *and* as dormant rules (so their unused
+    /// ignore directives are suppressed). Used by the CLI's `--rule-only`
+    /// filter to keep existing `# nginx-lint:ignore` directives quiet for
+    /// rules the user has temporarily filtered out.
+    ///
+    /// Pass only the rules that are *not* currently running; including a
+    /// rule that *is* running would incorrectly suppress its own unused
+    /// ignore warnings.
+    pub fn set_inactive_rules(&mut self, names: HashSet<String>) {
+        self.inactive_rules = names;
+    }
+
+    /// Names recognised by the ignore-comment parser: registered rules plus
+    /// any inactive rules supplied via [`set_inactive_rules`].
+    fn valid_rule_names_for_ignore(&self) -> HashSet<String> {
+        let mut names = self.rule_names();
+        names.extend(self.inactive_rules.iter().cloned());
+        names
+    }
+
+    /// Build an `IgnoreTracker` for the given content, wiring up both the
+    /// valid-rule-name set (for unknown-rule warnings) and the dormant-rule
+    /// set (for unused-ignore suppression). Centralised so the three
+    /// `lint_with_content*` entry points stay in sync.
+    fn make_ignore_tracker(
+        &self,
+        content: &str,
+    ) -> (IgnoreTracker, Vec<nginx_lint_common::ignore::IgnoreWarning>) {
+        let valid_rules = self.valid_rule_names_for_ignore();
+        let (mut tracker, warnings) =
+            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        if !self.inactive_rules.is_empty() {
+            tracker.set_dormant_rules(&self.inactive_rules);
+        }
+        (tracker, warnings)
     }
 
     /// Run all lint rules and collect errors
@@ -274,11 +324,9 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
+        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
-        let (mut tracker, warnings) =
-            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) = self.make_ignore_tracker(content);
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -295,11 +343,9 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize) {
-        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
+        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
-        let (mut tracker, warnings) =
-            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) = self.make_ignore_tracker(content);
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -354,11 +400,9 @@ impl Linter {
         path: &Path,
         content: &str,
     ) -> (Vec<LintError>, usize, Vec<RuleProfile>) {
-        use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
+        use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
-        let (mut tracker, warnings) =
-            IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        let (mut tracker, warnings) = self.make_ignore_tracker(content);
         let (errors, profiles) = self.lint_with_profile(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;

@@ -66,6 +66,13 @@ pub struct Cli {
     /// Overrides include.prefix in .nginx-lint.toml.
     #[arg(short = 'p', long, value_name = "DIR")]
     pub prefix: Option<PathBuf>,
+
+    /// Run only the specified rule(s). Other rules (including those enabled via
+    /// .nginx-lint.toml) are disabled for this invocation. Useful for evaluating a
+    /// new plugin or applying --fix for a single rule. Can be repeated or
+    /// comma-separated, e.g. `--rule-only indent` or `--rule-only indent,gzip-not-enabled`.
+    #[arg(long, value_name = "RULE", value_delimiter = ',')]
+    pub rule_only: Vec<String>,
 }
 
 #[derive(Subcommand)]

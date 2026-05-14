@@ -60,6 +60,11 @@ pub struct IgnoreTracker {
     ignored_lines: HashMap<usize, HashSet<String>>,
     /// All ignore directives for tracking usage
     directives: Vec<IgnoreDirective>,
+    /// Rule names that are intentionally not running in this invocation
+    /// (e.g. filtered out by `--rule-only`). Ignore directives targeting
+    /// these rules are excluded from "unused" warnings so the caller can
+    /// disable rules per-invocation without churning the user's config.
+    dormant_rules: HashSet<String>,
 }
 
 impl IgnoreTracker {
@@ -228,11 +233,21 @@ impl IgnoreTracker {
         }
     }
 
+    /// Mark rule names as dormant — unused ignore directives targeting these
+    /// rules will be excluded from [`unused_warnings`](Self::unused_warnings).
+    ///
+    /// Takes a borrowed set so the caller can reuse it across many trackers
+    /// (e.g. when linting an include tree) without paying a clone per call
+    /// site; the tracker stores its own copy internally.
+    pub fn set_dormant_rules(&mut self, dormant: &HashSet<String>) {
+        self.dormant_rules = dormant.clone();
+    }
+
     /// Get warnings for unused ignore directives
     pub fn unused_warnings(&self) -> Vec<IgnoreWarning> {
         self.directives
             .iter()
-            .filter(|d| !d.used)
+            .filter(|d| !d.used && !self.dormant_rules.contains(&d.rule_name))
             .map(|d| {
                 let fix =
                     Fix::replace_range(d.fix_start_offset, d.fix_end_offset, &d.fix_replacement);
@@ -836,6 +851,58 @@ server_tokens off;
             result.unused_warnings[0]
                 .message
                 .contains("server-tokens-enabled")
+        );
+    }
+
+    #[test]
+    fn test_dormant_rule_suppresses_unused_warning() {
+        let content = r#"
+# nginx-lint:ignore server-tokens-enabled reason
+server_tokens off;
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        // Marking the rule as dormant should suppress the unused warning
+        // even though no error consumed the directive.
+        let mut dormant = HashSet::new();
+        dormant.insert("server-tokens-enabled".to_string());
+        tracker.set_dormant_rules(&dormant);
+
+        let result = filter_errors(Vec::<LintError>::new(), &mut tracker);
+
+        assert!(
+            result.unused_warnings.is_empty(),
+            "dormant rule should suppress unused-ignore warning, got: {:?}",
+            result
+                .unused_warnings
+                .iter()
+                .map(|w| &w.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_dormant_rule_does_not_affect_other_rules() {
+        let content = r#"
+# nginx-lint:ignore server-tokens-enabled reason
+# nginx-lint:ignore autoindex-enabled reason
+server_tokens off;
+"#;
+        let (mut tracker, _) = IgnoreTracker::from_content(content);
+
+        // Only mark one rule dormant; the other should still produce
+        // the unused warning.
+        let mut dormant = HashSet::new();
+        dormant.insert("server-tokens-enabled".to_string());
+        tracker.set_dormant_rules(&dormant);
+
+        let result = filter_errors(Vec::<LintError>::new(), &mut tracker);
+
+        assert_eq!(result.unused_warnings.len(), 1);
+        assert!(
+            result.unused_warnings[0]
+                .message
+                .contains("autoindex-enabled")
         );
     }
 

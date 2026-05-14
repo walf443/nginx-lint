@@ -82,6 +82,42 @@ Rules are grouped into categories:
 | deprecation | deprecated directives (ssl on, listen http2) |
 
 
+## Running a Single Rule (`--rule-only`)
+
+`--rule-only` runs the linter with only the specified rule(s) enabled,
+ignoring every other rule (including those enabled via `.nginx-lint.toml`).
+Useful when evaluating a newly added plugin or applying `--fix` for one
+rule at a time without touching the rest of the config.
+
+```bash
+# Run only the indent rule
+nginx-lint --rule-only indent /etc/nginx/nginx.conf
+
+# Apply --fix for one rule only
+nginx-lint --fix --rule-only indent /etc/nginx/nginx.conf
+
+# Multiple rules (repeat the flag or comma-separate)
+nginx-lint --rule-only indent,missing-semicolon /etc/nginx/nginx.conf
+nginx-lint --rule-only indent --rule-only missing-semicolon /etc/nginx/nginx.conf
+```
+
+If a name doesn't match any registered rule, nginx-lint exits with code 2
+and lists the loaded rules. Use `nginx-lint why --list` to discover them.
+If the name exists in the builtin catalog but is not currently loaded
+(e.g. disabled in `.nginx-lint.toml`, or not built into this binary), the
+error message distinguishes that case from a true typo.
+
+> **Note:** Pre-parse syntax checks (`unmatched-braces`, `unclosed-quote`,
+> `missing-semicolon`) always run, even under `--rule-only`. Their findings
+> are prerequisites for further parsing, so they are reported regardless of
+> the filter.
+
+`# nginx-lint:ignore <rule>` directives that target rules filtered out by
+`--rule-only` are kept dormant for the invocation: they neither suppress
+anything (the rule isn't running) nor get reported as "unused", so you can
+toggle `--rule-only` without churning the surrounding config.
+
+
 ## Configuration (.nginx-lint.toml)
 
 Generate a default configuration file:
