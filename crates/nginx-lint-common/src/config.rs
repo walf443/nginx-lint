@@ -632,7 +632,7 @@ impl LintConfig {
     ///
     /// Order: native rules first, then builtin plugins in the same order as
     /// `BUILTIN_PLUGIN_NAMES` so review diffs against that file are obvious.
-    pub const KNOWN_RULES: &'static [&'static str] = &[
+    pub const KNOWN_RULE_NAMES: &'static [&'static str] = &[
         // Native rules — must match `NATIVE_RULE_NAMES` above
         "unmatched-braces",
         "unclosed-quote",
@@ -822,7 +822,7 @@ impl LintConfig {
 
             // Validate [rules.*] sections
             if let Some(toml::Value::Table(rules)) = root.get("rules") {
-                let known_rules: HashSet<&str> = Self::KNOWN_RULES.iter().copied().collect();
+                let known_rules: HashSet<&str> = Self::KNOWN_RULE_NAMES.iter().copied().collect();
 
                 for (rule_name, rule_value) in rules {
                     if !known_rules.contains(rule_name.as_str()) {
@@ -1486,11 +1486,11 @@ prefix = "/etc/nginx"
         }
     }
 
-    /// Sanity check that `KNOWN_RULES` actually drives the validator
+    /// Sanity check that `KNOWN_RULE_NAMES` actually drives the validator
     /// (rather than an inline list that can drift again).
     #[test]
     fn test_known_rules_constant_drives_validator() {
-        for rule_name in LintConfig::KNOWN_RULES {
+        for rule_name in LintConfig::KNOWN_RULE_NAMES {
             let toml_content = format!("[rules.{rule_name}]\nenabled = true\n");
             let mut file = NamedTempFile::new().unwrap();
             write!(file, "{}", toml_content).unwrap();
@@ -1498,17 +1498,17 @@ prefix = "/etc/nginx"
             let errors = LintConfig::validate_file(file.path()).unwrap();
             assert!(
                 errors.is_empty(),
-                "rule '{rule_name}' is listed in KNOWN_RULES but the validator \
+                "rule '{rule_name}' is listed in KNOWN_RULE_NAMES but the validator \
                  rejected it: {errors:?}"
             );
         }
     }
 
-    /// `NATIVE_RULE_NAMES` must be a subset of `KNOWN_RULES`: editing either
+    /// `NATIVE_RULE_NAMES` must be a subset of `KNOWN_RULE_NAMES`: editing either
     /// list independently would mean the validator forgets about a native rule.
     #[test]
     fn test_native_rule_names_subset_of_known_rules() {
-        let known: HashSet<&str> = LintConfig::KNOWN_RULES.iter().copied().collect();
+        let known: HashSet<&str> = LintConfig::KNOWN_RULE_NAMES.iter().copied().collect();
         let missing: Vec<&str> = LintConfig::NATIVE_RULE_NAMES
             .iter()
             .copied()
@@ -1516,19 +1516,38 @@ prefix = "/etc/nginx"
             .collect();
         assert!(
             missing.is_empty(),
-            "NATIVE_RULE_NAMES entries missing from KNOWN_RULES: {missing:?}"
+            "NATIVE_RULE_NAMES entries missing from KNOWN_RULE_NAMES: {missing:?}"
         );
     }
 
-    /// `KNOWN_RULES` must not contain duplicate entries — a duplicated name
+    /// Negative case: a rule name that is in neither `NATIVE_RULE_NAMES` nor
+    /// `BUILTIN_PLUGIN_NAMES` must still produce an `UnknownRule` error —
+    /// otherwise the whitelist would silently degrade to "accept anything".
+    #[test]
+    fn test_validate_rejects_unknown_rule_name() {
+        let toml_content = "[rules.no-such-rule-zzz]\nenabled = true\n";
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", toml_content).unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert_eq!(errors.len(), 1, "expected exactly one error, got: {errors:?}");
+        match &errors[0] {
+            ValidationError::UnknownRule { name, .. } => {
+                assert_eq!(name, "no-such-rule-zzz");
+            }
+            other => panic!("expected UnknownRule, got: {other:?}"),
+        }
+    }
+
+    /// `KNOWN_RULE_NAMES` must not contain duplicate entries — a duplicated name
     /// would silently mask a typo when the list is edited.
     #[test]
     fn test_known_rules_has_no_duplicates() {
         let mut seen: HashSet<&str> = HashSet::new();
-        for name in LintConfig::KNOWN_RULES {
+        for name in LintConfig::KNOWN_RULE_NAMES {
             assert!(
                 seen.insert(name),
-                "duplicate entry in KNOWN_RULES: '{name}'"
+                "duplicate entry in KNOWN_RULE_NAMES: '{name}'"
             );
         }
     }

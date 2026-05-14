@@ -1,7 +1,7 @@
 //! Drift-detection tests for `nginx-lint config validate`.
 //!
 //! Background (https://github.com/walf443/nginx-lint/issues/172):
-//! `LintConfig::KNOWN_RULES` (in `nginx-lint-common`) is the whitelist used
+//! `LintConfig::KNOWN_RULE_NAMES` (in `nginx-lint-common`) is the whitelist used
 //! by `nginx-lint config validate`. It must include every builtin plugin
 //! name, otherwise users get a spurious `unknown rule` error for a config
 //! that lints correctly.
@@ -20,26 +20,26 @@ fn known_rules_includes_all_builtin_plugins() {
     let missing: Vec<&str> = BUILTIN_PLUGIN_NAMES
         .iter()
         .copied()
-        .filter(|name| !LintConfig::KNOWN_RULES.contains(name))
+        .filter(|name| !LintConfig::KNOWN_RULE_NAMES.contains(name))
         .collect();
 
     assert!(
         missing.is_empty(),
         "BUILTIN_PLUGIN_NAMES contains rules that are NOT in \
-         `LintConfig::KNOWN_RULES`: {missing:?}. \
+         `LintConfig::KNOWN_RULE_NAMES`: {missing:?}. \
          `nginx-lint config validate` would reject user configs that \
          reference these rules, even though they lint correctly. \
-         Add them to `KNOWN_RULES` in crates/nginx-lint-common/src/config.rs.",
+         Add them to `KNOWN_RULE_NAMES` in crates/nginx-lint-common/src/config.rs.",
     );
 }
 
 #[test]
 fn known_rules_does_not_reference_removed_builtin_plugins() {
-    // The reverse direction: if a rule name listed in `KNOWN_RULES` is
+    // The reverse direction: if a rule name listed in `KNOWN_RULE_NAMES` is
     // neither a native rule (per `NATIVE_RULE_NAMES`) nor a current builtin
     // plugin (per `BUILTIN_PLUGIN_NAMES`), it was probably renamed or
     // deleted and the whitelist has gone stale.
-    let stale: Vec<&str> = LintConfig::KNOWN_RULES
+    let stale: Vec<&str> = LintConfig::KNOWN_RULE_NAMES
         .iter()
         .copied()
         .filter(|name| {
@@ -49,9 +49,9 @@ fn known_rules_does_not_reference_removed_builtin_plugins() {
 
     assert!(
         stale.is_empty(),
-        "KNOWN_RULES contains entries that are neither native rules nor \
+        "KNOWN_RULE_NAMES contains entries that are neither native rules nor \
          current builtin plugins: {stale:?}. Either add them back to \
          BUILTIN_PLUGIN_NAMES (if they still exist) or remove them from \
-         KNOWN_RULES.",
+         KNOWN_RULE_NAMES.",
     );
 }
