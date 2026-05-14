@@ -607,54 +607,67 @@ impl LintConfig {
         "missing-error-log", // error_log is typically set at top level in main config
     ];
 
-    /// All rule names recognised by `nginx-lint config validate`.
+    /// Native lint rules implemented directly in the top-level crate
+    /// (i.e. not packaged as plugins under `plugins/builtin/`).
     ///
-    /// This is the union of:
-    /// - native rules implemented directly in the top-level crate
-    ///   (`unmatched-braces`, `unclosed-quote`, `missing-semicolon`, `indent`,
-    ///   `include-path-exists`), and
-    /// - builtin plugin rules whose canonical list lives in
-    ///   [`nginx_lint::plugin::BUILTIN_PLUGIN_NAMES`].
-    ///
-    /// The CLI cannot import `BUILTIN_PLUGIN_NAMES` from here (it lives in the
-    /// top-level crate, while this module is a downstream dependency), so the
-    /// two lists are kept in sync by a drift-detection unit test in the
-    /// top-level crate. See `tests/known_rules_drift_test.rs`.
-    pub const KNOWN_RULES: &'static [&'static str] = &[
-        // Native rules (implemented in the top-level crate, not as plugins)
+    /// Exposed as a `pub const` so the drift-detection test in the top-level
+    /// crate (`tests/known_rules_drift_test.rs`) can distinguish "native rule"
+    /// from "stale builtin plugin entry" without duplicating this list.
+    pub const NATIVE_RULE_NAMES: &'static [&'static str] = &[
         "unmatched-braces",
         "unclosed-quote",
         "missing-semicolon",
         "indent",
         "include-path-exists",
-        // Builtin plugins — must match `BUILTIN_PLUGIN_NAMES` in `src/plugin/mod.rs`
-        "duplicate-directive",
-        "invalid-directive-context",
-        "deprecated-ssl-protocol",
+    ];
+
+    /// All rule names recognised by `nginx-lint config validate`.
+    ///
+    /// This is the union of [`NATIVE_RULE_NAMES`](Self::NATIVE_RULE_NAMES) and
+    /// the builtin plugin names. The builtin plugin list lives in the
+    /// top-level crate (`nginx-lint`) as `BUILTIN_PLUGIN_NAMES`; because this
+    /// module is a downstream dependency it cannot reference that symbol
+    /// directly, so the two lists are kept in sync by a drift-detection unit
+    /// test in the top-level crate (`tests/known_rules_drift_test.rs`).
+    ///
+    /// Order: native rules first, then builtin plugins in the same order as
+    /// `BUILTIN_PLUGIN_NAMES` so review diffs against that file are obvious.
+    pub const KNOWN_RULES: &'static [&'static str] = &[
+        // Native rules — must match `NATIVE_RULE_NAMES` above
+        "unmatched-braces",
+        "unclosed-quote",
+        "missing-semicolon",
+        "indent",
+        "include-path-exists",
+        // Builtin plugins — must match `BUILTIN_PLUGIN_NAMES` in
+        // `src/plugin/mod.rs` (same order for easier review)
         "server-tokens-enabled",
         "autoindex-enabled",
-        "weak-ssl-ciphers",
-        "nginx-rift",
-        "trailing-whitespace",
-        "space-before-semicolon",
-        "block-lines",
         "gzip-not-enabled",
-        "missing-error-log",
+        "duplicate-directive",
+        "space-before-semicolon",
+        "trailing-whitespace",
+        "block-lines",
         "proxy-pass-domain",
         "upstream-server-no-resolve",
+        "directive-inheritance",
         "root-in-location",
         "alias-location-slash-mismatch",
         "proxy-pass-with-uri",
         "proxy-keepalive",
         "try-files-with-proxy",
         "if-is-evil-in-location",
-        "directive-inheritance",
-        "client-max-body-size-not-set",
-        "listen-http2-deprecated",
-        "map-missing-default",
-        "proxy-missing-host-header",
-        "ssl-on-deprecated",
         "unreachable-location",
+        "missing-error-log",
+        "deprecated-ssl-protocol",
+        "weak-ssl-ciphers",
+        "invalid-directive-context",
+        "map-missing-default",
+        "ssl-on-deprecated",
+        "listen-http2-deprecated",
+        "proxy-missing-host-header",
+        "client-max-body-size-not-set",
+        "nginx-rift",
     ];
 
     /// Check if a rule is enabled
@@ -1489,6 +1502,22 @@ prefix = "/etc/nginx"
                  rejected it: {errors:?}"
             );
         }
+    }
+
+    /// `NATIVE_RULE_NAMES` must be a subset of `KNOWN_RULES`: editing either
+    /// list independently would mean the validator forgets about a native rule.
+    #[test]
+    fn test_native_rule_names_subset_of_known_rules() {
+        let known: HashSet<&str> = LintConfig::KNOWN_RULES.iter().copied().collect();
+        let missing: Vec<&str> = LintConfig::NATIVE_RULE_NAMES
+            .iter()
+            .copied()
+            .filter(|name| !known.contains(name))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "NATIVE_RULE_NAMES entries missing from KNOWN_RULES: {missing:?}"
+        );
     }
 
     /// `KNOWN_RULES` must not contain duplicate entries — a duplicated name

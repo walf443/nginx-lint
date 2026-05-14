@@ -35,21 +35,16 @@ fn known_rules_includes_all_builtin_plugins() {
 
 #[test]
 fn known_rules_does_not_reference_removed_builtin_plugins() {
-    // The reverse direction: if a rule name listed in `KNOWN_RULES` looks
-    // like a builtin plugin (i.e. is not one of the hand-maintained native
-    // rule names) but is no longer present in `BUILTIN_PLUGIN_NAMES`, it
-    // was probably renamed or deleted and the whitelist has gone stale.
-    const NATIVE_RULES: &[&str] = &[
-        "unmatched-braces",
-        "unclosed-quote",
-        "missing-semicolon",
-        "indent",
-        "include-path-exists",
-    ];
-
-    let stale: Vec<&&str> = LintConfig::KNOWN_RULES
+    // The reverse direction: if a rule name listed in `KNOWN_RULES` is
+    // neither a native rule (per `NATIVE_RULE_NAMES`) nor a current builtin
+    // plugin (per `BUILTIN_PLUGIN_NAMES`), it was probably renamed or
+    // deleted and the whitelist has gone stale.
+    let stale: Vec<&str> = LintConfig::KNOWN_RULES
         .iter()
-        .filter(|name| !NATIVE_RULES.contains(name) && !BUILTIN_PLUGIN_NAMES.contains(name))
+        .copied()
+        .filter(|name| {
+            !LintConfig::NATIVE_RULE_NAMES.contains(name) && !BUILTIN_PLUGIN_NAMES.contains(name)
+        })
         .collect();
 
     assert!(
