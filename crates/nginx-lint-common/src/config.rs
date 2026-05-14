@@ -1530,7 +1530,11 @@ prefix = "/etc/nginx"
         write!(file, "{}", toml_content).unwrap();
 
         let errors = LintConfig::validate_file(file.path()).unwrap();
-        assert_eq!(errors.len(), 1, "expected exactly one error, got: {errors:?}");
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
         match &errors[0] {
             ValidationError::UnknownRule { name, .. } => {
                 assert_eq!(name, "no-such-rule-zzz");
