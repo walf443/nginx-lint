@@ -2,8 +2,8 @@
 //!
 //! Detects the vulnerable nginx configuration pattern behind CVE-2026-42945
 //! (marketed as "NGINX Rift"): a `rewrite` directive whose replacement
-//! string contains `?`, followed in the same block by a `set`, `rewrite`,
-//! or `if` directive that references an unnamed PCRE capture variable
+//! string contains `?`, followed in the same block by a `set` or `rewrite`
+//! directive that references an unnamed PCRE capture variable
 //! (`$1`..`$9`).
 //!
 //! On affected nginx versions (0.6.27 .. 1.30.0) the leaked `is_args` flag
@@ -27,8 +27,8 @@ impl Plugin for NginxRiftPlugin {
             "nginx-rift",
             "security",
             "Detects the CVE-2026-42945 vulnerable pattern: a rewrite with '?' in \
-             the replacement followed by a set/rewrite/if using unnamed captures \
-             ($1..$9) in the same scope",
+             the replacement followed by a `set` or `rewrite` using unnamed \
+             captures ($1..$9) in the same scope",
         )
         .with_severity("error")
         .with_why(
@@ -36,9 +36,9 @@ impl Plugin for NginxRiftPlugin {
              ngx_http_rewrite_module that affects nginx 0.6.27 through 1.30.0 \
              (fixed in 1.30.1 and 1.31.0). When a `rewrite` replacement \
              contains `?`, the worker sets an internal `is_args` flag on the \
-             main script engine and never clears it. A subsequent `set`, \
-             `rewrite`, or `if` directive that references an unnamed PCRE \
-             capture (`$1`..`$9`) then uses a length-calculation pass that \
+             main script engine and never clears it. A subsequent `set` or \
+             `rewrite` directive that references an unnamed PCRE capture \
+             (`$1`..`$9`) then uses a length-calculation pass that \
              ignores the flag while the copy pass honors it, so the worker \
              writes more bytes (each escape-prone byte expands by 2, e.g. \
              `+` -> `%2B`) than were allocated. This may cause worker \
@@ -113,8 +113,29 @@ fn is_rewrite_with_question_mark(dir: &Directive) -> bool {
     dir.args[1].as_str().contains('?')
 }
 
+/// Directives that, on vulnerable nginx, hit the buggy script-engine path
+/// when evaluating an unnamed PCRE capture (`$1`..`$9`) — i.e. the
+/// directives whose use of `$N` after a leaking `rewrite … ?…` actually
+/// triggers the buffer overrun.
+///
+/// `set` and `rewrite` (in its replacement string) are both verified
+/// observable on nginx 1.30.0: with a preceding rewrite-with-`?` in the
+/// same scope, `+` in the captured value comes back as `%2B` (and for
+/// `set`, the value is also truncated mid-escape).
+///
+/// `return` is intentionally NOT included: empirically `return 200 "$1"`
+/// after a `rewrite … ?…` on nginx 1.30.0 returns `$1` clean (no
+/// mis-escape, no truncation), because `return`'s complex-value
+/// evaluation goes through a different code path.
+///
+/// `if` is intentionally NOT included: the only way `if`'s argument list
+/// can contain `$N` is the form `if ($1 …)`, which nginx itself rejects
+/// at config-load time with `unknown "1" variable` — so the rule would
+/// only ever fire on configs nginx refuses to start. The legitimate
+/// `if ($var ~ "regex")` form has its own captures via the if-regex and
+/// does not reference the outer rewrite's `$N` in its argument list.
 fn is_capture_consumer(dir: &Directive) -> bool {
-    dir.is("set") || dir.is("rewrite") || dir.is("if")
+    dir.is("set") || dir.is("rewrite")
 }
 
 fn uses_unnamed_capture(dir: &Directive) -> bool {
@@ -126,12 +147,24 @@ fn uses_unnamed_capture(dir: &Directive) -> bool {
         .any(|arg| contains_unnamed_capture(&arg.raw))
 }
 
+/// Detect references to positional captures `$1`..`$9`, including the
+/// brace-disambiguated form `${1}`..`${9}` used when the capture is
+/// followed by characters that would otherwise be parsed as part of the
+/// variable name (e.g. `${1}_suffix`).
 fn contains_unnamed_capture(s: &str) -> bool {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'$' && i + 1 < bytes.len() && matches!(bytes[i + 1], b'1'..=b'9') {
-            return true;
+        if bytes[i] == b'$' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            // `$1`..`$9`
+            if matches!(next, b'1'..=b'9') {
+                return true;
+            }
+            // `${1}`..`${9}`
+            if next == b'{' && i + 2 < bytes.len() && matches!(bytes[i + 2], b'1'..=b'9') {
+                return true;
+            }
         }
         i += 1;
     }
@@ -180,9 +213,12 @@ http {
     }
 
     #[test]
-    fn test_detects_rewrite_then_if_with_capture() {
+    fn test_no_error_on_if_with_positional_capture_form() {
+        // `if ($1 …)` is nginx-invalid at runtime (`unknown "1" variable`),
+        // so flagging it would only produce false positives on configs
+        // nginx itself refuses to load. Verify the rule does NOT fire.
         let runner = PluginTestRunner::new(NginxRiftPlugin);
-        runner.assert_has_errors(
+        runner.assert_no_errors(
             r#"
 http {
     server {
@@ -191,6 +227,27 @@ http {
             if ($1) {
                 return 200;
             }
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_detects_brace_form_of_unnamed_capture() {
+        // ${1} is the brace-disambiguated form of $1 (used when followed
+        // by characters that would otherwise be parsed into the variable
+        // name). The bug-triggering semantics are identical, so it must
+        // also be flagged.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal?migrated=true;
+            set $combined "${1}_suffix";
         }
     }
 }
@@ -326,7 +383,7 @@ http {
             rewrite ^/api/(.*)$ /internal?migrated=true;
             set $a $1;
             set $b $2;
-            if ($1) { return 200; }
+            rewrite ^/x/(.*)$ /y/$1;
         }
     }
 }

@@ -117,6 +117,36 @@ http {
 "#
 }
 
+/// Second vulnerable shape: rewrite-then-rewrite. The first rewrite leaks
+/// `is_args = 1`; the second rewrite then references `$1` in its
+/// replacement, where the leaked flag causes args-escaping (`+` → `%2B`)
+/// to be applied to the captured value as it is written into the
+/// rewritten URI. This is a separate observable manifestation of the
+/// same `is_args` leak the rule flags.
+fn vulnerable_rewrite_rewrite_config() -> &'static str {
+    r#"events {
+    worker_connections 1024;
+}
+http {
+    server {
+        listen 80;
+
+        location /healthz {
+            return 200 'OK';
+        }
+
+        location ~ ^/foo/(.*)$ {
+            rewrite ^/foo/(.*)$ /bar/$1?x=1;
+            rewrite ^/bar/(.*)$ /baz/$1;
+        }
+        location ~ ^/baz/(.*)$ {
+            return 200 "final=$1\n";
+        }
+    }
+}
+"#
+}
+
 /// Recommended fix #1: drop the `?` from the rewrite replacement so the
 /// `is_args` flag is never set in the first place. The captured value is
 /// then routed through `set` without going through the args-escaping path.
@@ -244,6 +274,44 @@ async fn vulnerable_pattern_corrupts_capture_with_plus() {
          should be shorter than fully-escaped `foo%2Bbar` (9 bytes); \
          got length {}",
         captured.len()
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn vulnerable_rewrite_then_rewrite_misescapes_capture() {
+    // The rule flags `rewrite (with ?) ... rewrite (using $N)` in the
+    // same scope as well as the `set` shape. Verify the second-rewrite
+    // form also produces the leaked-is_args symptom on a vulnerable
+    // build, proving that flagging the rewrite-rewrite shape is not a
+    // false positive.
+    if skip_on_patched_version() {
+        eprintln!("Skipping: nginx >= 1.31 has the CVE-2026-42945 fix");
+        return;
+    }
+    let nginx = NginxContainer::builder()
+        .health_path("/healthz")
+        .start(vulnerable_rewrite_rewrite_config())
+        .await;
+
+    // /foo/foo+bar →
+    //   1st rewrite: URI=/bar/foo+bar, args=x=1, is_args leaked to 1
+    //   2nd rewrite: URI=/baz/<$1> where $1="foo+bar". Leaked is_args
+    //                applies args-escaping → final=/baz/foo%2Bbar
+    let resp = reqwest::get(nginx.url("/foo/foo+bar")).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let body = resp.text().await.unwrap();
+
+    assert!(
+        body.contains("%2B"),
+        "expected leaked is_args to wrongly arg-escape `+` to `%2B` in the \
+         second rewrite's replacement (CVE-2026-42945 signature in \
+         rewrite-rewrite shape), got: {body}"
+    );
+    assert!(
+        !body.contains("final=foo+bar"),
+        "captured value should NOT pass through clean to the second \
+         rewrite's replacement on a vulnerable build, got: {body}"
     );
 }
 
