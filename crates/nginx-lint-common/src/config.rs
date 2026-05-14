@@ -607,6 +607,56 @@ impl LintConfig {
         "missing-error-log", // error_log is typically set at top level in main config
     ];
 
+    /// All rule names recognised by `nginx-lint config validate`.
+    ///
+    /// This is the union of:
+    /// - native rules implemented directly in the top-level crate
+    ///   (`unmatched-braces`, `unclosed-quote`, `missing-semicolon`, `indent`,
+    ///   `include-path-exists`), and
+    /// - builtin plugin rules whose canonical list lives in
+    ///   [`nginx_lint::plugin::BUILTIN_PLUGIN_NAMES`].
+    ///
+    /// The CLI cannot import `BUILTIN_PLUGIN_NAMES` from here (it lives in the
+    /// top-level crate, while this module is a downstream dependency), so the
+    /// two lists are kept in sync by a drift-detection unit test in the
+    /// top-level crate. See `tests/known_rules_drift_test.rs`.
+    pub const KNOWN_RULES: &'static [&'static str] = &[
+        // Native rules (implemented in the top-level crate, not as plugins)
+        "unmatched-braces",
+        "unclosed-quote",
+        "missing-semicolon",
+        "indent",
+        "include-path-exists",
+        // Builtin plugins — must match `BUILTIN_PLUGIN_NAMES` in `src/plugin/mod.rs`
+        "duplicate-directive",
+        "invalid-directive-context",
+        "deprecated-ssl-protocol",
+        "server-tokens-enabled",
+        "autoindex-enabled",
+        "weak-ssl-ciphers",
+        "nginx-rift",
+        "trailing-whitespace",
+        "space-before-semicolon",
+        "block-lines",
+        "gzip-not-enabled",
+        "missing-error-log",
+        "proxy-pass-domain",
+        "upstream-server-no-resolve",
+        "root-in-location",
+        "alias-location-slash-mismatch",
+        "proxy-pass-with-uri",
+        "proxy-keepalive",
+        "try-files-with-proxy",
+        "if-is-evil-in-location",
+        "directive-inheritance",
+        "client-max-body-size-not-set",
+        "listen-http2-deprecated",
+        "map-missing-default",
+        "proxy-missing-host-header",
+        "ssl-on-deprecated",
+        "unreachable-location",
+    ];
+
     /// Check if a rule is enabled
     pub fn is_rule_enabled(&self, name: &str) -> bool {
         self.rules
@@ -759,36 +809,7 @@ impl LintConfig {
 
             // Validate [rules.*] sections
             if let Some(toml::Value::Table(rules)) = root.get("rules") {
-                let known_rules: HashSet<&str> = [
-                    "duplicate-directive",
-                    "unmatched-braces",
-                    "unclosed-quote",
-                    "missing-semicolon",
-                    "invalid-directive-context",
-                    "deprecated-ssl-protocol",
-                    "server-tokens-enabled",
-                    "autoindex-enabled",
-                    "weak-ssl-ciphers",
-                    "nginx-rift",
-                    "indent",
-                    "trailing-whitespace",
-                    "space-before-semicolon",
-                    "block-lines",
-                    "gzip-not-enabled",
-                    "missing-error-log",
-                    "proxy-pass-domain",
-                    "upstream-server-no-resolve",
-                    "root-in-location",
-                    "alias-location-slash-mismatch",
-                    "proxy-pass-with-uri",
-                    "proxy-keepalive",
-                    "try-files-with-proxy",
-                    "if-is-evil-in-location",
-                    "directive-inheritance",
-                    "include-path-exists",
-                ]
-                .into_iter()
-                .collect();
+                let known_rules: HashSet<&str> = Self::KNOWN_RULES.iter().copied().collect();
 
                 for (rule_name, rule_value) in rules {
                     if !known_rules.contains(rule_name.as_str()) {
@@ -1420,6 +1441,67 @@ prefix = "/etc/nginx"
         assert!(props.contains_key("color"), "missing 'color' property");
         assert!(props.contains_key("parser"), "missing 'parser' property");
         assert!(props.contains_key("include"), "missing 'include' property");
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/172:
+    /// previously, `config validate` rejected configs that referenced real builtin
+    /// plugins whose names were missing from the validator's `known_rules`
+    /// whitelist. These names must remain recognised.
+    #[test]
+    fn test_validate_accepts_previously_drifted_builtin_plugins() {
+        // Names that were drifted out of `known_rules` before the fix for #172.
+        let previously_missing = [
+            "client-max-body-size-not-set",
+            "listen-http2-deprecated",
+            "map-missing-default",
+            "proxy-missing-host-header",
+            "ssl-on-deprecated",
+            "unreachable-location",
+        ];
+
+        for rule_name in previously_missing {
+            let toml_content = format!("[rules.{rule_name}]\nenabled = false\n");
+            let mut file = NamedTempFile::new().unwrap();
+            write!(file, "{}", toml_content).unwrap();
+
+            let errors = LintConfig::validate_file(file.path()).unwrap();
+            assert!(
+                errors.is_empty(),
+                "rule '{rule_name}' should be a known builtin plugin name, \
+                 but `validate_file` reported errors: {errors:?}"
+            );
+        }
+    }
+
+    /// Sanity check that `KNOWN_RULES` actually drives the validator
+    /// (rather than an inline list that can drift again).
+    #[test]
+    fn test_known_rules_constant_drives_validator() {
+        for rule_name in LintConfig::KNOWN_RULES {
+            let toml_content = format!("[rules.{rule_name}]\nenabled = true\n");
+            let mut file = NamedTempFile::new().unwrap();
+            write!(file, "{}", toml_content).unwrap();
+
+            let errors = LintConfig::validate_file(file.path()).unwrap();
+            assert!(
+                errors.is_empty(),
+                "rule '{rule_name}' is listed in KNOWN_RULES but the validator \
+                 rejected it: {errors:?}"
+            );
+        }
+    }
+
+    /// `KNOWN_RULES` must not contain duplicate entries — a duplicated name
+    /// would silently mask a typo when the list is edited.
+    #[test]
+    fn test_known_rules_has_no_duplicates() {
+        let mut seen: HashSet<&str> = HashSet::new();
+        for name in LintConfig::KNOWN_RULES {
+            assert!(
+                seen.insert(name),
+                "duplicate entry in KNOWN_RULES: '{name}'"
+            );
+        }
     }
 
     #[test]
