@@ -226,6 +226,14 @@ weak_ciphers = [
 # Required exclusion patterns
 required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 
+[rules.nginx-rift]
+# CVE-2026-42945: detects the rewrite-with-`?` + capture-consumer pattern
+# that triggers a heap buffer overflow on nginx 0.6.27 .. 1.30.0
+# (fixed in 1.30.1 / 1.31.0). Disable this rule once your entire fleet
+# is on nginx >= 1.30.1 / 1.31.0 and the vulnerable pattern no longer
+# poses an RCE risk in your environment.
+enabled = true
+
 # =============================================================================
 # Best Practices
 # =============================================================================
@@ -761,6 +769,7 @@ impl LintConfig {
                     "server-tokens-enabled",
                     "autoindex-enabled",
                     "weak-ssl-ciphers",
+                    "nginx-rift",
                     "indent",
                     "trailing-whitespace",
                     "space-before-semicolon",
