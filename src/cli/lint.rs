@@ -8,7 +8,7 @@ use nginx_lint::{
     pre_parse_checks_from_content, syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -529,18 +529,16 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             return ExitCode::from(2);
         }
 
-        let keep: std::collections::HashSet<&str> =
-            cli.rule_only.iter().map(String::as_str).collect();
+        let keep: HashSet<&str> = cli.rule_only.iter().map(String::as_str).collect();
         linter.remove_rules_by_name(|name| !keep.contains(name));
         // Surface *filtered-out* rules to the ignore-comment parser so
         // existing `# nginx-lint:ignore <other-rule>` directives stay quiet
         // (valid names + dormant for unused-warning suppression). The kept
         // rules are intentionally excluded — their own unused-ignore
         // directives must still produce warnings.
-        let inactive: std::collections::HashSet<String> = registered
-            .iter()
+        let inactive: HashSet<String> = registered
+            .into_iter()
             .filter(|name| !keep.contains(name.as_str()))
-            .cloned()
             .collect();
         linter.set_inactive_rules(inactive);
 

@@ -2388,10 +2388,10 @@ fn test_lint_detects_both_syntax_and_lint_errors() {
 }
 
 // ============================================================================
-// --rule-only behavior (Linter::remove_rules_by_name +
-// set_extra_valid_rule_names): mirrors what `nginx-lint --rule-only` does
-// from the CLI but exercised at the library level so it works regardless of
-// the builtin-plugin feature configuration.
+// --rule-only behavior (Linter::remove_rules_by_name + set_inactive_rules):
+// mirrors what `nginx-lint --rule-only` does from the CLI but exercised at
+// the library level so it works regardless of the builtin-plugin feature
+// configuration.
 // ============================================================================
 
 #[test]
@@ -2403,11 +2403,9 @@ fn test_rule_only_filters_other_rules() {
     // Baseline: default linter reports multiple rules' findings for this snippet.
     let baseline = get_default_linter();
     let (baseline_errors, _) = baseline.lint_with_content(&config, &path, content);
-    let baseline_rules: std::collections::HashSet<_> =
-        baseline_errors.iter().map(|e| e.rule.clone()).collect();
 
     // Skip the test if `indent` is not loaded in this build configuration.
-    if !baseline_rules.contains("indent") {
+    if !baseline_errors.iter().any(|e| e.rule == "indent") {
         return;
     }
 
