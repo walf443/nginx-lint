@@ -86,6 +86,8 @@ mod embedded {
     /// client-max-body-size-not-set plugin
     pub const CLIENT_MAX_BODY_SIZE_NOT_SET: &[u8] =
         include_bytes!("../../target/builtin-plugins/client_max_body_size_not_set.wasm");
+    /// nginx-rift plugin
+    pub const NGINX_RIFT: &[u8] = include_bytes!("../../target/builtin-plugins/nginx_rift.wasm");
 }
 
 // Re-export from parent module for backward compatibility
@@ -174,6 +176,7 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<ComponentLintRul
             "client-max-body-size-not-set",
             embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
         ),
+        ("nginx-rift", embedded::NGINX_RIFT),
     ];
 
     let mut plugins = Vec::new();

@@ -22,6 +22,7 @@ pub fn load_native_builtin_plugins() -> Vec<Box<dyn LintRule>> {
         Box::new(NativePluginRule::<
             weak_ssl_ciphers_plugin::WeakSslCiphersPlugin,
         >::new()),
+        Box::new(NativePluginRule::<nginx_rift_plugin::NginxRiftPlugin>::new()),
         // Style plugins
         Box::new(NativePluginRule::<
             space_before_semicolon_plugin::SpaceBeforeSemicolonPlugin,
