@@ -8,11 +8,19 @@ use std::path::Path;
 
 pub struct Linter {
     rules: Vec<Box<dyn LintRule>>,
+    /// Rule names that should be treated as valid by ignore-comment parsing
+    /// even though they are not registered as runnable rules. Used by the CLI
+    /// when `--rule-only` filters out rules the user's config still references
+    /// in `# nginx-lint:ignore` comments.
+    extra_valid_rule_names: std::collections::HashSet<String>,
 }
 
 impl Linter {
     pub fn new() -> Self {
-        Self { rules: Vec::new() }
+        Self {
+            rules: Vec::new(),
+            extra_valid_rule_names: std::collections::HashSet::new(),
+        }
     }
 
     pub fn with_default_rules() -> Self {
@@ -234,6 +242,22 @@ impl Linter {
         self.rules.iter().map(|r| r.name().to_string()).collect()
     }
 
+    /// Register additional rule names that ignore comments may reference even
+    /// though no matching rule is registered to run. This prevents spurious
+    /// "unknown rule" warnings when callers (e.g. the CLI's `--rule-only`
+    /// filter) intentionally remove rules from this linter.
+    pub fn set_extra_valid_rule_names(&mut self, names: std::collections::HashSet<String>) {
+        self.extra_valid_rule_names = names;
+    }
+
+    /// Names recognised by the ignore-comment parser: registered rules plus
+    /// any extras supplied via [`set_extra_valid_rule_names`].
+    fn valid_rule_names_for_ignore(&self) -> std::collections::HashSet<String> {
+        let mut names = self.rule_names();
+        names.extend(self.extra_valid_rule_names.iter().cloned());
+        names
+    }
+
     /// Run all lint rules and collect errors
     ///
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
@@ -276,9 +300,12 @@ impl Linter {
     ) -> (Vec<LintError>, usize) {
         use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
+        let valid_rules = self.valid_rule_names_for_ignore();
         let (mut tracker, warnings) =
             IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        if !self.extra_valid_rule_names.is_empty() {
+            tracker.set_dormant_rules(self.extra_valid_rule_names.clone());
+        }
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -297,9 +324,12 @@ impl Linter {
     ) -> (Vec<LintError>, usize) {
         use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
+        let valid_rules = self.valid_rule_names_for_ignore();
         let (mut tracker, warnings) =
             IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        if !self.extra_valid_rule_names.is_empty() {
+            tracker.set_dormant_rules(self.extra_valid_rule_names.clone());
+        }
         let errors = self.lint(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
@@ -356,9 +386,12 @@ impl Linter {
     ) -> (Vec<LintError>, usize, Vec<RuleProfile>) {
         use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
-        let valid_rules = self.rule_names();
+        let valid_rules = self.valid_rule_names_for_ignore();
         let (mut tracker, warnings) =
             IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+        if !self.extra_valid_rule_names.is_empty() {
+            tracker.set_dormant_rules(self.extra_valid_rule_names.clone());
+        }
         let (errors, profiles) = self.lint_with_profile(config, path);
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;

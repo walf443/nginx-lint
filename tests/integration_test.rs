@@ -2386,3 +2386,132 @@ fn test_lint_detects_both_syntax_and_lint_errors() {
         "Expected syntax-error in combined results"
     );
 }
+
+// ============================================================================
+// --rule-only behavior (Linter::remove_rules_by_name +
+// set_extra_valid_rule_names): mirrors what `nginx-lint --rule-only` does
+// from the CLI but exercised at the library level so it works regardless of
+// the builtin-plugin feature configuration.
+// ============================================================================
+
+#[test]
+fn test_rule_only_filters_other_rules() {
+    let content = "http {\nserver_tokens on;\nlocation / {\n}\n}\n";
+    let (config, _) = parse_string_with_errors(content);
+    let path = PathBuf::from("test.conf");
+
+    // Baseline: default linter reports multiple rules' findings for this snippet.
+    let baseline = get_default_linter();
+    let (baseline_errors, _) = baseline.lint_with_content(&config, &path, content);
+    let baseline_rules: std::collections::HashSet<_> =
+        baseline_errors.iter().map(|e| e.rule.clone()).collect();
+
+    // Skip the test if `indent` is not loaded in this build configuration.
+    if !baseline_rules.contains("indent") {
+        return;
+    }
+
+    // Construct a linter restricted to the `indent` rule, simulating
+    // `nginx-lint --rule-only indent`.
+    let mut linter = Linter::with_default_rules();
+    let pre_filter_names = linter.rule_names();
+    linter.remove_rules_by_name(|name| name != "indent");
+    linter.set_extra_valid_rule_names(pre_filter_names);
+
+    let (errors, _) = linter.lint_with_content(&config, &path, content);
+
+    assert!(
+        !errors.is_empty(),
+        "indent rule should still find issues in this snippet"
+    );
+    for err in &errors {
+        assert_eq!(
+            err.rule, "indent",
+            "After --rule-only filter, only indent errors should remain, found: {}",
+            err.rule
+        );
+    }
+}
+
+#[test]
+fn test_rule_only_keeps_ignore_for_dormant_rule_quiet() {
+    // Ignore directive targets a rule that is filtered out. With the
+    // dormant-rules mechanism, this should neither suppress anything nor
+    // emit an "unused nginx-lint:ignore" warning.
+    let content = concat!(
+        "# nginx-lint:ignore server-tokens-enabled rule-only test reason\n",
+        "http {\n",
+        "server_tokens on;\n",
+        "}\n",
+    );
+    let (config, _) = parse_string_with_errors(content);
+    let path = PathBuf::from("test.conf");
+
+    let mut linter = Linter::with_default_rules();
+    let pre_filter_names = linter.rule_names();
+
+    // Skip if indent is not loaded.
+    if !pre_filter_names.contains("indent") {
+        return;
+    }
+    // Skip if server-tokens-enabled is not loaded in this build (then there
+    // would be no dormant-rule semantics to test here).
+    if !pre_filter_names.contains("server-tokens-enabled") {
+        return;
+    }
+
+    linter.remove_rules_by_name(|name| name != "indent");
+    linter.set_extra_valid_rule_names(pre_filter_names);
+
+    let (errors, _) = linter.lint_with_content(&config, &path, content);
+
+    assert!(
+        !errors
+            .iter()
+            .any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        "--rule-only should not emit unused-ignore warnings for filtered rules; got: {:?}",
+        errors.iter().map(|e| (&e.rule, &e.message)).collect::<Vec<_>>()
+    );
+    assert!(
+        !errors.iter().any(|e| e.rule == "server-tokens-enabled"),
+        "filtered-out rule must not run"
+    );
+}
+
+#[test]
+fn test_rule_only_without_extra_valid_warns_about_unknown_ignore_target() {
+    // Sanity check: without set_extra_valid_rule_names, filtering rules out
+    // would (correctly, by the tracker's own contract) cause ignore comments
+    // for those rules to be reported as referencing unknown rules. This test
+    // documents the baseline that motivates the dormant-rules wiring.
+    let content = concat!(
+        "# nginx-lint:ignore server-tokens-enabled rule-only test reason\n",
+        "http {\n",
+        "server_tokens on;\n",
+        "}\n",
+    );
+    let (config, _) = parse_string_with_errors(content);
+    let path = PathBuf::from("test.conf");
+
+    let mut linter = Linter::with_default_rules();
+    let pre_filter_names = linter.rule_names();
+    if !pre_filter_names.contains("indent")
+        || !pre_filter_names.contains("server-tokens-enabled")
+    {
+        return;
+    }
+    linter.remove_rules_by_name(|name| name != "indent");
+    // Intentionally do NOT call set_extra_valid_rule_names.
+
+    let (errors, _) = linter.lint_with_content(&config, &path, content);
+
+    // The ignore tracker now treats server-tokens-enabled as an unknown rule
+    // because it is no longer registered. This is the spurious-warning case
+    // the CLI wiring exists to avoid.
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        "Without extra_valid_rule_names, filtered ignore targets should warn"
+    );
+}

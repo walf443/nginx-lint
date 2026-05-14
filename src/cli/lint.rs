@@ -23,6 +23,20 @@ enum FileResult {
     },
 }
 
+/// Check whether a rule name corresponds to a known builtin rule, regardless
+/// of whether it is currently registered on the linter. Used by `--rule-only`
+/// validation to distinguish "disabled in config" from "no such rule".
+fn rule_exists_in_catalog(name: &str) -> bool {
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    {
+        nginx_lint::docs::get_rule_doc_with_plugins(name).is_some()
+    }
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
+    {
+        nginx_lint::docs::all_rule_names().contains(&name)
+    }
+}
+
 /// Display profiling results
 fn display_profile(profiles: &[RuleProfile]) {
     use colored::Colorize;
@@ -465,34 +479,56 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // Apply --rule-only filter: keep only the requested rules, validate that
-    // every requested name corresponds to a registered rule.
+    // every requested name corresponds to a registered rule, and surface the
+    // filtered-out rules to the ignore-comment parser so existing
+    // `# nginx-lint:ignore <other-rule>` directives keep working.
     if !cli.rule_only.is_empty() {
         let registered = linter.rule_names();
-        let unknown: Vec<&String> = cli
-            .rule_only
-            .iter()
-            .filter(|name| !registered.contains(name.as_str()))
-            .collect();
-        if !unknown.is_empty() {
-            eprintln!(
-                "Error: --rule-only references unknown rule(s): {}",
-                unknown
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            let mut available: Vec<String> = registered.into_iter().collect();
+
+        // Split unknown names into "exists but not loaded" vs "no such rule"
+        // by consulting the full builtin catalog (rules + plugins).
+        let mut not_loaded: Vec<&str> = Vec::new();
+        let mut no_such_rule: Vec<&str> = Vec::new();
+        for name in &cli.rule_only {
+            if registered.contains(name) {
+                continue;
+            }
+            if rule_exists_in_catalog(name) {
+                not_loaded.push(name);
+            } else {
+                no_such_rule.push(name);
+            }
+        }
+
+        if !not_loaded.is_empty() || !no_such_rule.is_empty() {
+            if !no_such_rule.is_empty() {
+                eprintln!(
+                    "Error: --rule-only references unknown rule(s): {}",
+                    no_such_rule.join(", ")
+                );
+            }
+            if !not_loaded.is_empty() {
+                eprintln!(
+                    "Error: --rule-only rule(s) not loaded in this build (disabled in config or unsupported by the current feature set): {}",
+                    not_loaded.join(", ")
+                );
+            }
+            let mut available: Vec<&str> = registered.iter().map(String::as_str).collect();
             available.sort();
-            eprintln!("Available rules:");
+            eprintln!("Loaded rules:");
             for name in &available {
                 eprintln!("  - {}", name);
             }
             return ExitCode::from(2);
         }
 
-        let keep: std::collections::HashSet<String> = cli.rule_only.iter().cloned().collect();
+        let keep: std::collections::HashSet<&str> =
+            cli.rule_only.iter().map(String::as_str).collect();
         linter.remove_rules_by_name(|name| !keep.contains(name));
+        // Preserve the pre-filter rule set as "valid for ignore comments" so
+        // that existing `# nginx-lint:ignore <other-rule>` directives in the
+        // user's config do not get reported as referencing unknown rules.
+        linter.set_extra_valid_rule_names(registered);
 
         if cli.verbose {
             eprintln!("Running only rule(s): {}", cli.rule_only.join(", "));

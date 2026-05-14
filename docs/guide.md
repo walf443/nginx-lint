@@ -102,7 +102,20 @@ nginx-lint --rule-only indent --rule-only missing-semicolon /etc/nginx/nginx.con
 ```
 
 If a name doesn't match any registered rule, nginx-lint exits with code 2
-and lists the available rules. Use `nginx-lint why --list` to discover them.
+and lists the loaded rules. Use `nginx-lint why --list` to discover them.
+If the name exists in the builtin catalog but is not currently loaded
+(e.g. disabled in `.nginx-lint.toml`, or not built into this binary), the
+error message distinguishes that case from a true typo.
+
+> **Note:** Pre-parse syntax checks (`unmatched-braces`, `unclosed-quote`,
+> `missing-semicolon`) always run, even under `--rule-only`. Their findings
+> are prerequisites for further parsing, so they are reported regardless of
+> the filter.
+
+`# nginx-lint:ignore <rule>` directives that target rules filtered out by
+`--rule-only` are kept dormant for the invocation: they neither suppress
+anything (the rule isn't running) nor get reported as "unused", so you can
+toggle `--rule-only` without churning the surrounding config.
 
 
 ## Configuration (.nginx-lint.toml)
