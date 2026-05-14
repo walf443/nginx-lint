@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM rust:1-trixie@sha256:7f17fb1ec8e54dabd31c76bd2cfed1ac6695413ebe41ba1561d52720cc3da658 AS builder
+FROM rust:1-trixie@sha256:5b1e3484ddcd22a3738c0ec34a5e98bf19382eb295fb6db54295e62379119040 AS builder
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
