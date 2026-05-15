@@ -351,7 +351,7 @@ impl Linter {
                         max,
                     } => {
                         let range = match (min.as_deref(), max.as_deref()) {
-                            (Some(min), Some(max)) => format!("nginx {}..={}", min, max),
+                            (Some(min), Some(max)) => format!("nginx >={}, <={}", min, max),
                             (Some(min), None) => format!("nginx >={}", min),
                             (None, Some(max)) => format!("nginx <={}", max),
                             (None, None) => "any nginx version".to_string(),

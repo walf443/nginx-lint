@@ -1,11 +1,13 @@
 use std::process::ExitCode;
 
 /// Format an optional `(min, max)` nginx version pair as a human-readable
-/// range like `"nginx 0.6.27..=1.30.0"`, `"nginx >=1.0.0"`, `"nginx <=1.30.0"`.
+/// range like `"nginx >=0.6.27, <=1.30.0"`, `"nginx >=1.0.0"`, or
+/// `"nginx <=1.30.0"`. Uses `>=`/`<=` rather than Rust's `..=` syntax
+/// because end users are more familiar with comparison-operator notation.
 /// Returns `None` if both bounds are unset (i.e. the rule applies regardless).
 fn format_applies_to(min: Option<&str>, max: Option<&str>) -> Option<String> {
     match (min, max) {
-        (Some(min), Some(max)) => Some(format!("nginx {}..={}", min, max)),
+        (Some(min), Some(max)) => Some(format!("nginx >={}, <={}", min, max)),
         (Some(min), None) => Some(format!("nginx >={}", min)),
         (None, Some(max)) => Some(format!("nginx <={}", max)),
         (None, None) => None,

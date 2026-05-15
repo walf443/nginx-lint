@@ -229,7 +229,7 @@
         // when neither bound is declared (i.e. the rule applies regardless
         // of nginx version) so the caller can skip the detail section.
         function formatAppliesTo(min, max) {
-            if (min && max) return `nginx ${min}..=${max}`;
+            if (min && max) return `nginx >=${min}, <=${max}`;
             if (min) return `nginx >=${min}`;
             if (max) return `nginx <=${max}`;
             return null;
