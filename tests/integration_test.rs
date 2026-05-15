@@ -2681,3 +2681,55 @@ target_nginx_version = "not-a-version"
         "invalid target_nginx_version should fall back to no-filter"
     );
 }
+
+// `nginx-lint why <rule>` prints rule metadata to stderr; the surface
+// area we want to lock down here is specifically the "Applies to:"
+// line introduced by the target_nginx_version feature, so we shell out
+// to the CLI binary and grep its stderr. Requires a builtin-plugins
+// feature so the nginx-rift plugin is actually registered.
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_why_command_shows_applies_to_for_versioned_rule() {
+    use std::process::Command;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "nginx-rift"])
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(
+        output.status.success(),
+        "why command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Applies to: nginx >=0.6.27, <=1.30.0"),
+        "expected 'Applies to: nginx >=0.6.27, <=1.30.0' in why output; got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_why_command_omits_applies_to_for_unversioned_rule() {
+    // `indent` declares no version bounds; the "Applies to:" line must
+    // be omitted so the output stays uncluttered for rules that apply
+    // to every nginx version.
+    use std::process::Command;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "indent"])
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(output.status.success());
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Applies to:"),
+        "indent has no version range; 'Applies to:' should not appear; got:\n{}",
+        stderr
+    );
+}
