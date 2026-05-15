@@ -171,6 +171,7 @@ impl Plugin for ProxyKeepalivePlugin {
             "https://blog.nginx.org/blog/keep-alive-to-upstreams-is-now-default-in-nginx-1-29-7".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/best_practices/proxy_keepalive/tests/container_test.rs".to_string(),
         ])
+        .with_max_version("1.29.6")
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -472,6 +473,17 @@ http {
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
         );
+    }
+
+    #[test]
+    fn test_spec_declares_max_version_before_1_29_7_default() {
+        // nginx 1.29.7+ defaults proxy_http_version to 1.1 and enables
+        // upstream keep-alive by default, so the explicit
+        // `proxy_set_header Connection ""` is no longer required.
+        // Setting max_nginx_version to 1.29.6 lets the version-based
+        // filter skip this rule automatically on newer fleets.
+        let spec = ProxyKeepalivePlugin.spec();
+        assert_eq!(spec.max_nginx_version.as_deref(), Some("1.29.6"));
     }
 
     // =========================================================================
