@@ -22,6 +22,8 @@ pub fn convert_spec(sdk_spec: super::PluginSpec) -> nginx_lint::plugin::types::P
         bad_example: sdk_spec.bad_example,
         good_example: sdk_spec.good_example,
         references: sdk_spec.references,
+        min_nginx_version: sdk_spec.min_nginx_version,
+        max_nginx_version: sdk_spec.max_nginx_version,
     }
 }
 

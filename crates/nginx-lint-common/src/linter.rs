@@ -282,6 +282,24 @@ pub trait LintRule: Send + Sync {
     fn severity(&self) -> Option<&str> {
         None
     }
+
+    /// Minimum nginx version this rule applies to (inclusive).
+    ///
+    /// `None` means the rule applies regardless of how old the nginx version is.
+    /// Used by the linter's version-based rule filter to decide whether to
+    /// run this rule against a config whose
+    /// [`target_nginx_version`](crate::config::LintConfig::target_nginx_version)
+    /// is set.
+    fn min_nginx_version(&self) -> Option<&str> {
+        None
+    }
+
+    /// Maximum nginx version this rule applies to (inclusive).
+    ///
+    /// `None` means the rule applies regardless of how new the nginx version is.
+    fn max_nginx_version(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// Container that holds [`LintRule`]s and runs them against a parsed config.

@@ -2561,3 +2561,117 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
             .collect::<Vec<_>>()
     );
 }
+
+// ============================================================================
+// target_nginx_version tests
+// ============================================================================
+
+/// nginx config triggering nginx-rift (CVE-2026-42945) — rewrite with `?`
+/// followed by a `set` consuming an unnamed capture in the same scope.
+const NGINX_RIFT_VULNERABLE_CONFIG: &str = r#"http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal?migrated=true;
+            set $original_endpoint $1;
+        }
+    }
+}
+"#;
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_target_nginx_version_skips_out_of_range_rule() {
+    // nginx-rift declares max_nginx_version = "1.30.0". With target_nginx_version
+    // set to a newer version, the rule should be automatically filtered out.
+    let config_toml = r#"
+target_nginx_version = "1.31.0"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        rift_errors.is_empty(),
+        "nginx-rift should be skipped on nginx >=1.30.1; got: {:?}",
+        rift_errors
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_target_nginx_version_runs_in_range_rule() {
+    // With target_nginx_version still inside the affected range, nginx-rift
+    // must fire on the vulnerable pattern.
+    let config_toml = r#"
+target_nginx_version = "1.30.0"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        !rift_errors.is_empty(),
+        "nginx-rift should fire on nginx 1.30.0; got errors: {:?}",
+        errors.iter().map(|e| &e.rule).collect::<Vec<_>>()
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_skip_version_check_overrides_target_nginx_version() {
+    // Even with target_nginx_version above the rule's max, explicitly
+    // setting skip_version_check = true keeps the rule active.
+    let config_toml = r#"
+target_nginx_version = "1.31.0"
+
+[rules.nginx-rift]
+enabled = true
+skip_version_check = true
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        !rift_errors.is_empty(),
+        "nginx-rift should still fire with skip_version_check=true; got: {:?}",
+        errors.iter().map(|e| &e.rule).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_no_target_nginx_version_does_not_filter() {
+    // Without target_nginx_version, no filtering should occur — same behavior
+    // as before the feature was added.
+    let config = LintConfig::default();
+    let linter = Linter::with_config(Some(&config), None);
+    // Some rule registration must have happened.
+    assert!(
+        !linter.rules().is_empty(),
+        "default linter should have rules registered"
+    );
+}
+
+#[test]
+fn test_invalid_target_nginx_version_does_not_crash() {
+    // An unparseable target_nginx_version is logged and ignored — the
+    // linter still constructs with all rules enabled.
+    let config_toml = r#"
+target_nginx_version = "not-a-version"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+    assert!(
+        !linter.rules().is_empty(),
+        "invalid target_nginx_version should fall back to no-filter"
+    );
+}

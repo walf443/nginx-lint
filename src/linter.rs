@@ -2,11 +2,74 @@
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
+use nginx_lint_common::nginx_version::{NginxVersion, is_in_range};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::Path;
+
+/// Result of evaluating a rule against the configured target nginx version.
+enum VersionGate {
+    /// Rule applies to the target version, or filtering is disabled.
+    Allow,
+    /// Rule does not apply; skip silently (no `[rules.<name>]` block exists).
+    SkipSilently,
+    /// Rule does not apply but the user explicitly enabled it without
+    /// `skip_version_check = true`; skip and warn so the mismatch is visible.
+    SkipWithWarning {
+        rule: String,
+        target: String,
+        min: Option<String>,
+        max: Option<String>,
+    },
+}
+
+/// Evaluate whether a rule should run given the configured target nginx
+/// version and the user's explicit configuration of that rule.
+fn evaluate_version_gate(
+    rule: &dyn LintRule,
+    target: Option<&NginxVersion>,
+    config: Option<&LintConfig>,
+) -> VersionGate {
+    let Some(target) = target else {
+        return VersionGate::Allow;
+    };
+
+    // If the rule opts in to skipping the version check, allow it through.
+    if let Some(cfg) = config
+        && cfg.rule_skip_version_check(rule.name())
+    {
+        return VersionGate::Allow;
+    }
+
+    let min = rule
+        .min_nginx_version()
+        .and_then(|s| NginxVersion::parse(s).ok());
+    let max = rule
+        .max_nginx_version()
+        .and_then(|s| NginxVersion::parse(s).ok());
+
+    if is_in_range(target, min.as_ref(), max.as_ref()) {
+        return VersionGate::Allow;
+    }
+
+    // Out of range. Decide whether to warn.
+    let explicitly_enabled = config
+        .map(|c| c.rule_explicitly_configured(rule.name()) && c.is_rule_enabled(rule.name()))
+        .unwrap_or(false);
+
+    if explicitly_enabled {
+        VersionGate::SkipWithWarning {
+            rule: rule.name().to_string(),
+            target: target.to_string(),
+            min: rule.min_nginx_version().map(String::from),
+            max: rule.max_nginx_version().map(String::from),
+        }
+    } else {
+        VersionGate::SkipSilently
+    }
+}
 
 pub struct Linter {
     rules: Vec<Box<dyn LintRule>>,
@@ -220,6 +283,59 @@ impl Linter {
             }
         }
 
+        // Apply target_nginx_version filter (if configured). Rules whose
+        // declared min/max range does not include the configured version are
+        // dropped; if the user explicitly enabled such a rule without
+        // `skip_version_check = true`, a warning is emitted to stderr so the
+        // mismatch is visible. Dropped rules are kept in `inactive_rules` so
+        // existing `# nginx-lint:ignore[<rule>]` directives still parse cleanly.
+        let target_version = config
+            .and_then(|c| c.target_nginx_version())
+            .and_then(|raw| match NginxVersion::parse(raw) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    eprintln!(
+                        "warning: ignoring target_nginx_version: {} (skipping version-based rule filtering)",
+                        e
+                    );
+                    None
+                }
+            });
+
+        if let Some(target) = target_version {
+            let mut filtered_out: HashSet<String> = HashSet::new();
+            linter.rules.retain(|rule| {
+                match evaluate_version_gate(rule.as_ref(), Some(&target), config) {
+                    VersionGate::Allow => true,
+                    VersionGate::SkipSilently => {
+                        filtered_out.insert(rule.name().to_string());
+                        false
+                    }
+                    VersionGate::SkipWithWarning {
+                        rule: name,
+                        target,
+                        min,
+                        max,
+                    } => {
+                        let range = match (min.as_deref(), max.as_deref()) {
+                            (Some(min), Some(max)) => format!("nginx {}..={}", min, max),
+                            (Some(min), None) => format!("nginx >={}", min),
+                            (None, Some(max)) => format!("nginx <={}", max),
+                            (None, None) => "any nginx version".to_string(),
+                        };
+                        eprintln!(
+                            "warning: rule '{}' requires {} but target_nginx_version is {}; \
+                             skipping. Set [rules.{}] skip_version_check = true to override.",
+                            name, range, target, name
+                        );
+                        filtered_out.insert(name);
+                        false
+                    }
+                }
+            });
+            linter.inactive_rules.extend(filtered_out);
+        }
+
         linter
     }
 
@@ -428,5 +544,142 @@ pub struct RuleProfile {
 impl Default for Linter {
     fn default() -> Self {
         Self::with_default_rules()
+    }
+}
+
+#[cfg(test)]
+mod version_filter_tests {
+    use super::*;
+
+    /// Mock rule with configurable name and version bounds for testing.
+    struct MockRule {
+        name: &'static str,
+        min: Option<&'static str>,
+        max: Option<&'static str>,
+    }
+
+    impl LintRule for MockRule {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn category(&self) -> &'static str {
+            "test"
+        }
+        fn description(&self) -> &'static str {
+            "mock rule"
+        }
+        fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+            Vec::new()
+        }
+        fn min_nginx_version(&self) -> Option<&str> {
+            self.min
+        }
+        fn max_nginx_version(&self) -> Option<&str> {
+            self.max
+        }
+    }
+
+    fn build_config(toml: &str) -> LintConfig {
+        LintConfig::parse(toml).expect("config parse")
+    }
+
+    #[test]
+    fn no_target_version_allows_rule() {
+        let rule = MockRule {
+            name: "demo",
+            min: None,
+            max: Some("1.0.0"),
+        };
+        let gate = evaluate_version_gate(&rule, None, None);
+        assert!(matches!(gate, VersionGate::Allow));
+    }
+
+    #[test]
+    fn target_in_range_allows_rule() {
+        let rule = MockRule {
+            name: "demo",
+            min: Some("0.6.27"),
+            max: Some("1.30.0"),
+        };
+        let target = NginxVersion::parse("1.29.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), None);
+        assert!(matches!(gate, VersionGate::Allow));
+    }
+
+    #[test]
+    fn target_above_max_skips_silently_when_not_configured() {
+        let rule = MockRule {
+            name: "demo",
+            min: None,
+            max: Some("1.30.0"),
+        };
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), None);
+        assert!(matches!(gate, VersionGate::SkipSilently));
+    }
+
+    #[test]
+    fn explicitly_enabled_out_of_range_warns() {
+        let rule = MockRule {
+            name: "demo",
+            min: None,
+            max: Some("1.30.0"),
+        };
+        let config = build_config("[rules.demo]\nenabled = true\n");
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), Some(&config));
+        assert!(matches!(gate, VersionGate::SkipWithWarning { .. }));
+    }
+
+    #[test]
+    fn skip_version_check_overrides_filter() {
+        let rule = MockRule {
+            name: "demo",
+            min: None,
+            max: Some("1.30.0"),
+        };
+        let config = build_config("[rules.demo]\nenabled = true\nskip_version_check = true\n");
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), Some(&config));
+        assert!(matches!(gate, VersionGate::Allow));
+    }
+
+    #[test]
+    fn explicitly_disabled_out_of_range_does_not_warn() {
+        let rule = MockRule {
+            name: "demo",
+            min: None,
+            max: Some("1.30.0"),
+        };
+        let config = build_config("[rules.demo]\nenabled = false\n");
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), Some(&config));
+        // Not "enabled", so we skip silently rather than nagging the user.
+        assert!(matches!(gate, VersionGate::SkipSilently));
+    }
+
+    #[test]
+    fn unparseable_rule_bounds_treated_as_unbounded() {
+        let rule = MockRule {
+            name: "demo",
+            min: Some("garbage"),
+            max: Some("also-garbage"),
+        };
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), None);
+        // Both bounds fail to parse -> treated as None -> in range.
+        assert!(matches!(gate, VersionGate::Allow));
+    }
+
+    #[test]
+    fn target_below_min_skips() {
+        let rule = MockRule {
+            name: "demo",
+            min: Some("1.0.0"),
+            max: None,
+        };
+        let target = NginxVersion::parse("0.9.0").unwrap();
+        let gate = evaluate_version_gate(&rule, Some(&target), None);
+        assert!(matches!(gate, VersionGate::SkipSilently));
     }
 }

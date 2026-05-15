@@ -86,6 +86,8 @@ pub struct NativePluginRule<P: Plugin> {
     bad_example: Option<&'static str>,
     good_example: Option<&'static str>,
     references: Option<Vec<String>>,
+    min_nginx_version: Option<&'static str>,
+    max_nginx_version: Option<&'static str>,
 }
 
 impl<P: Plugin> Default for NativePluginRule<P> {
@@ -114,6 +116,12 @@ impl<P: Plugin> NativePluginRule<P> {
         let good_example: Option<&'static str> =
             spec.good_example.map(|s| &*Box::leak(s.into_boxed_str()));
         let references = spec.references;
+        let min_nginx_version: Option<&'static str> = spec
+            .min_nginx_version
+            .map(|s| &*Box::leak(s.into_boxed_str()));
+        let max_nginx_version: Option<&'static str> = spec
+            .max_nginx_version
+            .map(|s| &*Box::leak(s.into_boxed_str()));
 
         Self {
             plugin,
@@ -125,6 +133,8 @@ impl<P: Plugin> NativePluginRule<P> {
             bad_example,
             good_example,
             references,
+            min_nginx_version,
+            max_nginx_version,
         }
     }
 }
@@ -166,5 +176,13 @@ impl<P: Plugin + Send + Sync> LintRule for NativePluginRule<P> {
 
     fn references(&self) -> Option<Vec<String>> {
         self.references.clone()
+    }
+
+    fn min_nginx_version(&self) -> Option<&str> {
+        self.min_nginx_version
+    }
+
+    fn max_nginx_version(&self) -> Option<&str> {
+        self.max_nginx_version
     }
 }

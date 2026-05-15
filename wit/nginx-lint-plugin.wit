@@ -1,4 +1,4 @@
-package nginx-lint:plugin@3.0.0;
+package nginx-lint:plugin@4.0.0;
 
 interface types {
     enum severity {
@@ -36,6 +36,8 @@ interface types {
         bad-example: option<string>,
         good-example: option<string>,
         references: option<list<string>>,
+        min-nginx-version: option<string>,
+        max-nginx-version: option<string>,
     }
 }
 
