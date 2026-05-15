@@ -225,6 +225,16 @@
             return escaped.replace(/( +)((?:\n|$))/g, '<span class="trailing-ws">$1</span>$2');
         }
 
+        // Format the rule's nginx version applicability range. Returns null
+        // when neither bound is declared (i.e. the rule applies regardless
+        // of nginx version) so the caller can skip the detail section.
+        function formatAppliesTo(min, max) {
+            if (min && max) return `nginx ${min}..=${max}`;
+            if (min) return `nginx >=${min}`;
+            if (max) return `nginx <=${max}`;
+            return null;
+        }
+
         function renderRules(categories, ruleSpec) {
             const contentDiv = document.getElementById('content');
             const summaryDiv = document.getElementById('summary');
@@ -258,7 +268,8 @@
                 html += `<div class="category-title">${escapeHtml(category)} (${rules.length})</div>`;
 
                 for (const rule of rules) {
-                    const hasDetail = rule.why || rule.bad_example || rule.good_example || (rule.references && rule.references.length > 0);
+                    const appliesTo = formatAppliesTo(rule.min_nginx_version, rule.max_nginx_version);
+                    const hasDetail = rule.why || rule.bad_example || rule.good_example || (rule.references && rule.references.length > 0) || appliesTo;
                     html += `<div class="rule-card" data-rule="${escapeHtml(rule.name)}">`;
                     html += `<div class="rule-card-header" onclick="toggleRule(this)">`;
                     html += `<span class="rule-name">${escapeHtml(rule.name)}</span>`;
@@ -272,6 +283,9 @@
                     if (hasDetail) {
                         html += `<div class="rule-detail">`;
 
+                        if (appliesTo) {
+                            html += `<div class="detail-section"><h4>Applies to</h4><p>${escapeHtml(appliesTo)}</p></div>`;
+                        }
                         if (rule.why) {
                             html += `<div class="detail-section"><h4>Why</h4><p>${escapeHtml(rule.why)}</p></div>`;
                         }

@@ -19,6 +19,8 @@ across different environments."#,
     bad_example: include_str!("indent/bad.conf"),
     good_example: include_str!("indent/good.conf"),
     references: &[],
+    min_nginx_version: None,
+    max_nginx_version: None,
 };
 
 /// Check for inconsistent indentation

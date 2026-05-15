@@ -28,6 +28,8 @@ Or use the --context CLI flag:
     bad_example: include_str!("invalid_directive_context/bad.conf"),
     good_example: include_str!("invalid_directive_context/good.conf"),
     references: &["https://nginx.org/en/docs/beginners_guide.html"],
+    min_nginx_version: None,
+    max_nginx_version: None,
 };
 
 /// Check for directives placed in invalid contexts

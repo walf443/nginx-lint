@@ -300,6 +300,10 @@ struct JsRuleSpec {
     good_example: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     references: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    min_nginx_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_nginx_version: Option<String>,
 }
 
 /// Get rule spec (name -> extended spec mapping) as JSON
@@ -323,6 +327,8 @@ pub fn get_rule_spec() -> String {
                     bad_example: r.bad_example().map(|s| s.to_string()),
                     good_example: r.good_example().map(|s| s.to_string()),
                     references: r.references(),
+                    min_nginx_version: r.min_nginx_version().map(String::from),
+                    max_nginx_version: r.max_nginx_version().map(String::from),
                 },
             )
         })
@@ -354,6 +360,8 @@ pub fn get_rule_spec() -> String {
             } else {
                 Some(doc.references.iter().map(|s| s.to_string()).collect())
             },
+            min_nginx_version: doc.min_nginx_version.map(String::from),
+            max_nginx_version: doc.max_nginx_version.map(String::from),
         });
     }
 

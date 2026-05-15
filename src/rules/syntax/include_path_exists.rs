@@ -17,6 +17,8 @@ accepted by nginx without error, so only literal paths are checked."#,
     bad_example: include_str!("include_path_exists/bad.conf"),
     good_example: include_str!("include_path_exists/good.conf"),
     references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
+    min_nginx_version: None,
+    max_nginx_version: None,
 };
 
 /// Check that files referenced by include directives exist
