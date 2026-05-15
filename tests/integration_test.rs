@@ -2648,6 +2648,12 @@ skip_version_check = true
     );
 }
 
+// These two tests intentionally have no feature gate: they exercise only
+// the *absence* / *fallback* of version filtering, which is independent
+// of which plugin set (native vs WASM vs none) is loaded. The native
+// syntax rules registered unconditionally by `Linter::with_config`
+// guarantee `rules()` is non-empty even with no builtin-plugins feature.
+
 #[test]
 fn test_no_target_nginx_version_does_not_filter() {
     // Without target_nginx_version, no filtering should occur — same behavior
