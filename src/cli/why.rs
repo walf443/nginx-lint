@@ -1,3 +1,4 @@
+use nginx_lint_common::nginx_version::format_range;
 use std::process::ExitCode;
 
 pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
@@ -124,6 +125,9 @@ fn print_rule_doc(doc: &nginx_lint::docs::RuleDoc) {
     eprintln!("{} {}", "Rule:".bold(), doc.name.yellow());
     eprintln!("{} {}", "Category:".bold(), doc.category);
     eprintln!("{} {}", "Severity:".bold(), doc.severity);
+    if let Some(range) = format_range(doc.min_nginx_version, doc.max_nginx_version) {
+        eprintln!("{} {}", "Applies to:".bold(), range);
+    }
     eprintln!();
     eprintln!("{}", "Why:".bold());
     for line in doc.why.lines() {
@@ -171,6 +175,12 @@ fn print_rule_doc_owned(doc: &nginx_lint::docs::RuleDocOwned) {
     );
     eprintln!("{} {}", "Category:".bold(), doc.category);
     eprintln!("{} {}", "Severity:".bold(), doc.severity);
+    if let Some(range) = format_range(
+        doc.min_nginx_version.as_deref(),
+        doc.max_nginx_version.as_deref(),
+    ) {
+        eprintln!("{} {}", "Applies to:".bold(), range);
+    }
     eprintln!();
     if !doc.why.is_empty() {
         eprintln!("{}", "Why:".bold());

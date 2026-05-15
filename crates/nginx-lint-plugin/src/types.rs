@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Current API version for the plugin SDK
-pub const API_VERSION: &str = "1.0";
+pub const API_VERSION: &str = "1.1";
 
 /// Plugin metadata describing a lint rule.
 ///
@@ -65,6 +65,14 @@ pub struct PluginSpec {
     /// References (URLs, documentation links)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<Vec<String>>,
+    /// Minimum nginx version this rule applies to (inclusive, e.g. `"0.6.27"`).
+    /// `None` means unbounded on the lower end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_nginx_version: Option<String>,
+    /// Maximum nginx version this rule applies to (inclusive, e.g. `"1.30.0"`).
+    /// `None` means unbounded on the upper end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_nginx_version: Option<String>,
 }
 
 impl PluginSpec {
@@ -84,6 +92,8 @@ impl PluginSpec {
             bad_example: None,
             good_example: None,
             references: None,
+            min_nginx_version: None,
+            max_nginx_version: None,
         }
     }
 
@@ -114,6 +124,18 @@ impl PluginSpec {
     /// Set references
     pub fn with_references(mut self, refs: Vec<String>) -> Self {
         self.references = Some(refs);
+        self
+    }
+
+    /// Declare the lowest nginx version this rule applies to (inclusive).
+    pub fn with_min_version(mut self, version: impl Into<String>) -> Self {
+        self.min_nginx_version = Some(version.into());
+        self
+    }
+
+    /// Declare the highest nginx version this rule applies to (inclusive).
+    pub fn with_max_version(mut self, version: impl Into<String>) -> Self {
+        self.max_nginx_version = Some(version.into());
         self
     }
 

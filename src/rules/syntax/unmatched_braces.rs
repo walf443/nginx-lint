@@ -21,6 +21,7 @@ are balanced, and that block directives have their opening brace."#,
     bad_example: include_str!("unmatched_braces/bad.conf"),
     good_example: include_str!("unmatched_braces/good.conf"),
     references: &["https://nginx.org/en/docs/beginners_guide.html"],
+    ..RuleDoc::DEFAULTS
 };
 
 /// Check for unmatched braces

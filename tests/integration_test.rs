@@ -2561,3 +2561,175 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
             .collect::<Vec<_>>()
     );
 }
+
+// ============================================================================
+// target_nginx_version tests
+// ============================================================================
+
+/// nginx config triggering nginx-rift (CVE-2026-42945) — rewrite with `?`
+/// followed by a `set` consuming an unnamed capture in the same scope.
+const NGINX_RIFT_VULNERABLE_CONFIG: &str = r#"http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal?migrated=true;
+            set $original_endpoint $1;
+        }
+    }
+}
+"#;
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_target_nginx_version_skips_out_of_range_rule() {
+    // nginx-rift declares max_nginx_version = "1.30.0". With target_nginx_version
+    // set to a newer version, the rule should be automatically filtered out.
+    let config_toml = r#"
+target_nginx_version = "1.31.0"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        rift_errors.is_empty(),
+        "nginx-rift should be skipped on nginx >=1.30.1; got: {:?}",
+        rift_errors
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_target_nginx_version_runs_in_range_rule() {
+    // With target_nginx_version still inside the affected range, nginx-rift
+    // must fire on the vulnerable pattern.
+    let config_toml = r#"
+target_nginx_version = "1.30.0"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        !rift_errors.is_empty(),
+        "nginx-rift should fire on nginx 1.30.0; got errors: {:?}",
+        errors.iter().map(|e| &e.rule).collect::<Vec<_>>()
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_skip_version_check_overrides_target_nginx_version() {
+    // Even with target_nginx_version above the rule's max, explicitly
+    // setting skip_version_check = true keeps the rule active.
+    let config_toml = r#"
+target_nginx_version = "1.31.0"
+
+[rules.nginx-rift]
+enabled = true
+skip_version_check = true
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+
+    let parsed = parse_string(NGINX_RIFT_VULNERABLE_CONFIG).unwrap();
+    let errors = linter.lint(&parsed, Path::new("test.conf"));
+
+    let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
+    assert!(
+        !rift_errors.is_empty(),
+        "nginx-rift should still fire with skip_version_check=true; got: {:?}",
+        errors.iter().map(|e| &e.rule).collect::<Vec<_>>()
+    );
+}
+
+// These two tests intentionally have no feature gate: they exercise only
+// the *absence* / *fallback* of version filtering, which is independent
+// of which plugin set (native vs WASM vs none) is loaded. The native
+// syntax rules registered unconditionally by `Linter::with_config`
+// guarantee `rules()` is non-empty even with no builtin-plugins feature.
+
+#[test]
+fn test_no_target_nginx_version_does_not_filter() {
+    // Without target_nginx_version, no filtering should occur — same behavior
+    // as before the feature was added.
+    let config = LintConfig::default();
+    let linter = Linter::with_config(Some(&config), None);
+    // Some rule registration must have happened.
+    assert!(
+        !linter.rules().is_empty(),
+        "default linter should have rules registered"
+    );
+}
+
+#[test]
+fn test_invalid_target_nginx_version_does_not_crash() {
+    // An unparseable target_nginx_version is logged and ignored — the
+    // linter still constructs with all rules enabled.
+    let config_toml = r#"
+target_nginx_version = "not-a-version"
+"#;
+    let config = LintConfig::parse(config_toml).unwrap();
+    let linter = Linter::with_config(Some(&config), None);
+    assert!(
+        !linter.rules().is_empty(),
+        "invalid target_nginx_version should fall back to no-filter"
+    );
+}
+
+// `nginx-lint why <rule>` prints rule metadata to stderr; the surface
+// area we want to lock down here is specifically the "Applies to:"
+// line introduced by the target_nginx_version feature, so we shell out
+// to the CLI binary and grep its stderr. Requires a builtin-plugins
+// feature so the nginx-rift plugin is actually registered.
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_why_command_shows_applies_to_for_versioned_rule() {
+    use std::process::Command;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "nginx-rift"])
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(
+        output.status.success(),
+        "why command failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Applies to: nginx >=0.6.27, <=1.30.0"),
+        "expected 'Applies to: nginx >=0.6.27, <=1.30.0' in why output; got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_why_command_omits_applies_to_for_unversioned_rule() {
+    // `indent` declares no version bounds; the "Applies to:" line must
+    // be omitted so the output stays uncluttered for rules that apply
+    // to every nginx version.
+    use std::process::Command;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "indent"])
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(output.status.success());
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("Applies to:"),
+        "indent has no version range; 'Applies to:' should not appear; got:\n{}",
+        stderr
+    );
+}

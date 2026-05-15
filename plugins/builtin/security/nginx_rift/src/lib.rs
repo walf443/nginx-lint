@@ -64,6 +64,8 @@ impl Plugin for NginxRiftPlugin {
             "https://depthfirst.com/research/nginx-rift-achieving-nginx-rce-via-an-18-year-old-vulnerability".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/nginx_rift/tests/container_test.rs".to_string(),
         ])
+        .with_min_version("0.6.27")
+        .with_max_version("1.30.0")
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -437,5 +439,16 @@ http {
     fn test_fixtures() {
         let runner = PluginTestRunner::new(NginxRiftPlugin);
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
+
+    #[test]
+    fn test_spec_declares_affected_version_range() {
+        // The CVE affects nginx 0.6.27 through 1.30.0 (fixed in 1.30.1 / 1.31.0).
+        // The version range on the spec drives nginx-lint's automatic
+        // version-based rule filter, so a target_nginx_version of 1.30.1+
+        // skips this rule by default.
+        let spec = NginxRiftPlugin.spec();
+        assert_eq!(spec.min_nginx_version.as_deref(), Some("0.6.27"));
+        assert_eq!(spec.max_nginx_version.as_deref(), Some("1.30.0"));
     }
 }

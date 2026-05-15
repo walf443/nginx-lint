@@ -21,6 +21,40 @@ pub struct RuleDoc {
     pub good_example: &'static str,
     /// References (URLs, documentation links)
     pub references: &'static [&'static str],
+    /// Minimum nginx version this rule applies to (inclusive), if declared.
+    pub min_nginx_version: Option<&'static str>,
+    /// Maximum nginx version this rule applies to (inclusive), if declared.
+    pub max_nginx_version: Option<&'static str>,
+}
+
+impl RuleDoc {
+    /// Field defaults for use with Rust's struct-update syntax:
+    ///
+    /// ```ignore
+    /// pub static DOC: RuleDoc = RuleDoc {
+    ///     name: "my-rule",
+    ///     // ...required fields...
+    ///     ..RuleDoc::DEFAULTS
+    /// };
+    /// ```
+    ///
+    /// Currently only the optional `min_nginx_version` / `max_nginx_version`
+    /// fields have meaningful defaults; the rest are empty placeholders that
+    /// you should override. Future additive fields with sensible defaults
+    /// can be added here so existing DOC literals automatically pick them
+    /// up via `..RuleDoc::DEFAULTS` without each call site needing edits.
+    pub const DEFAULTS: RuleDoc = RuleDoc {
+        name: "",
+        category: "",
+        description: "",
+        severity: "",
+        why: "",
+        bad_example: "",
+        good_example: "",
+        references: &[],
+        min_nginx_version: None,
+        max_nginx_version: None,
+    };
 }
 
 /// Documentation for a lint rule (owned version, supports plugins)
@@ -44,6 +78,10 @@ pub struct RuleDocOwned {
     pub references: Vec<String>,
     /// Whether this is from a plugin
     pub is_plugin: bool,
+    /// Minimum nginx version this rule applies to (inclusive), if declared.
+    pub min_nginx_version: Option<String>,
+    /// Maximum nginx version this rule applies to (inclusive), if declared.
+    pub max_nginx_version: Option<String>,
 }
 
 impl From<&RuleDoc> for RuleDocOwned {
@@ -58,6 +96,8 @@ impl From<&RuleDoc> for RuleDocOwned {
             good_example: doc.good_example.to_string(),
             references: doc.references.iter().map(|s| s.to_string()).collect(),
             is_plugin: false,
+            min_nginx_version: doc.min_nginx_version.map(String::from),
+            max_nginx_version: doc.max_nginx_version.map(String::from),
         }
     }
 }
@@ -80,6 +120,7 @@ accepted by nginx but may indicate a misconfiguration."#,
     bad_example: include_str!("rules/syntax/include_path_exists/bad.conf"),
     good_example: include_str!("rules/syntax/include_path_exists/good.conf"),
     references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
+    ..RuleDoc::DEFAULTS
 };
 
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
@@ -147,6 +188,8 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
             good_example: rule.good_example().unwrap_or("").to_string(),
             references: rule.references().unwrap_or_default(),
             is_plugin: true,
+            min_nginx_version: rule.min_nginx_version().map(String::from),
+            max_nginx_version: rule.max_nginx_version().map(String::from),
         })
         .collect()
 }
@@ -174,6 +217,8 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
                 good_example: plugin.good_example().unwrap_or("").to_string(),
                 references: plugin.references().unwrap_or_default(),
                 is_plugin: true,
+                min_nginx_version: plugin.min_nginx_version().map(String::from),
+                max_nginx_version: plugin.max_nginx_version().map(String::from),
             });
         }
     }

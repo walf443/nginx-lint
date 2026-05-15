@@ -19,6 +19,7 @@ across different environments."#,
     bad_example: include_str!("indent/bad.conf"),
     good_example: include_str!("indent/good.conf"),
     references: &[],
+    ..RuleDoc::DEFAULTS
 };
 
 /// Check for inconsistent indentation

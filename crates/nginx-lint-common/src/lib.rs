@@ -31,6 +31,7 @@ pub mod config;
 pub mod docs;
 pub mod ignore;
 pub mod linter;
+pub mod nginx_version;
 
 // Re-export parser crate
 pub use nginx_lint_parser as parser;
@@ -48,3 +49,4 @@ pub use linter::{
     compute_line_starts, normalize_line_fix,
 };
 pub use nginx_lint_parser::{parse_config, parse_string, parse_string_with_errors};
+pub use nginx_version::{NginxVersion, NginxVersionParseError, format_range, is_in_range};
