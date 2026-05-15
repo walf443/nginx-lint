@@ -84,11 +84,26 @@ impl FromStr for NginxVersion {
 /// Returns true when `version` falls within the optional inclusive bounds.
 ///
 /// A `None` bound means "unbounded" on that side.
+///
+/// # Panics
+///
+/// In debug builds, panics if both bounds are supplied and `min > max`
+/// (i.e. the range is empty). A reversed range is almost always a plugin
+/// author mistake; failing fast in tests catches the bug at the source
+/// rather than silently filtering every rule out at runtime.
 pub fn is_in_range(
     version: &NginxVersion,
     min: Option<&NginxVersion>,
     max: Option<&NginxVersion>,
 ) -> bool {
+    if let (Some(min), Some(max)) = (min, max) {
+        debug_assert!(
+            min <= max,
+            "is_in_range called with reversed bounds: min={} > max={}",
+            min,
+            max
+        );
+    }
     if let Some(min) = min
         && version < min
     {
@@ -266,5 +281,33 @@ mod tests {
     fn from_str_works() {
         let v: NginxVersion = "1.30.1".parse().unwrap();
         assert_eq!(v, NginxVersion::new(1, 30, 1));
+    }
+
+    #[test]
+    #[should_panic(expected = "reversed bounds")]
+    fn range_panics_on_reversed_bounds_in_debug() {
+        // Plugin author mistakes (e.g. swapping min/max) would silently
+        // filter every version out at runtime; debug_assert! catches it
+        // in tests instead. Only fires in debug builds.
+        let min = NginxVersion::new(2, 0, 0);
+        let max = NginxVersion::new(1, 0, 0);
+        let v = NginxVersion::new(1, 5, 0);
+        is_in_range(&v, Some(&min), Some(&max));
+    }
+
+    #[test]
+    fn range_equal_bounds_is_allowed() {
+        // min == max is a valid single-point range, not a mistake.
+        let exact = NginxVersion::new(1, 30, 0);
+        assert!(is_in_range(
+            &NginxVersion::new(1, 30, 0),
+            Some(&exact),
+            Some(&exact)
+        ));
+        assert!(!is_in_range(
+            &NginxVersion::new(1, 30, 1),
+            Some(&exact),
+            Some(&exact)
+        ));
     }
 }
