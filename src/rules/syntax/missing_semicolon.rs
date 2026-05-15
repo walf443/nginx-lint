@@ -21,8 +21,7 @@ but regular directives always require them."#,
     bad_example: include_str!("missing_semicolon/bad.conf"),
     good_example: include_str!("missing_semicolon/good.conf"),
     references: &[],
-    min_nginx_version: None,
-    max_nginx_version: None,
+    ..RuleDoc::DEFAULTS
 };
 
 /// Check for missing semicolons at the end of directives

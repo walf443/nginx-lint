@@ -27,6 +27,36 @@ pub struct RuleDoc {
     pub max_nginx_version: Option<&'static str>,
 }
 
+impl RuleDoc {
+    /// Field defaults for use with Rust's struct-update syntax:
+    ///
+    /// ```ignore
+    /// pub static DOC: RuleDoc = RuleDoc {
+    ///     name: "my-rule",
+    ///     // ...required fields...
+    ///     ..RuleDoc::DEFAULTS
+    /// };
+    /// ```
+    ///
+    /// Currently only the optional `min_nginx_version` / `max_nginx_version`
+    /// fields have meaningful defaults; the rest are empty placeholders that
+    /// you should override. Future additive fields with sensible defaults
+    /// can be added here so existing DOC literals automatically pick them
+    /// up via `..RuleDoc::DEFAULTS` without each call site needing edits.
+    pub const DEFAULTS: RuleDoc = RuleDoc {
+        name: "",
+        category: "",
+        description: "",
+        severity: "",
+        why: "",
+        bad_example: "",
+        good_example: "",
+        references: &[],
+        min_nginx_version: None,
+        max_nginx_version: None,
+    };
+}
+
 /// Documentation for a lint rule (owned version, supports plugins)
 #[derive(Debug, Clone)]
 pub struct RuleDocOwned {
@@ -90,8 +120,7 @@ accepted by nginx but may indicate a misconfiguration."#,
     bad_example: include_str!("rules/syntax/include_path_exists/bad.conf"),
     good_example: include_str!("rules/syntax/include_path_exists/good.conf"),
     references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
-    min_nginx_version: None,
-    max_nginx_version: None,
+    ..RuleDoc::DEFAULTS
 };
 
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {

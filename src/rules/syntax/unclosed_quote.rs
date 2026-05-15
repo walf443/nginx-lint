@@ -20,8 +20,7 @@ Strings enclosed in quotes must be closed with the same quote type."#,
     bad_example: include_str!("unclosed_quote/bad.conf"),
     good_example: include_str!("unclosed_quote/good.conf"),
     references: &[],
-    min_nginx_version: None,
-    max_nginx_version: None,
+    ..RuleDoc::DEFAULTS
 };
 
 /// Check for unclosed string quotes
