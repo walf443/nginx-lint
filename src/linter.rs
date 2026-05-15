@@ -8,6 +8,43 @@ use nginx_lint_common::parser::ast::Config;
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+
+/// Process-wide set of `(rule_name, "min"|"max")` pairs for which we have
+/// already warned about an unparseable version bound. Plugins are registered
+/// once per process, so a single warning is sufficient — without this dedup
+/// the same warning would fire every time `Linter::with_config` is called.
+fn warned_invalid_bounds() -> &'static Mutex<HashSet<(String, &'static str)>> {
+    static WARNED: OnceLock<Mutex<HashSet<(String, &'static str)>>> = OnceLock::new();
+    WARNED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Try to parse a plugin-declared bound; emit a one-shot warning if parsing
+/// fails so plugin authors notice typos (`"1.30"` instead of `"1.30.0"`).
+/// Treats the bound as unbounded on parse failure, matching the silent
+/// behaviour that existed before this warning was added.
+fn parse_plugin_bound(
+    rule_name: &str,
+    which: &'static str,
+    raw: Option<&str>,
+) -> Option<NginxVersion> {
+    let raw = raw?;
+    match NginxVersion::parse(raw) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            let key = (rule_name.to_string(), which);
+            let mut warned = warned_invalid_bounds().lock().expect("warned set poisoned");
+            if warned.insert(key) {
+                eprintln!(
+                    "warning: rule '{}' declares an unparseable {}_nginx_version '{}': {} \
+                     (treated as unbounded; rule will not be version-filtered on this side)",
+                    rule_name, which, raw, e
+                );
+            }
+            None
+        }
+    }
+}
 
 /// Result of evaluating a rule against the configured target nginx version.
 enum VersionGate {
@@ -43,12 +80,8 @@ fn evaluate_version_gate(
         return VersionGate::Allow;
     }
 
-    let min = rule
-        .min_nginx_version()
-        .and_then(|s| NginxVersion::parse(s).ok());
-    let max = rule
-        .max_nginx_version()
-        .and_then(|s| NginxVersion::parse(s).ok());
+    let min = parse_plugin_bound(rule.name(), "min", rule.min_nginx_version());
+    let max = parse_plugin_bound(rule.name(), "max", rule.max_nginx_version());
 
     if is_in_range(target, min.as_ref(), max.as_ref()) {
         return VersionGate::Allow;
@@ -660,14 +693,36 @@ mod version_filter_tests {
 
     #[test]
     fn unparseable_rule_bounds_treated_as_unbounded() {
+        // Use a name unique to this test so the warning-dedup set doesn't
+        // interfere with other tests that exercise the same rule name.
         let rule = MockRule {
-            name: "demo",
+            name: "demo-unparseable-bounds",
             min: Some("garbage"),
             max: Some("also-garbage"),
         };
         let target = NginxVersion::parse("1.31.0").unwrap();
         let gate = evaluate_version_gate(&rule, Some(&target), None);
         // Both bounds fail to parse -> treated as None -> in range.
+        // A stderr warning is emitted once per rule to flag the plugin
+        // author about the typo, but the rule still runs (fail-open).
+        assert!(matches!(gate, VersionGate::Allow));
+    }
+
+    #[test]
+    fn unparseable_bound_warning_is_deduplicated() {
+        // The dedup set is keyed by (rule_name, "min"|"max"), so calling
+        // the gate twice for the same rule must not double-warn. We can't
+        // easily capture stderr here, but we can at least exercise the
+        // path and confirm the second call doesn't change observable
+        // behaviour.
+        let rule = MockRule {
+            name: "demo-dedup",
+            min: Some("oops"),
+            max: None,
+        };
+        let target = NginxVersion::parse("1.31.0").unwrap();
+        let _ = evaluate_version_gate(&rule, Some(&target), None);
+        let gate = evaluate_version_gate(&rule, Some(&target), None);
         assert!(matches!(gate, VersionGate::Allow));
     }
 
