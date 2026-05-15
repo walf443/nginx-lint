@@ -49,4 +49,4 @@ pub use linter::{
     compute_line_starts, normalize_line_fix,
 };
 pub use nginx_lint_parser::{parse_config, parse_string, parse_string_with_errors};
-pub use nginx_version::{NginxVersion, NginxVersionParseError, is_in_range};
+pub use nginx_version::{NginxVersion, NginxVersionParseError, format_range, is_in_range};

@@ -2,7 +2,7 @@
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
-use nginx_lint_common::nginx_version::{NginxVersion, is_in_range};
+use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
 use rayon::prelude::*;
@@ -350,12 +350,12 @@ impl Linter {
                         min,
                         max,
                     } => {
-                        let range = match (min.as_deref(), max.as_deref()) {
-                            (Some(min), Some(max)) => format!("nginx >={}, <={}", min, max),
-                            (Some(min), None) => format!("nginx >={}", min),
-                            (None, Some(max)) => format!("nginx <={}", max),
-                            (None, None) => "any nginx version".to_string(),
-                        };
+                        // (None, None) is unreachable here: a rule with no
+                        // bounds is in-range for every target and never
+                        // reaches SkipWithWarning. The fallback string is
+                        // defensive only.
+                        let range = format_range(min.as_deref(), max.as_deref())
+                            .unwrap_or_else(|| "any nginx version".to_string());
                         eprintln!(
                             "warning: rule '{}' requires {} but target_nginx_version is {}; \
                              skipping. Set [rules.{}] skip_version_check = true to override.",

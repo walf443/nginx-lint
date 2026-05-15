@@ -1,18 +1,5 @@
+use nginx_lint_common::nginx_version::format_range;
 use std::process::ExitCode;
-
-/// Format an optional `(min, max)` nginx version pair as a human-readable
-/// range like `"nginx >=0.6.27, <=1.30.0"`, `"nginx >=1.0.0"`, or
-/// `"nginx <=1.30.0"`. Uses `>=`/`<=` rather than Rust's `..=` syntax
-/// because end users are more familiar with comparison-operator notation.
-/// Returns `None` if both bounds are unset (i.e. the rule applies regardless).
-fn format_applies_to(min: Option<&str>, max: Option<&str>) -> Option<String> {
-    match (min, max) {
-        (Some(min), Some(max)) => Some(format!("nginx >={}, <={}", min, max)),
-        (Some(min), None) => Some(format!("nginx >={}", min)),
-        (None, Some(max)) => Some(format!("nginx <={}", max)),
-        (None, None) => None,
-    }
-}
 
 pub fn run_why(rule: Option<String>, list: bool) -> ExitCode {
     use colored::Colorize;
@@ -138,7 +125,7 @@ fn print_rule_doc(doc: &nginx_lint::docs::RuleDoc) {
     eprintln!("{} {}", "Rule:".bold(), doc.name.yellow());
     eprintln!("{} {}", "Category:".bold(), doc.category);
     eprintln!("{} {}", "Severity:".bold(), doc.severity);
-    if let Some(range) = format_applies_to(doc.min_nginx_version, doc.max_nginx_version) {
+    if let Some(range) = format_range(doc.min_nginx_version, doc.max_nginx_version) {
         eprintln!("{} {}", "Applies to:".bold(), range);
     }
     eprintln!();
@@ -188,7 +175,7 @@ fn print_rule_doc_owned(doc: &nginx_lint::docs::RuleDocOwned) {
     );
     eprintln!("{} {}", "Category:".bold(), doc.category);
     eprintln!("{} {}", "Severity:".bold(), doc.severity);
-    if let Some(range) = format_applies_to(
+    if let Some(range) = format_range(
         doc.min_nginx_version.as_deref(),
         doc.max_nginx_version.as_deref(),
     ) {

@@ -117,6 +117,36 @@ pub fn is_in_range(
     true
 }
 
+/// Format an optional `(min, max)` nginx version pair as a human-readable
+/// range. Returns `None` when both bounds are unset.
+///
+/// Uses `>=` / `<=` comparison-operator notation rather than Rust's `..=`
+/// inclusive-range syntax — most nginx-lint users are not Rust developers
+/// and `>=`/`<=` is the same notation npm, pip, and similar tools use for
+/// version constraints.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_common::nginx_version::format_range;
+///
+/// assert_eq!(
+///     format_range(Some("0.6.27"), Some("1.30.0")),
+///     Some("nginx >=0.6.27, <=1.30.0".to_string())
+/// );
+/// assert_eq!(format_range(Some("1.0.0"), None), Some("nginx >=1.0.0".to_string()));
+/// assert_eq!(format_range(None, Some("1.30.0")), Some("nginx <=1.30.0".to_string()));
+/// assert_eq!(format_range(None, None), None);
+/// ```
+pub fn format_range(min: Option<&str>, max: Option<&str>) -> Option<String> {
+    match (min, max) {
+        (Some(min), Some(max)) => Some(format!("nginx >={}, <={}", min, max)),
+        (Some(min), None) => Some(format!("nginx >={}", min)),
+        (None, Some(max)) => Some(format!("nginx <={}", max)),
+        (None, None) => None,
+    }
+}
+
 /// Error returned by [`NginxVersion::parse`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NginxVersionParseError {
@@ -309,5 +339,36 @@ mod tests {
             Some(&exact),
             Some(&exact)
         ));
+    }
+
+    #[test]
+    fn format_range_both_bounds() {
+        assert_eq!(
+            format_range(Some("0.6.27"), Some("1.30.0")),
+            Some("nginx >=0.6.27, <=1.30.0".to_string())
+        );
+    }
+
+    #[test]
+    fn format_range_min_only() {
+        assert_eq!(
+            format_range(Some("1.0.0"), None),
+            Some("nginx >=1.0.0".to_string())
+        );
+    }
+
+    #[test]
+    fn format_range_max_only() {
+        assert_eq!(
+            format_range(None, Some("1.29.6")),
+            Some("nginx <=1.29.6".to_string())
+        );
+    }
+
+    #[test]
+    fn format_range_none() {
+        // Rules with no declared range produce no string at all so callers
+        // can use `if let Some(range) = ...` to skip the display section.
+        assert_eq!(format_range(None, None), None);
     }
 }
