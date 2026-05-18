@@ -34,6 +34,7 @@ impl Plugin for ListenHttp2DeprecatedPlugin {
             "https://nginx.org/en/docs/http/ngx_http_v2_module.html".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/deprecation/listen_http2_deprecated/tests/container_test.rs".to_string(),
         ])
+        .with_min_version("1.25.1")
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -197,5 +198,15 @@ server {
     fn test_fixtures() {
         let runner = PluginTestRunner::new(ListenHttp2DeprecatedPlugin);
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
+
+    #[test]
+    fn test_spec_declares_min_version_1_25_1() {
+        // The `http2` parameter on `listen` was deprecated in nginx 1.25.1
+        // when the standalone `http2` directive was introduced. On older
+        // nginx versions the deprecated syntax is the only way to enable
+        // HTTP/2, so the version-based filter should skip this rule.
+        let spec = ListenHttp2DeprecatedPlugin.spec();
+        assert_eq!(spec.min_nginx_version.as_deref(), Some("1.25.1"));
     }
 }
