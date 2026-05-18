@@ -35,6 +35,7 @@ impl Plugin for SslOnDeprecatedPlugin {
             "https://nginx.org/en/docs/http/ngx_http_ssl_module.html#ssl".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/deprecation/ssl_on_deprecated/tests/container_test.rs".to_string(),
         ])
+        .with_min_version("1.15.0")
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -267,5 +268,15 @@ server {
     fn test_fixtures() {
         let runner = PluginTestRunner::new(SslOnDeprecatedPlugin);
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
+    }
+
+    #[test]
+    fn test_spec_declares_min_version_1_15_0() {
+        // `ssl on;` was deprecated in nginx 1.15.0 when the `ssl` parameter
+        // on `listen` became the preferred form. On older nginx versions
+        // `ssl on;` is the normal way to enable SSL, so the version-based
+        // filter should skip this rule there.
+        let spec = SslOnDeprecatedPlugin.spec();
+        assert_eq!(spec.min_nginx_version.as_deref(), Some("1.15.0"));
     }
 }
