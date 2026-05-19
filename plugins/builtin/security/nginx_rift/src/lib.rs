@@ -1149,6 +1149,73 @@ http {
     }
 
     #[test]
+    fn test_autofix_bails_on_mixed_named_and_unnamed_in_same_regex() {
+        // The cornerstone case for the bail-out: a single regex that
+        // contains BOTH a named capture AND an unnamed one. Users
+        // hitting this in the wild will want to know what the autofix
+        // does. Answer: nothing — the warning fires, no fix is
+        // attached, and they fix it manually.
+        //
+        // Both orderings are tested:
+        //
+        //  - named first (`(?<user>\w+)/(.*)`): a downstream `$1` in
+        //    PCRE refers to the *named* `user` group, but our
+        //    cap-numbering would assign `cap1` to the *unnamed* `(.*)`
+        //    (positional group 2). Renaming `$1` -> `$cap1` would
+        //    silently point the consumer at a different capture.
+        //
+        //  - unnamed first (`(.*)/(?<rest>\w+)`): here `$1` does
+        //    actually refer to the unnamed `(.*)` (positional group
+        //    1), so renaming would *coincidentally* be correct. We
+        //    still bail — the helper has no way to distinguish the
+        //    safe ordering from the unsafe one without a full PCRE
+        //    parser, and it's better to be uniformly conservative
+        //    than to ship a partial heuristic that handles one
+        //    ordering and not the other.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let rule_name = NginxRiftPlugin.spec().name;
+
+        for bad in [
+            // Named first, then unnamed.
+            r#"http {
+  server {
+    location / {
+      rewrite ^/u/(?<user>\w+)/(.*)$ /api?user=$user;
+      set $endpoint $1;
+    }
+  }
+}
+"#,
+            // Unnamed first, then named.
+            r#"http {
+  server {
+    location / {
+      rewrite ^/(.*)/(?<rest>\w+)$ /api?path=$rest;
+      set $endpoint $1;
+    }
+  }
+}
+"#,
+        ] {
+            let errors = runner.check_string(bad).expect("check");
+            let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == rule_name).collect();
+            assert_eq!(
+                rule_errors.len(),
+                1,
+                "warning must still fire on mixed-capture regex; config was:\n{}",
+                bad
+            );
+            assert!(
+                rule_errors[0].fixes.is_empty(),
+                "mixed named + unnamed in same regex must bail regardless of order; \
+                 got fixes {:?} for config:\n{}",
+                rule_errors[0].fixes,
+                bad
+            );
+        }
+    }
+
+    #[test]
     fn test_autofix_bails_when_v_rewrite_regex_has_python_style_named_capture() {
         // Same bail-out as the `(?<name>...)` form, but via the
         // `(?P<name>...)` Python-style syntax. The helper unit test
