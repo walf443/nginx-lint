@@ -128,9 +128,7 @@ fn build_named_capture_fixes(v_rewrite: &Directive, rest: &[&Directive]) -> Vec<
     let Some(v_regex_arg) = v_rewrite.args.first() else {
         return fixes;
     };
-    let Some((new_regex_raw, v_cap_count)) = build_renamed_regex(&v_regex_arg.raw) else {
-        return fixes;
-    };
+    let (new_regex_raw, v_cap_count) = build_renamed_regex(&v_regex_arg.raw);
     if v_cap_count == 0 {
         return fixes;
     }
@@ -159,9 +157,7 @@ fn build_named_capture_fixes(v_rewrite: &Directive, rest: &[&Directive]) -> Vec<
             let Some(c_regex_arg) = consumer.args.first() else {
                 continue;
             };
-            let Some((new_c_regex_raw, c_cap_count)) = build_renamed_regex(&c_regex_arg.raw) else {
-                continue;
-            };
+            let (new_c_regex_raw, c_cap_count) = build_renamed_regex(&c_regex_arg.raw);
             if c_cap_count > 0 {
                 push_arg_fix(&mut fixes, c_regex_arg, new_c_regex_raw);
             }
@@ -192,29 +188,40 @@ fn push_arg_fix(fixes: &mut Vec<Fix>, arg: &Argument, new_raw: String) {
 /// becomes a named group `(?<capN>...)`, numbered from 1 in source order.
 ///
 /// Returns the rewritten source plus the number of captures introduced.
-/// Returns `None` if the source is structurally unparseable (currently never;
-/// reserved for future regex-validation extensions).
 ///
 /// Non-capturing groups `(?:...)`, lookarounds `(?=...)`/`(?!...)`/`(?<=...)`,
 /// already-named groups `(?<name>...)`/`(?P<name>...)`, escaped `\(`, and `(`
 /// inside character classes `[...]` are all left untouched.
-fn build_renamed_regex(raw: &str) -> Option<(String, usize)> {
+///
+/// KNOWN LIMITATION: when a regex mixes named and unnamed captures
+/// (e.g. `(?P<foo>x)(.)`), the cap-number assigned here is the index
+/// among *unnamed* groups, not the PCRE positional group number. So
+/// `(?P<foo>x)(.)` becomes `(?P<foo>x)(?<cap1>.)`, but in PCRE the `.`
+/// is positional group 2 — `$2` still refers to it post-fix. The
+/// partial-fix bail-out (see `rename_positional_refs_in_raw`) prevents
+/// us from silently emitting `$cap2` references in that case, but the
+/// rule will keep firing on the residual `$2` until manually cleaned
+/// up. Configs that mix named and unnamed captures are rare; revisit
+/// if real-world reports surface.
+fn build_renamed_regex(raw: &str) -> (String, usize) {
     let positions = find_unnamed_capture_positions(raw);
     if positions.is_empty() {
-        return Some((raw.to_string(), 0));
+        return (raw.to_string(), 0);
     }
 
     let bytes = raw.as_bytes();
     let mut out = String::with_capacity(raw.len() + positions.len() * 8);
     let mut cursor = 0;
     for (idx, &pos) in positions.iter().enumerate() {
-        // Copy bytes up to and including the `(`
-        out.push_str(std::str::from_utf8(&bytes[cursor..=pos]).ok()?);
+        // Copy bytes up to and including the `(`. Slicing on an ASCII
+        // `(` boundary is always valid UTF-8 since `raw: &str` is, so
+        // the from_utf8 conversion is infallible here.
+        out.push_str(std::str::from_utf8(&bytes[cursor..=pos]).expect("ASCII boundary"));
         out.push_str(&format!("?<cap{}>", idx + 1));
         cursor = pos + 1;
     }
-    out.push_str(std::str::from_utf8(&bytes[cursor..]).ok()?);
-    Some((out, positions.len()))
+    out.push_str(std::str::from_utf8(&bytes[cursor..]).expect("ASCII boundary"));
+    (out, positions.len())
 }
 
 /// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
@@ -888,6 +895,103 @@ http {
         assert_eq!(
             find_unnamed_capture_positions("(a)(b)(?:c)(d)"),
             vec![0, 3, 11]
+        );
+    }
+
+    #[test]
+    fn test_autofix_multiple_vulnerable_rewrites_in_one_scope() {
+        // Three vulnerable rewrites in a chain: each is detected
+        // independently (so multiple errors are emitted), and the fix
+        // ranges for the middle/last rewrites overlap between errors.
+        // `apply_fixes_to_content` deduplicates by range, so the final
+        // applied content is still consistent.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location / {
+      rewrite ^/a/(.*)$ /b?x=$1;
+      rewrite ^/b/(.*)$ /c?y=$1;
+      rewrite ^/c/(.*)$ /d?z=$1;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location / {
+      rewrite ^/a/(?<cap1>.*)$ /b?x=$cap1;
+      rewrite ^/b/(?<cap1>.*)$ /c?y=$cap1;
+      rewrite ^/c/(?<cap1>.*)$ /d?z=$cap1;
+    }
+  }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_autofix_output_is_rule_clean() {
+        // Round-trip safety: applying the autofix to a complex
+        // vulnerable pattern must produce content that no longer
+        // triggers the rule. We verify by (1) confirming the autofix
+        // output matches the expected good form, then (2) confirming
+        // the good form itself produces zero rule errors.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let bad = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ /internal?migrated=true;
+      rewrite ^/x/(.*)$ /y/$1 last;
+      set $original_endpoint $1;
+      set $combined "prefix-$1-suffix";
+    }
+  }
+}
+"#;
+        let good = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
+      rewrite ^/x/(?<cap1>.*)$ /y/$cap1 last;
+      set $original_endpoint $cap1;
+      set $combined "prefix-$cap1-suffix";
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(bad, good);
+        runner.assert_no_errors(good);
+    }
+
+    #[test]
+    fn test_autofix_in_nested_block() {
+        // Vulnerable pattern lives inside `if {}` nested in `location {}`.
+        // The scope-walker must recurse into both block levels.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location / {
+      if ($request_method = POST) {
+        rewrite ^/api/(.*)$ /internal?migrated=true;
+        set $original_endpoint $1;
+      }
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location / {
+      if ($request_method = POST) {
+        rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
+        set $original_endpoint $cap1;
+      }
+    }
+  }
+}
+"#,
         );
     }
 
