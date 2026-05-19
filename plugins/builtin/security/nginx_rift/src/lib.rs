@@ -1084,6 +1084,39 @@ http {
     }
 
     #[test]
+    fn test_autofix_with_named_capture_outside_vulnerable_scope() {
+        // Mixed named/unnamed captures only trip our bail-out when they
+        // sit in the rewrite directives we're rewriting. Named captures
+        // in the location header (which we never touch) or named
+        // variable references in `set` values (`$user`, not `$N`)
+        // should be left untouched while the vulnerable chain itself
+        // still gets autofixed.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/u/(?<user>\w+)/api/(.*)$ {
+      rewrite ^/u/.+/api/(.*)$ /backend?migrated=true;
+      set $endpoint $1;
+      set $username $user;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location ~ ^/u/(?<user>\w+)/api/(.*)$ {
+      rewrite ^/u/.+/api/(?<cap1>.*)$ /backend?migrated=true;
+      set $endpoint $cap1;
+      set $username $user;
+    }
+  }
+}
+"#,
+        );
+    }
+
+    #[test]
     fn test_autofix_bails_when_v_rewrite_regex_has_named_capture() {
         // `(?<user>...)` in the vulnerable rewrite's regex makes
         // cap-numbering ambiguous: `$1` refers to `user` in PCRE, but
