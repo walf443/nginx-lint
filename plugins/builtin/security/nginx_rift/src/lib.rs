@@ -1149,6 +1149,88 @@ http {
     }
 
     #[test]
+    fn test_autofix_bails_when_v_rewrite_regex_has_python_style_named_capture() {
+        // Same bail-out as the `(?<name>...)` form, but via the
+        // `(?P<name>...)` Python-style syntax. The helper unit test
+        // (`test_regex_has_named_capture_helper`) confirms the detector
+        // recognizes both forms; this is the end-to-end check that the
+        // detector actually wires through to the fix builder and
+        // suppresses fix emission.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let bad = r#"http {
+  server {
+    location / {
+      rewrite ^/u/(?P<user>\w+)/(.*)$ /api?user=$user;
+      set $endpoint $1;
+    }
+  }
+}
+"#;
+        let errors = runner.check_string(bad).expect("check");
+        let spec_name = NginxRiftPlugin.spec().name;
+        let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == spec_name).collect();
+        assert_eq!(rule_errors.len(), 1, "warning should still fire");
+        assert!(
+            rule_errors[0].fixes.is_empty(),
+            "(?P<name>...) in v_rewrite must also bail out, got fixes: {:?}",
+            rule_errors[0].fixes
+        );
+    }
+
+    #[test]
+    fn test_autofix_no_fixes_attached_to_unfixable_consumer_rewrite() {
+        // The complement to `test_autofix_skips_consumer_rewrite_with_named_capture`:
+        // that test verifies the *resulting content* via string compare,
+        // which means a bug that emits a wrong-but-harmless fix could
+        // slip through. Here we look at the fix list directly and
+        // confirm we only emit fixes for the v_rewrite + the early
+        // `set` — nothing targets the unfixable consumer's regex,
+        // its replacement, or the downstream `set`.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let bad = r#"http {
+  server {
+    location / {
+      rewrite ^/api/(.*)$ /internal?migrated=true;
+      set $a $1;
+      rewrite ^/u/(?<user>\w+)/(.*)$ /next/$1 last;
+      set $b $1;
+    }
+  }
+}
+"#;
+        let errors = runner.check_string(bad).expect("check");
+        let spec_name = NginxRiftPlugin.spec().name;
+        let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == spec_name).collect();
+        assert_eq!(rule_errors.len(), 1, "single warning expected");
+
+        // Expect exactly 2 fixes: v_rewrite's regex + the first `set`'s
+        // value. The consumer rewrite (regex + replacement) and the
+        // trailing `set` must contribute 0 fixes.
+        let fix_texts: Vec<&str> = rule_errors[0]
+            .fixes
+            .iter()
+            .map(|f| f.new_text.as_str())
+            .collect();
+        assert_eq!(
+            rule_errors[0].fixes.len(),
+            2,
+            "expected exactly 2 fixes (v_rewrite regex + first set value), got: {:?}",
+            fix_texts
+        );
+        // Sanity: every emitted fix is a `cap1`-renaming. None should
+        // contain `cap` for the unfixable consumer (which has a `user`
+        // named group, not a `cap` group).
+        assert!(
+            rule_errors[0]
+                .fixes
+                .iter()
+                .all(|f| f.new_text.contains("cap1")),
+            "every fix should be a cap1-renaming, got: {:?}",
+            fix_texts
+        );
+    }
+
+    #[test]
     fn test_autofix_skips_consumer_rewrite_with_named_capture() {
         // The vulnerable rewrite itself is autofixable, but a later
         // consumer rewrite uses a named capture, so we (a) skip
