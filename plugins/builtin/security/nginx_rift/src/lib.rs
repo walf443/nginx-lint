@@ -34,7 +34,10 @@ impl Plugin for NginxRiftPlugin {
         .with_why(
             "CVE-2026-42945 (\"NGINX Rift\") is a heap buffer overflow in \
              ngx_http_rewrite_module that affects nginx 0.6.27 through 1.30.0 \
-             (fixed in 1.30.1 and 1.31.0). When a `rewrite` replacement \
+             (fixed in 1.30.1 and 1.31.0). Downstream distributions have \
+             backported the fix on their own schedules; notably, OpenResty \
+             shipped the patch in 1.29.2.4 (1.29.2.3 and earlier are still \
+             vulnerable). When a `rewrite` replacement \
              contains `?`, the worker sets an internal `is_args` flag on the \
              main script engine and never clears it. A subsequent `set` or \
              `rewrite` directive that references an unnamed PCRE capture \
@@ -45,8 +48,9 @@ impl Plugin for NginxRiftPlugin {
              crashes or — on systems without ASLR — unauthenticated remote \
              code execution. Empirically, the captured value is also \
              corrupted on the wire (`/api/foo+bar` returns a truncated \
-             `captured=foo%2Bb`). The reliable fixes are: (1) upgrade nginx \
-             to 1.30.1 / 1.31.0 or later; (2) drop `?` from the rewrite \
+             `captured=foo%2Bb`). The reliable fixes are: (1) upgrade to a \
+             patched build (nginx >= 1.30.1 / 1.31.0, or OpenResty \
+             >= 1.29.2.4); (2) drop `?` from the rewrite \
              replacement; (3) switch to named captures (`(?<name>...)`), \
              which are resolved through a separate code path that does not \
              share the rewrite engine's `is_args` state. Note that simply \
@@ -54,8 +58,9 @@ impl Plugin for NginxRiftPlugin {
              underlying bug. The configuration is syntactically valid and \
              nginx will load it; the danger is runtime-only on vulnerable \
              builds. This rule is enabled by default; disable it in \
-             configuration once your entire fleet is on nginx >= 1.30.1 / \
-             1.31.0.",
+             configuration once your entire fleet is on a patched build \
+             (nginx >= 1.30.1 / 1.31.0, OpenResty >= 1.29.2.4, or a \
+             distribution with the backport applied).",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())

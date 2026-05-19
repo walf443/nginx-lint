@@ -35,11 +35,14 @@
 //! On patched nginx the signature is *absent* by design, so there is
 //! nothing to assert on. We therefore skip the bug-observation tests on
 //! `nginx_version_at_least(1, 31)`. We do NOT skip on potentially-
-//! unpatched tags (`nginx:1.30`, `openresty:noble`, etc.) — those are
-//! exactly the builds we want to exercise. Confirmed observed on:
+//! unpatched tags (`nginx:1.30`, etc.) — those are exactly the builds
+//! we want to exercise. Confirmed observed on:
 //!
 //! - `nginx:1.30.0` (CVE patched in 1.30.1) — truncated/escaped
-//! - `openresty/openresty:noble` (openresty/1.29.2.3) — mis-escaped
+//! - `openresty/openresty:noble` — historically mis-escaped on
+//!   openresty/1.29.2.3; the backport landed in openresty/1.29.2.4 and
+//!   the floating `:noble` tag now resolves there, so it is skipped
+//!   (pin `1.29.2.3-noble` or earlier to exercise the unpatched form)
 //! - `nginx:1.31`, `freenginx:1.31` — clean (tests skipped)
 //!
 //! # Why we don't assert on a worker crash
@@ -59,7 +62,7 @@
 //!       --test container_test -- --ignored
 
 use nginx_lint_plugin::container_testing::{
-    NginxContainer, nginx_image_tag, nginx_version_at_least, reqwest,
+    NginxContainer, nginx_image, nginx_version_at_least, reqwest,
 };
 
 /// On patched builds the bug's signature is absent by design, so the
@@ -71,6 +74,9 @@ use nginx_lint_plugin::container_testing::{
 /// - the floating `1.30` tag — Docker Hub now resolves it to the patched
 ///   `1.30.1`, even though `nginx_version_at_least` only sees (1, 30)
 /// - any explicit `1.30.x` where x >= 1 (1.30.1 onward shipped the fix)
+/// - the floating `noble` tag (`openresty/openresty:noble`) — backport
+///   landed in openresty/1.29.2.4; pin `1.29.2.3-noble` or earlier to
+///   exercise the unpatched form
 ///
 /// To run the observation tests against the genuine unpatched build, use
 /// the explicit pinned tag, e.g. `NGINX_IMAGE=nginx:1.30.0`.
@@ -78,9 +84,15 @@ fn skip_on_patched_version() -> bool {
     if nginx_version_at_least(1, 31) {
         return true;
     }
-    let tag = nginx_image_tag();
+    let (image_name, tag) = nginx_image();
     // Bare `1.30` is the floating Docker tag — now patched (1.30.1+).
     if tag == "1.30" {
+        return true;
+    }
+    // `openresty/openresty:noble` is the floating tag that has shipped
+    // the CVE-2026-42945 backport (in openresty/1.29.2.4). Pin
+    // `1.29.2.3-noble` or earlier to exercise the unpatched form.
+    if image_name.contains("openresty") && tag == "noble" {
         return true;
     }
     // Explicit 1.30.x with x >= 1 is patched.
