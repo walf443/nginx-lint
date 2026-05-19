@@ -128,6 +128,12 @@ fn build_named_capture_fixes(v_rewrite: &Directive, rest: &[&Directive]) -> Vec<
     let Some(v_regex_arg) = v_rewrite.args.first() else {
         return fixes;
     };
+    if regex_has_named_capture(&v_regex_arg.raw) {
+        // Mixed named/unnamed captures: our cap-numbering can't safely
+        // map `$N` references — bail on the entire chain. Warning still
+        // fires; user fixes manually.
+        return fixes;
+    }
     let (new_regex_raw, v_cap_count) = build_renamed_regex(&v_regex_arg.raw);
     if v_cap_count == 0 {
         return fixes;
@@ -157,6 +163,16 @@ fn build_named_capture_fixes(v_rewrite: &Directive, rest: &[&Directive]) -> Vec<
             let Some(c_regex_arg) = consumer.args.first() else {
                 continue;
             };
+            if regex_has_named_capture(&c_regex_arg.raw) {
+                // Can't safely rename this rewrite's regex or its
+                // replacement's `$N`. Also force `active_caps = 0` so
+                // subsequent `set` consumers don't rename their `$N`
+                // either — those `$N` refer to this unfixable
+                // rewrite's captures, and renaming them would produce
+                // undefined `$capN` references at nginx-load time.
+                active_caps = 0;
+                continue;
+            }
             let (new_c_regex_raw, c_cap_count) = build_renamed_regex(&c_regex_arg.raw);
             if c_cap_count > 0 {
                 push_arg_fix(&mut fixes, c_regex_arg, new_c_regex_raw);
@@ -193,16 +209,11 @@ fn push_arg_fix(fixes: &mut Vec<Fix>, arg: &Argument, new_raw: String) {
 /// already-named groups `(?<name>...)`/`(?P<name>...)`, escaped `\(`, and `(`
 /// inside character classes `[...]` are all left untouched.
 ///
-/// KNOWN LIMITATION: when a regex mixes named and unnamed captures
-/// (e.g. `(?P<foo>x)(.)`), the cap-number assigned here is the index
-/// among *unnamed* groups, not the PCRE positional group number. So
-/// `(?P<foo>x)(.)` becomes `(?P<foo>x)(?<cap1>.)`, but in PCRE the `.`
-/// is positional group 2 — `$2` still refers to it post-fix. The
-/// partial-fix bail-out (see `rename_positional_refs_in_raw`) prevents
-/// us from silently emitting `$cap2` references in that case, but the
-/// rule will keep firing on the residual `$2` until manually cleaned
-/// up. Configs that mix named and unnamed captures are rare; revisit
-/// if real-world reports surface.
+/// Callers should bail out (via [`regex_has_named_capture`]) before calling
+/// this on a regex that already contains a named capture: the cap-numbering
+/// here is the index among *unnamed* groups, which doesn't match PCRE's
+/// positional numbering once named groups are mixed in. Renaming `$1` based
+/// on this index would silently change which group is referenced.
 fn build_renamed_regex(raw: &str) -> (String, usize) {
     let positions = find_unnamed_capture_positions(raw);
     if positions.is_empty() {
@@ -222,6 +233,62 @@ fn build_renamed_regex(raw: &str) -> (String, usize) {
     }
     out.push_str(std::str::from_utf8(&bytes[cursor..]).expect("ASCII boundary"));
     (out, positions.len())
+}
+
+/// Detect whether a regex source string contains any named capture group
+/// (`(?<name>...)` or `(?P<name>...)`). Lookbehinds `(?<=...)` / `(?<!...)`
+/// are NOT named captures and don't count.
+///
+/// Used to bail out of autofix on regexes that mix named and unnamed
+/// captures: our cap-numbering (index among unnamed) diverges from PCRE's
+/// positional numbering once a named group is present, so a `$1` could end
+/// up renamed to point at a different capture.
+fn regex_has_named_capture(raw: &str) -> bool {
+    let bytes = raw.as_bytes();
+    let mut i = 0;
+    let mut in_char_class = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if b == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+
+        if in_char_class {
+            if b == b']' {
+                in_char_class = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if b == b'[' {
+            in_char_class = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'(' && i + 3 < bytes.len() && bytes[i + 1] == b'?' {
+            // `(?<name>...)` — named iff the char after `<` is a name-start
+            // byte. `(?<=...)` and `(?<!...)` are lookbehinds; not captures.
+            if bytes[i + 2] == b'<' {
+                let after_lt = bytes[i + 3];
+                if after_lt != b'=' && after_lt != b'!' {
+                    return true;
+                }
+            }
+            // `(?P<name>...)` — Python-style named capture.
+            if bytes[i + 2] == b'P' && i + 4 < bytes.len() && bytes[i + 3] == b'<' {
+                return true;
+            }
+        }
+
+        i += 1;
+    }
+
+    false
 }
 
 /// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
@@ -993,6 +1060,92 @@ http {
 }
 "#,
         );
+    }
+
+    #[test]
+    fn test_autofix_bails_when_v_rewrite_regex_has_named_capture() {
+        // `(?<user>...)` in the vulnerable rewrite's regex makes
+        // cap-numbering ambiguous: `$1` refers to `user` in PCRE, but
+        // our cap-numbering would rename `$1` to `$cap1` and assign
+        // `cap1` to the *next* unnamed group — a different capture.
+        // To avoid silent semantic remap, we bail on the whole chain:
+        // warning fires, no fix attached.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let bad = r#"http {
+  server {
+    location / {
+      rewrite ^/u/(?<user>\w+)/(.*)$ /api?user=$user;
+      set $endpoint $1;
+    }
+  }
+}
+"#;
+        let errors = runner.check_string(bad).expect("check");
+        let spec_name = NginxRiftPlugin.spec().name;
+        let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == spec_name).collect();
+        assert_eq!(
+            rule_errors.len(),
+            1,
+            "warning should still fire on the vulnerable pattern"
+        );
+        assert!(
+            rule_errors[0].fixes.is_empty(),
+            "no fix should be attached when v_rewrite regex mixes named/unnamed"
+        );
+    }
+
+    #[test]
+    fn test_autofix_skips_consumer_rewrite_with_named_capture() {
+        // The vulnerable rewrite itself is autofixable, but a later
+        // consumer rewrite uses a named capture, so we (a) skip
+        // renaming that consumer's regex/replacement, and (b) force
+        // `active_caps = 0` so a downstream `set $foo $1` is NOT
+        // renamed (its `$1` references the unfixable rewrite's
+        // captures, which we have no name for).
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let bad = r#"http {
+  server {
+    location / {
+      rewrite ^/api/(.*)$ /internal?migrated=true;
+      set $a $1;
+      rewrite ^/u/(?<user>\w+)/(.*)$ /next/$1 last;
+      set $b $1;
+    }
+  }
+}
+"#;
+        let good = r#"http {
+  server {
+    location / {
+      rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
+      set $a $cap1;
+      rewrite ^/u/(?<user>\w+)/(.*)$ /next/$1 last;
+      set $b $1;
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(bad, good);
+    }
+
+    #[test]
+    fn test_regex_has_named_capture_helper() {
+        // Plain named captures.
+        assert!(regex_has_named_capture("(?<name>.*)"));
+        assert!(regex_has_named_capture("^/api/(?<rest>.*)$"));
+        assert!(regex_has_named_capture("(?P<name>.*)"));
+        assert!(regex_has_named_capture("(?<a>x)(.)"));
+        // Lookbehinds (NOT named captures).
+        assert!(!regex_has_named_capture("(?<=foo)bar"));
+        assert!(!regex_has_named_capture("(?<!foo)bar"));
+        // Unnamed-only.
+        assert!(!regex_has_named_capture("(.*)(.*)"));
+        assert!(!regex_has_named_capture("^/api/(.*)$"));
+        // Non-capturing groups and escapes.
+        assert!(!regex_has_named_capture("(?:foo)(bar)"));
+        assert!(!regex_has_named_capture(r"\(?<not_a_capture>\)"));
+        // Inside character class — bracket eats the `(?<`.
+        assert!(!regex_has_named_capture("[(?<x>]"));
     }
 
     #[test]
