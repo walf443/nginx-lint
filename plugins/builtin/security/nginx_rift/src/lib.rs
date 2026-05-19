@@ -280,7 +280,9 @@ fn regex_has_named_capture(raw: &str) -> bool {
                 }
             }
             // `(?P<name>...)` — Python-style named capture.
-            if bytes[i + 2] == b'P' && i + 4 < bytes.len() && bytes[i + 3] == b'<' {
+            // (Only `bytes[i + 3]` is read; the outer `i + 3 < bytes.len()`
+            // guard is already sufficient.)
+            if bytes[i + 2] == b'P' && bytes[i + 3] == b'<' {
                 return true;
             }
         }
@@ -293,10 +295,12 @@ fn regex_has_named_capture(raw: &str) -> bool {
 
 /// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
 ///
-/// Skips: escapes (`\(`), character classes (`[...]`), and the `(?...)`
-/// family — non-capturing `(?:...)`, named `(?<name>...)` / `(?P<name>...)`,
+/// Skips: escapes (`\(`), character classes (`[...]`), the `(?...)` family —
+/// non-capturing `(?:...)`, named `(?<name>...)` / `(?P<name>...)`,
 /// lookarounds `(?=...)` / `(?!...)` / `(?<=...)` / `(?<!...)`, atomic
-/// `(?>...)`, comments `(?#...)`, and inline modifiers `(?i)`.
+/// `(?>...)`, comments `(?#...)`, and inline modifiers `(?i)` — and the
+/// `(*VERB)` family — PCRE control verbs like `(*PRUNE)`, `(*SKIP)`,
+/// `(*FAIL)`, `(*MARK:name)`, etc.
 fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
     let bytes = regex.as_bytes();
     let mut positions = Vec::new();
@@ -328,9 +332,9 @@ fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
 
         if b == b'(' {
             let next = bytes.get(i + 1).copied();
-            if next == Some(b'?') {
-                // Some kind of (?...) construct — never an unnamed capture.
-            } else {
+            // `(?...)` constructs and `(*VERB)` control verbs are never
+            // unnamed captures.
+            if next != Some(b'?') && next != Some(b'*') {
                 positions.push(i);
             }
         }
@@ -963,6 +967,23 @@ http {
             find_unnamed_capture_positions("(a)(b)(?:c)(d)"),
             vec![0, 3, 11]
         );
+        // PCRE control verbs like (*PRUNE) / (*FAIL) / (*MARK:tag) start
+        // with `(*` and must not be treated as unnamed captures —
+        // otherwise we'd emit `(?<cap1>*PRUNE)` which is invalid PCRE.
+        assert_eq!(find_unnamed_capture_positions("(*PRUNE)(.*)"), vec![8]);
+        assert_eq!(find_unnamed_capture_positions("(*MARK:tag)(.*)"), vec![11]);
+    }
+
+    #[test]
+    fn test_regex_has_named_capture_handles_truncated_p_form() {
+        // Regression: the old `i + 4 < bytes.len()` guard required a
+        // byte we never read, so a regex ending exactly with `(?P<`
+        // would slip through without bail-out. (nginx itself rejects
+        // such malformed regex, but the helper should still answer
+        // correctly.)
+        assert!(regex_has_named_capture("(?P<"));
+        // And the normal case still returns true.
+        assert!(regex_has_named_capture("(?P<x>y)"));
     }
 
     #[test]
