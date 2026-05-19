@@ -1149,6 +1149,87 @@ http {
     }
 
     #[test]
+    fn test_autofix_handles_nested_unnamed_captures() {
+        // Nested unnamed captures get numbered outer-first in source
+        // order, which happens to match PCRE's positional numbering
+        // (outer = group 1, inner = group 2). No special handling is
+        // needed — `$1` -> `$cap1` and `$2` -> `$cap2` stay
+        // semantically equivalent.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location / {
+      rewrite ^/x/((.*))$ /target?z=1;
+      set $outer $1;
+      set $inner $2;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location / {
+      rewrite ^/x/(?<cap1>(?<cap2>.*))$ /target?z=1;
+      set $outer $cap1;
+      set $inner $cap2;
+    }
+  }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_autofix_bails_on_nested_capture_when_any_layer_is_named() {
+        // Once *any* layer of nesting is a named capture, the bail-out
+        // fires — the same uniform conservatism we apply to flat
+        // mixed regexes. Tested for both directions of nesting
+        // (named-wraps-unnamed and unnamed-wraps-named) to make the
+        // boundary explicit for readers.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let rule_name = NginxRiftPlugin.spec().name;
+
+        for bad in [
+            // Named outer, unnamed inner.
+            r#"http {
+  server {
+    location / {
+      rewrite ^/x/(?<outer>(.*))$ /target?z=$outer;
+      set $endpoint $1;
+    }
+  }
+}
+"#,
+            // Unnamed outer, named inner.
+            r#"http {
+  server {
+    location / {
+      rewrite ^/x/((?<inner>.*))$ /target?z=$inner;
+      set $endpoint $1;
+    }
+  }
+}
+"#,
+        ] {
+            let errors = runner.check_string(bad).expect("check");
+            let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == rule_name).collect();
+            assert_eq!(
+                rule_errors.len(),
+                1,
+                "warning must still fire on nested mixed-capture; config was:\n{}",
+                bad
+            );
+            assert!(
+                rule_errors[0].fixes.is_empty(),
+                "nested regex with any named layer must bail; got fixes {:?} for:\n{}",
+                rule_errors[0].fixes,
+                bad
+            );
+        }
+    }
+
+    #[test]
     fn test_autofix_bails_on_mixed_named_and_unnamed_in_same_regex() {
         // The cornerstone case for the bail-out: a single regex that
         // contains BOTH a named capture AND an unnamed one. Users
