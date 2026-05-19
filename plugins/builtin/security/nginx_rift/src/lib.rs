@@ -1149,6 +1149,36 @@ http {
     }
 
     #[test]
+    fn test_autofix_handles_escaped_parens_in_regex() {
+        // `\(` / `\)` are literal parens, not group boundaries. Both
+        // regex walkers skip backslash-escape pairs explicitly, so an
+        // escape inside the regex must not (a) get counted as an
+        // unnamed capture nor (b) shift the cap-numbering of the
+        // genuine `(.*)` that follows.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location / {
+      rewrite ^/api\(deprecated\)/(.*)$ /new?migrated=true;
+      set $endpoint $1;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location / {
+      rewrite ^/api\(deprecated\)/(?<cap1>.*)$ /new?migrated=true;
+      set $endpoint $cap1;
+    }
+  }
+}
+"#,
+        );
+    }
+
+    #[test]
     fn test_autofix_handles_nested_unnamed_captures() {
         // Nested unnamed captures get numbered outer-first in source
         // order, which happens to match PCRE's positional numbering
