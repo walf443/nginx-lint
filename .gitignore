@@ -7,5 +7,4 @@
 /test_plugins
 /test_builtin_plugins
 /web/api/
-Cargo.lock
 .claude/settings.local.json
