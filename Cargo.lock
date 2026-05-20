@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "alias-location-slash-mismatch-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -130,7 +130,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "autoindex-enabled-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "block-lines-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
@@ -421,7 +421,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "client-max-body-size-not-set-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "deprecated-ssl-protocol-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -792,7 +792,7 @@ dependencies = [
 
 [[package]]
 name = "directive-inheritance-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -849,7 +849,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "duplicate-directive-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
@@ -1158,7 +1158,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "gzip-not-enabled-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -1536,7 +1536,7 @@ dependencies = [
 
 [[package]]
 name = "if-is-evil-in-location-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "invalid-directive-context-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
@@ -1719,7 +1719,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen-http2-deprecated-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
@@ -1764,7 +1764,7 @@ dependencies = [
 
 [[package]]
 name = "map-missing-default-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -1810,14 +1810,14 @@ dependencies = [
 
 [[package]]
 name = "missing-error-log-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
 
 [[package]]
 name = "nginx-lint"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "alias-location-slash-mismatch-plugin",
  "autoindex-enabled-plugin",
@@ -1864,7 +1864,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-common"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-parser",
  "schemars 1.2.1",
@@ -1877,7 +1877,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-parser"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "rowan",
  "serde",
@@ -1887,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-common",
  "reqwest",
@@ -1900,7 +1900,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-rift-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2177,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "proxy-keepalive-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2185,7 +2185,7 @@ dependencies = [
 
 [[package]]
 name = "proxy-missing-host-header-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "proxy-pass-domain-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "proxy-pass-with-uri-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "root-in-location-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "server-tokens-enabled-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -2934,14 +2934,14 @@ dependencies = [
 
 [[package]]
 name = "space-before-semicolon-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
 
 [[package]]
 name = "ssl-on-deprecated-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
@@ -3459,14 +3459,14 @@ dependencies = [
 
 [[package]]
 name = "trailing-whitespace-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
 ]
 
 [[package]]
 name = "try-files-with-proxy-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -3504,7 +3504,7 @@ checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
 
 [[package]]
 name = "unreachable-location-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -3518,7 +3518,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "upstream-server-no-resolve-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
@@ -4111,7 +4111,7 @@ dependencies = [
 
 [[package]]
 name = "weak-ssl-ciphers-plugin"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "nginx-lint-plugin",
  "tokio",
