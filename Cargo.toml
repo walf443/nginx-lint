@@ -110,7 +110,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 
 # Plugin system dependencies
-wasmtime = { version = "44", features = ["component-model"], optional = true }
+wasmtime = { version = "45", features = ["component-model"], optional = true }
 
 # Native plugin dependencies
 nginx-lint-plugin = { version = "0.12.1", path = "crates/nginx-lint-plugin", optional = true }
