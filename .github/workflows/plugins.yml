@@ -28,13 +28,18 @@ jobs:
   test-plugins:
     name: Test Plugins (${{ matrix.chunk }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       matrix:
         chunk: [0, 1, 2, 3]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: "test-plugins-${{ matrix.chunk }}"
       - name: Test plugin chunk
@@ -57,15 +62,20 @@ jobs:
   wasm-build:
     name: Build WASM Plugins (${{ matrix.chunk }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       matrix:
         chunk: [0, 1]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: "wasm-build-${{ matrix.chunk }}"
       - name: Install wasm-tools
@@ -104,7 +114,7 @@ jobs:
         run: |
           find plugins/builtin -name "*.wasm.component.wasm" \
             | tar czf "wasm-components-${{ matrix.chunk }}.tar.gz" -T -
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wasm-plugins-${{ matrix.chunk }}
           path: wasm-components-${{ matrix.chunk }}.tar.gz
@@ -113,10 +123,15 @@ jobs:
   build-host:
     name: Build Host Binaries
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: "build-host"
       - name: Build nginx-lint and test binary
@@ -128,7 +143,7 @@ jobs:
           mkdir -p artifacts
           cp target/release/nginx-lint artifacts/
           find target/release/deps -name 'wasm_plugin_test-*' -type f -executable | head -1 | xargs -I{} cp {} artifacts/wasm_plugin_test
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-binaries
           path: artifacts/
@@ -138,17 +153,22 @@ jobs:
     name: WASM Integration Test
     needs: [wasm-build, typescript-plugin, build-host]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: wasm-plugins-*
           merge-multiple: true
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ts-plugin
           path: target/ts-plugins
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: host-binaries
           path: artifacts
@@ -184,15 +204,20 @@ jobs:
   typescript-plugin:
     name: TypeScript Plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: "24"
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           shared-key: "build-parser-wasm"
       - name: Install wasm-tools
@@ -218,7 +243,7 @@ jobs:
         working-directory: plugins/typescript/server-tokens-enabled-ts
         run: npm test
       - name: Upload TypeScript WASM plugin
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ts-plugin
           path: plugins/typescript/server-tokens-enabled-ts/dist/server-tokens-enabled-ts.wasm
