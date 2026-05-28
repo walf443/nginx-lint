@@ -238,6 +238,11 @@ impl<'a> RowanLexer<'a> {
                 }
                 self.advance_char();
             }
+        } else if matches!(self.peek(), Some('1'..='9')) {
+            // Positional capture `$1`..`$9`: nginx reads exactly one digit,
+            // so `$1redirect` is the capture `$1` followed by literal
+            // `redirect`, and `$12` is `$1` then `2`. Consume just the digit.
+            self.advance_char();
         } else {
             // $var syntax
             while let Some(ch) = self.peek() {
@@ -501,6 +506,99 @@ mod tests {
                 (SyntaxKind::ARGUMENT, "200"),
                 (SyntaxKind::WHITESPACE, " "),
                 (SyntaxKind::VARIABLE, "${request_uri}"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn positional_capture_stops_at_one_digit() {
+        // nginx reads `$1`..`$9` as a single-digit positional capture, so
+        // `$1redirect` is the capture `$1` followed by the literal text
+        // `redirect`, not one variable named `1redirect`.
+        let tokens = tokenize("set $x $1redirect;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$1"),
+                (SyntaxKind::IDENT, "redirect"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn positional_capture_followed_by_digit() {
+        // `$12` is the capture `$1` then a literal `2`; the `$N` form has no
+        // multi-digit captures (use the brace form `${12}` for those).
+        let tokens = tokenize("set $x $12;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$1"),
+                (SyntaxKind::ARGUMENT, "2"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn positional_capture_then_digit_and_letters() {
+        // `$12redirect` is the capture `$1` then the literal `2redirect`:
+        // the single digit is the capture, the remainder is plain text.
+        let tokens = tokenize("set $x $12redirect;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$1"),
+                (SyntaxKind::ARGUMENT, "2redirect"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn brace_capture_keeps_multiple_digits() {
+        // The brace form is unaffected: `${12}` stays one variable token.
+        let tokens = tokenize("set $x ${12};");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "${12}"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn letter_first_variable_with_digits_unaffected() {
+        // Only digit-FIRST names are single-digit captures; a normal name
+        // containing digits (`$arg_1`) is still one variable token.
+        let tokens = tokenize("set $x $arg_1;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$arg_1"),
                 (SyntaxKind::SEMICOLON, ";"),
             ]
         );
