@@ -1129,6 +1129,63 @@ http {
     }
 
     #[test]
+    fn test_autofix_scheme_variable_redirect_preserves_scheme() {
+        // A `$scheme`-prefixed redirect (no explicit flag): the autofix
+        // renames the regex group and `$1`, but must leave `$scheme` intact.
+        // The result still redirects (still `$scheme`-prefixed) yet is
+        // rule-clean, since the only capture is now named.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let good = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ $scheme://example.com/$cap1?x=1;
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ $scheme://example.com/$1?x=1;
+    }
+  }
+}
+"#,
+            good,
+        );
+        runner.assert_no_errors(good);
+    }
+
+    #[test]
+    fn test_autofix_quoted_scheme_redirect_preserves_quotes() {
+        // A quoted scheme-prefixed redirect: the `$1` inside the quoted
+        // replacement is renamed while the surrounding quotes are preserved,
+        // and the fixed form no longer trips the rule.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let good = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ 'https://example.com/$cap1?x=1';
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ 'https://example.com/$1?x=1';
+    }
+  }
+}
+"#,
+            good,
+        );
+        runner.assert_no_errors(good);
+    }
+
+    #[test]
     fn test_fixtures() {
         let runner = PluginTestRunner::new(NginxRiftPlugin);
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());
