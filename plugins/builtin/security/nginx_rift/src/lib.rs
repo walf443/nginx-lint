@@ -393,8 +393,15 @@ fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
 }
 
 /// Rewrite `$1`..`$9` and `${1}`..`${9}` references inside a raw argument
-/// source to `$cap1`..`$capN` (using `${capN}` brace form when followed by
-/// a name-continuation byte, to keep the variable boundary unambiguous).
+/// source to the braced named form `${cap1}`..`${capN}`.
+///
+/// The brace form is used unconditionally (never the bare `$capN`) so the
+/// rename is safe no matter what follows the reference — including a
+/// name-continuation character in the *next* argument. The parser splits a
+/// replacement on variable boundaries, so `$1path` becomes the two args `$1`
+/// and `path`; renaming `$1` to a bare `$capN` would then collapse with the
+/// following `path` into one different, undefined variable. The braced
+/// `${capN}` form cannot collapse.
 ///
 /// Returns `Some(new_raw)` when every reference can be rewritten safely; the
 /// caller still needs to compare against the original to detect "nothing
@@ -429,24 +436,16 @@ fn rename_positional_refs_in_raw(raw: &str, max_captures: usize) -> Option<Strin
             i += 4;
             continue;
         }
-        // `$N` form
+        // `$N` form. Always emit the braced `${capN}` form: the parser may
+        // have split a following name-continuation run into a separate arg
+        // (e.g. `$1path` -> `$1` + `path`), so a bare `$capN` could collapse
+        // with it into a different variable. Braces keep the boundary firm.
         if matches!(after, b'1'..=b'9') {
             let n = (after - b'0') as usize;
             if n > max_captures {
                 return None;
             }
-            // If the next byte continues a variable name, switch to brace
-            // form to avoid `$cap1abc` collapsing into a single var name.
-            let follow = bytes.get(i + 2).copied();
-            let needs_braces = matches!(
-                follow,
-                Some(b'_') | Some(b'a'..=b'z') | Some(b'A'..=b'Z') | Some(b'0'..=b'9')
-            );
-            if needs_braces {
-                out.push_str(&format!("${{cap{}}}", n));
-            } else {
-                out.push_str(&format!("$cap{}", n));
-            }
+            out.push_str(&format!("${{cap{}}}", n));
             i += 2;
             continue;
         }
@@ -1084,7 +1083,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ https://example.com/$cap1?x=1 redirect;
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/${cap1}?x=1 redirect;
     }
   }
 }
@@ -1095,7 +1094,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ https://example.com/$cap1?x=1 redirect;
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/${cap1}?x=1 redirect;
     }
   }
 }
@@ -1138,7 +1137,7 @@ http {
         let good = r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ $scheme://example.com/$cap1?x=1;
+      rewrite ^/api/(?<cap1>.*)$ $scheme://example.com/${cap1}?x=1;
     }
   }
 }
@@ -1166,7 +1165,7 @@ http {
         let good = r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ 'https://example.com/$cap1?x=1';
+      rewrite ^/api/(?<cap1>.*)$ 'https://example.com/${cap1}?x=1';
     }
   }
 }
@@ -1176,6 +1175,64 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(.*)$ 'https://example.com/$1?x=1';
+    }
+  }
+}
+"#,
+            good,
+        );
+        runner.assert_no_errors(good);
+    }
+
+    #[test]
+    fn test_autofix_redirect_capture_adjacent_to_text() {
+        // `$1path` is a capture immediately followed by name characters. The
+        // parser tokenizes it as `$1` + `path`, so the rename MUST brace the
+        // capture (`${cap1}`) — a bare `$cap1` would merge with the adjacent
+        // `path` into `$cap1path` (a different, undefined variable).
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let good = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/${cap1}path?x=1 redirect;
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ https://example.com/$1path?x=1 redirect;
+    }
+  }
+}
+"#,
+            good,
+        );
+        runner.assert_no_errors(good);
+    }
+
+    #[test]
+    fn test_autofix_consumer_capture_adjacent_to_text() {
+        // Same adjacency hazard on the consumer path: `set $x $1suffix` must
+        // become `${cap1}suffix`, not `$cap1suffix`.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        let good = r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
+      set $x ${cap1}suffix;
+    }
+  }
+}
+"#;
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ /internal?migrated=true;
+      set $x $1suffix;
     }
   }
 }
@@ -1208,7 +1265,7 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      set $original_endpoint $cap1;
+      set $original_endpoint ${cap1};
     }
   }
 }
@@ -1235,7 +1292,7 @@ http {
   server {
     location ~ ^/foo/(.*)$ {
       rewrite ^/foo/(?<cap1>.*)$ /bar?x=1;
-      rewrite ^/bar/(?<cap1>.*)$ /baz/$cap1 last;
+      rewrite ^/bar/(?<cap1>.*)$ /baz/${cap1} last;
     }
   }
 }
@@ -1288,7 +1345,7 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      set $combined "prefix-$cap1-suffix";
+      set $combined "prefix-${cap1}-suffix";
     }
   }
 }
@@ -1300,7 +1357,7 @@ http {
     fn test_autofix_partial_when_consumer_exceeds_captures() {
         // The vulnerable rewrite has only 1 capture; `set $b $2` references
         // a non-existent positional capture. We MUST NOT rename `$2` to
-        // `$cap2` (would create an undefined variable reference at
+        // `${cap2}` (would create an undefined variable reference at
         // nginx-load time). The other fixes still apply.
         let runner = PluginTestRunner::new(NginxRiftPlugin);
         runner.assert_fix_produces(
@@ -1318,7 +1375,7 @@ http {
   server {
     location / {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      set $a $cap1;
+      set $a ${cap1};
       set $b $2;
     }
   }
@@ -1349,7 +1406,7 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      set $a $cap1;
+      set $a ${cap1};
     }
     location ~ ^/other/(.*)$ {
       set $b $1;
@@ -1379,9 +1436,9 @@ http {
             r#"http {
   server {
     location / {
-      rewrite ^/(?:api)/(?<cap1>.*)/(?<cap2>.*)$ /backend/$cap1/$cap2?migrated=true;
-      set $a $cap1;
-      set $b $cap2;
+      rewrite ^/(?:api)/(?<cap1>.*)/(?<cap2>.*)$ /backend/${cap1}/${cap2}?migrated=true;
+      set $a ${cap1};
+      set $b ${cap2};
     }
   }
 }
@@ -1452,9 +1509,9 @@ http {
             r#"http {
   server {
     location / {
-      rewrite ^/a/(?<cap1>.*)$ /b?x=$cap1;
-      rewrite ^/b/(?<cap1>.*)$ /c?y=$cap1;
-      rewrite ^/c/(?<cap1>.*)$ /d?z=$cap1;
+      rewrite ^/a/(?<cap1>.*)$ /b?x=${cap1};
+      rewrite ^/b/(?<cap1>.*)$ /c?y=${cap1};
+      rewrite ^/c/(?<cap1>.*)$ /d?z=${cap1};
     }
   }
 }
@@ -1485,9 +1542,9 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      rewrite ^/x/(?<cap1>.*)$ /y/$cap1 last;
-      set $original_endpoint $cap1;
-      set $combined "prefix-$cap1-suffix";
+      rewrite ^/x/(?<cap1>.*)$ /y/${cap1} last;
+      set $original_endpoint ${cap1};
+      set $combined "prefix-${cap1}-suffix";
     }
   }
 }
@@ -1518,7 +1575,7 @@ http {
     location / {
       if ($request_method = POST) {
         rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-        set $original_endpoint $cap1;
+        set $original_endpoint ${cap1};
       }
     }
   }
@@ -1551,7 +1608,7 @@ http {
   server {
     location ~ ^/u/(?<user>\w+)/api/(.*)$ {
       rewrite ^/u/.+/api/(?<cap1>.*)$ /backend?migrated=true;
-      set $endpoint $cap1;
+      set $endpoint ${cap1};
       set $username $user;
     }
   }
@@ -1564,7 +1621,7 @@ http {
     fn test_autofix_bails_when_v_rewrite_regex_has_named_capture() {
         // `(?<user>...)` in the vulnerable rewrite's regex makes
         // cap-numbering ambiguous: `$1` refers to `user` in PCRE, but
-        // our cap-numbering would rename `$1` to `$cap1` and assign
+        // our cap-numbering would rename `$1` to `${cap1}` and assign
         // `cap1` to the *next* unnamed group — a different capture.
         // To avoid silent semantic remap, we bail on the whole chain:
         // warning fires, no fix attached.
@@ -1614,7 +1671,7 @@ http {
   server {
     location / {
       rewrite ^/api\(deprecated\)/(?<cap1>.*)$ /new?migrated=true;
-      set $endpoint $cap1;
+      set $endpoint ${cap1};
     }
   }
 }
@@ -1627,7 +1684,7 @@ http {
         // Nested unnamed captures get numbered outer-first in source
         // order, which happens to match PCRE's positional numbering
         // (outer = group 1, inner = group 2). No special handling is
-        // needed — `$1` -> `$cap1` and `$2` -> `$cap2` stay
+        // needed — `$1` -> `${cap1}` and `$2` -> `${cap2}` stay
         // semantically equivalent.
         let runner = PluginTestRunner::new(NginxRiftPlugin);
         runner.assert_fix_produces(
@@ -1645,8 +1702,8 @@ http {
   server {
     location / {
       rewrite ^/x/(?<cap1>(?<cap2>.*))$ /target?z=1;
-      set $outer $cap1;
-      set $inner $cap2;
+      set $outer ${cap1};
+      set $inner ${cap2};
     }
   }
 }
@@ -1716,7 +1773,7 @@ http {
         //  - named first (`(?<user>\w+)/(.*)`): a downstream `$1` in
         //    PCRE refers to the *named* `user` group, but our
         //    cap-numbering would assign `cap1` to the *unnamed* `(.*)`
-        //    (positional group 2). Renaming `$1` -> `$cap1` would
+        //    (positional group 2). Renaming `$1` -> `${cap1}` would
         //    silently point the consumer at a different capture.
         //
         //  - unnamed first (`(.*)/(?<rest>\w+)`): here `$1` does
@@ -1876,7 +1933,7 @@ http {
   server {
     location / {
       rewrite ^/api/(?<cap1>.*)$ /internal?migrated=true;
-      set $a $cap1;
+      set $a ${cap1};
       rewrite ^/u/(?<user>\w+)/(.*)$ /next/$1 last;
       set $b $1;
     }
