@@ -865,7 +865,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+            rewrite ^/api/(.*)$ https://example.com/$1?x=1 redirect;
         }
     }
 }
@@ -899,7 +899,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ http://ex.com/$1?x=1;
+            rewrite ^/api/(.*)$ http://example.com/$1?x=1;
         }
     }
 }
@@ -908,7 +908,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/$1?x=1;
+            rewrite ^/api/(.*)$ https://example.com/$1?x=1;
         }
     }
 }
@@ -917,7 +917,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ $scheme://ex.com/$1?x=1;
+            rewrite ^/api/(.*)$ $scheme://example.com/$1?x=1;
         }
     }
 }
@@ -939,7 +939,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ 'https://ex.com/$1?x=1';
+            rewrite ^/api/(.*)$ 'https://example.com/$1?x=1';
         }
     }
 }
@@ -957,7 +957,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+            rewrite ^/api/(.*)$ https://example.com/$1?x=1 redirect;
             set $foo $1;
         }
     }
@@ -980,7 +980,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/$1 redirect;
+            rewrite ^/api/(.*)$ https://example.com/$1 redirect;
         }
     }
 }
@@ -998,7 +998,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/static?x=1 redirect;
+            rewrite ^/api/(.*)$ https://example.com/static?x=1 redirect;
         }
     }
 }
@@ -1055,7 +1055,7 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
-            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+            rewrite ^/api/(.*)$ https://example.com/$1?x=1 redirect;
         }
     }
 }
@@ -1076,7 +1076,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+      rewrite ^/api/(.*)$ https://example.com/$1?x=1 redirect;
     }
   }
 }
@@ -1084,7 +1084,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ https://ex.com/$cap1?x=1 redirect;
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/$cap1?x=1 redirect;
     }
   }
 }
@@ -1095,7 +1095,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ https://ex.com/$cap1?x=1 redirect;
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/$cap1?x=1 redirect;
     }
   }
 }
@@ -1112,7 +1112,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(.*)$ https://ex.com/${1}?x=1 redirect;
+      rewrite ^/api/(.*)$ https://example.com/${1}?x=1 redirect;
     }
   }
 }
@@ -1120,7 +1120,7 @@ http {
             r#"http {
   server {
     location ~ ^/api/(.*)$ {
-      rewrite ^/api/(?<cap1>.*)$ https://ex.com/${cap1}?x=1 redirect;
+      rewrite ^/api/(?<cap1>.*)$ https://example.com/${cap1}?x=1 redirect;
     }
   }
 }
