@@ -1,15 +1,23 @@
-//! nginx-rift plugin (CVE-2026-42945)
+//! nginx-rift plugin (CVE-2026-42945, CVE-2026-9256)
 //!
-//! Detects the vulnerable nginx configuration pattern behind CVE-2026-42945
-//! (marketed as "NGINX Rift"): a `rewrite` directive whose replacement
-//! string contains `?`, followed in the same block by a `set` or `rewrite`
-//! directive that references an unnamed PCRE capture variable
-//! (`$1`..`$9`).
+//! Detects the vulnerable nginx configuration patterns behind CVE-2026-42945
+//! (marketed as "NGINX Rift") and its redirect-path sibling CVE-2026-9256:
 //!
-//! On affected nginx versions (0.6.27 .. 1.30.0) the leaked `is_args` flag
-//! causes a heap buffer overrun in the worker process during request
-//! handling, which can lead to a worker crash or unauthenticated RCE on
-//! systems without ASLR.
+//! - CVE-2026-42945: a `rewrite` whose replacement contains `?`, followed in
+//!   the same block by a `set` or `rewrite` directive that references an
+//!   unnamed PCRE capture variable (`$1`..`$9`).
+//! - CVE-2026-9256: a *redirecting* `rewrite` (a `redirect`/`permanent` flag,
+//!   or a replacement beginning with `http://`, `https://`, or `$scheme`)
+//!   whose own replacement contains both `?` and an unnamed capture — here
+//!   the overflow occurs while the worker builds the redirect URL, so no
+//!   following directive is required.
+//!
+//! On affected nginx versions (0.6.27 .. 1.30.1; mainline 1.31.0 is also
+//! affected by CVE-2026-9256) the leaked `is_args` flag causes a heap buffer
+//! overrun in the worker process during request handling, which can lead to a
+//! worker crash or unauthenticated RCE on systems without ASLR.
+//! CVE-2026-42945 is fixed in 1.30.1 / 1.31.0; the redirect-path
+//! CVE-2026-9256 that those releases left open is fixed in 1.30.2 / 1.31.1.
 //!
 //! Build with:
 //! ```sh
@@ -26,51 +34,60 @@ impl Plugin for NginxRiftPlugin {
         PluginSpec::new(
             "nginx-rift",
             "security",
-            "Detects the CVE-2026-42945 vulnerable pattern: a rewrite with '?' in \
-             the replacement followed by a `set` or `rewrite` using unnamed \
-             captures ($1..$9) in the same scope",
+            "Detects the CVE-2026-42945 / CVE-2026-9256 vulnerable patterns: a \
+             rewrite with '?' in the replacement followed by a `set` or \
+             `rewrite` using unnamed captures ($1..$9) in the same scope, or a \
+             redirecting rewrite whose own replacement contains both '?' and an \
+             unnamed capture",
         )
         .with_severity("warning")
         .with_why(
-            "CVE-2026-42945 (\"NGINX Rift\") is a heap buffer overflow in \
-             ngx_http_rewrite_module that affects nginx 0.6.27 through 1.30.0 \
-             (fixed in 1.30.1 and 1.31.0). Downstream distributions have \
-             backported the fix on their own schedules; notably, OpenResty \
-             shipped the patch in 1.29.2.4 (1.29.2.3 and earlier are still \
-             vulnerable). When a `rewrite` replacement \
-             contains `?`, the worker sets an internal `is_args` flag on the \
-             main script engine and never clears it. A subsequent `set` or \
-             `rewrite` directive that references an unnamed PCRE capture \
-             (`$1`..`$9`) then uses a length-calculation pass that \
-             ignores the flag while the copy pass honors it, so the worker \
-             writes more bytes (each escape-prone byte expands by 2, e.g. \
-             `+` -> `%2B`) than were allocated. This may cause worker \
-             crashes or — on systems without ASLR — unauthenticated remote \
-             code execution. Empirically, the captured value is also \
-             corrupted on the wire (`/api/foo+bar` returns a truncated \
-             `captured=foo%2Bb`). The reliable fixes are: (1) upgrade to a \
-             patched build (nginx >= 1.30.1 / 1.31.0, or OpenResty \
-             >= 1.29.2.4); (2) drop `?` from the rewrite \
-             replacement; (3) switch to named captures (`(?<name>...)`), \
-             which are resolved through a separate code path that does not \
-             share the rewrite engine's `is_args` state. Note that simply \
-             reordering `set` to run before `rewrite` does NOT remove the \
-             underlying bug. The configuration is syntactically valid and \
-             nginx will load it; the danger is runtime-only on vulnerable \
-             builds. This rule is enabled by default; disable it in \
-             configuration once your entire fleet is on a patched build \
-             (nginx >= 1.30.1 / 1.31.0, OpenResty >= 1.29.2.4, or a \
-             distribution with the backport applied).",
+            "CVE-2026-42945 (\"NGINX Rift\") and its redirect-path sibling \
+             CVE-2026-9256 are heap buffer overflows in \
+             ngx_http_rewrite_module. CVE-2026-42945 affects nginx 0.6.27 \
+             through 1.30.0 (fixed in 1.30.1 and 1.31.0); CVE-2026-9256 is \
+             the same `is_args` leak surfacing on the redirect path, which \
+             the 1.30.1 / 1.31.0 releases left unpatched — it affects \
+             nginx 1.30.1 and 1.31.0 and is fixed in 1.30.2 and 1.31.1. \
+             Downstream distributions backport on their own schedules; the \
+             original CVE-2026-42945 backport shipped in OpenResty 1.29.2.4 \
+             (1.29.2.3 and earlier are still vulnerable), so confirm your \
+             build also carries the CVE-2026-9256 fix. When a `rewrite` \
+             replacement contains `?`, the worker sets an internal \
+             `is_args` flag on the main script engine and never clears it. \
+             A subsequent `set` or `rewrite` directive that references an \
+             unnamed PCRE capture (`$1`..`$9`) then uses a \
+             length-calculation pass that ignores the flag while the copy \
+             pass honors it, so the worker writes more bytes (each \
+             escape-prone byte expands by 2, e.g. `+` -> `%2B`) than were \
+             allocated. This may cause worker crashes or — on systems \
+             without ASLR — unauthenticated remote code execution. \
+             Empirically, the captured value is also corrupted on the wire \
+             (`/api/foo+bar` returns a truncated `captured=foo%2Bb`). The \
+             reliable fixes are: (1) upgrade to a fully patched build \
+             (nginx >= 1.30.2 / 1.31.1, or a downstream build that carries \
+             both fixes); (2) drop `?` from the rewrite replacement; \
+             (3) switch to named captures (`(?<name>...)`), which are \
+             resolved through a separate code path that does not share the \
+             rewrite engine's `is_args` state. Note that simply reordering \
+             `set` to run before `rewrite` does NOT remove the underlying \
+             bug. The configuration is syntactically valid and nginx will \
+             load it; the danger is runtime-only on vulnerable builds. This \
+             rule is enabled by default; disable it in configuration once \
+             your entire fleet is on a fully patched build (nginx \
+             >= 1.30.2 / 1.31.1, or a distribution with both backports \
+             applied).",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
         .with_references(vec![
             "https://nvd.nist.gov/vuln/detail/CVE-2026-42945".to_string(),
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-9256".to_string(),
             "https://depthfirst.com/research/nginx-rift-achieving-nginx-rce-via-an-18-year-old-vulnerability".to_string(),
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/nginx_rift/tests/container_test.rs".to_string(),
         ])
         .with_min_version("0.6.27")
-        .with_max_version("1.30.0")
+        .with_max_version("1.30.1")
     }
 
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
@@ -93,18 +110,37 @@ fn check_items(items: &[ConfigItem], errors: &mut Vec<LintError>, err: &ErrorBui
     for (i, dir) in directives.iter().enumerate() {
         if is_rewrite_with_question_mark(dir) {
             let rest = &directives[i + 1..];
-            let triggers = rest
+            // CVE-2026-9256 (redirect path): a redirecting rewrite whose own
+            // replacement contains both `?` and an unnamed capture overflows
+            // while the worker builds the redirect URL — no following
+            // consumer is needed (the redirect terminates request handling).
+            let redirect_triggers =
+                is_redirecting_rewrite(dir) && replacement_uses_unnamed_capture(dir);
+            // CVE-2026-42945 (consumer path): a later `set`/`rewrite` in the
+            // same scope materializes an unnamed capture after the leak.
+            let consumer_triggers = rest
                 .iter()
                 .any(|next| is_capture_consumer(next) && uses_unnamed_capture(next));
-            if triggers {
-                let mut error = err.warning_at(
+
+            if redirect_triggers || consumer_triggers {
+                // When the rewrite redirects, the consumer path is dead code
+                // (processing stops at the redirect), so the redirect message
+                // is the accurate one whenever it applies.
+                let message = if redirect_triggers {
+                    "CVE-2026-9256: redirecting `rewrite` (redirect/permanent flag \
+                     or scheme-prefixed replacement) whose replacement contains both \
+                     `?` and an unnamed capture ($1..$9) — this triggers a heap \
+                     buffer overflow on nginx <1.30.2/<1.31.1 while the worker builds \
+                     the redirect URL. Switch to named captures, or remove `?` from \
+                     the replacement."
+                } else {
                     "CVE-2026-42945: `rewrite` replacement contains `?` and is \
                      followed by a directive that references an unnamed capture \
                      ($1..$9) in the same scope — this triggers a heap buffer \
                      overflow on nginx <1.30.1/<1.31.0. Upgrade nginx, switch to \
-                     named captures, or remove `?` from the replacement.",
-                    *dir,
-                );
+                     named captures, or remove `?` from the replacement."
+                };
+                let mut error = err.warning_at(message, *dir);
                 for fix in build_named_capture_fixes(dir, rest) {
                     error = error.with_fix(fix);
                 }
@@ -426,6 +462,49 @@ fn is_rewrite_with_question_mark(dir: &Directive) -> bool {
     dir.args.iter().skip(1).any(|a| a.raw.contains('?'))
 }
 
+/// Whether a `rewrite` issues an HTTP redirect. nginx redirects when the
+/// directive carries a `redirect`/`permanent` flag, or when the replacement
+/// begins with `http://`, `https://`, or `$scheme` (in which case nginx
+/// redirects even without an explicit flag).
+///
+/// The replacement always starts at `args[1]` (`args[0]` is the regex), so
+/// its leading piece tells us whether the replacement is scheme-prefixed.
+///
+/// The flag, when present, is the final whitespace-delimited token. Our
+/// parser splits the replacement on variable boundaries into *contiguous*
+/// args, so we distinguish a real flag from a replacement that merely ends in
+/// the literal text `redirect` (e.g. `$1redirect`, split into `$1` +
+/// `redirect`) by requiring a source gap — whitespace — between the flag and
+/// the preceding arg.
+fn is_redirecting_rewrite(dir: &Directive) -> bool {
+    if dir.args.len() >= 2 {
+        let last = &dir.args[dir.args.len() - 1];
+        let prev = &dir.args[dir.args.len() - 2];
+        let whitespace_separated = prev.span.end.offset < last.span.start.offset;
+        if whitespace_separated && matches!(last.raw.as_str(), "redirect" | "permanent") {
+            return true;
+        }
+    }
+    if let Some(first) = dir.args.get(1) {
+        let r = first.raw.as_str();
+        if r.starts_with("http://") || r.starts_with("https://") || r == "$scheme" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the rewrite's replacement (every arg after the regex) references
+/// an unnamed PCRE capture `$1`..`$9`. Unlike [`uses_unnamed_capture`], this
+/// skips `args[0]` so a `$`-anchored regex is never mistaken for a capture
+/// reference.
+fn replacement_uses_unnamed_capture(dir: &Directive) -> bool {
+    dir.args
+        .iter()
+        .skip(1)
+        .any(|arg| contains_unnamed_capture(&arg.raw))
+}
+
 /// Directives that, on vulnerable nginx, hit the buggy script-engine path
 /// when evaluating an unnamed PCRE capture (`$1`..`$9`) — i.e. the
 /// directives whose use of `$N` after a leaking `rewrite … ?…` actually
@@ -741,6 +820,211 @@ http {
             set $combined 'prefix-$1-suffix';
         }
     }
+}
+"#,
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // CVE-2026-9256 — the redirect-path variant
+    //
+    // A redirecting rewrite whose own replacement contains both `?` and an
+    // unnamed capture overflows while the worker builds the redirect URL.
+    // No following capture-consumer is required: the redirect terminates
+    // request handling, so any directive after it is dead code.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_detects_standalone_redirect_rewrite_with_capture() {
+        // Redirect via the explicit `redirect` flag; the replacement holds
+        // both `?` and `$1`, with no following consumer.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_detects_permanent_redirect_rewrite_with_capture() {
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal/$1?x=1 permanent;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_detects_scheme_prefixed_redirect_without_flag() {
+        // A replacement beginning with `http://`, `https://`, or `$scheme`
+        // makes nginx redirect even without an explicit flag.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        for cfg in [
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/$1?x=1;
+        }
+    }
+}
+"#,
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ $scheme://ex.com/$1?x=1;
+        }
+    }
+}
+"#,
+        ] {
+            runner.assert_has_errors(cfg);
+        }
+    }
+
+    #[test]
+    fn test_no_error_redirect_rewrite_without_question_mark() {
+        // A redirect carrying a capture but no `?` never sets `is_args`, so
+        // there is nothing to overflow.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/$1 redirect;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_no_error_redirect_rewrite_without_capture() {
+        // `?` but no unnamed capture in the replacement — the leaked
+        // `is_args` flag has no positional capture to corrupt.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/static?x=1 redirect;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_no_error_non_redirect_single_rewrite_with_capture_and_question_mark() {
+        // The boundary of CVE-2026-9256: a NON-redirecting single rewrite
+        // whose own replacement holds `?` and `$1` is not flagged — without
+        // the redirect there is no single-directive overflow, and there is no
+        // following consumer for the CVE-2026-42945 path either.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ /internal/$1?x=1 last;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_no_error_literal_redirect_suffix_is_not_a_flag() {
+        // `${1}redirect` parses as `${1}` + a contiguous literal `redirect`
+        // (no whitespace gap), so the trailing `redirect` is NOT a flag.
+        // This relative replacement does not redirect and, with no following
+        // consumer, must not be flagged — even though it contains both `?`
+        // and an unnamed capture. Without the flag's whitespace-gap check
+        // this would be a false positive.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_no_errors(
+            r#"
+http {
+    server {
+        location ~ ^/(.*)$ {
+            rewrite ^/(.*)$ /p?q=1/${1}redirect;
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_redirect_variant_reports_cve_9256_message() {
+        TestCase::new(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+        }
+    }
+}
+"#,
+        )
+        .expect_error_count(1)
+        .expect_error_on_line(5)
+        .expect_message_contains("CVE-2026-9256")
+        .run(&NginxRiftPlugin);
+    }
+
+    #[test]
+    fn test_autofix_standalone_redirect_rewrite() {
+        // The redirect variant reuses the named-capture autofix: rename the
+        // regex's unnamed group and the `$1` in the replacement.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ https://ex.com/$cap1?x=1 redirect;
+    }
+  }
+}
+"#,
+        );
+        // And the fixed form no longer trips the rule.
+        runner.assert_no_errors(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ https://ex.com/$cap1?x=1 redirect;
+    }
+  }
 }
 "#,
         );
@@ -1487,12 +1771,14 @@ http {
 
     #[test]
     fn test_spec_declares_affected_version_range() {
-        // The CVE affects nginx 0.6.27 through 1.30.0 (fixed in 1.30.1 / 1.31.0).
-        // The version range on the spec drives nginx-lint's automatic
-        // version-based rule filter, so a target_nginx_version of 1.30.1+
+        // CVE-2026-42945 affects nginx 0.6.27 through 1.30.0 (fixed in
+        // 1.30.1 / 1.31.0); the redirect-path CVE-2026-9256 extends the
+        // affected range through 1.30.1 (fixed in 1.30.2 / 1.31.1). The
+        // version range on the spec drives nginx-lint's automatic
+        // version-based rule filter, so a target_nginx_version of 1.30.2+
         // skips this rule by default.
         let spec = NginxRiftPlugin.spec();
         assert_eq!(spec.min_nginx_version.as_deref(), Some("0.6.27"));
-        assert_eq!(spec.max_nginx_version.as_deref(), Some("1.30.0"));
+        assert_eq!(spec.max_nginx_version.as_deref(), Some("1.30.1"));
     }
 }
