@@ -605,6 +605,44 @@ mod tests {
     }
 
     #[test]
+    fn dollar_nine_is_top_of_capture_range() {
+        // `$9` is the top of the single-digit range, so `$9foo` splits into
+        // the capture `$9` and the literal `foo`.
+        let tokens = tokenize("set $x $9foo;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$9"),
+                (SyntaxKind::IDENT, "foo"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
+    fn dollar_zero_is_not_a_single_digit_capture() {
+        // `$0` is below the `$1`..`$9` capture range, so it takes the normal
+        // greedy variable-name path: `$0redirect` is one variable token
+        // (nginx also treats `$0` as a name, not a positional capture).
+        let tokens = tokenize("set $x $0redirect;");
+        assert_eq!(
+            tokens,
+            vec![
+                (SyntaxKind::IDENT, "set"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$x"),
+                (SyntaxKind::WHITESPACE, " "),
+                (SyntaxKind::VARIABLE, "$0redirect"),
+                (SyntaxKind::SEMICOLON, ";"),
+            ]
+        );
+    }
+
+    #[test]
     fn comment() {
         let tokens = tokenize("# this is a comment\nlisten 80;");
         assert_eq!(
