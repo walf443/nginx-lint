@@ -232,12 +232,14 @@ weak_ciphers = [
 required_exclusions = ["!aNULL", "!eNULL", "!EXPORT", "!DES", "!RC4", "!MD5"]
 
 [rules.nginx-rift]
-# CVE-2026-42945: detects the rewrite-with-`?` + capture-consumer pattern
-# that triggers a heap buffer overflow on nginx 0.6.27 .. 1.30.0
-# (fixed in 1.30.1 / 1.31.0). The rule declares its applicable nginx
-# version range, so setting `target_nginx_version >= 1.30.1` above
-# disables it automatically. To run it anyway (e.g. on a mixed fleet),
-# add `skip_version_check = true` here.
+# CVE-2026-42945 / CVE-2026-9256: detects the rewrite-with-`?` +
+# capture-consumer pattern that triggers a heap buffer overflow on
+# nginx 0.6.27 .. 1.30.1 (CVE-2026-42945 fixed in 1.30.1 / 1.31.0; the
+# redirect-path CVE-2026-9256 those releases left open is fixed in
+# 1.30.2 / 1.31.1). The rule declares its applicable nginx version
+# range, so setting `target_nginx_version >= 1.30.2` above disables it
+# automatically. To run it anyway (e.g. on a mixed fleet), add
+# `skip_version_check = true` here.
 enabled = true
 # skip_version_check = true
 

@@ -1,9 +1,16 @@
 //! Container-based integration tests for the nginx-rift rule
-//! (CVE-2026-42945, "NGINX Rift").
+//! (CVE-2026-42945, "NGINX Rift", and the redirect-path CVE-2026-9256).
 //!
 //! These tests prove the rule is targeting a *real* nginx bug by exercising
 //! the flagged directive sequence against a vulnerable nginx and observing
 //! the bug's signature directly.
+//!
+//! Scope note: the configs below exercise the CVE-2026-42945 set/rewrite-
+//! consumer signature, which is fixed in 1.30.1 / 1.31.0 — so the version
+//! gates in this file key off that fix point. The rule's declared
+//! max_version is 1.30.1 because the same `is_args` leak persists on the
+//! redirect path as CVE-2026-9256 (fixed in 1.30.2 / 1.31.1); that
+//! redirect-path manifestation is not exercised by these tests.
 //!
 //! # The bug's observable signature
 //!

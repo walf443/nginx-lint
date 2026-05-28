@@ -2566,8 +2566,9 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
 // target_nginx_version tests
 // ============================================================================
 
-/// nginx config triggering nginx-rift (CVE-2026-42945) — rewrite with `?`
-/// followed by a `set` consuming an unnamed capture in the same scope.
+/// nginx config triggering nginx-rift (CVE-2026-42945 / CVE-2026-9256) —
+/// rewrite with `?` followed by a `set` consuming an unnamed capture in the
+/// same scope.
 const NGINX_RIFT_VULNERABLE_CONFIG: &str = r#"http {
     server {
         location ~ ^/api/(.*)$ {
@@ -2581,7 +2582,7 @@ const NGINX_RIFT_VULNERABLE_CONFIG: &str = r#"http {
 #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
 #[test]
 fn test_target_nginx_version_skips_out_of_range_rule() {
-    // nginx-rift declares max_nginx_version = "1.30.0". With target_nginx_version
+    // nginx-rift declares max_nginx_version = "1.30.1". With target_nginx_version
     // set to a newer version, the rule should be automatically filtered out.
     let config_toml = r#"
 target_nginx_version = "1.31.0"
@@ -2595,7 +2596,7 @@ target_nginx_version = "1.31.0"
     let rift_errors: Vec<_> = errors.iter().filter(|e| e.rule == "nginx-rift").collect();
     assert!(
         rift_errors.is_empty(),
-        "nginx-rift should be skipped on nginx >=1.30.1; got: {:?}",
+        "nginx-rift should be skipped on nginx >=1.30.2; got: {:?}",
         rift_errors
     );
 }
@@ -2705,8 +2706,8 @@ fn test_why_command_shows_applies_to_for_versioned_rule() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("Applies to: nginx >=0.6.27, <=1.30.0"),
-        "expected 'Applies to: nginx >=0.6.27, <=1.30.0' in why output; got:\n{}",
+        stderr.contains("Applies to: nginx >=0.6.27, <=1.30.1"),
+        "expected 'Applies to: nginx >=0.6.27, <=1.30.1' in why output; got:\n{}",
         stderr
     );
 }
