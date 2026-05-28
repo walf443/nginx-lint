@@ -87,6 +87,12 @@ impl Plugin for NginxRiftPlugin {
             "https://github.com/walf443/nginx-lint/blob/main/plugins/builtin/security/nginx_rift/tests/container_test.rs".to_string(),
         ])
         .with_min_version("0.6.27")
+        // Inclusive upper bound. A single min..max range cannot express
+        // "≤1.30.1 plus mainline 1.31.0": 1.31.0 is also affected by
+        // CVE-2026-9256 (fixed in 1.31.1) but is gated out for a
+        // `target_nginx_version = 1.31.0`. The stable branch — the common
+        // deployment — is covered; mainline-1.31.0 users must rely on
+        // matching the pattern directly rather than the version filter.
         .with_max_version("1.30.1")
     }
 
@@ -467,15 +473,24 @@ fn is_rewrite_with_question_mark(dir: &Directive) -> bool {
 /// begins with `http://`, `https://`, or `$scheme` (in which case nginx
 /// redirects even without an explicit flag).
 ///
-/// The replacement always starts at `args[1]` (`args[0]` is the regex), so
-/// its leading piece tells us whether the replacement is scheme-prefixed.
+/// Intended to be called only for a rewrite that already has a `?` in its
+/// replacement (the caller's `is_rewrite_with_question_mark` guard). Outside
+/// that guard a 2-arg `rewrite ^x$ redirect;` — where `redirect` is the
+/// replacement URI, not a flag — would be misread as a redirect; the guard
+/// makes that unreachable, since such a single-token replacement has no `?`.
 ///
-/// The flag, when present, is the final whitespace-delimited token. Our
-/// parser splits the replacement on variable boundaries into *contiguous*
-/// args, so we distinguish a real flag from a replacement that merely ends in
-/// the literal text `redirect` (e.g. `$1redirect`, split into `$1` +
-/// `redirect`) by requiring a source gap — whitespace — between the flag and
-/// the preceding arg.
+/// Flag detection: the flag is the final whitespace-delimited token. Our
+/// parser splits an unquoted replacement on variable boundaries into
+/// *contiguous* args, so a real flag is distinguished from a replacement that
+/// merely ends in the literal text `redirect` (e.g. `${1}redirect`, split
+/// into `${1}` + `redirect`) by requiring a source gap — whitespace — before
+/// it.
+///
+/// Scheme detection reads the replacement's leading piece (`args[1]`;
+/// `args[0]` is the regex) through `as_str()` so a *quoted* replacement
+/// (`"https://…"`) is unquoted first. `${scheme}` (brace form) is
+/// intentionally NOT matched: nginx's prefix check is the literal bytes
+/// `$scheme`, so `${scheme}://…` does not auto-redirect.
 fn is_redirecting_rewrite(dir: &Directive) -> bool {
     if dir.args.len() >= 2 {
         let last = &dir.args[dir.args.len() - 1];
@@ -486,8 +501,14 @@ fn is_redirecting_rewrite(dir: &Directive) -> bool {
         }
     }
     if let Some(first) = dir.args.get(1) {
-        let r = first.raw.as_str();
-        if r.starts_with("http://") || r.starts_with("https://") || r == "$scheme" {
+        // `as_str()` drops surrounding quotes; for an unquoted `$scheme`
+        // variable it also drops the `$`, so match the bare variable on raw.
+        let lead = first.as_str();
+        if lead.starts_with("http://")
+            || lead.starts_with("https://")
+            || lead.starts_with("$scheme")
+            || first.raw == "$scheme"
+        {
             return true;
         }
     }
@@ -878,6 +899,15 @@ http {
 http {
     server {
         location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ http://ex.com/$1?x=1;
+        }
+    }
+}
+"#,
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
             rewrite ^/api/(.*)$ https://ex.com/$1?x=1;
         }
     }
@@ -895,6 +925,49 @@ http {
         ] {
             runner.assert_has_errors(cfg);
         }
+    }
+
+    #[test]
+    fn test_detects_quoted_scheme_redirect_without_flag() {
+        // A quoted replacement still redirects (nginx strips the quotes), so
+        // a quoted scheme-prefixed replacement with `?` and a capture — and
+        // no explicit flag — must be flagged. The scheme check reads the
+        // unquoted `as_str()`, not the quote-wrapped `raw`.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_has_errors(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ 'https://ex.com/$1?x=1';
+        }
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_redirect_with_trailing_consumer_reports_single_cve_9256() {
+        // A redirecting rewrite that also carries `?` and a capture, with a
+        // (dead-code) `set` after it: exactly one error, and it names the
+        // redirect CVE rather than the consumer CVE.
+        TestCase::new(
+            r#"
+http {
+    server {
+        location ~ ^/api/(.*)$ {
+            rewrite ^/api/(.*)$ https://ex.com/$1?x=1 redirect;
+            set $foo $1;
+        }
+    }
+}
+"#,
+        )
+        .expect_error_count(1)
+        .expect_error_on_line(5)
+        .expect_message_contains("CVE-2026-9256")
+        .run(&NginxRiftPlugin);
     }
 
     #[test]
@@ -1023,6 +1096,31 @@ http {
   server {
     location ~ ^/api/(.*)$ {
       rewrite ^/api/(?<cap1>.*)$ https://ex.com/$cap1?x=1 redirect;
+    }
+  }
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_autofix_redirect_with_brace_capture() {
+        // The `${1}` brace form in a redirecting rewrite's replacement is
+        // renamed to `${cap1}` alongside the regex's unnamed group.
+        let runner = PluginTestRunner::new(NginxRiftPlugin);
+        runner.assert_fix_produces(
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(.*)$ https://ex.com/${1}?x=1 redirect;
+    }
+  }
+}
+"#,
+            r#"http {
+  server {
+    location ~ ^/api/(.*)$ {
+      rewrite ^/api/(?<cap1>.*)$ https://ex.com/${cap1}?x=1 redirect;
     }
   }
 }
