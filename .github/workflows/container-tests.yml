@@ -33,7 +33,7 @@ jobs:
           MINOR="${LATEST##*.}"
           PREVIOUS="$MAJOR.$((MINOR - 1))"
           OLDER="$MAJOR.$((MINOR - 2))"
-          echo "matrix={\"nginx-image\":[\"nginx:$LATEST\",\"nginx:$PREVIOUS\",\"nginx:$OLDER\",\"openresty/openresty:noble\",\"ghcr.io/walf443/freenginx-image:1.31\"]}" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"nginx-image\":[\"nginx:$LATEST\",\"nginx:$PREVIOUS\",\"nginx:$OLDER\",\"openresty/openresty:resolute\",\"ghcr.io/walf443/freenginx-image:1.31\"]}" >> "$GITHUB_OUTPUT"
 
   container-tests:
     name: Container Tests (${{ matrix.nginx-image }})

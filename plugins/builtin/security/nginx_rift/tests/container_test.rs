@@ -46,10 +46,10 @@
 //! we want to exercise. Confirmed observed on:
 //!
 //! - `nginx:1.30.0` (CVE patched in 1.30.1) — truncated/escaped
-//! - `openresty/openresty:noble` — historically mis-escaped on
+//! - `openresty/openresty:noble` / `:resolute` — historically mis-escaped on
 //!   openresty/1.29.2.3; the backport landed in openresty/1.29.2.4 and
-//!   the floating `:noble` tag now resolves there, so it is skipped
-//!   (pin `1.29.2.3-noble` or earlier to exercise the unpatched form)
+//!   the floating `:noble`/`:resolute` tags now resolve there, so they are
+//!   skipped (pin `1.29.2.3-noble` or earlier to exercise the unpatched form)
 //! - `nginx:1.31`, `freenginx:1.31` — clean (tests skipped)
 //!
 //! # Why we don't assert on a worker crash
@@ -81,9 +81,9 @@ use nginx_lint_plugin::container_testing::{
 /// - the floating `1.30` tag — Docker Hub now resolves it to the patched
 ///   `1.30.1`, even though `nginx_version_at_least` only sees (1, 30)
 /// - any explicit `1.30.x` where x >= 1 (1.30.1 onward shipped the fix)
-/// - the floating `noble` tag (`openresty/openresty:noble`) — backport
-///   landed in openresty/1.29.2.4; pin `1.29.2.3-noble` or earlier to
-///   exercise the unpatched form
+/// - the floating `noble`/`resolute` tags (`openresty/openresty:noble`,
+///   `:resolute`) — backport landed in openresty/1.29.2.4; pin
+///   `1.29.2.3-noble` or earlier to exercise the unpatched form
 ///
 /// To run the observation tests against the genuine unpatched build, use
 /// the explicit pinned tag, e.g. `NGINX_IMAGE=nginx:1.30.0`.
@@ -96,10 +96,10 @@ fn skip_on_patched_version() -> bool {
     if tag == "1.30" {
         return true;
     }
-    // `openresty/openresty:noble` is the floating tag that has shipped
-    // the CVE-2026-42945 backport (in openresty/1.29.2.4). Pin
+    // `openresty/openresty:noble` / `:resolute` are floating tags that have
+    // shipped the CVE-2026-42945 backport (in openresty/1.29.2.4). Pin
     // `1.29.2.3-noble` or earlier to exercise the unpatched form.
-    if image_name.contains("openresty") && tag == "noble" {
+    if image_name.contains("openresty") && (tag == "noble" || tag == "resolute") {
         return true;
     }
     // Explicit 1.30.x with x >= 1 is patched.
