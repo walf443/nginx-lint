@@ -552,15 +552,27 @@ fn convert_argument_to_wit(arg: &ast::Argument) -> config_api::ArgumentInfo {
 
 // === WIT type conversion functions ===
 
-/// Remove control characters (except `\n` and `\t`) from plugin-provided text.
+/// Replace control characters (except `\n` and `\t`) and Unicode bidi
+/// control characters in plugin-provided text with U+FFFD (�).
 ///
 /// Plugin output is untrusted and is printed to the user's terminal or
 /// embedded in generated documentation; raw control characters such as ESC
 /// would allow ANSI escape sequence injection (e.g. spoofing or hiding parts
-/// of the lint report).
+/// of the lint report), and bidi overrides (Trojan Source) can visually
+/// reorder displayed text. Characters are replaced rather than removed so
+/// that tampering stays visible to the user.
 fn sanitize_text(text: &str) -> String {
     text.chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .map(|c| {
+            let is_disallowed_control = c.is_control() && c != '\n' && c != '\t';
+            let is_bidi_control =
+                ('\u{202A}'..='\u{202E}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c);
+            if is_disallowed_control || is_bidi_control {
+                '\u{FFFD}'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 
@@ -883,10 +895,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sanitize_text_strips_ansi_escape() {
-        // ESC [ 31 m (red) + ESC [ 2 K (erase line) — typical injection payloads
+    fn test_sanitize_text_replaces_ansi_escape() {
+        // ESC [ 31 m (red) + ESC [ 2 K (erase line) — typical injection payloads.
+        // Replaced with U+FFFD so the tampering stays visible.
         let input = "\x1b[31mfake error\x1b[2K";
-        assert_eq!(sanitize_text(input), "[31mfake error[2K");
+        assert_eq!(sanitize_text(input), "\u{FFFD}[31mfake error\u{FFFD}[2K");
     }
 
     #[test]
@@ -896,10 +909,25 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_text_strips_other_control_chars() {
-        // \r (CR), \x07 (BEL), \x08 (BS) are stripped; unicode text is kept
+    fn test_sanitize_text_replaces_other_control_chars() {
+        // \r (CR), \x07 (BEL), \x08 (BS) are replaced; unicode text is kept
         let input = "警告\r\x07\x08です";
-        assert_eq!(sanitize_text(input), "警告です");
+        assert_eq!(sanitize_text(input), "警告\u{FFFD}\u{FFFD}\u{FFFD}です");
+    }
+
+    #[test]
+    fn test_sanitize_text_replaces_c1_control_chars() {
+        // 0x9B is a C1 control char acting as a standalone CSI
+        let input = "a\u{9B}31mb";
+        assert_eq!(sanitize_text(input), "a\u{FFFD}31mb");
+    }
+
+    #[test]
+    fn test_sanitize_text_replaces_bidi_controls() {
+        // U+202E (RTL override) and U+2066 (LTR isolate) enable Trojan
+        // Source style display reordering
+        let input = "safe\u{202E}gnirts live\u{2066}x";
+        assert_eq!(sanitize_text(input), "safe\u{FFFD}gnirts live\u{FFFD}x");
     }
 
     #[test]
@@ -914,9 +942,9 @@ mod tests {
             fixes: vec![],
         };
         let error = convert_lint_error(&wit_error);
-        assert_eq!(error.rule, "evilrule");
-        assert_eq!(error.category, "category");
-        assert_eq!(error.message, "msg[31m with escape");
+        assert_eq!(error.rule, "evil\u{FFFD}rule");
+        assert_eq!(error.category, "cat\u{FFFD}egory");
+        assert_eq!(error.message, "msg\u{FFFD}[31m with escape");
     }
 
     #[test]
@@ -935,19 +963,19 @@ mod tests {
             max_nginx_version: None,
         };
         let spec = convert_plugin_spec(&wit_spec);
-        assert_eq!(spec.name, "name");
-        assert_eq!(spec.category, "category");
-        assert_eq!(spec.description, "desc[0m");
-        assert_eq!(spec.severity.as_deref(), Some("warning"));
-        assert_eq!(spec.why.as_deref(), Some("why"));
+        assert_eq!(spec.name, "na\u{FFFD}me");
+        assert_eq!(spec.category, "cat\u{FFFD}egory");
+        assert_eq!(spec.description, "desc\u{FFFD}[0m");
+        assert_eq!(spec.severity.as_deref(), Some("warn\u{FFFD}ing"));
+        assert_eq!(spec.why.as_deref(), Some("why\u{FFFD}"));
         // Newlines and tabs in examples are preserved
-        assert_eq!(spec.bad_example.as_deref(), Some("bad\nexample"));
-        assert_eq!(spec.good_example.as_deref(), Some("good\texample"));
+        assert_eq!(spec.bad_example.as_deref(), Some("bad\nexample\u{FFFD}"));
+        assert_eq!(spec.good_example.as_deref(), Some("good\texample\u{FFFD}"));
         assert_eq!(
             spec.references,
-            Some(vec!["https://example.com/[31m".to_string()])
+            Some(vec!["https://example.com/\u{FFFD}[31m".to_string()])
         );
-        assert_eq!(spec.min_nginx_version.as_deref(), Some("1.0"));
+        assert_eq!(spec.min_nginx_version.as_deref(), Some("1.0\u{FFFD}"));
     }
 
     #[test]
