@@ -137,10 +137,11 @@ pub fn nginx_image_tag() -> String {
 /// Check if the nginx image version is >= the given major.minor threshold.
 ///
 /// Parses the image tag as `"major.minor"` and returns `true` if it is at least
-/// `(threshold_major, threshold_minor)`. Returns `false` if the tag cannot be
-/// parsed (e.g. `"latest"`, `"noble"` for openresty). This means non-numeric
-/// tags (such as openresty or freenginx images) are conservatively treated as
-/// *not* meeting the threshold.
+/// `(threshold_major, threshold_minor)`. For non-numeric tags (e.g. `"latest"`,
+/// or openresty codename tags like `"noble"`/`"resolute"` whose underlying
+/// nginx core version changes over time), the actual version is detected by
+/// running `nginx -v` inside the image. If detection fails (e.g. docker is
+/// unavailable), the threshold is conservatively treated as not met.
 ///
 /// # Example
 ///
@@ -152,17 +153,78 @@ pub fn nginx_image_tag() -> String {
 /// ```
 pub fn nginx_version_at_least(threshold_major: u32, threshold_minor: u32) -> bool {
     let tag = nginx_image_tag();
-    parse_version_at_least(&tag, threshold_major, threshold_minor)
+    match parse_major_minor(&tag) {
+        Some(version) => version >= (threshold_major, threshold_minor),
+        None => detected_image_version()
+            .is_some_and(|version| version >= (threshold_major, threshold_minor)),
+    }
 }
 
-fn parse_version_at_least(tag: &str, threshold_major: u32, threshold_minor: u32) -> bool {
-    let parts: Vec<&str> = tag.split('.').collect();
-    if parts.len() >= 2 {
-        if let (Ok(major), Ok(minor)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-            return (major, minor) >= (threshold_major, threshold_minor);
+/// Parse the leading `major.minor` out of a version-ish string such as
+/// `"1.29"`, `"1.29.7"`, or `"1.29.2.3-noble"`.
+fn parse_major_minor(version: &str) -> Option<(u32, u32)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts
+        .next()?
+        .split(|c: char| !c.is_ascii_digit())
+        .next()?
+        .parse::<u32>()
+        .ok()?;
+    Some((major, minor))
+}
+
+/// Extract the nginx core version from `nginx -v` output, e.g.
+/// `"nginx version: nginx/1.27.4"` or `"nginx version: openresty/1.29.2.4"`
+/// (OpenResty versions track the nginx core they bundle).
+fn parse_nginx_v_output(output: &str) -> Option<(u32, u32)> {
+    output
+        .lines()
+        .filter(|line| line.contains("version:"))
+        .find_map(|line| {
+            let (_, version) = line.rsplit_once('/')?;
+            parse_major_minor(version.trim())
+        })
+}
+
+/// Detect the nginx core version by running `nginx -v` inside the configured
+/// container image. The result is cached for the lifetime of the test process.
+///
+/// Tries the binary names/paths used by the supported image families
+/// (nginx, openresty, freenginx).
+fn detected_image_version() -> Option<(u32, u32)> {
+    static CACHE: std::sync::OnceLock<Option<(u32, u32)>> = std::sync::OnceLock::new();
+    *CACHE.get_or_init(|| {
+        let image = nginx_image_config().full_image();
+        let output = std::process::Command::new("docker")
+            .args([
+                "run",
+                "--rm",
+                "--entrypoint",
+                "/bin/sh",
+                &image,
+                "-c",
+                "nginx -v 2>&1 || openresty -v 2>&1 \
+                 || /usr/local/nginx/sbin/nginx -v 2>&1 \
+                 || /usr/local/openresty/bin/openresty -v 2>&1",
+            ])
+            .output()
+            .ok()?;
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let version = parse_nginx_v_output(&combined);
+        if version.is_none() {
+            eprintln!(
+                "Warning: could not detect nginx version of image {} (output: {})",
+                image,
+                combined.trim()
+            );
         }
-    }
-    false
+        version
+    })
 }
 
 #[cfg(test)]
@@ -170,41 +232,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn version_at_least_exact_match() {
-        assert!(parse_version_at_least("1.29", 1, 29));
+    fn parse_major_minor_basic() {
+        assert_eq!(parse_major_minor("1.29"), Some((1, 29)));
+        assert_eq!(parse_major_minor("1.30"), Some((1, 30)));
+        assert_eq!(parse_major_minor("2.0"), Some((2, 0)));
     }
 
     #[test]
-    fn version_at_least_higher_minor() {
-        assert!(parse_version_at_least("1.30", 1, 29));
+    fn parse_major_minor_with_patch() {
+        assert_eq!(parse_major_minor("1.29.7"), Some((1, 29)));
+        assert_eq!(parse_major_minor("1.28.3"), Some((1, 28)));
     }
 
     #[test]
-    fn version_at_least_lower_minor() {
-        assert!(!parse_version_at_least("1.28", 1, 29));
+    fn parse_major_minor_openresty_pinned_tag() {
+        assert_eq!(parse_major_minor("1.29.2.3-noble"), Some((1, 29)));
     }
 
     #[test]
-    fn version_at_least_with_patch() {
-        assert!(parse_version_at_least("1.29.7", 1, 29));
-        assert!(!parse_version_at_least("1.28.3", 1, 29));
+    fn parse_major_minor_minor_with_suffix() {
+        // e.g. a hypothetical "1.29-alpine" style tag
+        assert_eq!(parse_major_minor("1.29-alpine"), Some((1, 29)));
     }
 
     #[test]
-    fn version_at_least_non_numeric_tag() {
-        assert!(!parse_version_at_least("latest", 1, 29));
-        assert!(!parse_version_at_least("noble", 1, 29));
+    fn parse_major_minor_non_numeric() {
+        assert_eq!(parse_major_minor("latest"), None);
+        assert_eq!(parse_major_minor("noble"), None);
+        assert_eq!(parse_major_minor("resolute"), None);
     }
 
     #[test]
-    fn version_at_least_higher_major() {
-        assert!(parse_version_at_least("2.0", 1, 29));
+    fn parse_nginx_v_nginx() {
+        let output = "nginx version: nginx/1.27.4\n";
+        assert_eq!(parse_nginx_v_output(output), Some((1, 27)));
     }
 
     #[test]
-    fn version_at_least_boundary() {
-        assert!(parse_version_at_least("1.29", 1, 29));
-        assert!(!parse_version_at_least("1.29", 1, 30));
+    fn parse_nginx_v_openresty() {
+        let output = "nginx version: openresty/1.31.1.1\n";
+        assert_eq!(parse_nginx_v_output(output), Some((1, 31)));
+    }
+
+    #[test]
+    fn parse_nginx_v_with_leading_noise() {
+        // `sh -c "a || b"` may emit a not-found error before the match
+        let output = "/bin/sh: nginx: not found\nnginx version: openresty/1.29.2.4\n";
+        assert_eq!(parse_nginx_v_output(output), Some((1, 29)));
+    }
+
+    #[test]
+    fn parse_nginx_v_garbage() {
+        assert_eq!(parse_nginx_v_output("no version here"), None);
+        assert_eq!(parse_nginx_v_output(""), None);
     }
 }
 
