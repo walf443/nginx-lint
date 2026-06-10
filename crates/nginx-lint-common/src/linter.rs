@@ -447,13 +447,37 @@ pub fn normalize_line_fix(fix: &Fix, content: &str, line_starts: &[usize]) -> Op
     Some(Fix::replace_range(line_start, line_end, &fix.new_text))
 }
 
+/// Result of applying fixes to content, with detailed counts.
+#[derive(Debug)]
+pub struct FixApplyResult {
+    /// Content after applying the fixes
+    pub content: String,
+    /// Number of fixes applied
+    pub applied: usize,
+    /// Number of fixes skipped because their offsets were out of range or
+    /// not on UTF-8 character boundaries (e.g. produced by a buggy plugin).
+    /// Does not include fixes skipped due to overlap with an applied fix.
+    pub skipped_invalid: usize,
+}
+
 /// Apply fixes to content string.
 ///
-/// All fixes (both line-based and offset-based) are normalized to offset-based,
-/// then applied in reverse order to avoid index shifts. Overlapping fixes are skipped.
+/// Convenience wrapper around [`apply_fixes_to_content_detailed`] for callers
+/// that do not need the skipped-fix count.
 ///
 /// Returns `(modified_content, number_of_fixes_applied)`.
 pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) {
+    let result = apply_fixes_to_content_detailed(content, fixes);
+    (result.content, result.applied)
+}
+
+/// Apply fixes to content string, reporting skipped fixes.
+///
+/// All fixes (both line-based and offset-based) are normalized to offset-based,
+/// then applied in reverse order to avoid index shifts. Overlapping fixes are skipped.
+/// Fixes with invalid offsets (out of range or not on UTF-8 char boundaries) are
+/// skipped and counted in [`FixApplyResult::skipped_invalid`].
+pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixApplyResult {
     let line_starts = compute_line_starts(content);
 
     // Normalize all fixes to range-based
@@ -491,6 +515,7 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
     });
 
     let mut fix_count = 0;
+    let mut skipped_invalid = 0;
     let mut result = content.to_string();
     let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
 
@@ -514,6 +539,8 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
             result.replace_range(start..end, &fix.new_text);
             applied_ranges.push((start, start + fix.new_text.len()));
             fix_count += 1;
+        } else {
+            skipped_invalid += 1;
         }
     }
 
@@ -522,7 +549,11 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
         result.push('\n');
     }
 
-    (result, fix_count)
+    FixApplyResult {
+        content: result,
+        applied: fix_count,
+        skipped_invalid,
+    }
 }
 
 #[cfg(test)]
@@ -666,6 +697,31 @@ mod fix_tests {
         let (result, count) = apply_fixes_to_content(content, &fixes);
         assert_eq!(result, "あxう;\n");
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_detailed_counts_invalid_fixes() {
+        // One valid fix, one non-boundary fix, one out-of-range fix
+        let content = "あいう;\n";
+        let valid = Fix::replace_range(3, 6, "x");
+        let non_boundary = Fix::replace_range(1, 2, "y");
+        let out_of_range = Fix::replace_range(100, 200, "z");
+        let fixes: Vec<&Fix> = vec![&valid, &non_boundary, &out_of_range];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(result.content, "あxう;\n");
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.skipped_invalid, 2);
+    }
+
+    #[test]
+    fn test_detailed_overlap_not_counted_as_invalid() {
+        let content = "abcdef\n";
+        let fix1 = Fix::replace_range(0, 3, "XYZ");
+        let fix2 = Fix::replace_range(2, 5, "QQQ"); // overlaps with fix1
+        let fixes: Vec<&Fix> = vec![&fix1, &fix2];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(result.applied, 1);
+        assert_eq!(result.skipped_invalid, 0);
     }
 
     #[test]
