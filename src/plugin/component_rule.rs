@@ -1308,6 +1308,17 @@ mod tests {
         }
     }
 
+    /// Create a second handle aliasing the same table entry, for calling
+    /// host trait methods that take the `Resource` by value while the
+    /// original handle stays owned elsewhere (e.g. by a DirectiveContext).
+    /// Tests must not drop/delete these aliases: deleting both the alias
+    /// and the original would double-delete the table entry.
+    fn alias_directive_handle(
+        resource: &Resource<DirectiveResource>,
+    ) -> Resource<DirectiveResource> {
+        Resource::new_own(resource.rep())
+    }
+
     /// Wrap a directive in a single-item Config and push a path-based
     /// directive resource for it.
     fn push_test_directive(
@@ -1591,7 +1602,7 @@ mod tests {
         let names: Vec<String> = contexts
             .iter()
             .map(|ctx| {
-                config_api::HostDirective::name(&mut data, Resource::new_own(ctx.directive.rep()))
+                config_api::HostDirective::name(&mut data, alias_directive_handle(&ctx.directive))
             })
             .collect();
         assert_eq!(names, vec!["http", "server", "listen"]);
@@ -1603,7 +1614,7 @@ mod tests {
         assert_eq!(listen_ctx.depth, 2);
         let data_wit = config_api::HostDirective::data(
             &mut data,
-            Resource::new_own(listen_ctx.directive.rep()),
+            alias_directive_handle(&listen_ctx.directive),
         );
         assert_eq!(data_wit.name, "listen");
         assert_eq!(data_wit.line, 3);
@@ -1636,9 +1647,8 @@ mod tests {
         let config_api::ConfigItem::DirectiveItem(server_resource) = &items[0] else {
             panic!("expected directive item");
         };
-        let server_resource = Resource::new_own(server_resource.rep());
         assert_eq!(
-            config_api::HostDirective::name(&mut data, server_resource),
+            config_api::HostDirective::name(&mut data, alias_directive_handle(server_resource)),
             "server"
         );
     }
