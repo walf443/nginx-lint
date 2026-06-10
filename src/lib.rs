@@ -35,7 +35,10 @@ pub use docs::{RuleDoc, RuleDocOwned};
 pub use linter::RuleProfile;
 pub use linter::{Fix, LintError, LintRule, Linter, Severity};
 pub use nginx_lint_common::RULE_CATEGORIES;
-pub use nginx_lint_common::{apply_fixes_to_content, compute_line_starts, normalize_line_fix};
+pub use nginx_lint_common::{
+    FixApplyResult, apply_fixes_to_content, apply_fixes_to_content_detailed, compute_line_starts,
+    normalize_line_fix,
+};
 
 #[cfg(feature = "cli")]
 pub use include::{IncludedFile, collect_included_files, collect_included_files_with_context};
@@ -135,17 +138,17 @@ pub fn pre_parse_checks_from_content(
 }
 
 /// Apply fixes to a file
-/// Returns the number of fixes applied
+/// Returns the application result, including applied and skipped fix counts
 #[cfg(feature = "cli")]
-pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<usize> {
+pub fn apply_fixes(path: &Path, errors: &[LintError]) -> std::io::Result<FixApplyResult> {
     let content = fs::read_to_string(path)?;
     let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
 
-    let (result, fix_count) = apply_fixes_to_content(&content, &fixes);
+    let result = apply_fixes_to_content_detailed(&content, &fixes);
 
-    if fix_count > 0 {
-        fs::write(path, result)?;
+    if result.applied > 0 {
+        fs::write(path, &result.content)?;
     }
 
-    Ok(fix_count)
+    Ok(result)
 }

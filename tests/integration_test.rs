@@ -723,8 +723,8 @@ fn test_all_rule_fixtures() {
                                 .collect();
 
                             if !rule_errors_with_fixes.is_empty() {
-                                if let Ok(fix_count) = apply_fixes(temp_path, &rule_errors_with_fixes) {
-                                    if fix_count > 0 {
+                                if let Ok(fix_result) = apply_fixes(temp_path, &rule_errors_with_fixes) {
+                                    if fix_result.applied > 0 {
                                         if let (Ok(fixed_content), Ok(expected_content)) = (
                                             fs::read_to_string(temp_path),
                                             fs::read_to_string(&tc.expected_path),

@@ -3,7 +3,7 @@ use clap::CommandFactory;
 use colored::control;
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
-    apply_fixes, apply_fixes_to_content, collect_included_files,
+    apply_fixes, apply_fixes_to_content_detailed, collect_included_files,
     collect_included_files_with_context, parse_config, parse_string_with_errors,
     pre_parse_checks_from_content, syntax_errors_to_lint_errors,
 };
@@ -12,6 +12,19 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+/// Warn about fixes that were skipped due to invalid offsets (out of range
+/// or not on UTF-8 char boundaries), which indicates a buggy or misbehaving
+/// rule/plugin.
+fn warn_skipped_fixes(skipped: usize, path: &Path) {
+    if skipped > 0 {
+        eprintln!(
+            "Warning: skipped {} fix(es) with invalid offsets in {}",
+            skipped,
+            path.display()
+        );
+    }
+}
 
 /// Result of linting a single file
 enum FileResult {
@@ -214,17 +227,23 @@ fn process_results(
                 if fix {
                     if let Some(content) = stdin_content {
                         let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
-                        let (fixed_content, count) = apply_fixes_to_content(content, &fixes);
-                        if count > 0 {
-                            print!("{}", fixed_content);
+                        let result = apply_fixes_to_content_detailed(content, &fixes);
+                        warn_skipped_fixes(result.skipped_invalid, &path);
+                        if result.applied > 0 {
+                            print!("{}", result.content);
                         } else {
                             print!("{}", content);
                         }
                     } else {
                         match apply_fixes(&path, &errors) {
-                            Ok(count) => {
-                                if count > 0 {
-                                    eprintln!("Applied {} fix(es) to {}", count, path.display());
+                            Ok(result) => {
+                                warn_skipped_fixes(result.skipped_invalid, &path);
+                                if result.applied > 0 {
+                                    eprintln!(
+                                        "Applied {} fix(es) to {}",
+                                        result.applied,
+                                        path.display()
+                                    );
                                 }
                             }
                             Err(e) => {

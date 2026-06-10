@@ -45,8 +45,9 @@ pub use ignore::{
     FilterResult, IgnoreTracker, IgnoreWarning, filter_errors, parse_context_comment,
 };
 pub use linter::{
-    Fix, LintError, LintRule, Linter, RULE_CATEGORIES, Severity, apply_fixes_to_content,
-    compute_line_starts, normalize_line_fix,
+    Fix, FixApplyResult, LintError, LintRule, Linter, RULE_CATEGORIES, Severity,
+    apply_fixes_to_content, apply_fixes_to_content_detailed, compute_line_starts,
+    normalize_line_fix,
 };
 pub use nginx_lint_parser::{parse_config, parse_string, parse_string_with_errors};
 pub use nginx_version::{NginxVersion, NginxVersionParseError, format_range, is_in_range};
