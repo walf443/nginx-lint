@@ -504,7 +504,13 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
             continue;
         }
 
-        if start <= result.len() && end <= result.len() && start <= end {
+        // Offsets must lie on UTF-8 char boundaries: replace_range panics
+        // otherwise, and plugin-provided fixes are untrusted input.
+        if start <= end
+            && end <= result.len()
+            && result.is_char_boundary(start)
+            && result.is_char_boundary(end)
+        {
             result.replace_range(start..end, &fix.new_text);
             applied_ranges.push((start, start + fix.new_text.len()));
             fix_count += 1;
@@ -625,6 +631,40 @@ mod fix_tests {
         let fixes: Vec<&Fix> = vec![&fix1, &fix2];
         let (_, count) = apply_fixes_to_content(content, &fixes);
         // Only one fix should apply (the other is skipped due to overlap)
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_apply_fix_non_char_boundary_skipped() {
+        // "あ" is 3 bytes (0..3); offsets 1 and 2 are not char boundaries.
+        // Such fixes (e.g. from a malicious plugin) must be skipped, not panic.
+        let content = "あいう;\n";
+        let fix = Fix::replace_range(1, 2, "x");
+        let fixes: Vec<&Fix> = vec![&fix];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, content);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_apply_fix_non_char_boundary_end_skipped() {
+        // start is on a boundary but end is mid-character
+        let content = "あいう;\n";
+        let fix = Fix::replace_range(0, 4, "x");
+        let fixes: Vec<&Fix> = vec![&fix];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, content);
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_apply_fix_multibyte_on_boundary_applies() {
+        // Offsets on char boundaries within multibyte content still work
+        let content = "あいう;\n";
+        let fix = Fix::replace_range(3, 6, "x");
+        let fixes: Vec<&Fix> = vec![&fix];
+        let (result, count) = apply_fixes_to_content(content, &fixes);
+        assert_eq!(result, "あxう;\n");
         assert_eq!(count, 1);
     }
 
