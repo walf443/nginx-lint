@@ -552,6 +552,23 @@ fn convert_argument_to_wit(arg: &ast::Argument) -> config_api::ArgumentInfo {
 
 // === WIT type conversion functions ===
 
+/// Remove control characters (except `\n` and `\t`) from plugin-provided text.
+///
+/// Plugin output is untrusted and is printed to the user's terminal or
+/// embedded in generated documentation; raw control characters such as ESC
+/// would allow ANSI escape sequence injection (e.g. spoofing or hiding parts
+/// of the lint report).
+fn sanitize_text(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .collect()
+}
+
+/// Sanitize an optional plugin-provided string.
+fn sanitize_opt(text: &Option<String>) -> Option<String> {
+    text.as_deref().map(sanitize_text)
+}
+
 /// Convert WIT Severity to crate Severity
 fn convert_severity(severity: &bindings::nginx_lint::plugin::types::Severity) -> Severity {
     match severity {
@@ -576,7 +593,12 @@ fn convert_fix(fix: &bindings::nginx_lint::plugin::types::Fix) -> crate::linter:
 /// Convert WIT LintError to crate LintError
 fn convert_lint_error(error: &bindings::nginx_lint::plugin::types::LintError) -> LintError {
     let severity = convert_severity(&error.severity);
-    let mut lint_error = LintError::new(&error.rule, &error.category, &error.message, severity);
+    let mut lint_error = LintError::new(
+        &sanitize_text(&error.rule),
+        &sanitize_text(&error.category),
+        &sanitize_text(&error.message),
+        severity,
+    );
 
     if let (Some(line), Some(column)) = (error.line, error.column) {
         lint_error = lint_error.with_location(line as usize, column as usize);
@@ -594,17 +616,20 @@ fn convert_lint_error(error: &bindings::nginx_lint::plugin::types::LintError) ->
 /// Convert WIT PluginSpec to our PluginSpec format
 fn convert_plugin_spec(spec: &bindings::nginx_lint::plugin::types::PluginSpec) -> PluginSpec {
     PluginSpec {
-        name: spec.name.clone(),
-        category: spec.category.clone(),
-        description: spec.description.clone(),
-        api_version: spec.api_version.clone(),
-        severity: spec.severity.clone(),
-        why: spec.why.clone(),
-        bad_example: spec.bad_example.clone(),
-        good_example: spec.good_example.clone(),
-        references: spec.references.clone(),
-        min_nginx_version: spec.min_nginx_version.clone(),
-        max_nginx_version: spec.max_nginx_version.clone(),
+        name: sanitize_text(&spec.name),
+        category: sanitize_text(&spec.category),
+        description: sanitize_text(&spec.description),
+        api_version: sanitize_text(&spec.api_version),
+        severity: sanitize_opt(&spec.severity),
+        why: sanitize_opt(&spec.why),
+        bad_example: sanitize_opt(&spec.bad_example),
+        good_example: sanitize_opt(&spec.good_example),
+        references: spec
+            .references
+            .as_ref()
+            .map(|refs| refs.iter().map(|r| sanitize_text(r)).collect()),
+        min_nginx_version: sanitize_opt(&spec.min_nginx_version),
+        max_nginx_version: sanitize_opt(&spec.max_nginx_version),
     }
 }
 
@@ -856,6 +881,74 @@ impl LintRule for ComponentLintRule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sanitize_text_strips_ansi_escape() {
+        // ESC [ 31 m (red) + ESC [ 2 K (erase line) — typical injection payloads
+        let input = "\x1b[31mfake error\x1b[2K";
+        assert_eq!(sanitize_text(input), "[31mfake error[2K");
+    }
+
+    #[test]
+    fn test_sanitize_text_keeps_newline_and_tab() {
+        let input = "line1\n\tline2";
+        assert_eq!(sanitize_text(input), "line1\n\tline2");
+    }
+
+    #[test]
+    fn test_sanitize_text_strips_other_control_chars() {
+        // \r (CR), \x07 (BEL), \x08 (BS) are stripped; unicode text is kept
+        let input = "警告\r\x07\x08です";
+        assert_eq!(sanitize_text(input), "警告です");
+    }
+
+    #[test]
+    fn test_convert_lint_error_sanitizes_strings() {
+        let wit_error = bindings::nginx_lint::plugin::types::LintError {
+            rule: "evil\x1brule".to_string(),
+            category: "cat\x1begory".to_string(),
+            message: "msg\x1b[31m with escape".to_string(),
+            severity: bindings::nginx_lint::plugin::types::Severity::Warning,
+            line: Some(1),
+            column: Some(1),
+            fixes: vec![],
+        };
+        let error = convert_lint_error(&wit_error);
+        assert_eq!(error.rule, "evilrule");
+        assert_eq!(error.category, "category");
+        assert_eq!(error.message, "msg[31m with escape");
+    }
+
+    #[test]
+    fn test_convert_plugin_spec_sanitizes_strings() {
+        let wit_spec = bindings::nginx_lint::plugin::types::PluginSpec {
+            name: "na\x1bme".to_string(),
+            category: "cat\x1begory".to_string(),
+            description: "desc\x1b[0m".to_string(),
+            api_version: "1.0".to_string(),
+            severity: Some("warn\x1bing".to_string()),
+            why: Some("why\x07".to_string()),
+            bad_example: Some("bad\nexample\x1b".to_string()),
+            good_example: Some("good\texample\x08".to_string()),
+            references: Some(vec!["https://example.com/\x1b[31m".to_string()]),
+            min_nginx_version: Some("1.0\x1b".to_string()),
+            max_nginx_version: None,
+        };
+        let spec = convert_plugin_spec(&wit_spec);
+        assert_eq!(spec.name, "name");
+        assert_eq!(spec.category, "category");
+        assert_eq!(spec.description, "desc[0m");
+        assert_eq!(spec.severity.as_deref(), Some("warning"));
+        assert_eq!(spec.why.as_deref(), Some("why"));
+        // Newlines and tabs in examples are preserved
+        assert_eq!(spec.bad_example.as_deref(), Some("bad\nexample"));
+        assert_eq!(spec.good_example.as_deref(), Some("good\texample"));
+        assert_eq!(
+            spec.references,
+            Some(vec!["https://example.com/[31m".to_string()])
+        );
+        assert_eq!(spec.min_nginx_version.as_deref(), Some("1.0"));
+    }
 
     #[test]
     fn test_convert_severity_error() {
