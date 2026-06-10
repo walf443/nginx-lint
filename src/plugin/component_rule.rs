@@ -552,8 +552,8 @@ fn convert_argument_to_wit(arg: &ast::Argument) -> config_api::ArgumentInfo {
 
 // === WIT type conversion functions ===
 
-/// Replace control characters (except `\n` and `\t`) and Unicode bidi
-/// control characters in plugin-provided text with U+FFFD (�).
+/// Replace control characters (except `\n` and `\t`) and Unicode
+/// Bidi_Control characters in plugin-provided text with U+FFFD (�).
 ///
 /// Plugin output is untrusted and is printed to the user's terminal or
 /// embedded in generated documentation; raw control characters such as ESC
@@ -565,8 +565,11 @@ fn sanitize_text(text: &str) -> String {
     text.chars()
         .map(|c| {
             let is_disallowed_control = c.is_control() && c != '\n' && c != '\t';
-            let is_bidi_control =
-                ('\u{202A}'..='\u{202E}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c);
+            // All characters with the Unicode Bidi_Control property
+            let is_bidi_control = matches!(
+                c,
+                '\u{061C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+            );
             if is_disallowed_control || is_bidi_control {
                 '\u{FFFD}'
             } else {
@@ -928,6 +931,14 @@ mod tests {
         // Source style display reordering
         let input = "safe\u{202E}gnirts live\u{2066}x";
         assert_eq!(sanitize_text(input), "safe\u{FFFD}gnirts live\u{FFFD}x");
+    }
+
+    #[test]
+    fn test_sanitize_text_replaces_implicit_bidi_marks() {
+        // U+200E (LRM), U+200F (RLM), U+061C (ALM) — the remaining
+        // Bidi_Control characters
+        let input = "a\u{200E}b\u{200F}c\u{061C}d";
+        assert_eq!(sanitize_text(input), "a\u{FFFD}b\u{FFFD}c\u{FFFD}d");
     }
 
     #[test]
