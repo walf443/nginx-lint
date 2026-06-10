@@ -35,9 +35,19 @@ pub struct ConfigResource {
     config: Arc<Config>,
 }
 
-/// Host-side directive resource, holding a cloned Directive.
+/// Host-side directive resource, referencing a directive inside the shared
+/// Config AST by its path.
+///
+/// Holding `(Arc<Config>, path)` instead of a cloned `Directive` keeps each
+/// handle small: cloning the directive would deep-copy its whole block
+/// subtree, which is O(n^2) host memory when a plugin requests handles for
+/// every directive of a large config.
 pub struct DirectiveResource {
-    directive: ast::Directive,
+    config: Arc<Config>,
+    /// Indices locating the directive: each element is the position of a
+    /// directive within the current `ConfigItem` list, descending into that
+    /// directive's block items for the next element.
+    path: Vec<usize>,
 }
 
 /// Generated bindings from WIT file, isolated in a submodule to avoid name conflicts
@@ -73,11 +83,11 @@ impl wasmtime::component::HasData for ComponentStoreData {
 /// the trap error for debugging.
 impl ComponentStoreData {
     fn get_directive(&self, self_: &Resource<DirectiveResource>) -> &ast::Directive {
-        &self
+        let resource = self
             .table
             .get(self_)
-            .expect("invalid directive resource handle")
-            .directive
+            .expect("invalid directive resource handle");
+        resolve_directive(&resource.config, &resource.path)
     }
 
     fn get_config(&self, self_: &Resource<ConfigResource>) -> &Arc<Config> {
@@ -88,16 +98,57 @@ impl ComponentStoreData {
             .config
     }
 
-    /// Push a directive into the resource table.
+    /// Push a directive path into the resource table.
     ///
     /// Panics (trapped by wasmtime) if the resource table is full. This can
     /// happen if an untrusted plugin requests an excessive number of handles.
     /// The fuel limit should prevent this in practice.
-    fn push_directive(&mut self, directive: ast::Directive) -> Resource<DirectiveResource> {
+    fn push_directive(
+        &mut self,
+        config: Arc<Config>,
+        path: Vec<usize>,
+    ) -> Resource<DirectiveResource> {
         self.table
-            .push(DirectiveResource { directive })
+            .push(DirectiveResource { config, path })
             .expect("resource table full: too many directive handles allocated")
     }
+}
+
+/// Resolve a directive path (see [`DirectiveResource`]) to the directive it
+/// points at. Panics (trapped by wasmtime) on a path that does not point at
+/// a directive; paths are host-constructed, so this only happens on a host
+/// bug, not on plugin input.
+fn resolve_directive<'a>(config: &'a Config, path: &[usize]) -> &'a ast::Directive {
+    let mut items: &[ast::ConfigItem] = &config.items;
+    let mut found: Option<&'a ast::Directive> = None;
+    for &index in path {
+        let ast::ConfigItem::Directive(directive) =
+            items.get(index).expect("invalid directive path index")
+        else {
+            panic!("directive path does not point at a directive");
+        };
+        items = directive
+            .block
+            .as_ref()
+            .map(|block| block.items.as_slice())
+            .unwrap_or(&[]);
+        found = Some(directive);
+    }
+    found.expect("empty directive path")
+}
+
+/// Resolve a directive path to the directive's block items. An empty path
+/// resolves to the config's top-level items; a directive without a block
+/// resolves to an empty slice.
+fn resolve_block_items<'a>(config: &'a Config, path: &[usize]) -> &'a [ast::ConfigItem] {
+    if path.is_empty() {
+        return &config.items;
+    }
+    resolve_directive(config, path)
+        .block
+        .as_ref()
+        .map(|block| block.items.as_slice())
+        .unwrap_or(&[])
 }
 
 // === Host trait implementations for config-api ===
@@ -113,17 +164,18 @@ impl config_api::HostConfig for ComponentStoreData {
         &mut self,
         self_: Resource<ConfigResource>,
     ) -> Vec<config_api::DirectiveContext> {
-        // TODO: Each directive (including its block subtree) is deep-cloned into
-        // a DirectiveResource. For large configs this is O(n^2) memory/time.
-        // Consider storing Arc<Directive> or an index into the original
-        // Arc<Config> to avoid deep cloning.
         let config = self.get_config(&self_).clone();
         let mut collected = Vec::new();
-        collect_directives_with_context(&config.items, &config.include_context, &mut collected);
+        collect_directive_paths_with_context(
+            &config.items,
+            &config.include_context,
+            &mut Vec::new(),
+            &mut collected,
+        );
 
         let mut results = Vec::new();
-        for (directive, parent_stack, depth) in collected {
-            let dir_resource = self.push_directive(directive.clone());
+        for (path, parent_stack, depth) in collected {
+            let dir_resource = self.push_directive(config.clone(), path);
             results.push(config_api::DirectiveContext {
                 directive: dir_resource,
                 parent_stack,
@@ -139,11 +191,11 @@ impl config_api::HostConfig for ComponentStoreData {
     ) -> Vec<Resource<DirectiveResource>> {
         let config = self.get_config(&self_).clone();
         let mut collected = Vec::new();
-        collect_all_directives(&config.items, &mut collected);
+        collect_directive_paths(&config.items, &mut Vec::new(), &mut collected);
 
         let mut results = Vec::new();
-        for directive in collected {
-            let dir_resource = self.push_directive(directive.clone());
+        for path in collected {
+            let dir_resource = self.push_directive(config.clone(), path);
             results.push(dir_resource);
         }
         results
@@ -153,7 +205,7 @@ impl config_api::HostConfig for ComponentStoreData {
         // Clone the Arc (cheap) to release the immutable borrow on self.table,
         // allowing convert_config_items_to_wit to borrow self.table mutably.
         let config = self.get_config(&self_).clone();
-        convert_config_items_to_wit(&config.items, &mut self.table)
+        convert_config_items_to_wit(&config, &[], &mut self.table)
     }
 
     fn include_context(&mut self, self_: Resource<ConfigResource>) -> Vec<String> {
@@ -325,21 +377,16 @@ impl config_api::HostDirective for ComponentStoreData {
     }
 
     fn block_items(&mut self, self_: Resource<DirectiveResource>) -> Vec<config_api::ConfigItem> {
-        // Clone block items to release the immutable borrow on self.table,
-        // allowing convert_config_items_to_wit to borrow self.table mutably.
-        // TODO: Consider using Arc<Directive> in DirectiveResource to avoid
-        // deep-cloning block subtrees on each call.
-        let items = {
-            let dir = self
+        // Clone the Arc and path (cheap) to release the immutable borrow on
+        // self.table, allowing convert_config_items_to_wit to borrow it mutably.
+        let (config, path) = {
+            let resource = self
                 .table
                 .get(&self_)
                 .expect("invalid directive resource handle");
-            match &dir.directive.block {
-                Some(block) => block.items.clone(),
-                None => return Vec::new(),
-            }
+            (resource.config.clone(), resource.path.clone())
         };
-        convert_config_items_to_wit(&items, &mut self.table)
+        convert_config_items_to_wit(&config, &path, &mut self.table)
     }
 
     fn block_is_raw(&mut self, self_: Resource<DirectiveResource>) -> bool {
@@ -457,48 +504,72 @@ fn make_range_fix(start: usize, end: usize, new_text: String) -> config_api::Fix
     }
 }
 
-/// Recursively collect directives with parent context (depth-first).
-fn collect_directives_with_context<'a>(
-    items: &'a [ast::ConfigItem],
+/// Recursively collect directive paths with parent context (depth-first).
+fn collect_directive_paths_with_context(
+    items: &[ast::ConfigItem],
     parent_stack: &[String],
-    results: &mut Vec<(&'a ast::Directive, Vec<String>, u32)>,
+    path_prefix: &mut Vec<usize>,
+    results: &mut Vec<(Vec<usize>, Vec<String>, u32)>,
 ) {
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         if let ast::ConfigItem::Directive(directive) = item {
-            results.push((directive, parent_stack.to_vec(), parent_stack.len() as u32));
+            path_prefix.push(index);
+            results.push((
+                path_prefix.clone(),
+                parent_stack.to_vec(),
+                parent_stack.len() as u32,
+            ));
             if let Some(block) = &directive.block {
                 let mut child_stack = parent_stack.to_vec();
                 child_stack.push(directive.name.clone());
-                collect_directives_with_context(&block.items, &child_stack, results);
+                collect_directive_paths_with_context(
+                    &block.items,
+                    &child_stack,
+                    path_prefix,
+                    results,
+                );
             }
+            path_prefix.pop();
         }
     }
 }
 
-/// Recursively collect all directives (depth-first).
-fn collect_all_directives<'a>(items: &'a [ast::ConfigItem], results: &mut Vec<&'a ast::Directive>) {
-    for item in items {
-        if let ast::ConfigItem::Directive(directive) = item {
-            results.push(directive);
-            if let Some(block) = &directive.block {
-                collect_all_directives(&block.items, results);
-            }
-        }
-    }
-}
-
-/// Convert parser ConfigItems to WIT ConfigItems.
-fn convert_config_items_to_wit(
+/// Recursively collect all directive paths (depth-first).
+fn collect_directive_paths(
     items: &[ast::ConfigItem],
+    path_prefix: &mut Vec<usize>,
+    results: &mut Vec<Vec<usize>>,
+) {
+    for (index, item) in items.iter().enumerate() {
+        if let ast::ConfigItem::Directive(directive) = item {
+            path_prefix.push(index);
+            results.push(path_prefix.clone());
+            if let Some(block) = &directive.block {
+                collect_directive_paths(&block.items, path_prefix, results);
+            }
+            path_prefix.pop();
+        }
+    }
+}
+
+/// Convert the ConfigItems at `base_path` (see [`resolve_block_items`]) to
+/// WIT ConfigItems, creating path-based directive resources for directives.
+fn convert_config_items_to_wit(
+    config: &Arc<Config>,
+    base_path: &[usize],
     table: &mut ResourceTable,
 ) -> Vec<config_api::ConfigItem> {
+    let items = resolve_block_items(config, base_path);
     let mut results = Vec::new();
-    for item in items {
+    for (index, item) in items.iter().enumerate() {
         match item {
-            ast::ConfigItem::Directive(directive) => {
+            ast::ConfigItem::Directive(_) => {
+                let mut path = base_path.to_vec();
+                path.push(index);
                 let dir_resource = table
                     .push(DirectiveResource {
-                        directive: directive.as_ref().clone(),
+                        config: config.clone(),
+                        path,
                     })
                     .expect("resource table full: too many directive handles allocated");
                 results.push(config_api::ConfigItem::DirectiveItem(dir_resource));
@@ -1237,6 +1308,24 @@ mod tests {
         }
     }
 
+    /// Wrap a directive in a single-item Config and push a path-based
+    /// directive resource for it.
+    fn push_test_directive(
+        data: &mut ComponentStoreData,
+        directive: ast::Directive,
+    ) -> Resource<DirectiveResource> {
+        let config = Arc::new(Config {
+            items: vec![ast::ConfigItem::Directive(Box::new(directive))],
+            include_context: vec![],
+        });
+        data.table
+            .push(DirectiveResource {
+                config,
+                path: vec![0],
+            })
+            .unwrap()
+    }
+
     #[test]
     fn test_is_included_from_http_server_correct_order() {
         let (mut data, resource) =
@@ -1335,10 +1424,7 @@ mod tests {
             table: ResourceTable::new(),
         };
         let dir = make_directive("listen", 2, 1, 10, 20);
-        let resource = data
-            .table
-            .push(DirectiveResource { directive: dir })
-            .unwrap();
+        let resource = push_test_directive(&mut data, dir);
 
         let fix =
             config_api::HostDirective::insert_before(&mut data, resource, "new_line;".to_string());
@@ -1355,10 +1441,7 @@ mod tests {
             table: ResourceTable::new(),
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
-        let resource = data
-            .table
-            .push(DirectiveResource { directive: dir })
-            .unwrap();
+        let resource = push_test_directive(&mut data, dir);
 
         let fix =
             config_api::HostDirective::insert_before(&mut data, resource, "new_line;".to_string());
@@ -1376,10 +1459,7 @@ mod tests {
             table: ResourceTable::new(),
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
-        let resource = data
-            .table
-            .push(DirectiveResource { directive: dir })
-            .unwrap();
+        let resource = push_test_directive(&mut data, dir);
 
         let fix = config_api::HostDirective::insert_before_many(
             &mut data,
@@ -1431,10 +1511,7 @@ mod tests {
             table: ResourceTable::new(),
         };
         let dir = make_directive("listen", 1, 1, 0, 10);
-        let resource = data
-            .table
-            .push(DirectiveResource { directive: dir })
-            .unwrap();
+        let resource = push_test_directive(&mut data, dir);
 
         let items = config_api::HostDirective::block_items(&mut data, resource);
         assert!(items.is_empty());
@@ -1456,13 +1533,113 @@ mod tests {
             closing_brace_leading_whitespace: String::new(),
             trailing_whitespace: "\n".to_string(),
         });
-        let resource = data
-            .table
-            .push(DirectiveResource { directive: dir })
-            .unwrap();
+        let resource = push_test_directive(&mut data, dir);
 
         let items = config_api::HostDirective::block_items(&mut data, resource);
         assert_eq!(items.len(), 1);
         assert!(matches!(items[0], config_api::ConfigItem::DirectiveItem(_)));
+    }
+
+    /// Create a directive with a block containing the given items.
+    fn make_block_directive(
+        name: &str,
+        line: usize,
+        items: Vec<ast::ConfigItem>,
+    ) -> ast::Directive {
+        let mut dir = make_directive(name, line, 1, line * 100, line * 100 + 50);
+        dir.block = Some(ast::Block {
+            items,
+            span: ast::Span::new(
+                ast::Position::new(line, 10, line * 100 + 9),
+                ast::Position::new(line + 2, 1, line * 100 + 49),
+            ),
+            raw_content: None,
+            closing_brace_leading_whitespace: String::new(),
+            trailing_whitespace: "\n".to_string(),
+        });
+        dir
+    }
+
+    #[test]
+    fn test_nested_directive_paths_resolve() {
+        // http { server { listen; } }  plus a comment before `server` so that
+        // directive indices differ from "directive number"
+        let listen = make_directive("listen", 3, 9, 320, 330);
+        let comment = ast::ConfigItem::Comment(ast::Comment {
+            text: "# c".to_string(),
+            span: ast::Span::new(ast::Position::new(2, 5, 210), ast::Position::new(2, 8, 213)),
+            leading_whitespace: String::new(),
+            trailing_whitespace: "\n".to_string(),
+        });
+        let server = make_block_directive(
+            "server",
+            2,
+            vec![ast::ConfigItem::Directive(Box::new(listen))],
+        );
+        let http = make_block_directive(
+            "http",
+            1,
+            vec![comment, ast::ConfigItem::Directive(Box::new(server))],
+        );
+        let (mut data, config_resource) =
+            setup_store_with_config(vec![], vec![ast::ConfigItem::Directive(Box::new(http))]);
+
+        let contexts =
+            config_api::HostConfig::all_directives_with_context(&mut data, config_resource);
+        assert_eq!(contexts.len(), 3);
+
+        let names: Vec<String> = contexts
+            .iter()
+            .map(|ctx| {
+                config_api::HostDirective::name(&mut data, Resource::new_own(ctx.directive.rep()))
+            })
+            .collect();
+        assert_eq!(names, vec!["http", "server", "listen"]);
+
+        // The deepest directive (listen, behind a comment sibling) resolves
+        // with correct location data through the path
+        let listen_ctx = &contexts[2];
+        assert_eq!(listen_ctx.parent_stack, vec!["http", "server"]);
+        assert_eq!(listen_ctx.depth, 2);
+        let data_wit = config_api::HostDirective::data(
+            &mut data,
+            Resource::new_own(listen_ctx.directive.rep()),
+        );
+        assert_eq!(data_wit.name, "listen");
+        assert_eq!(data_wit.line, 3);
+        assert_eq!(data_wit.start_offset, 320);
+    }
+
+    #[test]
+    fn test_nested_block_items_create_resolvable_handles() {
+        // block_items on `http` must return a handle for `server` that
+        // resolves through the extended path
+        let listen = make_directive("listen", 3, 9, 320, 330);
+        let server = make_block_directive(
+            "server",
+            2,
+            vec![ast::ConfigItem::Directive(Box::new(listen))],
+        );
+        let http = make_block_directive(
+            "http",
+            1,
+            vec![ast::ConfigItem::Directive(Box::new(server))],
+        );
+        let mut data = ComponentStoreData {
+            limits: StoreLimitsBuilder::new().build(),
+            table: ResourceTable::new(),
+        };
+        let http_resource = push_test_directive(&mut data, http);
+
+        let items = config_api::HostDirective::block_items(&mut data, http_resource);
+        assert_eq!(items.len(), 1);
+        let config_api::ConfigItem::DirectiveItem(server_resource) = &items[0] else {
+            panic!("expected directive item");
+        };
+        let server_resource = Resource::new_own(server_resource.rep());
+        assert_eq!(
+            config_api::HostDirective::name(&mut data, server_resource),
+            "server"
+        );
     }
 }
