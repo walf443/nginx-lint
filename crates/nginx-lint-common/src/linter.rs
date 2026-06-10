@@ -448,15 +448,17 @@ pub fn normalize_line_fix(fix: &Fix, content: &str, line_starts: &[usize]) -> Op
 }
 
 /// Result of applying fixes to content, with detailed counts.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FixApplyResult {
     /// Content after applying the fixes
     pub content: String,
     /// Number of fixes applied
     pub applied: usize,
-    /// Number of fixes skipped because their offsets were out of range or
-    /// not on UTF-8 character boundaries (e.g. produced by a buggy plugin).
-    /// Does not include fixes skipped due to overlap with an applied fix.
+    /// Number of fixes skipped because they could not be applied: offsets out
+    /// of range or not on UTF-8 character boundaries, or a line-based fix
+    /// referencing a missing line or `old_text` (e.g. produced by a buggy
+    /// plugin). Does not include fixes skipped due to overlap with an applied
+    /// fix.
     pub skipped_invalid: usize,
 }
 
@@ -475,10 +477,11 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
 ///
 /// All fixes (both line-based and offset-based) are normalized to offset-based,
 /// then applied in reverse order to avoid index shifts. Overlapping fixes are skipped.
-/// Fixes with invalid offsets (out of range or not on UTF-8 char boundaries) are
-/// skipped and counted in [`FixApplyResult::skipped_invalid`].
+/// Fixes that cannot be applied (invalid offsets, or line-based fixes that fail
+/// normalization) are skipped and counted in [`FixApplyResult::skipped_invalid`].
 pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixApplyResult {
     let line_starts = compute_line_starts(content);
+    let mut skipped_invalid = 0;
 
     // Normalize all fixes to range-based
     let mut range_fixes: Vec<Fix> = Vec::with_capacity(fixes.len());
@@ -487,6 +490,8 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
             range_fixes.push((*fix).clone());
         } else if let Some(normalized) = normalize_line_fix(fix, content, &line_starts) {
             range_fixes.push(normalized);
+        } else {
+            skipped_invalid += 1;
         }
     }
 
@@ -515,7 +520,6 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
     });
 
     let mut fix_count = 0;
-    let mut skipped_invalid = 0;
     let mut result = content.to_string();
     let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
 
@@ -710,6 +714,19 @@ mod fix_tests {
         let result = apply_fixes_to_content_detailed(content, &fixes);
         assert_eq!(result.content, "あxう;\n");
         assert_eq!(result.applied, 1);
+        assert_eq!(result.skipped_invalid, 2);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_detailed_counts_failed_line_normalization() {
+        let content = "listen 80;\n";
+        let missing_old_text = Fix::replace(1, "nonexistent", "x");
+        let out_of_range_line = Fix::replace(99, "listen", "x");
+        let fixes: Vec<&Fix> = vec![&missing_old_text, &out_of_range_line];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(result.content, content);
+        assert_eq!(result.applied, 0);
         assert_eq!(result.skipped_invalid, 2);
     }
 
