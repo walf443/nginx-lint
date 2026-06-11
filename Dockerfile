@@ -8,6 +8,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release && \
     cp target/release/nginx-lint /usr/local/bin/nginx-lint
 
-FROM debian:trixie-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8
+FROM debian:trixie-slim@sha256:545a1665d9364d3b00d1c892aa8fabc88d3c1f1d673eeeedfa3051010ebd91bb
 COPY --from=builder /usr/local/bin/nginx-lint /usr/local/bin/nginx-lint
 ENTRYPOINT ["nginx-lint"]
