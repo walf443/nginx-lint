@@ -143,6 +143,7 @@ jobs:
         working-directory: plugins/typescript/nginx-lint-plugin
       # jco's --instantiation mode emits a stray `export type Result` inside the
       # Root interface (invalid TS); the type is unused, so strip it.
+      # Upstream bug: https://github.com/bytecodealliance/jco/issues/1708
       - name: Fix jco instantiation d.ts
         run: sed -i '/export type Result<T, E>/d' wasm/parser/parser.d.ts
         working-directory: plugins/typescript/nginx-lint-plugin
