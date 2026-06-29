@@ -95,7 +95,9 @@ build-parser-wasm:
 	cd plugins/typescript/nginx-lint-plugin && \
 		npx jco transpile \
 			../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm \
-			-o wasm/parser --name parser
+			-o wasm/parser --name parser --instantiation async && \
+		sed -i.bak '/export type Result<T, E>/d' wasm/parser/parser.d.ts && \
+		rm -f wasm/parser/parser.d.ts.bak
 	@echo "Parser component built and transpiled."
 
 # Run tests

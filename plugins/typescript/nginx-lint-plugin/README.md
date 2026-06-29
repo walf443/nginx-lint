@@ -107,6 +107,32 @@ it("handles included files", () => {
 | `assertErrorOnLine(content, line)` | Assert error on a specific line |
 | `testExamples(badConf, goodConf)` | Validate bad config produces errors, good config does not |
 
+### Custom runtimes (Cloudflare Workers / workerd)
+
+`nginx-lint-plugin/testing` loads the parser WASM with `node:fs`/`fetch`, which
+are unavailable in some runtimes — most notably Cloudflare Workers (workerd).
+For those, import `nginx-lint-plugin/testing/custom` and supply the core module
+yourself. The bundler (e.g. wrangler/esbuild) precompiles a `.wasm` import into
+a `WebAssembly.Module`, and since the parser core has no imports it can be
+instantiated synchronously:
+
+```ts
+import { createTesting } from "nginx-lint-plugin/testing/custom";
+import coreModule from "nginx-lint-plugin/wasm/parser/parser.core.wasm";
+
+const { parseConfig, PluginTestRunner } = await createTesting({
+  getCoreModule: () => coreModule,
+  instantiateCore: (module) => new WebAssembly.Instance(module),
+});
+
+// Same API as nginx-lint-plugin/testing from here on:
+const runner = new PluginTestRunner(spec, check);
+runner.assertErrors("http { server_tokens on; }", 1);
+```
+
+`createTesting` returns the same `parseConfig` and `PluginTestRunner` as the
+default entry. In Node/browser you don't need this — use `.../testing`.
+
 ## Building a Plugin
 
 ### package.json

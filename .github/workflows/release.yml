@@ -139,7 +139,12 @@ jobs:
         run: npm install
         working-directory: plugins/typescript/nginx-lint-plugin
       - name: Transpile parser WASM to JS
-        run: npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm -o wasm/parser --name parser
+        run: npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm -o wasm/parser --name parser --instantiation async
+        working-directory: plugins/typescript/nginx-lint-plugin
+      # jco's --instantiation mode emits a stray `export type Result` inside the
+      # Root interface (invalid TS); the type is unused, so strip it.
+      - name: Fix jco instantiation d.ts
+        run: sed -i '/export type Result<T, E>/d' wasm/parser/parser.d.ts
         working-directory: plugins/typescript/nginx-lint-plugin
       - name: Build package
         run: npm run build
