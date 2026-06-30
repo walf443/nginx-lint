@@ -7,12 +7,25 @@
  *
  * Usage:
  *   import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
+ *
+ * This entry instantiates the parser WASM with a built-in loader (node:fs in
+ * Node, fetch in the browser). In runtimes without either — e.g. Cloudflare
+ * Workers / workerd — import `nginx-lint-plugin/testing/custom` and supply the
+ * core module yourself.
  */
 
-import { parseConfig as parseConfigWasm } from "../wasm/parser/parser.js";
-import { buildConfigFromParseOutput } from "./config-builder.js";
-import type { Config } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
-import type { LintError, PluginSpec } from "./generated/interfaces/nginx-lint-plugin-types.js";
+import { instantiate } from "../wasm/parser/parser.js";
+import { makeParseConfig, makePluginTestRunner } from "./testing-core.js";
+
+// When `getCoreModule` is omitted, jco's generated glue falls back to its
+// built-in loader (node:fs in Node, fetch in the browser) — the original
+// behavior. Top-level await keeps the exported `parseConfig` synchronous for
+// callers. The component declares only type-only imports (data-types/
+// parser-types) that are never invoked, so `{}` is a safe import object.
+const { parseConfig: parseConfigWasm } = await instantiate(
+  undefined as never,
+  {} as never,
+);
 
 /**
  * Parse an nginx configuration string into a WIT-compatible Config object.
@@ -21,16 +34,7 @@ import type { LintError, PluginSpec } from "./generated/interfaces/nginx-lint-pl
  * to the production Rust parser. The DFS traversal (allDirectivesWithContext)
  * is computed on the Rust side.
  */
-export function parseConfig(
-  source: string,
-  opts?: { includeContext?: string[] },
-): Config {
-  const output = parseConfigWasm(source, opts?.includeContext ?? []);
-  return buildConfigFromParseOutput(output);
-}
-
-type SpecFn = () => PluginSpec;
-type CheckFn = (cfg: Config, path: string) => LintError[];
+export const parseConfig = makeParseConfig(parseConfigWasm);
 
 /**
  * Test runner for TypeScript nginx-lint plugins.
@@ -47,72 +51,5 @@ type CheckFn = (cfg: Config, path: string) => LintError[];
  * runner.assertErrors("http { server_tokens off; }", 0);
  * ```
  */
-export class PluginTestRunner {
-  private specFn: SpecFn;
-  private checkFn: CheckFn;
-
-  constructor(spec: SpecFn, check: CheckFn) {
-    this.specFn = spec;
-    this.checkFn = check;
-  }
-
-  /**
-   * Parse and check a config string, returning only errors from this plugin's rule.
-   */
-  checkString(content: string, opts?: { includeContext?: string[] }): LintError[] {
-    const cfg = parseConfig(content, opts);
-    const errors = this.checkFn(cfg, "test.conf");
-    const ruleName = this.specFn().name;
-    return errors.filter((e) => e.rule === ruleName);
-  }
-
-  /**
-   * Assert that parsing and checking a config produces exactly `count` errors
-   * from this plugin's rule.
-   */
-  assertErrors(content: string, count: number): void {
-    const errors = this.checkString(content);
-    if (errors.length !== count) {
-      throw new Error(
-        `Expected ${count} error(s) from "${this.specFn().name}", got ${errors.length}: ${JSON.stringify(errors, null, 2)}`,
-      );
-    }
-  }
-
-  /**
-   * Assert that a config produces at least one error on the given line.
-   */
-  assertErrorOnLine(content: string, line: number): void {
-    const errors = this.checkString(content);
-    const hasLine = errors.some((e) => e.line === line);
-    if (!hasLine) {
-      const lines = errors.map((e) => e.line);
-      throw new Error(
-        `Expected error on line ${line} from "${this.specFn().name}", got errors on lines: ${JSON.stringify(lines)}`,
-      );
-    }
-  }
-
-  /**
-   * Test bad/good config content.
-   * - `badConf` must produce at least one error.
-   * - `goodConf` must produce zero errors.
-   */
-  testExamples(badConf: string, goodConf: string): void {
-    const ruleName = this.specFn().name;
-
-    const badErrors = this.checkString(badConf);
-    if (badErrors.length === 0) {
-      throw new Error(
-        `bad.conf should produce at least one "${ruleName}" error, got none`,
-      );
-    }
-
-    const goodErrors = this.checkString(goodConf);
-    if (goodErrors.length > 0) {
-      throw new Error(
-        `good.conf should produce no "${ruleName}" errors, got: ${JSON.stringify(goodErrors, null, 2)}`,
-      );
-    }
-  }
-}
+export const PluginTestRunner = makePluginTestRunner(parseConfig);
+export type PluginTestRunner = InstanceType<typeof PluginTestRunner>;
