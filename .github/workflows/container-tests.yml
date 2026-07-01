@@ -54,8 +54,13 @@ jobs:
         with:
           shared-key: "container-tests"
 
-      - name: Pull image
-        run: docker pull ${{ matrix.nginx-image }}
+      - parallel:
+          - name: Pull image
+            run: docker pull ${{ matrix.nginx-image }}
+          - name: Pull CoreDNS image
+            run: docker pull coredns/coredns:latest
+          - name: Pull PHP-FPM image
+            run: docker pull php:8.3-fpm
 
       - name: Show nginx version
         run: |
@@ -63,12 +68,6 @@ jobs:
             "nginx -v 2>&1 || openresty -v 2>&1 \
              || /usr/local/nginx/sbin/nginx -v 2>&1 \
              || /usr/local/openresty/bin/openresty -v 2>&1"
-
-      - name: Pull CoreDNS image
-        run: docker pull coredns/coredns:latest
-
-      - name: Pull PHP-FPM image
-        run: docker pull php:8.3-fpm
 
       - name: Run container tests
         env:
