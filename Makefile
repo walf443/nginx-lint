@@ -85,9 +85,6 @@ build-with-wasm-plugins: collect-plugins
 	@echo "Done."
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
-# The sed step below strips a stray, unused `export type Result` that jco's
-# --instantiation mode emits (invalid TS). Upstream bug:
-# https://github.com/bytecodealliance/jco/issues/1708
 build-parser-wasm:
 	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
 	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
@@ -98,9 +95,7 @@ build-parser-wasm:
 	cd plugins/typescript/nginx-lint-plugin && \
 		npx jco transpile \
 			../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm \
-			-o wasm/parser --name parser --instantiation async && \
-		sed -i.bak '/export type Result<T, E>/d' wasm/parser/parser.d.ts && \
-		rm -f wasm/parser/parser.d.ts.bak
+			-o wasm/parser --name parser --instantiation async
 	@echo "Parser component built and transpiled."
 
 # Run tests
