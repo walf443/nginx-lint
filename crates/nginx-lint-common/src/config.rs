@@ -111,6 +111,13 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# nginx-lint configuration file
 # Per-rule `skip_version_check = true` forces a rule to run regardless.
 # target_nginx_version = "1.31.0"
 
+# Cache directory for nginx-lint. Cacheable artifacts are stored in
+# subdirectories beneath it (e.g. the WASM plugin compilation cache under
+# "plugins/"). Defaults to the per-user cache directory (e.g.
+# ~/.cache/nginx-lint on Linux). A relative path is resolved against the
+# directory containing this file.
+# cache_dir = ".nginx-lint-cache"
+
 # Color output settings
 [color]
 # Color mode: "auto", "always", or "never"
@@ -327,6 +334,15 @@ pub struct LintConfig {
     /// lazily and emits a single warning if invalid.
     #[serde(default)]
     pub target_nginx_version: Option<String>,
+    /// Cache directory for nginx-lint.
+    ///
+    /// Cacheable artifacts are stored in subdirectories beneath it (e.g.
+    /// the WASM plugin compilation cache under `plugins/`). Defaults to the
+    /// per-user cache directory (e.g. `~/.cache/nginx-lint` on Linux). A
+    /// relative path is resolved against the directory containing the
+    /// config file.
+    #[serde(default)]
+    pub cache_dir: Option<String>,
 }
 
 /// Parser configuration
@@ -757,6 +773,12 @@ impl LintConfig {
         self.include.prefix.as_deref()
     }
 
+    /// Get the cache directory for nginx-lint (e.g. the WASM plugin
+    /// compilation cache is stored under `plugins/` beneath it)
+    pub fn cache_dir(&self) -> Option<&str> {
+        self.cache_dir.as_deref()
+    }
+
     /// Get additional contexts for invalid-directive-context rule
     pub fn additional_contexts(&self) -> Option<&HashMap<String, Vec<String>>> {
         self.rules
@@ -805,6 +827,7 @@ impl LintConfig {
                 "parser",
                 "include",
                 "target_nginx_version",
+                "cache_dir",
             ]
             .into_iter()
             .collect();
@@ -1444,6 +1467,31 @@ unknown_key = "value"
     fn test_include_prefix_none_by_default() {
         let config = LintConfig::default();
         assert!(config.include_prefix().is_none());
+    }
+
+    #[test]
+    fn test_cache_dir_none_by_default() {
+        let config = LintConfig::default();
+        assert!(config.cache_dir().is_none());
+    }
+
+    #[test]
+    fn test_cache_dir_parsed() {
+        let config = LintConfig::parse(r#"cache_dir = ".nginx-lint-cache""#).unwrap();
+        assert_eq!(config.cache_dir(), Some(".nginx-lint-cache"));
+    }
+
+    #[test]
+    fn test_cache_dir_validation_accepted() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "cache_dir = \"/var/cache/nginx-lint\"").unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert!(
+            errors.is_empty(),
+            "cache_dir should be a valid top-level field, got errors: {:?}",
+            errors
+        );
     }
 
     #[test]

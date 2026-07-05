@@ -36,6 +36,9 @@ pub enum PluginError {
 
     #[error("Unsupported WASM format '{path}': {message}")]
     UnsupportedFormat { path: PathBuf, message: String },
+
+    #[error("Failed to initialize plugin compilation cache at '{path}': {message}")]
+    CacheError { path: PathBuf, message: String },
 }
 
 impl PluginError {
@@ -88,6 +91,13 @@ impl PluginError {
 
     pub fn unsupported_format(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
         Self::UnsupportedFormat {
+            path: path.into(),
+            message: message.into(),
+        }
+    }
+
+    pub fn cache_error(path: impl Into<PathBuf>, message: impl Into<String>) -> Self {
+        Self::CacheError {
             path: path.into(),
             message: message.into(),
         }

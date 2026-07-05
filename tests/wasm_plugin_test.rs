@@ -12,7 +12,7 @@
 #![cfg(feature = "plugins")]
 
 use nginx_lint::parse_string;
-use nginx_lint::plugin::PluginLoader;
+use nginx_lint::plugin::{CompilationCache, PluginLoader};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -94,7 +94,8 @@ fn setup() -> Option<(PluginLoader, Vec<WasmPluginTestCase>)> {
         eprintln!("SKIP: No WASM plugin binaries found. Run `make build-plugins` first.");
         return None;
     }
-    let loader = PluginLoader::new().expect("Failed to create PluginLoader");
+    let loader = PluginLoader::new_with_cache(CompilationCache::Disabled)
+        .expect("Failed to create PluginLoader");
     Some((loader, plugins))
 }
 

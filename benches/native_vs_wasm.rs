@@ -13,7 +13,7 @@
 
 use nginx_lint::LintRule;
 use nginx_lint::parser::parse_string;
-use nginx_lint::plugin::PluginLoader;
+use nginx_lint::plugin::{CompilationCache, PluginLoader};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -129,8 +129,11 @@ fn main() {
 
     // Load WASM plugin
     let wasm_path = find_plugin_wasm("server_tokens_enabled");
+    // Cache disabled so the cold-start measurement always compiles instead of
+    // reading a previous run's cached artifact
     let cold_start = Instant::now();
-    let loader = PluginLoader::new_trusted().expect("Failed to create PluginLoader");
+    let loader = PluginLoader::new_trusted_with_cache(CompilationCache::Disabled)
+        .expect("Failed to create PluginLoader");
     let wasm_rule = loader
         .load_plugin(&wasm_path)
         .expect("Failed to load WASM plugin");
