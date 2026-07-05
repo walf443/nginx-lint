@@ -730,10 +730,8 @@ pub struct ComponentLintRule {
     spec: PluginSpec,
     /// Pre-instantiated bindings: import resolution and type checking are
     /// done once at load time, so each check call only pays for
-    /// instantiation itself (shared across threads)
+    /// instantiation itself (shared across threads; also holds the engine)
     plugin_pre: PluginPre<ComponentStoreData>,
-    /// WASM engine reference (shared across threads)
-    engine: Engine,
     /// Memory limit in bytes
     memory_limit: u64,
     /// Execution timeout per call in epoch ticks (None = no timeout, for
@@ -772,8 +770,7 @@ impl ComponentLintRule {
             .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
 
         // Get plugin spec
-        let spec_wit =
-            Self::get_plugin_spec(&plugin_pre, engine, &path, memory_limit, timeout_ticks)?;
+        let spec_wit = Self::get_plugin_spec(&plugin_pre, &path, memory_limit, timeout_ticks)?;
         let spec = convert_plugin_spec(&spec_wit);
 
         // Leak strings for 'static lifetime required by the LintRule trait.
@@ -787,7 +784,6 @@ impl ComponentLintRule {
             path,
             spec,
             plugin_pre,
-            engine: engine.clone(),
             memory_limit,
             timeout_ticks,
             name,
@@ -825,12 +821,11 @@ impl ComponentLintRule {
     /// Get plugin spec by instantiating the component and calling spec()
     fn get_plugin_spec(
         plugin_pre: &PluginPre<ComponentStoreData>,
-        engine: &Engine,
         path: &Path,
         memory_limit: u64,
         timeout_ticks: Option<u64>,
     ) -> Result<bindings::nginx_lint::plugin::types::PluginSpec, PluginError> {
-        let mut store = Self::create_store(engine, memory_limit, timeout_ticks);
+        let mut store = Self::create_store(plugin_pre.engine(), memory_limit, timeout_ticks);
         let plugin = plugin_pre
             .instantiate(&mut store)
             .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
@@ -846,7 +841,11 @@ impl ComponentLintRule {
         config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store = Self::create_store(&self.engine, self.memory_limit, self.timeout_ticks);
+        let mut store = Self::create_store(
+            self.plugin_pre.engine(),
+            self.memory_limit,
+            self.timeout_ticks,
+        );
         let plugin = self
             .plugin_pre
             .instantiate(&mut store)

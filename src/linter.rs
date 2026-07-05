@@ -1,6 +1,7 @@
 // Re-export core types from nginx-lint-common
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
+use nginx_lint_common::linter::run_rule;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
 use nginx_lint_common::parser::ast::Config;
@@ -433,23 +434,6 @@ impl Linter {
         (tracker, warnings)
     }
 
-    /// Run a single rule, sharing one lazily-created `Arc<Config>` among the
-    /// rules that want a shared handle (e.g. WASM plugin rules). Native-only
-    /// rule sets never pay for the clone.
-    fn run_rule(
-        rule: &dyn LintRule,
-        config: &Config,
-        path: &Path,
-        shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
-    ) -> Vec<LintError> {
-        if rule.wants_shared_config() {
-            let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
-            rule.check_shared(shared, path)
-        } else {
-            rule.check(config, path)
-        }
-    }
-
     /// Run all lint rules and collect errors
     ///
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
@@ -459,7 +443,7 @@ impl Linter {
 
         self.rules
             .par_iter()
-            .map(|rule| Self::run_rule(rule.as_ref(), config, path, &shared_config))
+            .map(|rule| run_rule(rule.as_ref(), config, path, &shared_config))
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
@@ -473,7 +457,7 @@ impl Linter {
 
         self.rules
             .iter()
-            .flat_map(|rule| Self::run_rule(rule.as_ref(), config, path, &shared_config))
+            .flat_map(|rule| run_rule(rule.as_ref(), config, path, &shared_config))
             .collect()
     }
 
@@ -537,7 +521,7 @@ impl Linter {
             .iter()
             .map(|rule| {
                 let start = Instant::now();
-                let errors = Self::run_rule(rule.as_ref(), config, path, &shared_config);
+                let errors = run_rule(rule.as_ref(), config, path, &shared_config);
                 let duration = start.elapsed();
                 let profile = RuleProfile {
                     name: rule.name().to_string(),
