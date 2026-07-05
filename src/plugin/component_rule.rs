@@ -1191,9 +1191,12 @@ http {
 
     /// The WIT boundary intentionally does not carry two pieces of data, and
     /// has not since the original per-directive reconstruction path; plugins
-    /// have never observed them. Normalize the original AST to the
-    /// guest-visible form so the round-trip comparison checks everything
-    /// else exactly:
+    /// have never observed them. They cannot be "fixed" either: adding
+    /// fields to the existing WIT records would be a breaking change that
+    /// fails instantiation of plugins built against the old SDK (see the
+    /// API_VERSION note in plugin/mod.rs). Normalize the original AST to
+    /// the guest-visible form so the round-trip comparison checks
+    /// everything else exactly:
     /// - a trailing comment transfers only its text (span and whitespace are
     ///   zeroed guest-side)
     /// - a blank line's span end is recomputed from its content, which

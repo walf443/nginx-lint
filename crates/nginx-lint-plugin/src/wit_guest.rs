@@ -67,6 +67,14 @@ pub fn convert_lint_error(error: super::LintError) -> nginx_lint::plugin::types:
 /// DFS-ordered array with index-based child references) and rebuilds the
 /// tree guest-side. One WIT boundary crossing regardless of config size,
 /// instead of two calls (`data` + `block-items`) per directive.
+///
+/// Known-lossy fields (unchanged since the original reconstruction path;
+/// they cannot be added without a breaking WIT record change that would
+/// fail instantiation of already-built plugins):
+/// - a directive's `trailing_comment` carries only its text; its span and
+///   whitespace are zeroed
+/// - a blank line's span end is recomputed from its content, which excludes
+///   the newline the parser includes
 pub fn reconstruct_config(
     config: &nginx_lint::plugin::config_api::Config,
 ) -> crate::parser::ast::Config {
