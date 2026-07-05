@@ -8,6 +8,17 @@
  *   import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
  */
 
+/**
+ * Current API version of the plugin interface.
+ *
+ * Use this for `PluginSpec.apiVersion` so plugins track the SDK version
+ * automatically. Informational only: compatibility is enforced structurally
+ * by WIT import resolution (a plugin built against a newer SDK fails to
+ * instantiate on an older host). Kept in sync with the Rust SDK's
+ * `API_VERSION` in crates/nginx-lint-plugin/src/types.rs.
+ */
+export const API_VERSION = "1.2";
+
 // --- types interface (severity, fix, lint-error, plugin-spec) ---
 export type {
   Severity,

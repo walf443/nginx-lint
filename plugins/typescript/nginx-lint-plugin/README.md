@@ -23,7 +23,10 @@ export function spec(): PluginSpec {
     name: "my-rule",
     category: "best-practices",
     description: "Describe what this rule checks",
-    apiVersion: "1.0",
+    // Literal on purpose: jco componentize cannot resolve runtime imports.
+    // Assert equality with the SDK's API_VERSION constant in your tests
+    // (which run in Node) to keep it in sync.
+    apiVersion: "1.2",
     severity: "warning",
   };
 }
@@ -268,7 +271,7 @@ import type {
   name: string;         // Rule identifier (e.g. "my-rule")
   category: string;     // Category (e.g. "security", "best-practices", "style", "syntax")
   description: string;  // Human-readable description
-  apiVersion: string;   // API version ("1.0")
+  apiVersion: string;   // API version — keep in sync with the SDK's exported API_VERSION
   severity?: string;    // Default: "warning". Also accepts "error"
   why?: string;         // Explanation of why this rule matters
   badExample?: string;  // Config that triggers the rule

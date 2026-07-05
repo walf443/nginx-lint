@@ -23,7 +23,10 @@ export function spec(): PluginSpec {
     category: "security",
     description:
       "Detects when server_tokens is enabled (exposes nginx version) [TypeScript]",
-    apiVersion: "1.0",
+    // Keep in sync with API_VERSION from nginx-lint-plugin (enforced by a
+    // test; a runtime import would break jco componentize, which cannot
+    // resolve bare module specifiers)
+    apiVersion: "1.2",
     severity: "warning",
     why: "When server_tokens is 'on' (the default), nginx includes its version number in " +
       "the Server response header and on default error pages. This information can help " +
