@@ -466,9 +466,17 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     // Load custom plugins if specified
     #[cfg(feature = "plugins")]
     if let Some(ref plugins_dir) = cli.plugins {
-        use nginx_lint::plugin::PluginLoader;
+        use nginx_lint::plugin::{CompilationCache, PluginLoader};
 
-        match PluginLoader::new() {
+        let cache = if cli.no_plugin_cache {
+            CompilationCache::Disabled
+        } else if let Some(ref cache_dir) = cli.plugin_cache_dir {
+            CompilationCache::Directory(cache_dir.clone())
+        } else {
+            CompilationCache::Default
+        };
+
+        match PluginLoader::new_with_cache(cache) {
             Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {
@@ -477,6 +485,16 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             plugins.len(),
                             plugins_dir.display()
                         );
+                        if let (Some(cache_dir), Some((hits, misses))) =
+                            (loader.cache_directory(), loader.cache_stats())
+                        {
+                            eprintln!(
+                                "Plugin compilation cache: {} ({} hit(s), {} miss(es))",
+                                cache_dir.display(),
+                                hits,
+                                misses
+                            );
+                        }
                     }
                     for plugin in plugins {
                         if cli.verbose {

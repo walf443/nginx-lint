@@ -6,14 +6,33 @@ use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
 use crate::linter::LintRule;
 use std::fs;
-use std::path::Path;
-use wasmtime::{Config, Engine};
+use std::path::{Path, PathBuf};
+use wasmtime::{Cache, CacheConfig, Config, Engine};
 
 /// Memory limit for plugins (256 MB)
 const MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Fuel limit for CPU metering (prevents infinite loops)
 const FUEL_LIMIT: u64 = 10_000_000_000;
+
+/// Compilation cache configuration for the plugin loader.
+///
+/// Compiling a WASM plugin to native code dominates plugin load time. With a
+/// disk cache enabled, compiled artifacts are keyed by the plugin bytes and
+/// compiler configuration, so subsequent runs skip compilation entirely and
+/// only deserialize the cached native code.
+#[derive(Debug, Clone, Default)]
+pub enum CompilationCache {
+    /// Use wasmtime's default per-user cache directory
+    /// (e.g. `~/.cache/wasmtime` on Linux).
+    #[default]
+    Default,
+    /// Compile plugins on every run without caching.
+    Disabled,
+    /// Cache in the given directory, creating it if missing. A relative path
+    /// is resolved against the current working directory.
+    Directory(PathBuf),
+}
 
 /// Detect whether a WASM binary is a component model file
 fn is_component_model(bytes: &[u8]) -> Option<bool> {
@@ -37,12 +56,14 @@ pub struct PluginLoader {
     engine: Engine,
     /// Whether fuel metering is enabled (for untrusted plugins)
     fuel_enabled: bool,
+    /// Compilation cache handle, kept for reporting hit/miss statistics
+    cache: Option<Cache>,
 }
 
 impl PluginLoader {
     /// Create a new plugin loader with security constraints (fuel metering enabled)
     pub fn new() -> Result<Self, PluginError> {
-        Self::with_options(true)
+        Self::with_options(true, CompilationCache::Default)
     }
 
     /// Create a new plugin loader for trusted plugins (fuel metering disabled for performance)
@@ -50,10 +71,17 @@ impl PluginLoader {
     /// WARNING: Only use this for trusted, builtin plugins. External plugins should use `new()`
     /// to enable fuel metering and prevent infinite loops.
     pub fn new_trusted() -> Result<Self, PluginError> {
-        Self::with_options(false)
+        Self::with_options(false, CompilationCache::Default)
     }
 
-    fn with_options(enable_fuel: bool) -> Result<Self, PluginError> {
+    /// Create a new plugin loader with security constraints and an explicit
+    /// compilation cache configuration
+    pub fn new_with_cache(cache: CompilationCache) -> Result<Self, PluginError> {
+        Self::with_options(true, cache)
+    }
+
+    fn with_options(enable_fuel: bool, cache: CompilationCache) -> Result<Self, PluginError> {
+        let cache = Self::build_cache(cache)?;
         let mut config = Config::new();
 
         // Enable fuel-based metering only for untrusted plugins
@@ -62,6 +90,9 @@ impl PluginLoader {
         config.wasm_component_model(true);
         // Enable Wasm GC support (needed for GC-based languages like wado)
         config.wasm_gc(true);
+        // The cache key includes the compiler configuration, so trusted and
+        // untrusted loaders never share cache entries.
+        config.cache(cache.clone());
 
         let engine = Engine::new(&config)
             .map_err(|e| PluginError::compile_error("engine", e.to_string()))?;
@@ -69,7 +100,49 @@ impl PluginLoader {
         Ok(Self {
             engine,
             fuel_enabled: enable_fuel,
+            cache,
         })
+    }
+
+    fn build_cache(cache: CompilationCache) -> Result<Option<Cache>, PluginError> {
+        match cache {
+            CompilationCache::Disabled => Ok(None),
+            // The default cache directory can be unavailable (e.g. no home
+            // directory); linting should still work, just without the cache.
+            CompilationCache::Default => match Cache::new(CacheConfig::new()) {
+                Ok(cache) => Ok(Some(cache)),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: plugin compilation cache disabled (failed to initialize): {}",
+                        e
+                    );
+                    Ok(None)
+                }
+            },
+            // An explicitly requested directory that cannot be used is an error.
+            CompilationCache::Directory(dir) => {
+                // wasmtime requires an absolute cache directory path
+                let abs_dir = std::path::absolute(&dir)
+                    .map_err(|e| PluginError::cache_error(&dir, e.to_string()))?;
+                let mut config = CacheConfig::new();
+                config.with_directory(abs_dir);
+                Cache::new(config)
+                    .map(Some)
+                    .map_err(|e| PluginError::cache_error(&dir, e.to_string()))
+            }
+        }
+    }
+
+    /// Get the compilation cache directory, if caching is enabled
+    pub fn cache_directory(&self) -> Option<&PathBuf> {
+        self.cache.as_ref().map(|c| c.directory())
+    }
+
+    /// Get compilation cache statistics as `(hits, misses)`, if caching is enabled
+    pub fn cache_stats(&self) -> Option<(usize, usize)> {
+        self.cache
+            .as_ref()
+            .map(|c| (c.cache_hits(), c.cache_misses()))
     }
 
     /// Get the WASM engine
@@ -251,6 +324,46 @@ mod tests {
         fs::write(dir.path().join("readme.txt"), b"hello").unwrap();
         let plugins = loader.load_plugins(dir.path()).unwrap();
         assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn test_new_with_cache_custom_directory() {
+        let dir = tempdir().unwrap();
+        let cache_dir = dir.path().join("wasm-cache");
+        let loader =
+            PluginLoader::new_with_cache(CompilationCache::Directory(cache_dir.clone())).unwrap();
+        // The directory is created and reported back (in canonicalized form)
+        assert!(cache_dir.is_dir());
+        let reported = loader.cache_directory().expect("cache should be enabled");
+        assert_eq!(reported, &fs::canonicalize(&cache_dir).unwrap());
+        assert_eq!(loader.cache_stats(), Some((0, 0)));
+    }
+
+    #[test]
+    fn test_new_with_cache_disabled() {
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        assert!(loader.cache_directory().is_none());
+        assert!(loader.cache_stats().is_none());
+    }
+
+    #[test]
+    fn test_cache_round_trip() {
+        let dir = tempdir().unwrap();
+        let make_loader = || {
+            PluginLoader::new_with_cache(CompilationCache::Directory(dir.path().to_path_buf()))
+                .unwrap()
+        };
+
+        // First compilation populates the cache
+        let loader = make_loader();
+        wasmtime::component::Component::new(loader.engine(), "(component)").unwrap();
+        assert_eq!(loader.cache_stats(), Some((0, 1)));
+
+        // A fresh loader with the same cache directory and configuration
+        // hits the cache instead of recompiling
+        let loader = make_loader();
+        wasmtime::component::Component::new(loader.engine(), "(component)").unwrap();
+        assert_eq!(loader.cache_stats(), Some((1, 0)));
     }
 
     #[test]
