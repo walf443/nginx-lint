@@ -209,12 +209,20 @@ fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<ComponentLintRul
         ("nginx-rift", embedded::NGINX_RIFT),
     ];
 
-    let mut plugins = Vec::new();
-    for (name, bytes) in plugin_entries {
-        plugins.push(
-            loader.load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes)?,
-        );
-    }
+    let compile = |(name, bytes): &(&str, &[u8])| {
+        loader.load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes)
+    };
 
-    Ok(plugins)
+    // Compile plugins in parallel (with the cli feature): the serial phases
+    // of each component's compilation overlap across plugins, which speeds
+    // up the first run / cache misses. Order is preserved.
+    #[cfg(feature = "cli")]
+    {
+        use rayon::prelude::*;
+        plugin_entries.par_iter().map(compile).collect()
+    }
+    #[cfg(not(feature = "cli"))]
+    {
+        plugin_entries.iter().map(compile).collect()
+    }
 }
