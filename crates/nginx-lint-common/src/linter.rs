@@ -249,12 +249,36 @@ pub trait LintRule: Send + Sync {
     /// This method allows passing a pre-serialized config JSON to avoid
     /// repeated serialization when running multiple plugins.
     /// Default implementation ignores the serialized config and calls check().
+    #[deprecated(
+        since = "0.16.0",
+        note = "no longer called by the linter; the serialized config was only used by \
+                legacy core-module plugins. Implement check() or check_shared() instead."
+    )]
     fn check_with_serialized_config(
         &self,
         config: &Config,
         path: &Path,
         _serialized_config: &str,
     ) -> Vec<LintError> {
+        self.check(config, path)
+    }
+
+    /// Whether this rule wants the config as a shared `Arc` handle.
+    ///
+    /// Rules that hand the config to another owner (e.g. WASM plugin rules,
+    /// which store it in the sandbox's resource table) should return `true`
+    /// so the linter shares one `Arc<Config>` across all such rules instead
+    /// of each rule deep-cloning the AST per check.
+    fn wants_shared_config(&self) -> bool {
+        false
+    }
+
+    /// Run the rule with a shared config handle.
+    ///
+    /// The linter calls this instead of [`check`](Self::check) when
+    /// [`wants_shared_config`](Self::wants_shared_config) returns `true`.
+    /// Default implementation borrows the config and calls `check()`.
+    fn check_shared(&self, config: &std::sync::Arc<Config>, path: &Path) -> Vec<LintError> {
         self.check(config, path)
     }
 
@@ -336,13 +360,35 @@ impl Linter {
 
     /// Run all lint rules and collect errors (sequential version)
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        // Pre-serialize config once for all rules (optimization for WASM plugins)
-        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+        let shared_config = std::sync::OnceLock::new();
 
         self.rules
             .iter()
-            .flat_map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
+            .flat_map(|rule| run_rule(rule.as_ref(), config, path, &shared_config))
             .collect()
+    }
+}
+
+/// Run a single rule, dispatching to [`LintRule::check_shared`] with one
+/// lazily-created `Arc<Config>` for rules that
+/// [want a shared handle](LintRule::wants_shared_config), and to
+/// [`LintRule::check`] otherwise.
+///
+/// The `Arc` is created at most once per `shared_config` cell (i.e. per
+/// linted file), so purely native rule sets never pay for the clone. Linter
+/// implementations should route every rule invocation through this function
+/// so the dispatch policy stays in one place.
+pub fn run_rule(
+    rule: &dyn LintRule,
+    config: &Config,
+    path: &Path,
+    shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+) -> Vec<LintError> {
+    if rule.wants_shared_config() {
+        let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
+        rule.check_shared(shared, path)
+    } else {
+        rule.check(config, path)
     }
 }
 

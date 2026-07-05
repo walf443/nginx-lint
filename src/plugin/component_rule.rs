@@ -62,8 +62,8 @@ mod bindings {
     });
 }
 
-use bindings::Plugin;
 use bindings::nginx_lint::plugin::config_api;
+use bindings::{Plugin, PluginPre};
 
 /// Store data for component model execution
 struct ComponentStoreData {
@@ -728,10 +728,10 @@ pub struct ComponentLintRule {
     path: PathBuf,
     /// Plugin metadata
     spec: PluginSpec,
-    /// Compiled component (shared across threads)
-    component: Arc<wasmtime::component::Component>,
-    /// WASM engine reference (shared across threads)
-    engine: Engine,
+    /// Pre-instantiated bindings: import resolution and type checking are
+    /// done once at load time, so each check call only pays for
+    /// instantiation itself (shared across threads; also holds the engine)
+    plugin_pre: PluginPre<ComponentStoreData>,
     /// Memory limit in bytes
     memory_limit: u64,
     /// Execution timeout per call in epoch ticks (None = no timeout, for
@@ -756,14 +756,21 @@ impl ComponentLintRule {
         let component = wasmtime::component::Component::new(engine, component_bytes)
             .map_err(|e| PluginError::compile_error(&path, e.to_string()))?;
 
+        // Register all host functions (types + config-api) and resolve the
+        // component's imports once; per-call work is instantiation only
+        let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(engine);
+        Plugin::add_to_linker::<ComponentStoreData, ComponentStoreData>(&mut linker, |data| data)
+            .map_err(|e| {
+            PluginError::instantiate_error(&path, format!("Failed to add imports to linker: {}", e))
+        })?;
+        let instance_pre = linker
+            .instantiate_pre(&component)
+            .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
+        let plugin_pre = PluginPre::new(instance_pre)
+            .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
+
         // Get plugin spec
-        let spec_wit = Self::get_plugin_spec_from_component(
-            engine,
-            &component,
-            &path,
-            memory_limit,
-            timeout_ticks,
-        )?;
+        let spec_wit = Self::get_plugin_spec(&plugin_pre, &path, memory_limit, timeout_ticks)?;
         let spec = convert_plugin_spec(&spec_wit);
 
         // Leak strings for 'static lifetime required by the LintRule trait.
@@ -776,8 +783,7 @@ impl ComponentLintRule {
         Ok(Self {
             path,
             spec,
-            component: Arc::new(component),
-            engine: engine.clone(),
+            plugin_pre,
             memory_limit,
             timeout_ticks,
             name,
@@ -812,35 +818,17 @@ impl ComponentLintRule {
         store
     }
 
-    /// Instantiate the component with config-api imports registered
-    fn instantiate(
-        engine: &Engine,
-        component: &wasmtime::component::Component,
-        store: &mut Store<ComponentStoreData>,
-        path: &Path,
-    ) -> Result<Plugin, PluginError> {
-        let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(engine);
-
-        // Register all host functions (types + config-api)
-        Plugin::add_to_linker::<ComponentStoreData, ComponentStoreData>(&mut linker, |data| data)
-            .map_err(|e| {
-            PluginError::instantiate_error(path, format!("Failed to add imports to linker: {}", e))
-        })?;
-
-        Plugin::instantiate(store, component, &linker)
-            .map_err(|e| PluginError::instantiate_error(path, e.to_string()))
-    }
-
     /// Get plugin spec by instantiating the component and calling spec()
-    fn get_plugin_spec_from_component(
-        engine: &Engine,
-        component: &wasmtime::component::Component,
+    fn get_plugin_spec(
+        plugin_pre: &PluginPre<ComponentStoreData>,
         path: &Path,
         memory_limit: u64,
         timeout_ticks: Option<u64>,
     ) -> Result<bindings::nginx_lint::plugin::types::PluginSpec, PluginError> {
-        let mut store = Self::create_store(engine, memory_limit, timeout_ticks);
-        let plugin = Self::instantiate(engine, component, &mut store, path)?;
+        let mut store = Self::create_store(plugin_pre.engine(), memory_limit, timeout_ticks);
+        let plugin = plugin_pre
+            .instantiate(&mut store)
+            .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
 
         plugin
             .call_spec(&mut store)
@@ -850,19 +838,24 @@ impl ComponentLintRule {
     /// Execute the check function using resource-based config access
     fn execute_check(
         &self,
-        config: &Config,
+        config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store = Self::create_store(&self.engine, self.memory_limit, self.timeout_ticks);
-        let plugin = Self::instantiate(&self.engine, &self.component, &mut store, &self.path)?;
+        let mut store = Self::create_store(
+            self.plugin_pre.engine(),
+            self.memory_limit,
+            self.timeout_ticks,
+        );
+        let plugin = self
+            .plugin_pre
+            .instantiate(&mut store)
+            .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
 
         // Create config resource handle
         let config_resource = store
             .data_mut()
             .table
-            .push(ConfigResource {
-                config: Arc::new(config.clone()),
-            })
+            .push(ConfigResource { config })
             .map_err(|e| {
                 PluginError::execution_error(
                     &self.path,
@@ -889,6 +882,22 @@ impl ComponentLintRule {
 
         Ok(wit_errors.iter().map(convert_lint_error).collect())
     }
+
+    /// Run a check with a shared config handle, converting failures into a
+    /// reported lint error
+    fn run_check(&self, config: Arc<Config>, path: &Path) -> Vec<LintError> {
+        match self.execute_check(config, path) {
+            Ok(errors) => errors,
+            Err(e) => {
+                vec![LintError::new(
+                    self.name,
+                    self.category,
+                    &format!("Plugin execution failed: {}", e),
+                    Severity::Error,
+                )]
+            }
+        }
+    }
 }
 
 impl LintRule for ComponentLintRule {
@@ -905,27 +914,17 @@ impl LintRule for ComponentLintRule {
     }
 
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        match self.execute_check(config, path) {
-            Ok(errors) => errors,
-            Err(e) => {
-                vec![LintError::new(
-                    self.name,
-                    self.category,
-                    &format!("Plugin execution failed: {}", e),
-                    Severity::Error,
-                )]
-            }
-        }
+        // Direct callers only have a borrowed Config, so this pays a deep
+        // clone. The linter passes a shared handle via check_shared instead.
+        self.run_check(Arc::new(config.clone()), path)
     }
 
-    fn check_with_serialized_config(
-        &self,
-        config: &Config,
-        path: &Path,
-        _serialized_config: &str,
-    ) -> Vec<LintError> {
-        // With resource-based approach, we don't use serialized config
-        self.check(config, path)
+    fn wants_shared_config(&self) -> bool {
+        true
+    }
+
+    fn check_shared(&self, config: &Arc<Config>, path: &Path) -> Vec<LintError> {
+        self.run_check(config.clone(), path)
     }
 
     fn why(&self) -> Option<&str> {

@@ -92,16 +92,21 @@ fn find_plugin_wasm(plugin_name: &str) -> PathBuf {
     wasm_path
 }
 
-/// Benchmark warm iterations for a given rule and config
+/// Benchmark warm iterations for a given rule and config.
+///
+/// Uses check_shared with one shared Arc, matching how the linter invokes
+/// rules in production (check() would deep-clone the config per call for
+/// WASM rules and overstate their cost).
 fn bench_warm(
     rule: &dyn LintRule,
     config: &nginx_lint::parser::ast::Config,
     path: &Path,
     iterations: u32,
 ) -> Duration {
+    let shared = std::sync::Arc::new(config.clone());
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = rule.check(config, path);
+        let _ = rule.check_shared(&shared, path);
     }
     start.elapsed()
 }
