@@ -468,10 +468,19 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::{CompilationCache, PluginLoader};
 
-        let cache = if cli.no_plugin_cache {
+        // Cache root precedence: --no-cache > --cache-dir > cache_dir in
+        // .nginx-lint.toml (relative to the config file) > per-user default
+        let cache = if cli.no_cache {
             CompilationCache::Disabled
-        } else if let Some(ref cache_dir) = cli.plugin_cache_dir {
+        } else if let Some(ref cache_dir) = cli.cache_dir {
             CompilationCache::Directory(cache_dir.clone())
+        } else if let Some(cache_dir) = lint_config.as_ref().and_then(|c| c.cache_dir()) {
+            let path = PathBuf::from(cache_dir);
+            CompilationCache::Directory(if path.is_relative() {
+                config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
+            } else {
+                path
+            })
         } else {
             CompilationCache::Default
         };

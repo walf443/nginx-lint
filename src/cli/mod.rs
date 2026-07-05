@@ -58,16 +58,17 @@ pub struct Cli {
     #[arg(long, value_name = "DIR")]
     pub plugins: Option<PathBuf>,
 
-    /// Directory for the WASM plugin compilation cache. Defaults to wasmtime's
-    /// per-user cache directory (e.g. ~/.cache/wasmtime on Linux).
+    /// Cache directory for nginx-lint (the WASM plugin compilation cache is stored
+    /// under "plugins/" beneath it). Defaults to the per-user cache directory
+    /// (e.g. ~/.cache/nginx-lint on Linux). Overrides cache_dir in .nginx-lint.toml.
     #[cfg(feature = "plugins")]
-    #[arg(long, value_name = "DIR", conflicts_with = "no_plugin_cache")]
-    pub plugin_cache_dir: Option<PathBuf>,
+    #[arg(long, value_name = "DIR", conflicts_with = "no_cache")]
+    pub cache_dir: Option<PathBuf>,
 
-    /// Disable the WASM plugin compilation cache and compile plugins on every run
+    /// Disable the cache (WASM plugins are compiled on every run)
     #[cfg(feature = "plugins")]
     #[arg(long)]
-    pub no_plugin_cache: bool,
+    pub no_cache: bool,
 
     /// Show profiling information (time spent per rule)
     #[arg(long)]

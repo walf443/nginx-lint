@@ -21,16 +21,21 @@ const FUEL_LIMIT: u64 = 10_000_000_000;
 /// disk cache enabled, compiled artifacts are keyed by the plugin bytes and
 /// compiler configuration, so subsequent runs skip compilation entirely and
 /// only deserialize the cached native code.
+///
+/// The cache lives in the [`crate::cache::PLUGIN_CACHE_SUBDIR`] subdirectory
+/// of the nginx-lint cache root, so the same root can be shared with other
+/// (future) cache consumers.
 #[derive(Debug, Clone, Default)]
 pub enum CompilationCache {
-    /// Use wasmtime's default per-user cache directory
-    /// (e.g. `~/.cache/wasmtime` on Linux).
+    /// Use the default per-user cache root
+    /// (e.g. `~/.cache/nginx-lint` on Linux); see
+    /// [`crate::cache::default_cache_root`].
     #[default]
     Default,
     /// Compile plugins on every run without caching.
     Disabled,
-    /// Cache in the given directory, creating it if missing. A relative path
-    /// is resolved against the current working directory.
+    /// Use the given directory as the cache root, creating it if missing.
+    /// A relative path is resolved against the current working directory.
     Directory(PathBuf),
 }
 
@@ -107,30 +112,40 @@ impl PluginLoader {
     fn build_cache(cache: CompilationCache) -> Result<Option<Cache>, PluginError> {
         match cache {
             CompilationCache::Disabled => Ok(None),
-            // The default cache directory can be unavailable (e.g. no home
+            // The default cache root can be unavailable (e.g. no home
             // directory); linting should still work, just without the cache.
-            CompilationCache::Default => match Cache::new(CacheConfig::new()) {
-                Ok(cache) => Ok(Some(cache)),
-                Err(e) => {
+            CompilationCache::Default => {
+                let Some(root) = crate::cache::default_cache_root() else {
                     eprintln!(
-                        "Warning: plugin compilation cache disabled (failed to initialize): {}",
-                        e
+                        "Warning: plugin compilation cache disabled (could not determine the user cache directory)"
                     );
-                    Ok(None)
+                    return Ok(None);
+                };
+                match Self::cache_in_root(&root) {
+                    Ok(cache) => Ok(Some(cache)),
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: plugin compilation cache disabled (failed to initialize): {}",
+                            e
+                        );
+                        Ok(None)
+                    }
                 }
-            },
-            // An explicitly requested directory that cannot be used is an error.
-            CompilationCache::Directory(dir) => {
-                // wasmtime requires an absolute cache directory path
-                let abs_dir = std::path::absolute(&dir)
-                    .map_err(|e| PluginError::cache_error(&dir, e.to_string()))?;
-                let mut config = CacheConfig::new();
-                config.with_directory(abs_dir);
-                Cache::new(config)
-                    .map(Some)
-                    .map_err(|e| PluginError::cache_error(&dir, e.to_string()))
             }
+            // An explicitly requested directory that cannot be used is an error.
+            CompilationCache::Directory(root) => Self::cache_in_root(&root).map(Some),
         }
+    }
+
+    /// Create a compilation cache in the plugin subdirectory of `root`
+    fn cache_in_root(root: &Path) -> Result<Cache, PluginError> {
+        let dir = crate::cache::plugin_cache_dir(root);
+        // wasmtime requires an absolute cache directory path
+        let abs_dir =
+            std::path::absolute(&dir).map_err(|e| PluginError::cache_error(&dir, e.to_string()))?;
+        let mut config = CacheConfig::new();
+        config.with_directory(abs_dir);
+        Cache::new(config).map_err(|e| PluginError::cache_error(&dir, e.to_string()))
     }
 
     /// Get the compilation cache directory, if caching is enabled
@@ -329,13 +344,15 @@ mod tests {
     #[test]
     fn test_new_with_cache_custom_directory() {
         let dir = tempdir().unwrap();
-        let cache_dir = dir.path().join("wasm-cache");
+        let cache_root = dir.path().join("nginx-lint-cache");
         let loader =
-            PluginLoader::new_with_cache(CompilationCache::Directory(cache_dir.clone())).unwrap();
-        // The directory is created and reported back (in canonicalized form)
-        assert!(cache_dir.is_dir());
+            PluginLoader::new_with_cache(CompilationCache::Directory(cache_root.clone())).unwrap();
+        // The plugin cache lives in the "plugins" subdirectory of the root,
+        // which is created and reported back (in canonicalized form)
+        let plugin_cache = cache_root.join("plugins");
+        assert!(plugin_cache.is_dir());
         let reported = loader.cache_directory().expect("cache should be enabled");
-        assert_eq!(reported, &fs::canonicalize(&cache_dir).unwrap());
+        assert_eq!(reported, &fs::canonicalize(&plugin_cache).unwrap());
         assert_eq!(loader.cache_stats(), Some((0, 0)));
     }
 

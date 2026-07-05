@@ -4,6 +4,7 @@ pub use nginx_lint_common::ignore;
 pub use nginx_lint_common::parser;
 
 // Local modules with CLI-specific functionality
+pub mod cache;
 pub mod docs;
 pub mod linter;
 pub mod rules;
