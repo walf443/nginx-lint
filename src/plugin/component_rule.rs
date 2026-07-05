@@ -565,26 +565,14 @@ fn convert_config_items_to_wit(
                 results.push(config_api::ConfigItem::DirectiveItem(dir_resource));
             }
             ast::ConfigItem::Comment(comment) => {
-                results.push(config_api::ConfigItem::CommentItem(
-                    config_api::CommentInfo {
-                        text: comment.text.clone(),
-                        line: comment.span.start.line as u32,
-                        column: comment.span.start.column as u32,
-                        leading_whitespace: comment.leading_whitespace.clone(),
-                        trailing_whitespace: comment.trailing_whitespace.clone(),
-                        start_offset: comment.span.start.offset as u32,
-                        end_offset: comment.span.end.offset as u32,
-                    },
-                ));
+                results.push(config_api::ConfigItem::CommentItem(make_comment_info(
+                    comment,
+                )));
             }
             ast::ConfigItem::BlankLine(blank) => {
-                results.push(config_api::ConfigItem::BlankLineItem(
-                    config_api::BlankLineInfo {
-                        line: blank.span.start.line as u32,
-                        content: blank.content.clone(),
-                        start_offset: blank.span.start.offset as u32,
-                    },
-                ));
+                results.push(config_api::ConfigItem::BlankLineItem(make_blank_line_info(
+                    blank,
+                )));
             }
         }
     }
@@ -1128,15 +1116,240 @@ mod tests {
         fn walk_items(data: &mut ComponentStoreData, items: Vec<config_api::ConfigItem>) {
             for item in items {
                 if let config_api::ConfigItem::DirectiveItem(handle) = item {
-                    let alias = Resource::new_own(handle.rep());
+                    let alias = Resource::new_borrow(handle.rep());
                     let d = config_api::HostDirective::data(data, alias);
                     if d.has_block {
-                        let alias = Resource::new_own(handle.rep());
+                        let alias = Resource::new_borrow(handle.rep());
                         let children = config_api::HostDirective::block_items(data, alias);
                         walk_items(data, children);
                     }
                 }
             }
+        }
+    }
+
+    /// The snapshot flattening must be lossless: rebuilding the AST from the
+    /// flat array (the way the guest SDK does) must reproduce the original
+    /// config exactly. Guards against field omissions in make_directive_data
+    /// and ordering/index bugs in flatten_item_to_wit, which would otherwise
+    /// silently drift from what plugins observe.
+    #[test]
+    fn test_snapshot_round_trip_is_lossless() {
+        let source = r#"# leading comment
+user nginx;
+
+http {
+    gzip on; # trailing comment
+    upstream backend {
+        server 127.0.0.1:8080;
+    }
+
+    server {
+        listen 80;
+        server_name "example.com" 'alt.example.com';
+        set $custom_var value;
+        location / {
+            proxy_pass http://backend;
+            proxy_set_header Host $host;
+        }
+    }
+}
+"#;
+        let config = crate::parser::parse_string(source).unwrap();
+        let (mut data, resource) =
+            setup_store_with_config(vec!["http".to_string()], config.items.clone());
+
+        let snapshot = config_api::HostConfig::snapshot(&mut data, resource);
+
+        let mut slots: Vec<Option<config_api::FlatItem>> =
+            snapshot.all_items.into_iter().map(Some).collect();
+        let rebuilt = Config {
+            items: snapshot
+                .top_level_indices
+                .iter()
+                .map(|&index| rebuild_item(&mut slots, index))
+                .collect(),
+            include_context: snapshot.include_context,
+        };
+        assert!(
+            slots.iter().all(Option::is_none),
+            "snapshot contains items unreachable from the index tree"
+        );
+
+        let mut original = Config {
+            items: config.items,
+            include_context: vec!["http".to_string()],
+        };
+        normalize_known_lossy_fields(&mut original.items);
+        assert_eq!(
+            serde_json::to_value(&original).unwrap(),
+            serde_json::to_value(&rebuilt).unwrap(),
+            "snapshot round trip must reproduce the original AST exactly \
+             (modulo the known-lossy fields normalized above)"
+        );
+    }
+
+    /// The WIT boundary intentionally does not carry two pieces of data, and
+    /// has not since the original per-directive reconstruction path; plugins
+    /// have never observed them. Normalize the original AST to the
+    /// guest-visible form so the round-trip comparison checks everything
+    /// else exactly:
+    /// - a trailing comment transfers only its text (span and whitespace are
+    ///   zeroed guest-side)
+    /// - a blank line's span end is recomputed from its content, which
+    ///   excludes the newline the parser includes
+    fn normalize_known_lossy_fields(items: &mut [ast::ConfigItem]) {
+        for item in items {
+            match item {
+                ast::ConfigItem::Directive(directive) => {
+                    if let Some(comment) = &mut directive.trailing_comment {
+                        let line = directive.span.start.line;
+                        comment.span = ast::Span::new(
+                            ast::Position::new(line, 0, 0),
+                            ast::Position::new(line, 0, 0),
+                        );
+                        comment.leading_whitespace = String::new();
+                        comment.trailing_whitespace = String::new();
+                    }
+                    if let Some(block) = &mut directive.block {
+                        normalize_known_lossy_fields(&mut block.items);
+                    }
+                }
+                ast::ConfigItem::BlankLine(blank) => {
+                    let start = blank.span.start;
+                    blank.span = ast::Span::new(
+                        start,
+                        ast::Position::new(
+                            start.line,
+                            1 + blank.content.chars().count(),
+                            start.offset + blank.content.len(),
+                        ),
+                    );
+                }
+                ast::ConfigItem::Comment(_) => {}
+            }
+        }
+    }
+
+    /// Test-local mirror of the guest SDK's build_item: rebuild the AST item
+    /// at `index` from the snapshot's flat array.
+    fn rebuild_item(slots: &mut [Option<config_api::FlatItem>], index: u32) -> ast::ConfigItem {
+        use bindings::nginx_lint::plugin::parser_types::ConfigItemValue;
+
+        let item = slots[index as usize].take().expect("index visited twice");
+        let children: Vec<ast::ConfigItem> = item
+            .child_indices
+            .iter()
+            .map(|&child| rebuild_item(slots, child))
+            .collect();
+
+        match item.value {
+            ConfigItemValue::DirectiveItem(d) => {
+                let line = d.line as usize;
+                let column = d.column as usize;
+                let start_offset = d.start_offset as usize;
+                let block = d.has_block.then(|| ast::Block {
+                    items: children,
+                    span: ast::Span::new(
+                        ast::Position::new(
+                            d.block_start_line.unwrap_or(d.line) as usize,
+                            d.block_start_column.unwrap_or(d.column) as usize,
+                            d.block_start_offset.unwrap_or(d.start_offset) as usize,
+                        ),
+                        ast::Position::new(
+                            d.end_line as usize,
+                            d.end_column as usize,
+                            d.end_offset as usize,
+                        ),
+                    ),
+                    raw_content: d.block_raw_content.clone(),
+                    closing_brace_leading_whitespace: d
+                        .closing_brace_leading_whitespace
+                        .clone()
+                        .unwrap_or_default(),
+                    trailing_whitespace: d.block_trailing_whitespace.clone().unwrap_or_default(),
+                });
+                ast::ConfigItem::Directive(Box::new(ast::Directive {
+                    name_span: ast::Span::new(
+                        ast::Position::new(line, column, start_offset),
+                        ast::Position::new(
+                            line,
+                            d.name_end_column as usize,
+                            d.name_end_offset as usize,
+                        ),
+                    ),
+                    args: d.args.into_iter().map(rebuild_argument).collect(),
+                    block,
+                    span: ast::Span::new(
+                        ast::Position::new(line, column, start_offset),
+                        ast::Position::new(
+                            d.end_line as usize,
+                            d.end_column as usize,
+                            d.end_offset as usize,
+                        ),
+                    ),
+                    trailing_comment: d.trailing_comment_text.map(|text| ast::Comment {
+                        span: ast::Span::new(
+                            ast::Position::new(line, 0, 0),
+                            ast::Position::new(line, 0, 0),
+                        ),
+                        leading_whitespace: String::new(),
+                        trailing_whitespace: String::new(),
+                        text,
+                    }),
+                    name: d.name,
+                    leading_whitespace: d.leading_whitespace,
+                    space_before_terminator: d.space_before_terminator,
+                    trailing_whitespace: d.trailing_whitespace,
+                }))
+            }
+            ConfigItemValue::CommentItem(c) => ast::ConfigItem::Comment(ast::Comment {
+                span: ast::Span::new(
+                    ast::Position::new(c.line as usize, c.column as usize, c.start_offset as usize),
+                    ast::Position::new(
+                        c.line as usize,
+                        c.column as usize + c.text.chars().count(),
+                        c.end_offset as usize,
+                    ),
+                ),
+                leading_whitespace: c.leading_whitespace,
+                trailing_whitespace: c.trailing_whitespace,
+                text: c.text,
+            }),
+            ConfigItemValue::BlankLineItem(b) => ast::ConfigItem::BlankLine(ast::BlankLine {
+                span: ast::Span::new(
+                    ast::Position::new(b.line as usize, 1, b.start_offset as usize),
+                    ast::Position::new(
+                        b.line as usize,
+                        1 + b.content.chars().count(),
+                        b.start_offset as usize + b.content.len(),
+                    ),
+                ),
+                content: b.content,
+            }),
+        }
+    }
+
+    fn rebuild_argument(a: config_api::ArgumentInfo) -> ast::Argument {
+        let value = match a.arg_type {
+            config_api::ArgumentType::Literal => ast::ArgumentValue::Literal(a.value),
+            config_api::ArgumentType::QuotedString => ast::ArgumentValue::QuotedString(a.value),
+            config_api::ArgumentType::SingleQuotedString => {
+                ast::ArgumentValue::SingleQuotedString(a.value)
+            }
+            config_api::ArgumentType::Variable => ast::ArgumentValue::Variable(a.value),
+        };
+        ast::Argument {
+            value,
+            span: ast::Span::new(
+                ast::Position::new(a.line as usize, a.column as usize, a.start_offset as usize),
+                ast::Position::new(
+                    a.line as usize,
+                    a.column as usize + a.raw.chars().count(),
+                    a.end_offset as usize,
+                ),
+            ),
+            raw: a.raw,
         }
     }
 

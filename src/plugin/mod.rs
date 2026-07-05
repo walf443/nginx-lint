@@ -22,12 +22,14 @@ pub use loader::{CompilationCache, PluginLoader};
 
 /// Current API version for the plugin interface.
 ///
-/// This version covers:
-/// - Input: The Config/AST structure passed to plugins via WIT resource handles
-/// - Output: The LintError structure returned by plugins via WIT types
-///
-/// Plugins declare which API version they use, and the host can support
-/// multiple versions for backward compatibility.
+/// Informational only: plugins report the SDK's version in
+/// `PluginSpec.api_version`, and nothing compares it at runtime. Actual
+/// compatibility is enforced structurally by WIT import resolution — a
+/// plugin instantiates iff the host provides every function the plugin
+/// imports. Hosts therefore stay compatible with plugins built against
+/// older SDKs (the WIT interface only ever gains functions), while a
+/// plugin built against a newer SDK fails to instantiate on an older host
+/// with a missing-import error.
 pub const API_VERSION: &str = "1.2";
 
 /// Names of builtin plugins

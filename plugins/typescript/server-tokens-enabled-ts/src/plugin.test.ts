@@ -4,6 +4,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { spec, check } from "./plugin.js";
+import { API_VERSION } from "nginx-lint-plugin";
 import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -14,6 +15,9 @@ describe("spec", () => {
     const s = spec();
     assert.equal(s.name, "server-tokens-enabled-ts");
     assert.equal(s.category, "security");
+    // The plugin declares apiVersion as a literal (a runtime import would
+    // break jco componentize); this assertion keeps it in sync with the SDK
+    assert.equal(s.apiVersion, API_VERSION);
     assert.equal(s.severity, "warning");
     assert.ok(s.description.length > 0);
     assert.ok(s.badExample);
