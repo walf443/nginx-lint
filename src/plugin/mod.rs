@@ -28,7 +28,7 @@ pub use loader::{CompilationCache, PluginLoader};
 ///
 /// Plugins declare which API version they use, and the host can support
 /// multiple versions for backward compatibility.
-pub const API_VERSION: &str = "1.0";
+pub const API_VERSION: &str = "1.2";
 
 /// Names of builtin plugins
 pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[

@@ -63,81 +63,99 @@ pub fn convert_lint_error(error: super::LintError) -> nginx_lint::plugin::types:
 
 /// Reconstruct a parser Config from a WIT config resource handle.
 ///
-/// This calls host functions to retrieve the config data and builds
-/// a parser::Config that plugins can use unchanged.
+/// Fetches the entire config in a single `snapshot()` host call (a flat
+/// DFS-ordered array with index-based child references) and rebuilds the
+/// tree guest-side. One WIT boundary crossing regardless of config size,
+/// instead of two calls (`data` + `block-items`) per directive.
 pub fn reconstruct_config(
     config: &nginx_lint::plugin::config_api::Config,
 ) -> crate::parser::ast::Config {
     use crate::parser::ast;
 
-    let items = reconstruct_config_items(&config.items());
-    let include_context = config.include_context();
+    let snapshot = config.snapshot();
+    // Slots let each flat item be moved out exactly once while children are
+    // resolved by index, avoiding a clone of every string in the config
+    let mut slots: Vec<Option<nginx_lint::plugin::config_api::FlatItem>> =
+        snapshot.all_items.into_iter().map(Some).collect();
+    let items = snapshot
+        .top_level_indices
+        .iter()
+        .map(|&index| build_item(&mut slots, index))
+        .collect();
 
     ast::Config {
         items,
-        include_context,
+        include_context: snapshot.include_context,
     }
 }
 
-/// Reconstruct parser ConfigItems from WIT ConfigItems.
-fn reconstruct_config_items(
-    items: &[nginx_lint::plugin::config_api::ConfigItem],
-) -> Vec<crate::parser::ast::ConfigItem> {
+/// Rebuild the config item at `index` (and, recursively, its block children)
+/// from the snapshot's flat array.
+fn build_item(
+    slots: &mut [Option<nginx_lint::plugin::config_api::FlatItem>],
+    index: u32,
+) -> crate::parser::ast::ConfigItem {
     use crate::parser::ast;
-    use nginx_lint::plugin::config_api::ConfigItem as WitConfigItem;
+    use nginx_lint::plugin::parser_types::ConfigItemValue;
 
-    items
+    let item = slots[index as usize]
+        .take()
+        .expect("snapshot child index out of range or visited twice");
+    let children: Vec<ast::ConfigItem> = item
+        .child_indices
         .iter()
-        .map(|item| match item {
-            WitConfigItem::DirectiveItem(dir_handle) => {
-                ast::ConfigItem::Directive(Box::new(reconstruct_directive(dir_handle)))
-            }
-            WitConfigItem::CommentItem(c) => ast::ConfigItem::Comment(ast::Comment {
-                text: c.text.clone(),
-                span: ast::Span::new(
-                    ast::Position::new(c.line as usize, c.column as usize, c.start_offset as usize),
-                    ast::Position::new(
-                        c.line as usize,
-                        c.column as usize + c.text.chars().count(),
-                        c.end_offset as usize,
-                    ),
+        .map(|&child| build_item(slots, child))
+        .collect();
+
+    match item.value {
+        ConfigItemValue::DirectiveItem(d) => {
+            ast::ConfigItem::Directive(Box::new(directive_from_data(d, children)))
+        }
+        ConfigItemValue::CommentItem(c) => ast::ConfigItem::Comment(ast::Comment {
+            span: ast::Span::new(
+                ast::Position::new(c.line as usize, c.column as usize, c.start_offset as usize),
+                ast::Position::new(
+                    c.line as usize,
+                    c.column as usize + c.text.chars().count(),
+                    c.end_offset as usize,
                 ),
-                leading_whitespace: c.leading_whitespace.clone(),
-                trailing_whitespace: c.trailing_whitespace.clone(),
-            }),
-            WitConfigItem::BlankLineItem(b) => ast::ConfigItem::BlankLine(ast::BlankLine {
-                span: ast::Span::new(
-                    ast::Position::new(b.line as usize, 1, b.start_offset as usize),
-                    ast::Position::new(
-                        b.line as usize,
-                        1 + b.content.chars().count(),
-                        b.start_offset as usize + b.content.len(),
-                    ),
+            ),
+            leading_whitespace: c.leading_whitespace,
+            trailing_whitespace: c.trailing_whitespace,
+            text: c.text,
+        }),
+        ConfigItemValue::BlankLineItem(b) => ast::ConfigItem::BlankLine(ast::BlankLine {
+            span: ast::Span::new(
+                ast::Position::new(b.line as usize, 1, b.start_offset as usize),
+                ast::Position::new(
+                    b.line as usize,
+                    1 + b.content.chars().count(),
+                    b.start_offset as usize + b.content.len(),
                 ),
-                content: b.content.clone(),
-            }),
-        })
-        .collect()
+            ),
+            content: b.content,
+        }),
+    }
 }
 
-/// Convert a WIT argument-info to a parser Argument.
-fn convert_wit_argument(
-    a: &nginx_lint::plugin::config_api::ArgumentInfo,
+/// Convert a WIT argument-info to a parser Argument (by value, no clones).
+fn argument_from_info(
+    a: nginx_lint::plugin::config_api::ArgumentInfo,
 ) -> crate::parser::ast::Argument {
     use crate::parser::ast;
 
     let value = match a.arg_type {
         nginx_lint::plugin::config_api::ArgumentType::Literal => {
-            ast::ArgumentValue::Literal(a.value.clone())
+            ast::ArgumentValue::Literal(a.value)
         }
         nginx_lint::plugin::config_api::ArgumentType::QuotedString => {
-            ast::ArgumentValue::QuotedString(a.value.clone())
+            ast::ArgumentValue::QuotedString(a.value)
         }
         nginx_lint::plugin::config_api::ArgumentType::SingleQuotedString => {
-            ast::ArgumentValue::SingleQuotedString(a.value.clone())
+            ast::ArgumentValue::SingleQuotedString(a.value)
         }
         nginx_lint::plugin::config_api::ArgumentType::Variable => {
-            ast::ArgumentValue::Variable(a.value.clone())
+            ast::ArgumentValue::Variable(a.value)
         }
     };
     ast::Argument {
@@ -150,24 +168,19 @@ fn convert_wit_argument(
                 a.end_offset as usize,
             ),
         ),
-        raw: a.raw.clone(),
+        raw: a.raw,
     }
 }
 
-/// Reconstruct a parser Directive from a WIT directive resource handle.
-///
-/// Uses the bulk `data()` method to fetch all flat properties in a single
-/// WIT boundary crossing, then only calls `block_items()` if the directive
-/// has a block (1 additional crossing per block, recursive).
-fn reconstruct_directive(
-    handle: &nginx_lint::plugin::config_api::Directive,
+/// Build a parser Directive from an owned WIT directive-data record and the
+/// already-reconstructed block children (empty when there is no block).
+fn directive_from_data(
+    d: nginx_lint::plugin::config_api::DirectiveData,
+    block_items: Vec<crate::parser::ast::ConfigItem>,
 ) -> crate::parser::ast::Directive {
     use crate::parser::ast;
 
-    // Single WIT call to get all flat properties
-    let d = handle.data();
-
-    let args: Vec<ast::Argument> = d.args.iter().map(convert_wit_argument).collect();
+    let args: Vec<ast::Argument> = d.args.into_iter().map(argument_from_info).collect();
 
     let line = d.line as usize;
     let column = d.column as usize;
@@ -177,8 +190,6 @@ fn reconstruct_directive(
     let end_column = d.end_column as usize;
 
     let block = if d.has_block {
-        // One additional WIT call for block items (recursive)
-        let block_items = reconstruct_config_items(&handle.block_items());
         // Use the actual block span start (position of '{') when available,
         // falling back to directive start for backwards compatibility.
         let block_start_line = d.block_start_line.unwrap_or(line as u32) as usize;

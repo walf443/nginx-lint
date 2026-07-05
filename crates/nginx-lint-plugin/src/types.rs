@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Current API version for the plugin SDK
-pub const API_VERSION: &str = "1.1";
+pub const API_VERSION: &str = "1.2";
 
 /// Plugin metadata describing a lint rule.
 ///

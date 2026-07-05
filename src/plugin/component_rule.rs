@@ -157,9 +157,26 @@ impl bindings::nginx_lint::plugin::types::Host for ComponentStoreData {}
 
 impl bindings::nginx_lint::plugin::data_types::Host for ComponentStoreData {}
 
+impl bindings::nginx_lint::plugin::parser_types::Host for ComponentStoreData {}
+
 impl config_api::Host for ComponentStoreData {}
 
 impl config_api::HostConfig for ComponentStoreData {
+    fn snapshot(&mut self, self_: Resource<ConfigResource>) -> config_api::ConfigSnapshot {
+        let config = self.get_config(&self_).clone();
+        let mut all_items = Vec::new();
+        let top_level_indices = config
+            .items
+            .iter()
+            .map(|item| flatten_item_to_wit(item, &mut all_items))
+            .collect();
+        config_api::ConfigSnapshot {
+            all_items,
+            top_level_indices,
+            include_context: config.include_context.clone(),
+        }
+    }
+
     fn all_directives_with_context(
         &mut self,
         self_: Resource<ConfigResource>,
@@ -263,34 +280,7 @@ impl config_api::HostConfig for ComponentStoreData {
 
 impl config_api::HostDirective for ComponentStoreData {
     fn data(&mut self, self_: Resource<DirectiveResource>) -> config_api::DirectiveData {
-        let dir = self.get_directive(&self_);
-        config_api::DirectiveData {
-            name: dir.name.clone(),
-            args: dir.args.iter().map(convert_argument_to_wit).collect(),
-            line: dir.span.start.line as u32,
-            column: dir.span.start.column as u32,
-            start_offset: dir.span.start.offset as u32,
-            end_offset: dir.span.end.offset as u32,
-            end_line: dir.span.end.line as u32,
-            end_column: dir.span.end.column as u32,
-            leading_whitespace: dir.leading_whitespace.clone(),
-            trailing_whitespace: dir.trailing_whitespace.clone(),
-            space_before_terminator: dir.space_before_terminator.clone(),
-            has_block: dir.block.is_some(),
-            block_is_raw: dir.block.as_ref().is_some_and(|b| b.raw_content.is_some()),
-            block_raw_content: dir.block.as_ref().and_then(|b| b.raw_content.clone()),
-            closing_brace_leading_whitespace: dir
-                .block
-                .as_ref()
-                .map(|b| b.closing_brace_leading_whitespace.clone()),
-            block_trailing_whitespace: dir.block.as_ref().map(|b| b.trailing_whitespace.clone()),
-            trailing_comment_text: dir.trailing_comment.as_ref().map(|c| c.text.clone()),
-            name_end_column: dir.name_span.end.column as u32,
-            name_end_offset: dir.name_span.end.offset as u32,
-            block_start_line: dir.block.as_ref().map(|b| b.span.start.line as u32),
-            block_start_column: dir.block.as_ref().map(|b| b.span.start.column as u32),
-            block_start_offset: dir.block.as_ref().map(|b| b.span.start.offset as u32),
-        }
+        make_directive_data(self.get_directive(&self_))
     }
 
     fn name(&mut self, self_: Resource<DirectiveResource>) -> String {
@@ -599,6 +589,106 @@ fn convert_config_items_to_wit(
         }
     }
     results
+}
+
+/// Build the WIT DirectiveData record for a directive.
+fn make_directive_data(dir: &ast::Directive) -> config_api::DirectiveData {
+    config_api::DirectiveData {
+        name: dir.name.clone(),
+        args: dir.args.iter().map(convert_argument_to_wit).collect(),
+        line: dir.span.start.line as u32,
+        column: dir.span.start.column as u32,
+        start_offset: dir.span.start.offset as u32,
+        end_offset: dir.span.end.offset as u32,
+        end_line: dir.span.end.line as u32,
+        end_column: dir.span.end.column as u32,
+        leading_whitespace: dir.leading_whitespace.clone(),
+        trailing_whitespace: dir.trailing_whitespace.clone(),
+        space_before_terminator: dir.space_before_terminator.clone(),
+        has_block: dir.block.is_some(),
+        block_is_raw: dir.block.as_ref().is_some_and(|b| b.raw_content.is_some()),
+        block_raw_content: dir.block.as_ref().and_then(|b| b.raw_content.clone()),
+        closing_brace_leading_whitespace: dir
+            .block
+            .as_ref()
+            .map(|b| b.closing_brace_leading_whitespace.clone()),
+        block_trailing_whitespace: dir.block.as_ref().map(|b| b.trailing_whitespace.clone()),
+        trailing_comment_text: dir.trailing_comment.as_ref().map(|c| c.text.clone()),
+        name_end_column: dir.name_span.end.column as u32,
+        name_end_offset: dir.name_span.end.offset as u32,
+        block_start_line: dir.block.as_ref().map(|b| b.span.start.line as u32),
+        block_start_column: dir.block.as_ref().map(|b| b.span.start.column as u32),
+        block_start_offset: dir.block.as_ref().map(|b| b.span.start.offset as u32),
+    }
+}
+
+/// Build the WIT CommentInfo record for a comment.
+fn make_comment_info(comment: &ast::Comment) -> config_api::CommentInfo {
+    config_api::CommentInfo {
+        text: comment.text.clone(),
+        line: comment.span.start.line as u32,
+        column: comment.span.start.column as u32,
+        leading_whitespace: comment.leading_whitespace.clone(),
+        trailing_whitespace: comment.trailing_whitespace.clone(),
+        start_offset: comment.span.start.offset as u32,
+        end_offset: comment.span.end.offset as u32,
+    }
+}
+
+/// Build the WIT BlankLineInfo record for a blank line.
+fn make_blank_line_info(blank: &ast::BlankLine) -> config_api::BlankLineInfo {
+    config_api::BlankLineInfo {
+        line: blank.span.start.line as u32,
+        content: blank.content.clone(),
+        start_offset: blank.span.start.offset as u32,
+    }
+}
+
+/// Recursively flatten a config item into the snapshot's DFS-ordered array,
+/// returning its index. Directive items record their block children as
+/// indices into the same array (see the `parser-types` WIT interface, which
+/// uses the same layout).
+fn flatten_item_to_wit(item: &ast::ConfigItem, all_items: &mut Vec<config_api::FlatItem>) -> u32 {
+    use bindings::nginx_lint::plugin::parser_types::ConfigItemValue;
+
+    match item {
+        ast::ConfigItem::Directive(directive) => {
+            let index = all_items.len() as u32;
+            all_items.push(config_api::FlatItem {
+                value: ConfigItemValue::DirectiveItem(make_directive_data(directive)),
+                child_indices: Vec::new(),
+            });
+            let child_indices = directive
+                .block
+                .as_ref()
+                .map(|block| {
+                    block
+                        .items
+                        .iter()
+                        .map(|child| flatten_item_to_wit(child, all_items))
+                        .collect()
+                })
+                .unwrap_or_default();
+            all_items[index as usize].child_indices = child_indices;
+            index
+        }
+        ast::ConfigItem::Comment(comment) => {
+            let index = all_items.len() as u32;
+            all_items.push(config_api::FlatItem {
+                value: ConfigItemValue::CommentItem(make_comment_info(comment)),
+                child_indices: Vec::new(),
+            });
+            index
+        }
+        ast::ConfigItem::BlankLine(blank) => {
+            let index = all_items.len() as u32;
+            all_items.push(config_api::FlatItem {
+                value: ConfigItemValue::BlankLineItem(make_blank_line_info(blank)),
+                child_indices: Vec::new(),
+            });
+            index
+        }
+    }
 }
 
 /// Convert a parser Argument to WIT ArgumentInfo.
@@ -955,6 +1045,100 @@ impl LintRule for ComponentLintRule {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Temporary measurement harness for the WIT-boundary cost investigation.
+    /// Run manually with:
+    /// cargo test --release --features plugins --lib phase_timing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn phase_timing() {
+        use crate::plugin::{CompilationCache, PluginLoader};
+        use std::time::Instant;
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target/builtin-plugins/server_tokens_enabled.wasm");
+        if !wasm_path.exists() {
+            eprintln!("SKIP: run `make build-plugins` first");
+            return;
+        }
+
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
+        let rule = loader
+            .load_component_from_bytes(&wasm_path, &bytes)
+            .unwrap();
+
+        for n_servers in [30, 300] {
+            let mut src = String::from("http {\n  gzip on;\n");
+            for i in 0..n_servers {
+                src.push_str(&format!(
+                    "  server {{\n    listen 80;\n    server_name s{i}.example.com;\n    server_tokens off;\n    location / {{\n      proxy_pass http://127.0.0.1:8080;\n      proxy_set_header Host $host;\n    }}\n    error_log /var/log/nginx/error.log;\n  }}\n"
+                ));
+            }
+            src.push_str("}\n");
+            let config = crate::parser::parse_string(&src).unwrap();
+            let n_directives = config.all_directives().count();
+            let shared = Arc::new(config);
+            let iters = 200;
+
+            // Phase A: store + instantiate only
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut store = ComponentLintRule::create_store(
+                    rule.plugin_pre.engine(),
+                    rule.memory_limit,
+                    rule.timeout_ticks,
+                );
+                let _plugin = rule.plugin_pre.instantiate(&mut store).unwrap();
+            }
+            let phase_a = start.elapsed() / iters;
+
+            // Phase B: full check (instantiate + guest reconstruct + rule logic)
+            let start = Instant::now();
+            for _ in 0..iters {
+                let _ = rule.check_shared(&shared, Path::new("test.conf"));
+            }
+            let phase_b = start.elapsed() / iters;
+
+            // Phase C: host-side conversion only (what the host does when the
+            // guest walks items/data/block-items), no WIT lowering, no guest
+            let start = Instant::now();
+            for _ in 0..iters {
+                let mut data = ComponentStoreData {
+                    limits: StoreLimitsBuilder::new().build(),
+                    table: ResourceTable::new(),
+                };
+                let cfg_res = data
+                    .table
+                    .push(ConfigResource {
+                        config: shared.clone(),
+                    })
+                    .unwrap();
+                let items = config_api::HostConfig::items(&mut data, cfg_res);
+                walk_items(&mut data, items);
+            }
+            let phase_c = start.elapsed() / iters;
+
+            println!(
+                "directives={n_directives}: instantiate={phase_a:?} full_check={phase_b:?} host_conv={phase_c:?} guest+lowering={:?}",
+                phase_b.saturating_sub(phase_a).saturating_sub(phase_c)
+            );
+        }
+
+        fn walk_items(data: &mut ComponentStoreData, items: Vec<config_api::ConfigItem>) {
+            for item in items {
+                if let config_api::ConfigItem::DirectiveItem(handle) = item {
+                    let alias = Resource::new_own(handle.rep());
+                    let d = config_api::HostDirective::data(data, alias);
+                    if d.has_block {
+                        let alias = Resource::new_own(handle.rep());
+                        let children = config_api::HostDirective::block_items(data, alias);
+                        walk_items(data, children);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_sanitize_text_replaces_ansi_escape() {

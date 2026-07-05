@@ -120,6 +120,18 @@ interface data-types {
 interface config-api {
     use types.{fix};
     use data-types.{argument-type, argument-info, comment-info, blank-line-info, directive-data};
+    use parser-types.{config-item as flat-item};
+
+    /// The entire config as one flat value (see the `snapshot` function)
+    record config-snapshot {
+        /// Flat array of all config items (DFS order); directive items
+        /// reference their block children via child-indices
+        all-items: list<flat-item>,
+        /// Indices of top-level items in all-items
+        top-level-indices: list<u32>,
+        /// Include context (parent block names from the include directive)
+        include-context: list<string>,
+    }
 
     /// A config item (directive, comment, or blank line)
     variant config-item {
@@ -197,6 +209,11 @@ interface config-api {
 
     /// The parsed nginx configuration (resource backed by host data)
     resource config {
+        /// Get the entire config as one flat snapshot in a single call.
+        /// Bulk alternative to walking items/data/block-items per directive:
+        /// one host call transfers everything, which avoids per-directive
+        /// call overhead when reconstructing the whole tree guest-side.
+        snapshot: func() -> config-snapshot;
         /// Iterate over all directives recursively with parent context
         all-directives-with-context: func() -> list<directive-context>;
         /// Iterate over all directives recursively
