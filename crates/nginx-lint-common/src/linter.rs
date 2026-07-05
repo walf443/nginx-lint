@@ -250,6 +250,7 @@ pub trait LintRule: Send + Sync {
     /// repeated serialization when running multiple plugins.
     /// Default implementation ignores the serialized config and calls check().
     #[deprecated(
+        since = "0.16.0",
         note = "no longer called by the linter; the serialized config was only used by \
                 legacy core-module plugins. Implement check() or check_shared() instead."
     )]
