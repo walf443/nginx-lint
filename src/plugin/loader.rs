@@ -12,8 +12,12 @@ use wasmtime::{Cache, CacheConfig, Config, Engine};
 /// Memory limit for plugins (256 MB)
 const MEMORY_LIMIT_BYTES: u64 = 256 * 1024 * 1024;
 
-/// Fuel limit for CPU metering (prevents infinite loops)
-const FUEL_LIMIT: u64 = 10_000_000_000;
+/// How often the background ticker advances the engine epoch
+const EPOCH_TICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// Execution timeout for a single plugin call by an untrusted plugin,
+/// expressed in epoch ticks (100 ticks × 100 ms = 10 seconds)
+const TIMEOUT_TICKS: u64 = 100;
 
 /// Compilation cache configuration for the plugin loader.
 ///
@@ -59,22 +63,23 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
 /// Plugin loader that discovers and loads WASM plugins from a directory
 pub struct PluginLoader {
     engine: Engine,
-    /// Whether fuel metering is enabled (for untrusted plugins)
-    fuel_enabled: bool,
+    /// Whether the execution timeout (epoch interruption) is enabled
+    /// (for untrusted plugins)
+    timeout_enabled: bool,
     /// Compilation cache handle, kept for reporting hit/miss statistics
     cache: Option<Cache>,
 }
 
 impl PluginLoader {
-    /// Create a new plugin loader with security constraints (fuel metering enabled)
+    /// Create a new plugin loader with security constraints (execution timeout enabled)
     pub fn new() -> Result<Self, PluginError> {
         Self::with_options(true, CompilationCache::Default)
     }
 
-    /// Create a new plugin loader for trusted plugins (fuel metering disabled for performance)
+    /// Create a new plugin loader for trusted plugins (execution timeout disabled for performance)
     ///
     /// WARNING: Only use this for trusted, builtin plugins. External plugins should use `new()`
-    /// to enable fuel metering and prevent infinite loops.
+    /// to enable the execution timeout and prevent infinite loops.
     pub fn new_trusted() -> Result<Self, PluginError> {
         Self::with_options(false, CompilationCache::Default)
     }
@@ -91,12 +96,16 @@ impl PluginLoader {
         Self::with_options(true, cache)
     }
 
-    fn with_options(enable_fuel: bool, cache: CompilationCache) -> Result<Self, PluginError> {
+    fn with_options(enable_timeout: bool, cache: CompilationCache) -> Result<Self, PluginError> {
         let cache = Self::build_cache(cache)?;
         let mut config = Config::new();
 
-        // Enable fuel-based metering only for untrusted plugins
-        config.consume_fuel(enable_fuel);
+        // Enable epoch interruption only for untrusted plugins: each check
+        // call gets a wall-clock deadline (see TIMEOUT_TICKS) so an infinite
+        // loop in a plugin cannot hang the linter. Epoch checks cost a few
+        // percent at runtime, unlike fuel metering which instruments every
+        // basic block.
+        config.epoch_interruption(enable_timeout);
         // Enable component model support for WIT-based plugins
         config.wasm_component_model(true);
         // Enable Wasm GC support (needed for GC-based languages like wado)
@@ -108,11 +117,41 @@ impl PluginLoader {
         let engine = Engine::new(&config)
             .map_err(|e| PluginError::compile_error("engine", e.to_string()))?;
 
+        if enable_timeout {
+            Self::spawn_epoch_ticker(&engine)?;
+        }
+
         Ok(Self {
             engine,
-            fuel_enabled: enable_fuel,
+            timeout_enabled: enable_timeout,
             cache,
         })
+    }
+
+    /// Spawn the background thread that advances the engine epoch at a fixed
+    /// interval. Deadlines are expressed in ticks of this interval. The
+    /// thread holds only a weak engine reference and exits once the engine
+    /// (and every rule cloned from it) has been dropped.
+    fn spawn_epoch_ticker(engine: &Engine) -> Result<(), PluginError> {
+        let weak_engine = engine.weak();
+        std::thread::Builder::new()
+            .name("nginx-lint-epoch-ticker".to_string())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(EPOCH_TICK_INTERVAL);
+                    let Some(engine) = weak_engine.upgrade() else {
+                        break;
+                    };
+                    engine.increment_epoch();
+                }
+            })
+            .map_err(|e| {
+                PluginError::execution_error(
+                    "engine",
+                    format!("Failed to spawn epoch ticker thread: {}", e),
+                )
+            })?;
+        Ok(())
     }
 
     fn build_cache(cache: CompilationCache) -> Result<Option<Cache>, PluginError> {
@@ -176,14 +215,15 @@ impl PluginLoader {
         MEMORY_LIMIT_BYTES
     }
 
-    /// Get the fuel limit for CPU metering
-    pub fn fuel_limit(&self) -> u64 {
-        if self.fuel_enabled { FUEL_LIMIT } else { 0 }
+    /// Get the execution timeout in epoch ticks, or `None` when the timeout
+    /// is disabled (trusted plugins)
+    pub fn timeout_ticks(&self) -> Option<u64> {
+        self.timeout_enabled.then_some(TIMEOUT_TICKS)
     }
 
-    /// Check if fuel metering is enabled
-    pub fn fuel_enabled(&self) -> bool {
-        self.fuel_enabled
+    /// Check if the execution timeout (epoch interruption) is enabled
+    pub fn timeout_enabled(&self) -> bool {
+        self.timeout_enabled
     }
 
     /// Load all WASM plugins from a directory
@@ -235,18 +275,12 @@ impl PluginLoader {
         path: &Path,
         component_bytes: &[u8],
     ) -> Result<ComponentLintRule, PluginError> {
-        let fuel_limit = if self.fuel_enabled {
-            self.fuel_limit()
-        } else {
-            0
-        };
         ComponentLintRule::new(
             &self.engine,
             path.to_path_buf(),
             component_bytes,
             self.memory_limit(),
-            fuel_limit,
-            self.fuel_enabled,
+            self.timeout_ticks(),
         )
     }
 }
@@ -266,6 +300,50 @@ mod tests {
     fn test_loader_creation() {
         let loader = PluginLoader::new_with_cache(CompilationCache::Disabled);
         assert!(loader.is_ok());
+    }
+
+    #[test]
+    fn test_timeout_enabled_for_untrusted() {
+        let loader = test_loader();
+        assert!(loader.timeout_enabled());
+        assert_eq!(loader.timeout_ticks(), Some(TIMEOUT_TICKS));
+    }
+
+    #[test]
+    fn test_timeout_disabled_for_trusted() {
+        let loader = PluginLoader::new_trusted_with_cache(CompilationCache::Disabled).unwrap();
+        assert!(!loader.timeout_enabled());
+        assert_eq!(loader.timeout_ticks(), None);
+    }
+
+    #[test]
+    fn test_epoch_deadline_interrupts_infinite_loop() {
+        // End-to-end check of the timeout machinery: epoch interruption
+        // compiled in, the ticker thread advancing the epoch, and the
+        // deadline trapping a spinning guest.
+        let loader = test_loader();
+        let wat = r#"(component
+            (core module $m
+                (func (export "spin") (loop $l br $l))
+            )
+            (core instance $i (instantiate $m))
+            (func (export "spin") (canon lift (core func $i "spin")))
+        )"#;
+        let component = wasmtime::component::Component::new(loader.engine(), wat).unwrap();
+        let mut store = wasmtime::Store::new(loader.engine(), ());
+        // Trap at the first tick (~100ms) to keep the test fast
+        store.set_epoch_deadline(1);
+        let linker = wasmtime::component::Linker::<()>::new(loader.engine());
+        let instance = linker.instantiate(&mut store, &component).unwrap();
+        let spin = instance
+            .get_typed_func::<(), ()>(&mut store, "spin")
+            .unwrap();
+
+        let err = spin.call(&mut store, ()).unwrap_err();
+        assert_eq!(
+            err.downcast_ref::<wasmtime::Trap>(),
+            Some(&wasmtime::Trap::Interrupt)
+        );
     }
 
     #[test]
