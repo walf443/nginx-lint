@@ -124,7 +124,7 @@ static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<ComponentLintRule>> =
 /// The first call compiles all WASM modules and caches them.
 /// Subsequent calls clone from the cache, which is much faster.
 ///
-/// Builtin plugins use a trusted loader with fuel metering disabled for better performance.
+/// Builtin plugins use a trusted loader with the execution timeout disabled for better performance.
 #[cfg(feature = "wasm-builtin-plugins")]
 pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
     // Try to get from cache first
@@ -132,7 +132,7 @@ pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
         return Ok(cached.clone());
     }
 
-    // Get or create the loader (use trusted mode for builtin plugins - no fuel metering)
+    // Get or create the loader (use trusted mode for builtin plugins - no execution timeout)
     let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
         let cache = BUILTIN_PLUGIN_CACHE.get().cloned().unwrap_or_default();
         PluginLoader::new_trusted_with_cache(cache).unwrap_or_else(|e| {

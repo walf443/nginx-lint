@@ -102,7 +102,7 @@ impl ComponentStoreData {
     ///
     /// Panics (trapped by wasmtime) if the resource table is full. This can
     /// happen if an untrusted plugin requests an excessive number of handles.
-    /// The fuel limit should prevent this in practice.
+    /// The execution timeout should prevent this in practice.
     fn push_directive(
         &mut self,
         config: Arc<Config>,
@@ -734,10 +734,9 @@ pub struct ComponentLintRule {
     engine: Engine,
     /// Memory limit in bytes
     memory_limit: u64,
-    /// Fuel limit for CPU metering (0 = unlimited)
-    fuel_limit: u64,
-    /// Whether fuel metering is enabled
-    fuel_enabled: bool,
+    /// Execution timeout per call in epoch ticks (None = no timeout, for
+    /// trusted plugins)
+    timeout_ticks: Option<u64>,
     /// Leaked static strings for LintRule trait
     name: &'static str,
     category: &'static str,
@@ -751,8 +750,7 @@ impl ComponentLintRule {
         path: PathBuf,
         component_bytes: &[u8],
         memory_limit: u64,
-        fuel_limit: u64,
-        fuel_enabled: bool,
+        timeout_ticks: Option<u64>,
     ) -> Result<Self, PluginError> {
         // Compile the component
         let component = wasmtime::component::Component::new(engine, component_bytes)
@@ -764,8 +762,7 @@ impl ComponentLintRule {
             &component,
             &path,
             memory_limit,
-            fuel_limit,
-            fuel_enabled,
+            timeout_ticks,
         )?;
         let spec = convert_plugin_spec(&spec_wit);
 
@@ -782,22 +779,19 @@ impl ComponentLintRule {
             component: Arc::new(component),
             engine: engine.clone(),
             memory_limit,
-            fuel_limit,
-            fuel_enabled,
+            timeout_ticks,
             name,
             category,
             description,
         })
     }
 
-    /// Create a store with limits and fuel
+    /// Create a store with limits and the execution deadline
     fn create_store(
         engine: &Engine,
         memory_limit: u64,
-        fuel_limit: u64,
-        fuel_enabled: bool,
-        path: &Path,
-    ) -> Result<Store<ComponentStoreData>, PluginError> {
+        timeout_ticks: Option<u64>,
+    ) -> Store<ComponentStoreData> {
         let limits = StoreLimitsBuilder::new()
             .memory_size(memory_limit as usize)
             .build();
@@ -809,12 +803,13 @@ impl ComponentLintRule {
             },
         );
         store.limiter(|data| &mut data.limits);
-        if fuel_enabled {
-            store.set_fuel(fuel_limit).map_err(|e| {
-                PluginError::execution_error(path, format!("Failed to set fuel: {}", e))
-            })?;
+        if let Some(ticks) = timeout_ticks {
+            // The loader's epoch ticker advances the engine epoch at a fixed
+            // interval; execution traps with Trap::Interrupt once the
+            // deadline is reached (wasmtime's default deadline behavior).
+            store.set_epoch_deadline(ticks);
         }
-        Ok(store)
+        store
     }
 
     /// Instantiate the component with config-api imports registered
@@ -842,10 +837,9 @@ impl ComponentLintRule {
         component: &wasmtime::component::Component,
         path: &Path,
         memory_limit: u64,
-        fuel_limit: u64,
-        fuel_enabled: bool,
+        timeout_ticks: Option<u64>,
     ) -> Result<bindings::nginx_lint::plugin::types::PluginSpec, PluginError> {
-        let mut store = Self::create_store(engine, memory_limit, fuel_limit, fuel_enabled, path)?;
+        let mut store = Self::create_store(engine, memory_limit, timeout_ticks);
         let plugin = Self::instantiate(engine, component, &mut store, path)?;
 
         plugin
@@ -859,13 +853,7 @@ impl ComponentLintRule {
         config: &Config,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store = Self::create_store(
-            &self.engine,
-            self.memory_limit,
-            self.fuel_limit,
-            self.fuel_enabled,
-            &self.path,
-        )?;
+        let mut store = Self::create_store(&self.engine, self.memory_limit, self.timeout_ticks);
         let plugin = Self::instantiate(&self.engine, &self.component, &mut store, &self.path)?;
 
         // Create config resource handle
@@ -886,7 +874,8 @@ impl ComponentLintRule {
         let wit_errors = plugin
             .call_check(&mut store, config_resource, &path_str)
             .map_err(|e| {
-                if e.downcast_ref::<Trap>() == Some(&Trap::OutOfFuel) {
+                // Epoch deadline expiry surfaces as Trap::Interrupt
+                if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
                     PluginError::timeout(&self.path)
                 } else {
                     PluginError::execution_error(&self.path, format!("check() failed: {}", e))
@@ -1253,8 +1242,7 @@ mod tests {
             PathBuf::from("test.wasm"),
             b"not a wasm component",
             256 * 1024 * 1024,
-            10_000_000,
-            true,
+            Some(100),
         );
         assert!(matches!(result, Err(PluginError::CompileError { .. })));
     }
