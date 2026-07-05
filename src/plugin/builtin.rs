@@ -139,6 +139,11 @@ pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
             // Builtin plugins are embedded and must load even when the
             // configured cache directory is unusable: warn and fall back to
             // uncached compilation instead of failing the whole lint run.
+            // Any other error (e.g. engine creation) is a real failure that
+            // retrying without a cache would only mask.
+            if !matches!(e, PluginError::CacheError { .. }) {
+                panic!("Failed to create PluginLoader: {}", e);
+            }
             eprintln!("Warning: builtin plugin compilation cache disabled: {}", e);
             PluginLoader::new_trusted_with_cache(super::CompilationCache::Disabled)
                 .expect("Failed to create PluginLoader")

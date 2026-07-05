@@ -251,12 +251,6 @@ impl PluginLoader {
     }
 }
 
-impl Default for PluginLoader {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default PluginLoader")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

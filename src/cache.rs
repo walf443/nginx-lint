@@ -65,10 +65,11 @@ mod tests {
 
     #[test]
     fn test_default_cache_root_ends_with_app_name() {
-        // HOME (or LOCALAPPDATA on Windows) is set in any normal test
-        // environment, so a root should resolve and be nginx-lint specific
-        let root = default_cache_root().expect("cache root should resolve");
-        assert!(root.ends_with("nginx-lint"));
+        // Hermetic build sandboxes may run tests without HOME (or
+        // LOCALAPPDATA on Windows); the root only resolves when set
+        if let Some(root) = default_cache_root() {
+            assert!(root.ends_with("nginx-lint"));
+        }
     }
 
     #[test]
