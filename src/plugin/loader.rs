@@ -226,26 +226,43 @@ impl PluginLoader {
         self.timeout_enabled
     }
 
-    /// Load all WASM plugins from a directory
+    /// Load all WASM plugins from a directory.
+    ///
+    /// Plugins are loaded in parallel: wasmtime already parallelizes code
+    /// generation within one component, but the serial phases (parsing,
+    /// validation, instantiation for `spec()`) overlap across plugins,
+    /// which speeds up cache-miss/first runs.
+    /// Results are ordered by file name so the rule order is deterministic.
     pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        use rayon::prelude::*;
+
         if !dir.exists() || !dir.is_dir() {
             return Err(PluginError::directory_not_found(dir));
         }
 
-        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
         let entries = fs::read_dir(dir).map_err(|e| PluginError::io_error(dir, e))?;
-
+        let mut paths: Vec<PathBuf> = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|e| PluginError::io_error(dir, e))?;
             let path = entry.path();
-
             if path.extension().is_some_and(|ext| ext == "wasm") {
-                match self.load_plugin(&path) {
-                    Ok(plugin) => plugins.push(plugin),
-                    Err(e) => {
-                        eprintln!("Warning: Failed to load plugin {:?}: {}", path, e);
-                    }
-                }
+                paths.push(path);
+            }
+        }
+        paths.sort();
+
+        let results: Vec<Result<Box<dyn LintRule>, PluginError>> = paths
+            .par_iter()
+            .map(|path| self.load_plugin(path))
+            .collect();
+
+        // Report failures serially so the warnings appear in path order
+        // regardless of which worker finished first
+        let mut plugins = Vec::new();
+        for (path, result) in paths.iter().zip(results) {
+            match result {
+                Ok(plugin) => plugins.push(plugin),
+                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
             }
         }
 
