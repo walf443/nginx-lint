@@ -433,17 +433,33 @@ impl Linter {
         (tracker, warnings)
     }
 
+    /// Run a single rule, sharing one lazily-created `Arc<Config>` among the
+    /// rules that want a shared handle (e.g. WASM plugin rules). Native-only
+    /// rule sets never pay for the clone.
+    fn run_rule(
+        rule: &dyn LintRule,
+        config: &Config,
+        path: &Path,
+        shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+    ) -> Vec<LintError> {
+        if rule.wants_shared_config() {
+            let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
+            rule.check_shared(shared, path)
+        } else {
+            rule.check(config, path)
+        }
+    }
+
     /// Run all lint rules and collect errors
     ///
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
     #[cfg(feature = "cli")]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        // Pre-serialize config once for all rules (optimization for WASM plugins)
-        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+        let shared_config = std::sync::OnceLock::new();
 
         self.rules
             .par_iter()
-            .map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
+            .map(|rule| Self::run_rule(rule.as_ref(), config, path, &shared_config))
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
@@ -453,12 +469,11 @@ impl Linter {
     /// Run all lint rules and collect errors (sequential version for WASM)
     #[cfg(not(feature = "cli"))]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        // Pre-serialize config once for all rules (optimization for WASM plugins)
-        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+        let shared_config = std::sync::OnceLock::new();
 
         self.rules
             .iter()
-            .flat_map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
+            .flat_map(|rule| Self::run_rule(rule.as_ref(), config, path, &shared_config))
             .collect()
     }
 
@@ -515,15 +530,14 @@ impl Linter {
     ) -> (Vec<LintError>, Vec<RuleProfile>) {
         use std::time::Instant;
 
-        // Pre-serialize config once for all rules (optimization for WASM plugins)
-        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+        let shared_config = std::sync::OnceLock::new();
 
         let results: Vec<(Vec<LintError>, RuleProfile)> = self
             .rules
             .iter()
             .map(|rule| {
                 let start = Instant::now();
-                let errors = rule.check_with_serialized_config(config, path, &serialized_config);
+                let errors = Self::run_rule(rule.as_ref(), config, path, &shared_config);
                 let duration = start.elapsed();
                 let profile = RuleProfile {
                     name: rule.name().to_string(),

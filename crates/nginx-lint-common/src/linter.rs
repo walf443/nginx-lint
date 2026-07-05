@@ -249,12 +249,36 @@ pub trait LintRule: Send + Sync {
     /// This method allows passing a pre-serialized config JSON to avoid
     /// repeated serialization when running multiple plugins.
     /// Default implementation ignores the serialized config and calls check().
+    #[deprecated(
+        since = "0.16.0",
+        note = "no longer called by the linter; the serialized config was only used by \
+                legacy core-module plugins. Implement check() or check_shared() instead."
+    )]
     fn check_with_serialized_config(
         &self,
         config: &Config,
         path: &Path,
         _serialized_config: &str,
     ) -> Vec<LintError> {
+        self.check(config, path)
+    }
+
+    /// Whether this rule wants the config as a shared `Arc` handle.
+    ///
+    /// Rules that hand the config to another owner (e.g. WASM plugin rules,
+    /// which store it in the sandbox's resource table) should return `true`
+    /// so the linter shares one `Arc<Config>` across all such rules instead
+    /// of each rule deep-cloning the AST per check.
+    fn wants_shared_config(&self) -> bool {
+        false
+    }
+
+    /// Run the rule with a shared config handle.
+    ///
+    /// The linter calls this instead of [`check`](Self::check) when
+    /// [`wants_shared_config`](Self::wants_shared_config) returns `true`.
+    /// Default implementation borrows the config and calls `check()`.
+    fn check_shared(&self, config: &std::sync::Arc<Config>, path: &Path) -> Vec<LintError> {
         self.check(config, path)
     }
 
@@ -336,12 +360,20 @@ impl Linter {
 
     /// Run all lint rules and collect errors (sequential version)
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
-        // Pre-serialize config once for all rules (optimization for WASM plugins)
-        let serialized_config = serde_json::to_string(config).unwrap_or_default();
+        // Rules that hand the config to another owner share one Arc, created
+        // lazily so purely native rule sets never pay for the clone
+        let shared_config: std::sync::OnceLock<std::sync::Arc<Config>> = std::sync::OnceLock::new();
 
         self.rules
             .iter()
-            .flat_map(|rule| rule.check_with_serialized_config(config, path, &serialized_config))
+            .flat_map(|rule| {
+                if rule.wants_shared_config() {
+                    let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
+                    rule.check_shared(shared, path)
+                } else {
+                    rule.check(config, path)
+                }
+            })
             .collect()
     }
 }
