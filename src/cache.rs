@@ -17,9 +17,15 @@ pub const PLUGIN_CACHE_SUBDIR: &str = "plugins";
 /// - macOS: `~/Library/Caches/nginx-lint`
 /// - Windows: `%LOCALAPPDATA%\nginx-lint`
 ///
-/// Returns `None` when the relevant environment variables are unset.
+/// Returns `None` when the relevant environment variables are unset, empty,
+/// or relative.
 pub fn default_cache_root() -> Option<PathBuf> {
-    let base = if cfg!(target_os = "macos") {
+    cache_root_from(platform_cache_base())
+}
+
+/// Platform-specific per-user cache base directory from the environment
+fn platform_cache_base() -> Option<PathBuf> {
+    if cfg!(target_os = "macos") {
         std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Caches"))
     } else if cfg!(windows) {
         std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
@@ -29,8 +35,17 @@ pub fn default_cache_root() -> Option<PathBuf> {
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-    };
-    base.map(|base| base.join("nginx-lint"))
+    }
+}
+
+/// Append the app directory to the cache base, rejecting non-absolute bases.
+///
+/// An empty or relative base (e.g. `HOME=""`) would otherwise be resolved
+/// against the current working directory later on, silently creating a
+/// cache tree wherever nginx-lint happens to run.
+fn cache_root_from(base: Option<PathBuf>) -> Option<PathBuf> {
+    base.filter(|base| base.is_absolute())
+        .map(|base| base.join("nginx-lint"))
 }
 
 /// WASM plugin compilation cache directory under the given cache root
@@ -54,5 +69,23 @@ mod tests {
         // environment, so a root should resolve and be nginx-lint specific
         let root = default_cache_root().expect("cache root should resolve");
         assert!(root.ends_with("nginx-lint"));
+    }
+
+    #[test]
+    fn test_cache_root_from_absolute_base() {
+        let root = cache_root_from(Some(PathBuf::from("/home/user/.cache")));
+        assert_eq!(root, Some(PathBuf::from("/home/user/.cache/nginx-lint")));
+    }
+
+    #[test]
+    fn test_cache_root_from_rejects_relative_base() {
+        // e.g. HOME="" produces the relative base ".cache" or "Library/Caches"
+        assert_eq!(cache_root_from(Some(PathBuf::from(".cache"))), None);
+        assert_eq!(cache_root_from(Some(PathBuf::from(""))), None);
+    }
+
+    #[test]
+    fn test_cache_root_from_none() {
+        assert_eq!(cache_root_from(None), None);
     }
 }

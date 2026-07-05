@@ -79,6 +79,12 @@ impl PluginLoader {
         Self::with_options(false, CompilationCache::Default)
     }
 
+    /// Create a trusted plugin loader (see [`new_trusted`](Self::new_trusted))
+    /// with an explicit compilation cache configuration
+    pub fn new_trusted_with_cache(cache: CompilationCache) -> Result<Self, PluginError> {
+        Self::with_options(false, cache)
+    }
+
     /// Create a new plugin loader with security constraints and an explicit
     /// compilation cache configuration
     pub fn new_with_cache(cache: CompilationCache) -> Result<Self, PluginError> {
@@ -256,15 +262,21 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Loader for tests: cache disabled so `cargo test` never creates or
+    /// writes the real per-user cache directory.
+    fn test_loader() -> PluginLoader {
+        PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap()
+    }
+
     #[test]
     fn test_loader_creation() {
-        let loader = PluginLoader::new();
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled);
         assert!(loader.is_ok());
     }
 
     #[test]
     fn test_load_plugins_empty_dir() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let dir = tempdir().unwrap();
         let plugins = loader.load_plugins(dir.path());
         assert!(plugins.is_ok());
@@ -273,14 +285,14 @@ mod tests {
 
     #[test]
     fn test_load_plugins_nonexistent_dir() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let result = loader.load_plugins(Path::new("/nonexistent/path"));
         assert!(matches!(result, Err(PluginError::DirectoryNotFound { .. })));
     }
 
     #[test]
     fn test_invalid_wasm_file() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let dir = tempdir().unwrap();
         let wasm_path = dir.path().join("invalid.wasm");
         fs::write(&wasm_path, b"not a wasm file").unwrap();
@@ -291,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_core_module_rejected() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let dir = tempdir().unwrap();
         let wasm_path = dir.path().join("legacy.wasm");
         // Core module: magic + version 01 00 00 00
@@ -334,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_load_plugins_skips_non_wasm() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let dir = tempdir().unwrap();
         fs::write(dir.path().join("readme.txt"), b"hello").unwrap();
         let plugins = loader.load_plugins(dir.path()).unwrap();
@@ -385,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_component_model_enabled() {
-        let loader = PluginLoader::new().unwrap();
+        let loader = test_loader();
         let bytes = b"\0asm\x0d\x00\x01\x00";
         let result = wasmtime::component::Component::new(loader.engine(), bytes);
         if let Err(e) = result {

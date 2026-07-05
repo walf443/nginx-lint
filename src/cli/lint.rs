@@ -26,6 +26,16 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
     }
 }
 
+/// Resolve a path value from the config file: a relative path is resolved
+/// against the directory containing the config file.
+fn resolve_against_config_dir(path: PathBuf, config_dir: Option<&Path>) -> PathBuf {
+    if path.is_relative() {
+        config_dir.unwrap_or(Path::new(".")).join(path)
+    } else {
+        path
+    }
+}
+
 /// Result of linting a single file
 enum FileResult {
     LintErrors {
@@ -428,12 +438,10 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     let include_prefix: Option<PathBuf> = cli.prefix.clone().or_else(|| {
         if let Some(ref config) = lint_config {
             if let Some(p) = config.include_prefix() {
-                let path = PathBuf::from(p);
-                Some(if path.is_relative() {
-                    config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
-                } else {
-                    path
-                })
+                Some(resolve_against_config_dir(
+                    PathBuf::from(p),
+                    config_dir.as_deref(),
+                ))
             } else {
                 // Config exists but no prefix set: default to config file directory
                 config_dir.clone()
@@ -449,7 +457,41 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         eprintln!("Include prefix: {}", prefix.display());
     }
 
-    // 8. Create linter and load plugins
+    // 8. Resolve the cache root and create the linter
+    // Cache root precedence: --no-cache > --cache-dir > cache_dir in
+    // .nginx-lint.toml (relative to the config file) > per-user default
+    #[cfg(feature = "plugins")]
+    let compilation_cache = {
+        use nginx_lint::plugin::CompilationCache;
+
+        if cli.no_cache {
+            CompilationCache::Disabled
+        } else if let Some(ref cache_dir) = cli.cache_dir {
+            CompilationCache::Directory(cache_dir.clone())
+        } else if let Some(cache_dir) = lint_config.as_ref().and_then(|c| c.cache_dir()) {
+            CompilationCache::Directory(resolve_against_config_dir(
+                PathBuf::from(cache_dir),
+                config_dir.as_deref(),
+            ))
+        } else {
+            CompilationCache::Default
+        }
+    };
+
+    // In builds without the plugins feature the cache is never used; tell the
+    // user instead of silently ignoring their configuration.
+    #[cfg(not(feature = "plugins"))]
+    if lint_config.as_ref().and_then(|c| c.cache_dir()).is_some() {
+        eprintln!(
+            "Warning: cache_dir in the configuration file has no effect in this build (compiled without the plugins feature)"
+        );
+    }
+
+    // Builtin WASM plugins are compiled through a process-global loader, so
+    // the cache root must be configured before the first Linter is created.
+    #[cfg(feature = "wasm-builtin-plugins")]
+    nginx_lint::plugin::builtin::configure_builtin_plugin_cache(compilation_cache.clone());
+
     #[allow(unused_mut)]
     let mut linter = Linter::with_config(lint_config.as_ref(), include_prefix.as_deref());
 
@@ -466,26 +508,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     // Load custom plugins if specified
     #[cfg(feature = "plugins")]
     if let Some(ref plugins_dir) = cli.plugins {
-        use nginx_lint::plugin::{CompilationCache, PluginLoader};
+        use nginx_lint::plugin::PluginLoader;
 
-        // Cache root precedence: --no-cache > --cache-dir > cache_dir in
-        // .nginx-lint.toml (relative to the config file) > per-user default
-        let cache = if cli.no_cache {
-            CompilationCache::Disabled
-        } else if let Some(ref cache_dir) = cli.cache_dir {
-            CompilationCache::Directory(cache_dir.clone())
-        } else if let Some(cache_dir) = lint_config.as_ref().and_then(|c| c.cache_dir()) {
-            let path = PathBuf::from(cache_dir);
-            CompilationCache::Directory(if path.is_relative() {
-                config_dir.as_deref().unwrap_or(Path::new(".")).join(&path)
-            } else {
-                path
-            })
-        } else {
-            CompilationCache::Default
-        };
-
-        match PluginLoader::new_with_cache(cache) {
+        match PluginLoader::new_with_cache(compilation_cache) {
             Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {

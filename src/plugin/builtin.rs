@@ -97,6 +97,22 @@ pub use super::{BUILTIN_PLUGIN_NAMES, is_builtin_plugin};
 #[cfg(feature = "wasm-builtin-plugins")]
 static PLUGIN_LOADER_CACHE: std::sync::OnceLock<PluginLoader> = std::sync::OnceLock::new();
 
+/// Compilation cache configuration for builtin plugin loading
+#[cfg(feature = "wasm-builtin-plugins")]
+static BUILTIN_PLUGIN_CACHE: std::sync::OnceLock<super::CompilationCache> =
+    std::sync::OnceLock::new();
+
+/// Configure the compilation cache used when loading builtin plugins.
+///
+/// Must be called before the first [`load_builtin_plugins`] call to take
+/// effect; later calls are ignored because the loader and the compiled
+/// plugins are cached globally. When never called, builtin plugins use
+/// [`CompilationCache::Default`](super::CompilationCache::Default).
+#[cfg(feature = "wasm-builtin-plugins")]
+pub fn configure_builtin_plugin_cache(cache: super::CompilationCache) {
+    let _ = BUILTIN_PLUGIN_CACHE.set(cache);
+}
+
 /// Global cache for compiled builtin plugins
 /// This avoids recompiling WASM modules on every Linter creation
 #[cfg(feature = "wasm-builtin-plugins")]
@@ -117,8 +133,17 @@ pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
     }
 
     // Get or create the loader (use trusted mode for builtin plugins - no fuel metering)
-    let loader = PLUGIN_LOADER_CACHE
-        .get_or_init(|| PluginLoader::new_trusted().expect("Failed to create PluginLoader"));
+    let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
+        let cache = BUILTIN_PLUGIN_CACHE.get().cloned().unwrap_or_default();
+        PluginLoader::new_trusted_with_cache(cache).unwrap_or_else(|e| {
+            // Builtin plugins are embedded and must load even when the
+            // configured cache directory is unusable: warn and fall back to
+            // uncached compilation instead of failing the whole lint run.
+            eprintln!("Warning: builtin plugin compilation cache disabled: {}", e);
+            PluginLoader::new_trusted_with_cache(super::CompilationCache::Disabled)
+                .expect("Failed to create PluginLoader")
+        })
+    });
 
     // Compile plugins
     let plugins = compile_builtin_plugins(loader)?;
