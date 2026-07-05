@@ -228,12 +228,14 @@ impl PluginLoader {
 
     /// Load all WASM plugins from a directory.
     ///
-    /// Plugins are loaded in parallel (with the `cli` feature): wasmtime
-    /// already parallelizes code generation within one component, but the
-    /// serial phases (parsing, validation, instantiation for `spec()`)
-    /// overlap across plugins, which speeds up cache-miss/first runs.
+    /// Plugins are loaded in parallel: wasmtime already parallelizes code
+    /// generation within one component, but the serial phases (parsing,
+    /// validation, instantiation for `spec()`) overlap across plugins,
+    /// which speeds up cache-miss/first runs.
     /// Results are ordered by file name so the rule order is deterministic.
     pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        use rayon::prelude::*;
+
         if !dir.exists() || !dir.is_dir() {
             return Err(PluginError::directory_not_found(dir));
         }
@@ -249,23 +251,22 @@ impl PluginLoader {
         }
         paths.sort();
 
-        let load = |path: &PathBuf| match self.load_plugin(path) {
-            Ok(plugin) => Some(plugin),
-            Err(e) => {
-                eprintln!("Warning: Failed to load plugin {:?}: {}", path, e);
-                None
+        let results: Vec<Result<Box<dyn LintRule>, PluginError>> = paths
+            .par_iter()
+            .map(|path| self.load_plugin(path))
+            .collect();
+
+        // Report failures serially so the warnings appear in path order
+        // regardless of which worker finished first
+        let mut plugins = Vec::new();
+        for (path, result) in paths.iter().zip(results) {
+            match result {
+                Ok(plugin) => plugins.push(plugin),
+                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
             }
-        };
+        }
 
-        #[cfg(feature = "cli")]
-        let loaded: Vec<Option<Box<dyn LintRule>>> = {
-            use rayon::prelude::*;
-            paths.par_iter().map(load).collect()
-        };
-        #[cfg(not(feature = "cli"))]
-        let loaded: Vec<Option<Box<dyn LintRule>>> = paths.iter().map(load).collect();
-
-        Ok(loaded.into_iter().flatten().collect())
+        Ok(plugins)
     }
 
     /// Load a single WASM plugin from a file

@@ -228,7 +228,7 @@ Load custom WASM plugins from a directory:
 nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 ```
 
-Each `.wasm` file in the directory is loaded as a plugin. See the `plugins/builtin/` directory for examples of how to write plugins using the `nginx-lint-plugin` SDK.
+Each `.wasm` file in the directory is loaded as a plugin, in file name order. See the `plugins/builtin/` directory for examples of how to write plugins using the `nginx-lint-plugin` SDK.
 
 ## Installation
 
