@@ -2734,3 +2734,103 @@ fn test_why_command_omits_applies_to_for_unversioned_rule() {
         stderr
     );
 }
+
+// ============================================================================
+// CLI --fix tests - unfixable errors must still be reported
+// ============================================================================
+
+/// Config with a fixable error (unmatched brace gets a closing-brace fix)
+/// and an unfixable one (the resulting rowan syntax error has no fix).
+#[cfg(feature = "cli")]
+const UNFIXABLE_CONFIG: &str = "events {\n    worker_connections 1024;\n";
+
+#[cfg(feature = "cli")]
+#[test]
+fn test_fix_reports_unfixable_errors() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(UNFIXABLE_CONFIG.as_bytes()).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint --fix");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("syntax-error"),
+        "unfixable errors should still be reported with --fix; got:\n{}",
+        stdout
+    );
+    assert!(
+        !output.status.success(),
+        "exit code should be non-zero when unfixable errors remain"
+    );
+}
+
+#[cfg(feature = "cli")]
+#[test]
+fn test_fix_stdin_reports_unfixable_errors_to_stderr() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to run nginx-lint --fix -");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(UNFIXABLE_CONFIG.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // stdout carries only the fixed content; the report goes to stderr
+    assert!(
+        stdout.contains("worker_connections 1024;"),
+        "stdout should contain the fixed content; got:\n{}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("syntax-error"),
+        "the report must not be mixed into the fixed content on stdout; got:\n{}",
+        stdout
+    );
+    assert!(
+        stderr.contains("syntax-error"),
+        "unfixable errors should be reported to stderr in stdin mode; got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(feature = "cli")]
+#[test]
+fn test_fix_exits_zero_when_all_errors_fixed() {
+    use std::io::Write;
+    use std::process::Command;
+
+    // Only an inconsistent-indent warning, which has an autofix
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(b"events {\n    worker_connections 1024;\n      multi_accept on;\n}\n")
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint --fix");
+
+    assert!(
+        output.status.success(),
+        "exit code should be zero when all errors were fixed; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

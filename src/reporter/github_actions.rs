@@ -2,9 +2,9 @@ use crate::LintError;
 use crate::Severity;
 use std::path::Path;
 
-pub(crate) fn report(errors: &[LintError], path: &Path) {
+pub(crate) fn report(writer: &mut dyn std::io::Write, errors: &[LintError], path: &Path) {
     for line in format(errors, path) {
-        println!("{}", line);
+        let _ = writeln!(writer, "{}", line);
     }
 }
 

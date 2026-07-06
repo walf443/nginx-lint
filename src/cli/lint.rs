@@ -235,6 +235,13 @@ fn process_results(
                 profiles,
             } => {
                 if fix {
+                    // Errors without an autofix remain after fixing; report them
+                    // so they don't silently disappear under --fix.
+                    let unfixed: Vec<LintError> = errors
+                        .iter()
+                        .filter(|e| e.fixes.is_empty())
+                        .cloned()
+                        .collect();
                     if let Some(content) = stdin_content {
                         let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
                         let result = apply_fixes_to_content_detailed(content, &fixes);
@@ -243,6 +250,10 @@ fn process_results(
                             print!("{}", result.content);
                         } else {
                             print!("{}", content);
+                        }
+                        // stdout carries the fixed content, so report to stderr
+                        if !unfixed.is_empty() {
+                            reporter.report_to_stderr(&unfixed, &path, ignored_count);
                         }
                     } else {
                         match apply_fixes(&path, &errors) {
@@ -260,11 +271,15 @@ fn process_results(
                                 eprintln!("Error applying fixes to {}: {}", path.display(), e);
                             }
                         }
+                        if !unfixed.is_empty() {
+                            reporter.report(&unfixed, &path, ignored_count);
+                        }
                     }
+                    all_errors.extend(unfixed);
                 } else {
                     reporter.report(&errors, &path, ignored_count);
+                    all_errors.extend(errors);
                 }
-                all_errors.extend(errors);
                 if let Some(p) = profiles {
                     all_profiles.extend(p);
                 }

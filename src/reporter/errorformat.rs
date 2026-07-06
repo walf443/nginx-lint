@@ -2,9 +2,11 @@ use crate::LintError;
 use crate::Severity;
 use crate::config::{Color, ColorConfig};
 use colored::{ColoredString, Colorize};
+use std::io::Write;
 use std::path::Path;
 
 pub(crate) fn report(
+    writer: &mut dyn Write,
     errors: &[LintError],
     path: &Path,
     colors: &ColorConfig,
@@ -47,11 +49,11 @@ pub(crate) fn report(
         )
         .bold();
 
-        println!("{}: {}: {}", location, severity_str, error.message);
+        let _ = writeln!(writer, "{}: {}: {}", location, severity_str, error.message);
     }
 
     if !errors.is_empty() || ignored_count > 0 {
-        println!();
+        let _ = writeln!(writer);
         let error_count = errors
             .iter()
             .filter(|e| e.severity == Severity::Error)
@@ -73,7 +75,7 @@ pub(crate) fn report(
         }
 
         if !parts.is_empty() {
-            println!("Found {}", parts.join(", "));
+            let _ = writeln!(writer, "Found {}", parts.join(", "));
         }
     }
 }
