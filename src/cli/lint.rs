@@ -26,6 +26,26 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
     }
 }
 
+/// Extend `errors` with `additional`, dropping exact duplicates.
+///
+/// Pre-parse checks and the registered syntax rules (missing-semicolon,
+/// unmatched-braces, unclosed-quote) detect the same problems; keeping both
+/// copies would report each problem twice and, under `--fix`, apply the same
+/// fix twice (e.g. inserting `;;` for one missing semicolon).
+fn extend_errors_dedup(errors: &mut Vec<LintError>, additional: Vec<LintError>) {
+    for err in additional {
+        let is_duplicate = errors.iter().any(|existing| {
+            existing.rule == err.rule
+                && existing.line == err.line
+                && existing.column == err.column
+                && existing.message == err.message
+        });
+        if !is_duplicate {
+            errors.push(err);
+        }
+    }
+}
+
 /// Resolve a path value from the config file: a relative path is resolved
 /// against the directory containing the config file.
 fn resolve_against_config_dir(path: PathBuf, config_dir: Option<&Path>) -> PathBuf {
@@ -202,88 +222,199 @@ fn lint_file(
 
     let mut result = run_lint_on_config(&config, path, &content, linter, profile);
 
-    // Merge pre-parse errors and syntax errors into lint errors
-    // TODO: pre_parse_checks (unmatched-braces, etc.) and rowan syntax-error may report
-    // the same issue. Consider deduplicating or unifying these in a future refactor.
+    // Merge pre-parse errors and syntax errors into lint errors, dropping
+    // exact duplicates (the linter's syntax rules and pre_parse_checks
+    // overlap; rowan syntax-error may also repeat).
     let FileResult::LintErrors { ref mut errors, .. } = result;
-    errors.extend(pre_parse_errors);
+    extend_errors_dedup(errors, pre_parse_errors);
     if !syntax_errors.is_empty() {
-        errors.extend(syntax_errors_to_lint_errors(&syntax_errors, &content));
+        extend_errors_dedup(
+            errors,
+            syntax_errors_to_lint_errors(&syntax_errors, &content),
+        );
     }
 
     result
 }
 
-/// Process lint results: report errors, apply fixes, and determine exit code
+/// Lint a file, apply autofixes, and re-lint the fixed content.
+///
+/// Reporting the re-lint result (instead of the pre-fix errors) means the
+/// reported errors and the exit code always describe what actually remains
+/// in the written file: positions are computed against the rewritten
+/// content, and problems left behind by fixes that failed to apply or were
+/// skipped stay visible.
+fn fix_file(
+    inc: &IncludedFile,
+    linter: &Linter,
+    lint_config: Option<&LintConfig>,
+    profile: bool,
+) -> FileResult {
+    let FileResult::LintErrors {
+        path,
+        errors,
+        ignored_count,
+        profiles,
+    } = lint_file(inc, linter, lint_config, profile);
+
+    if errors.iter().all(|e| e.fixes.is_empty()) {
+        return FileResult::LintErrors {
+            path,
+            errors,
+            ignored_count,
+            profiles,
+        };
+    }
+
+    match apply_fixes(&path, &errors) {
+        Ok(result) => {
+            warn_skipped_fixes(result.skipped_invalid, &path);
+            if result.applied == 0 {
+                // Nothing was written: the original lint results still hold.
+                return FileResult::LintErrors {
+                    path,
+                    errors,
+                    ignored_count,
+                    profiles,
+                };
+            }
+            eprintln!("Applied {} fix(es) to {}", result.applied, path.display());
+            let FileResult::LintErrors {
+                errors: remaining,
+                ignored_count: remaining_ignored,
+                ..
+            } = lint_content(
+                &result.content,
+                &path,
+                linter,
+                lint_config,
+                false,
+                inc.include_context.clone(),
+            );
+            FileResult::LintErrors {
+                path,
+                errors: remaining,
+                ignored_count: remaining_ignored,
+                profiles,
+            }
+        }
+        Err(e) => {
+            eprintln!("Error applying fixes to {}: {}", path.display(), e);
+            // Nothing was written: every error still stands.
+            FileResult::LintErrors {
+                path,
+                errors,
+                ignored_count,
+                profiles,
+            }
+        }
+    }
+}
+
+/// Apply autofixes to stdin content, print the result to stdout, and
+/// re-lint the fixed content for the stderr report and the exit code.
+fn fix_stdin(
+    result: FileResult,
+    content: &str,
+    linter: &Linter,
+    lint_config: Option<&LintConfig>,
+    initial_context: Vec<String>,
+) -> FileResult {
+    let FileResult::LintErrors {
+        path,
+        errors,
+        ignored_count,
+        profiles,
+    } = result;
+
+    let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+    let apply_result = apply_fixes_to_content_detailed(content, &fixes);
+    warn_skipped_fixes(apply_result.skipped_invalid, &path);
+
+    if apply_result.applied == 0 {
+        // Nothing was fixed: echo the input and keep the original results.
+        print!("{}", content);
+        return FileResult::LintErrors {
+            path,
+            errors,
+            ignored_count,
+            profiles,
+        };
+    }
+
+    print!("{}", apply_result.content);
+    let FileResult::LintErrors {
+        errors: remaining,
+        ignored_count: remaining_ignored,
+        ..
+    } = lint_content(
+        &apply_result.content,
+        &path,
+        linter,
+        lint_config,
+        false,
+        initial_context,
+    );
+    FileResult::LintErrors {
+        path,
+        errors: remaining,
+        ignored_count: remaining_ignored,
+        profiles,
+    }
+}
+
+/// Process lint results: report errors and determine the exit code.
+///
+/// Under `--fix` the results have already been fixed and re-linted by
+/// `fix_file`/`fix_stdin`, so they are reported like any other lint result;
+/// in stdin mode the report goes to stderr because stdout carries the fixed
+/// content.
 fn process_results(
     results: Vec<FileResult>,
     fix: bool,
     no_fail_on_warnings: bool,
     profile: bool,
     reporter: &Reporter,
-    stdin_content: Option<&str>,
+    stdin_mode: bool,
 ) -> ExitCode {
     let mut all_errors = Vec::new();
     let mut all_profiles: Vec<RuleProfile> = Vec::new();
+    // Once the output consumer closes the stream (e.g. piping into `head`),
+    // stop reporting but still compute the exit code.
+    let mut output_closed = false;
 
     for result in results {
-        match result {
-            FileResult::LintErrors {
-                path,
-                errors,
-                ignored_count,
-                profiles,
-            } => {
-                if fix {
-                    // Errors without an autofix remain after fixing; report them
-                    // so they don't silently disappear under --fix.
-                    let unfixed: Vec<LintError> = errors
-                        .iter()
-                        .filter(|e| e.fixes.is_empty())
-                        .cloned()
-                        .collect();
-                    if let Some(content) = stdin_content {
-                        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
-                        let result = apply_fixes_to_content_detailed(content, &fixes);
-                        warn_skipped_fixes(result.skipped_invalid, &path);
-                        if result.applied > 0 {
-                            print!("{}", result.content);
-                        } else {
-                            print!("{}", content);
-                        }
-                        // stdout carries the fixed content, so report to stderr
-                        if !unfixed.is_empty() {
-                            reporter.report_to_stderr(&unfixed, &path, ignored_count);
-                        }
-                    } else {
-                        match apply_fixes(&path, &errors) {
-                            Ok(result) => {
-                                warn_skipped_fixes(result.skipped_invalid, &path);
-                                if result.applied > 0 {
-                                    eprintln!(
-                                        "Applied {} fix(es) to {}",
-                                        result.applied,
-                                        path.display()
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                eprintln!("Error applying fixes to {}: {}", path.display(), e);
-                            }
-                        }
-                        if !unfixed.is_empty() {
-                            reporter.report(&unfixed, &path, ignored_count);
-                        }
-                    }
-                    all_errors.extend(unfixed);
-                } else {
-                    reporter.report(&errors, &path, ignored_count);
-                    all_errors.extend(errors);
-                }
-                if let Some(p) = profiles {
-                    all_profiles.extend(p);
-                }
+        let FileResult::LintErrors {
+            path,
+            errors,
+            ignored_count,
+            profiles,
+        } = result;
+
+        let report_result = if output_closed {
+            Ok(())
+        } else if fix && stdin_mode {
+            // stdout carries the fixed content, so report to stderr
+            if !errors.is_empty() || ignored_count > 0 {
+                reporter.report_to_stderr(&errors, &path, ignored_count)
+            } else {
+                Ok(())
             }
+        } else {
+            reporter.report(&errors, &path, ignored_count)
+        };
+        if let Err(e) = report_result {
+            if e.kind() == std::io::ErrorKind::BrokenPipe {
+                output_closed = true;
+            } else {
+                eprintln!("Error writing report: {}", e);
+                return ExitCode::from(2);
+            }
+        }
+
+        all_errors.extend(errors);
+        if let Some(p) = profiles {
+            all_profiles.extend(p);
         }
     }
 
@@ -327,12 +458,15 @@ fn lint_content(
 
     let mut result = run_lint_on_config(&parse_result, path, content, linter, profile);
 
-    // Merge pre-parse errors and syntax errors into lint errors
-    // TODO: pre_parse_checks and rowan syntax-error may overlap (see lint_file TODO)
+    // Merge pre-parse errors and syntax errors into lint errors, dropping
+    // exact duplicates (see lint_file)
     let FileResult::LintErrors { ref mut errors, .. } = result;
-    errors.extend(pre_parse_errors);
+    extend_errors_dedup(errors, pre_parse_errors);
     if !syntax_errors.is_empty() {
-        errors.extend(syntax_errors_to_lint_errors(&syntax_errors, content));
+        extend_errors_dedup(
+            errors,
+            syntax_errors_to_lint_errors(&syntax_errors, content),
+        );
     }
 
     result
@@ -635,14 +769,25 @@ pub fn run_lint(cli: Cli) -> ExitCode {
 
     // 8. Build results: stdin mode vs file mode
     let results: Vec<FileResult> = if let Some(ref content) = stdin_content {
-        vec![lint_content(
+        let result = lint_content(
             content,
             Path::new("<stdin>"),
             &linter,
             lint_config.as_ref(),
             cli.profile,
-            initial_context,
-        )]
+            initial_context.clone(),
+        );
+        if cli.fix {
+            vec![fix_stdin(
+                result,
+                content,
+                &linter,
+                lint_config.as_ref(),
+                initial_context,
+            )]
+        } else {
+            vec![result]
+        }
     } else {
         // Collect all files to lint (including files referenced by include directives)
         let mut seen_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
@@ -688,10 +833,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
 
         // Lint files (parallel when not fixing and not profiling, sequential otherwise)
-        if cli.fix || cli.profile {
+        if cli.fix {
             included_files
                 .iter()
-                .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), cli.profile))
+                .map(|inc| fix_file(inc, &linter, lint_config.as_ref(), cli.profile))
+                .collect()
+        } else if cli.profile {
+            included_files
+                .iter()
+                .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), true))
                 .collect()
         } else {
             included_files
@@ -701,13 +851,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     };
 
-    // 9. Process results (report/fix/exit code)
+    // 9. Process results (report/exit code)
     process_results(
         results,
         cli.fix,
         cli.no_fail_on_warnings,
         cli.profile,
         &reporter,
-        stdin_content.as_deref(),
+        stdin_mode,
     )
 }

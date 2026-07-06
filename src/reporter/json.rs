@@ -21,8 +21,8 @@ pub(crate) fn report(
     errors: &[LintError],
     path: &Path,
     ignored_count: usize,
-) {
-    let _ = writeln!(writer, "{}", format(errors, path, ignored_count));
+) -> std::io::Result<()> {
+    writeln!(writer, "{}", format(errors, path, ignored_count))
 }
 
 pub(crate) fn format(errors: &[LintError], path: &Path, ignored_count: usize) -> String {

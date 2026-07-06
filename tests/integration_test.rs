@@ -2739,10 +2739,12 @@ fn test_why_command_omits_applies_to_for_unversioned_rule() {
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================
 
-/// Config with a fixable error (unmatched brace gets a closing-brace fix)
-/// and an unfixable one (the resulting rowan syntax error has no fix).
+/// Config with a fixable warning (inconsistent indent) and an unfixable
+/// error (the stray `;;` produces a rowan syntax error that has no fix and
+/// survives `--fix`).
 #[cfg(feature = "cli")]
-const UNFIXABLE_CONFIG: &str = "events {\n    worker_connections 1024;\n";
+const UNFIXABLE_CONFIG: &str =
+    "events {\n    worker_connections 1024;\n      multi_accept on;;\n}\n";
 
 #[cfg(feature = "cli")]
 #[test]
@@ -2832,5 +2834,105 @@ fn test_fix_exits_zero_when_all_errors_fixed() {
         "exit code should be zero when all errors were fixed; stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// When applying fixes fails (e.g. read-only file), nothing was fixed, so
+/// every error must still be reported and the exit code must be non-zero.
+#[cfg(all(feature = "cli", unix))]
+#[test]
+fn test_fix_unwritable_file_keeps_errors_and_fails() {
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(b"events {\n    worker_connections 1024\n}\n")
+        .unwrap();
+    std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o444)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint --fix");
+
+    std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("missing-semicolon"),
+        "errors must still be reported when fixes could not be written; got:\n{}",
+        stdout
+    );
+    assert!(
+        !output.status.success(),
+        "exit code must be non-zero when fixes could not be written"
+    );
+}
+
+/// The same problem detected twice (registered syntax rule + pre-parse
+/// check) must apply its fix only once: `listen 80` becomes `listen 80;`,
+/// not `listen 80;;`.
+#[cfg(feature = "cli")]
+#[test]
+fn test_fix_applies_duplicate_reported_fix_once() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(b"events {\n    worker_connections 1024\n}\n")
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint --fix");
+
+    let fixed = std::fs::read_to_string(file.path()).unwrap();
+    assert!(
+        fixed.contains("worker_connections 1024;") && !fixed.contains("1024;;"),
+        "the missing-semicolon fix must be applied exactly once; got:\n{}",
+        fixed
+    );
+    assert!(
+        output.status.success(),
+        "exit code should be zero after everything was fixed; stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// The report printed by --fix must describe the file as written: running a
+/// plain lint on the fixed file afterwards must produce the identical
+/// report (same errors, same positions).
+#[cfg(feature = "cli")]
+#[test]
+fn test_fix_reports_positions_of_fixed_file() {
+    use std::io::Write;
+    use std::process::Command;
+
+    // Unclosed `map` block: the inserted closing brace shifts every
+    // following line, so stale (pre-fix) positions would not survive the
+    // comparison below.
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(
+        b"http {\n    map $a $b {\n        default 1;\n\n    server {\n        listen 80;\n    }\n}\n",
+    )
+    .unwrap();
+
+    let fix_output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--fix", file.path().to_str().unwrap()])
+        .output()
+        .expect("Failed to run nginx-lint --fix");
+
+    let relint_output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg(file.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run nginx-lint");
+
+    assert_eq!(
+        String::from_utf8_lossy(&fix_output.stdout),
+        String::from_utf8_lossy(&relint_output.stdout),
+        "--fix must report exactly what a plain lint of the fixed file reports"
     );
 }

@@ -11,7 +11,7 @@ pub(crate) fn report(
     path: &Path,
     colors: &ColorConfig,
     ignored_count: usize,
-) {
+) -> std::io::Result<()> {
     let path_str = path.display();
 
     let mut sorted_errors: Vec<_> = errors.iter().collect();
@@ -49,11 +49,11 @@ pub(crate) fn report(
         )
         .bold();
 
-        let _ = writeln!(writer, "{}: {}: {}", location, severity_str, error.message);
+        writeln!(writer, "{}: {}: {}", location, severity_str, error.message)?;
     }
 
     if !errors.is_empty() || ignored_count > 0 {
-        let _ = writeln!(writer);
+        writeln!(writer)?;
         let error_count = errors
             .iter()
             .filter(|e| e.severity == Severity::Error)
@@ -75,9 +75,11 @@ pub(crate) fn report(
         }
 
         if !parts.is_empty() {
-            let _ = writeln!(writer, "Found {}", parts.join(", "));
+            writeln!(writer, "Found {}", parts.join(", "))?;
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]

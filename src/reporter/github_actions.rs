@@ -2,10 +2,15 @@ use crate::LintError;
 use crate::Severity;
 use std::path::Path;
 
-pub(crate) fn report(writer: &mut dyn std::io::Write, errors: &[LintError], path: &Path) {
+pub(crate) fn report(
+    writer: &mut dyn std::io::Write,
+    errors: &[LintError],
+    path: &Path,
+) -> std::io::Result<()> {
     for line in format(errors, path) {
-        let _ = writeln!(writer, "{}", line);
+        writeln!(writer, "{}", line)?;
     }
+    Ok(())
 }
 
 pub(crate) fn format(errors: &[LintError], path: &Path) -> Vec<String> {
