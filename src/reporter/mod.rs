@@ -31,13 +31,41 @@ impl Reporter {
         Self { format, colors }
     }
 
-    pub fn report(&self, errors: &[LintError], path: &Path, ignored_count: usize) {
+    /// Report to stdout. Returns any write error so the caller can react
+    /// (e.g. a broken pipe, or a full disk truncating JSON output).
+    pub fn report(
+        &self,
+        errors: &[LintError],
+        path: &Path,
+        ignored_count: usize,
+    ) -> std::io::Result<()> {
+        self.report_to(&mut std::io::stdout().lock(), errors, path, ignored_count)
+    }
+
+    /// Report to stderr instead of stdout. Used in `--fix` stdin mode, where
+    /// stdout carries the fixed content.
+    pub fn report_to_stderr(
+        &self,
+        errors: &[LintError],
+        path: &Path,
+        ignored_count: usize,
+    ) -> std::io::Result<()> {
+        self.report_to(&mut std::io::stderr().lock(), errors, path, ignored_count)
+    }
+
+    fn report_to(
+        &self,
+        writer: &mut dyn std::io::Write,
+        errors: &[LintError],
+        path: &Path,
+        ignored_count: usize,
+    ) -> std::io::Result<()> {
         match self.format {
             OutputFormat::ErrorFormat => {
-                errorformat::report(errors, path, &self.colors, ignored_count)
+                errorformat::report(writer, errors, path, &self.colors, ignored_count)
             }
-            OutputFormat::Json => json::report(errors, path, ignored_count),
-            OutputFormat::GithubActions => github_actions::report(errors, path),
+            OutputFormat::Json => json::report(writer, errors, path, ignored_count),
+            OutputFormat::GithubActions => github_actions::report(writer, errors, path),
         }
     }
 }

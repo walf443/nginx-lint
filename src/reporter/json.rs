@@ -16,8 +16,13 @@ struct Summary {
     ignored: usize,
 }
 
-pub(crate) fn report(errors: &[LintError], path: &Path, ignored_count: usize) {
-    println!("{}", format(errors, path, ignored_count));
+pub(crate) fn report(
+    writer: &mut dyn std::io::Write,
+    errors: &[LintError],
+    path: &Path,
+    ignored_count: usize,
+) -> std::io::Result<()> {
+    writeln!(writer, "{}", format(errors, path, ignored_count))
 }
 
 pub(crate) fn format(errors: &[LintError], path: &Path, ignored_count: usize) -> String {
