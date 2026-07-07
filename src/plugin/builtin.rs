@@ -323,6 +323,23 @@ mod tests {
         );
     }
 
+    /// Every loaded builtin's `spec()` name must match its `PLUGIN_ENTRIES`
+    /// table name: the enabled/disabled filter operates on the table name,
+    /// so a mismatch would make the rule impossible to filter under the
+    /// name it reports errors as. The load path only checks this with a
+    /// `debug_assert`; this test covers release builds too.
+    #[test]
+    fn test_loaded_spec_names_match_table_names() {
+        super::configure_builtin_plugin_cache(crate::plugin::CompilationCache::Disabled);
+
+        let rules = load_builtin_plugins().expect("builtin load should succeed");
+        let spec_names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+        assert_eq!(
+            spec_names, BUILTIN_PLUGIN_NAMES,
+            "spec() names must match PLUGIN_ENTRIES/BUILTIN_PLUGIN_NAMES in order"
+        );
+    }
+
     /// Filtered loading must compile only the requested plugins and return
     /// them in declaration order regardless of the filter's own ordering.
     #[test]

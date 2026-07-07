@@ -2562,6 +2562,48 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
     );
 }
 
+// Regression test for the --rule-only / version-gate interaction: the CLI
+// used to REPLACE the linter's inactive set with `registered \ keep`, which
+// dropped rules the version gate had marked inactive — an ignore comment
+// targeting such a rule then warned as referencing an unknown rule. With
+// rule-only filtering inside the constructor, excluded builtin rules are
+// recorded as inactive by name (whether or not they are also
+// version-gated), and the CLI extends the set instead of replacing it.
+// nginx-rift declares max_nginx_version = "1.30.1", so with target 1.31.0
+// it is both version-gated and excluded by `--rule-only indent`.
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_rule_only_keeps_ignore_for_version_gated_rule_quiet() {
+    let lint_config = LintConfig::parse("target_nginx_version = \"1.31.0\"\n").unwrap();
+
+    let only: std::collections::HashSet<String> = ["indent".to_string()].into();
+    let mut linter = Linter::with_config_and_rule_only(Some(&lint_config), None, Some(&only));
+    if !linter.rule_names().contains("indent") {
+        return;
+    }
+
+    // Mimic the CLI's post-load step: prune external plugins (none here)
+    // and EXTEND the inactive set rather than replacing it.
+    let registered = linter.rule_names();
+    let mut inactive = linter.inactive_rule_names().clone();
+    inactive.extend(registered.into_iter().filter(|name| name != "indent"));
+    linter.set_inactive_rules(inactive);
+
+    let content = "# nginx-lint:ignore nginx-rift version-gated reason\nhttp {\n}\n";
+    let (config, _) = parse_string_with_errors(content);
+    let (errors, _) = linter.lint_with_content(&config, &PathBuf::from("test.conf"), content);
+
+    assert!(
+        !errors.iter().any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        "ignore comment targeting a version-gated rule must stay quiet under \
+         --rule-only (neither unknown-rule nor unused-ignore warnings); got: {:?}",
+        errors
+            .iter()
+            .map(|e| (&e.rule, &e.message))
+            .collect::<Vec<_>>()
+    );
+}
+
 // ============================================================================
 // target_nginx_version tests
 // ============================================================================

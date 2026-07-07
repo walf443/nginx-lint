@@ -771,6 +771,8 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
 
         let keep: HashSet<&str> = cli.rule_only.iter().map(String::as_str).collect();
+        // Builtin rules were already filtered inside the constructor; this
+        // only prunes the external plugins loaded above.
         linter.remove_rules_by_name(|name| !keep.contains(name));
         // Surface the *filtered-out* external plugins to the ignore-comment
         // parser so existing `# nginx-lint:ignore <other-rule>` directives
