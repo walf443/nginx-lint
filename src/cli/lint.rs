@@ -641,8 +641,21 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     #[cfg(feature = "wasm-builtin-plugins")]
     nginx_lint::plugin::builtin::configure_builtin_plugin_cache(compilation_cache.clone());
 
+    // Pass --rule-only to the linter constructor so excluded builtin rules
+    // are never constructed (WASM builtins outside the set are not even
+    // compiled). External plugins are filtered after loading instead: their
+    // rule names are only known once they are compiled.
+    let rule_only: Option<std::collections::HashSet<String>> = if cli.rule_only.is_empty() {
+        None
+    } else {
+        Some(cli.rule_only.iter().cloned().collect())
+    };
     #[allow(unused_mut)]
-    let mut linter = Linter::with_config(lint_config.as_ref(), include_prefix.as_deref());
+    let mut linter = Linter::with_config_and_rule_only(
+        lint_config.as_ref(),
+        include_prefix.as_deref(),
+        rule_only.as_ref(),
+    );
 
     // Show builtin plugins in verbose mode
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
@@ -698,11 +711,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     }
 
-    // Apply --rule-only filter: keep only the requested rules, validate that
-    // every requested name corresponds to a registered rule, and surface the
-    // filtered-out rules to the ignore-comment parser so existing
-    // `# nginx-lint:ignore <other-rule>` directives keep working.
+    // Finish the --rule-only handling: builtin rules were already filtered
+    // inside the linter constructor; validate that every requested name
+    // corresponds to a rule this run could load, and prune the external
+    // plugins that were loaded above.
     if !cli.rule_only.is_empty() {
+        // Kept builtin rules plus every external plugin
         let registered = linter.rule_names();
 
         // Split unknown names into "exists but not loaded" vs "no such rule"
@@ -740,8 +754,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     not_loaded.join(", ")
                 );
             }
-            let mut available: Vec<&str> = registered.iter().map(String::as_str).collect();
+            // Rules the filter excluded are inactive, not registered; list
+            // them too so the user sees every name --rule-only accepts.
+            let mut available: Vec<&str> = registered
+                .iter()
+                .chain(linter.inactive_rule_names())
+                .map(String::as_str)
+                .collect();
             available.sort();
+            available.dedup();
             eprintln!("Loaded rules:");
             for name in &available {
                 eprintln!("  - {}", name);
@@ -750,16 +771,21 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
 
         let keep: HashSet<&str> = cli.rule_only.iter().map(String::as_str).collect();
+        // Builtin rules were already filtered inside the constructor; this
+        // only prunes the external plugins loaded above.
         linter.remove_rules_by_name(|name| !keep.contains(name));
-        // Surface *filtered-out* rules to the ignore-comment parser so
-        // existing `# nginx-lint:ignore <other-rule>` directives stay quiet
-        // (valid names + dormant for unused-warning suppression). The kept
-        // rules are intentionally excluded — their own unused-ignore
-        // directives must still produce warnings.
-        let inactive: HashSet<String> = registered
-            .into_iter()
-            .filter(|name| !keep.contains(name.as_str()))
-            .collect();
+        // Surface the *filtered-out* external plugins to the ignore-comment
+        // parser so existing `# nginx-lint:ignore <other-rule>` directives
+        // stay quiet (valid names + dormant for unused-warning suppression);
+        // filtered-out builtin rules are already inactive from the linter
+        // constructor. The kept rules are intentionally excluded — their own
+        // unused-ignore directives must still produce warnings.
+        let mut inactive = linter.inactive_rule_names().clone();
+        inactive.extend(
+            registered
+                .into_iter()
+                .filter(|name| !keep.contains(name.as_str())),
+        );
         linter.set_inactive_rules(inactive);
 
         if cli.verbose {

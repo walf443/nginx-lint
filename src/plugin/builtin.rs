@@ -5,6 +5,8 @@
 
 #[cfg(feature = "wasm-builtin-plugins")]
 use super::{ComponentLintRule, PluginError, PluginLoader};
+#[cfg(feature = "wasm-builtin-plugins")]
+use crate::linter::LintRule;
 
 /// Embedded WASM bytes for builtin plugins
 #[cfg(feature = "wasm-builtin-plugins")]
@@ -113,27 +115,23 @@ pub fn configure_builtin_plugin_cache(cache: super::CompilationCache) {
     let _ = BUILTIN_PLUGIN_CACHE.set(cache);
 }
 
-/// Global cache for compiled builtin plugins
-/// This avoids recompiling WASM modules on every Linter creation
-#[cfg(feature = "wasm-builtin-plugins")]
-static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<Vec<ComponentLintRule>> =
-    std::sync::OnceLock::new();
-
-/// Load all builtin plugins (with caching)
+/// Per-plugin cache of compiled builtin plugins, keyed by plugin name.
 ///
-/// The first call compiles all WASM modules and caches them.
-/// Subsequent calls clone from the cache, which is much faster.
-///
-/// Builtin plugins use a trusted loader with the execution timeout disabled for better performance.
+/// Compiling a WASM module dominates load time, so each builtin is compiled
+/// at most once per process, on first request. Caching per plugin (rather
+/// than the whole set at once) lets [`load_builtin_plugins_filtered`] skip
+/// plugins the current config disables without poisoning later calls that
+/// need a different subset.
 #[cfg(feature = "wasm-builtin-plugins")]
-pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
-    // Try to get from cache first
-    if let Some(cached) = BUILTIN_PLUGINS_CACHE.get() {
-        return Ok(cached.clone());
-    }
+static BUILTIN_PLUGINS_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<&'static str, ComponentLintRule>>,
+> = std::sync::OnceLock::new();
 
-    // Get or create the loader (use trusted mode for builtin plugins - no execution timeout)
-    let loader = PLUGIN_LOADER_CACHE.get_or_init(|| {
+/// Get or create the shared trusted loader for builtin plugins
+/// (no execution timeout; the engine is expensive to create)
+#[cfg(feature = "wasm-builtin-plugins")]
+fn plugin_loader() -> &'static PluginLoader {
+    PLUGIN_LOADER_CACHE.get_or_init(|| {
         let cache = BUILTIN_PLUGIN_CACHE.get().cloned().unwrap_or_default();
         PluginLoader::new_trusted_with_cache(cache).unwrap_or_else(|e| {
             // Builtin plugins are embedded and must load even when the
@@ -148,79 +146,214 @@ pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
             PluginLoader::new_trusted_with_cache(super::CompilationCache::Disabled)
                 .expect("Failed to create PluginLoader")
         })
-    });
-
-    // Compile plugins
-    let plugins = compile_builtin_plugins(loader)?;
-
-    // Try to store in cache (ignore if another thread beat us)
-    let _ = BUILTIN_PLUGINS_CACHE.set(plugins.clone());
-
-    Ok(plugins)
+    })
 }
 
-/// Compile all builtin plugins from embedded WASM bytes
+/// Load all builtin plugins (with caching)
+///
+/// Each plugin is compiled at most once per process; subsequent calls clone
+/// from the cache, which is much faster.
+///
+/// Builtin plugins use a trusted loader with the execution timeout disabled for better performance.
 #[cfg(feature = "wasm-builtin-plugins")]
-fn compile_builtin_plugins(loader: &PluginLoader) -> Result<Vec<ComponentLintRule>, PluginError> {
+pub fn load_builtin_plugins() -> Result<Vec<ComponentLintRule>, PluginError> {
+    load_builtin_plugins_filtered(|_| true)
+}
+
+/// Load the builtin plugins whose name passes `filter`, in declaration order.
+///
+/// Plugins rejected by the filter are not compiled at all, so a config that
+/// disables most builtin rules only pays compilation (or cache
+/// deserialization) for the rules it actually runs. Accepted plugins are
+/// compiled once per process and cached individually; a later call with a
+/// broader filter compiles only the plugins not yet cached.
+#[cfg(feature = "wasm-builtin-plugins")]
+pub fn load_builtin_plugins_filtered(
+    filter: impl Fn(&str) -> bool,
+) -> Result<Vec<ComponentLintRule>, PluginError> {
     use std::path::PathBuf;
 
-    let plugin_entries: &[(&str, &[u8])] = &[
-        ("server-tokens-enabled", embedded::SERVER_TOKENS_ENABLED),
-        ("autoindex-enabled", embedded::AUTOINDEX_ENABLED),
-        ("gzip-not-enabled", embedded::GZIP_NOT_ENABLED),
-        ("duplicate-directive", embedded::DUPLICATE_DIRECTIVE),
-        ("space-before-semicolon", embedded::SPACE_BEFORE_SEMICOLON),
-        ("trailing-whitespace", embedded::TRAILING_WHITESPACE),
-        ("block-lines", embedded::BLOCK_LINES),
-        ("proxy-pass-domain", embedded::PROXY_PASS_DOMAIN),
-        (
-            "upstream-server-no-resolve",
-            embedded::UPSTREAM_SERVER_NO_RESOLVE,
-        ),
-        ("directive-inheritance", embedded::DIRECTIVE_INHERITANCE),
-        ("root-in-location", embedded::ROOT_IN_LOCATION),
-        (
-            "alias-location-slash-mismatch",
-            embedded::ALIAS_LOCATION_SLASH_MISMATCH,
-        ),
-        ("proxy-pass-with-uri", embedded::PROXY_PASS_WITH_URI),
-        ("proxy-keepalive", embedded::PROXY_KEEPALIVE),
-        ("try-files-with-proxy", embedded::TRY_FILES_WITH_PROXY),
-        ("if-is-evil-in-location", embedded::IF_IS_EVIL_IN_LOCATION),
-        ("unreachable-location", embedded::UNREACHABLE_LOCATION),
-        ("missing-error-log", embedded::MISSING_ERROR_LOG),
-        ("deprecated-ssl-protocol", embedded::DEPRECATED_SSL_PROTOCOL),
-        ("weak-ssl-ciphers", embedded::WEAK_SSL_CIPHERS),
-        (
-            "invalid-directive-context",
-            embedded::INVALID_DIRECTIVE_CONTEXT,
-        ),
-        ("map-missing-default", embedded::MAP_MISSING_DEFAULT),
-        ("ssl-on-deprecated", embedded::SSL_ON_DEPRECATED),
-        ("listen-http2-deprecated", embedded::LISTEN_HTTP2_DEPRECATED),
-        (
-            "proxy-missing-host-header",
-            embedded::PROXY_MISSING_HOST_HEADER,
-        ),
-        (
-            "client-max-body-size-not-set",
-            embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
-        ),
-        ("nginx-rift", embedded::NGINX_RIFT),
-    ];
-
-    // Compile plugins in parallel: the serial phases of each component's
-    // compilation overlap across plugins, which speeds up the first run /
-    // cache misses. Order is preserved.
-    use rayon::prelude::*;
-    let results: Vec<Result<ComponentLintRule, PluginError>> = plugin_entries
-        .par_iter()
-        .map(|(name, bytes)| {
-            loader.load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes)
-        })
+    let selected: Vec<(&'static str, &'static [u8])> = PLUGIN_ENTRIES
+        .iter()
+        .copied()
+        .filter(|(name, _)| filter(name))
         .collect();
 
-    // Fold serially so a failure surfaces the first failing plugin in
-    // declaration order, keeping error reports deterministic
-    results.into_iter().collect()
+    let cache = BUILTIN_PLUGINS_CACHE.get_or_init(Default::default);
+    let mut rules: std::collections::HashMap<&'static str, ComponentLintRule> = {
+        let cache = cache.lock().expect("builtin plugin cache poisoned");
+        selected
+            .iter()
+            .filter_map(|(name, _)| cache.get(name).map(|rule| (*name, rule.clone())))
+            .collect()
+    };
+
+    let missing: Vec<(&'static str, &'static [u8])> = selected
+        .iter()
+        .copied()
+        .filter(|(name, _)| !rules.contains_key(name))
+        .collect();
+
+    if !missing.is_empty() {
+        let loader = plugin_loader();
+
+        // Compile plugins in parallel: the serial phases of each component's
+        // compilation overlap across plugins, which speeds up the first run /
+        // cache misses. Order is preserved. The cache lock is not held while
+        // compiling; two threads racing on the same plugin at worst compile
+        // it twice, and the first insert wins.
+        use rayon::prelude::*;
+        let results: Vec<(&'static str, Result<ComponentLintRule, PluginError>)> = missing
+            .par_iter()
+            .map(|(name, bytes)| {
+                let result = loader
+                    .load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes);
+                (*name, result)
+            })
+            .collect();
+
+        let mut first_error = None;
+        {
+            let mut cache = cache.lock().expect("builtin plugin cache poisoned");
+            for (name, result) in results {
+                match result {
+                    Ok(rule) => {
+                        debug_assert_eq!(
+                            rule.name(),
+                            name,
+                            "builtin plugin table name and spec name must match \
+                             (the enabled-set filter operates on the table name)"
+                        );
+                        cache.entry(name).or_insert_with(|| rule.clone());
+                        rules.insert(name, rule);
+                    }
+                    // Remember the first failure in declaration order for a
+                    // deterministic error report, but still cache the
+                    // plugins that succeeded.
+                    Err(e) => {
+                        if first_error.is_none() {
+                            first_error = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(e) = first_error {
+            return Err(e);
+        }
+    }
+
+    Ok(selected
+        .iter()
+        .map(|(name, _)| {
+            rules
+                .remove(name)
+                .expect("every selected plugin is either cached or freshly compiled")
+        })
+        .collect())
+}
+
+/// Embedded builtin plugins in declaration order: `(rule name, WASM bytes)`.
+///
+/// The rule name must match the plugin's `spec()` name and the
+/// `BUILTIN_PLUGIN_NAMES` table in `plugin/mod.rs` (enforced by a test
+/// below); enabled/disabled filtering happens against this name before the
+/// plugin is compiled.
+#[cfg(feature = "wasm-builtin-plugins")]
+const PLUGIN_ENTRIES: &[(&str, &[u8])] = &[
+    ("server-tokens-enabled", embedded::SERVER_TOKENS_ENABLED),
+    ("autoindex-enabled", embedded::AUTOINDEX_ENABLED),
+    ("gzip-not-enabled", embedded::GZIP_NOT_ENABLED),
+    ("duplicate-directive", embedded::DUPLICATE_DIRECTIVE),
+    ("space-before-semicolon", embedded::SPACE_BEFORE_SEMICOLON),
+    ("trailing-whitespace", embedded::TRAILING_WHITESPACE),
+    ("block-lines", embedded::BLOCK_LINES),
+    ("proxy-pass-domain", embedded::PROXY_PASS_DOMAIN),
+    (
+        "upstream-server-no-resolve",
+        embedded::UPSTREAM_SERVER_NO_RESOLVE,
+    ),
+    ("directive-inheritance", embedded::DIRECTIVE_INHERITANCE),
+    ("root-in-location", embedded::ROOT_IN_LOCATION),
+    (
+        "alias-location-slash-mismatch",
+        embedded::ALIAS_LOCATION_SLASH_MISMATCH,
+    ),
+    ("proxy-pass-with-uri", embedded::PROXY_PASS_WITH_URI),
+    ("proxy-keepalive", embedded::PROXY_KEEPALIVE),
+    ("try-files-with-proxy", embedded::TRY_FILES_WITH_PROXY),
+    ("if-is-evil-in-location", embedded::IF_IS_EVIL_IN_LOCATION),
+    ("unreachable-location", embedded::UNREACHABLE_LOCATION),
+    ("missing-error-log", embedded::MISSING_ERROR_LOG),
+    ("deprecated-ssl-protocol", embedded::DEPRECATED_SSL_PROTOCOL),
+    ("weak-ssl-ciphers", embedded::WEAK_SSL_CIPHERS),
+    (
+        "invalid-directive-context",
+        embedded::INVALID_DIRECTIVE_CONTEXT,
+    ),
+    ("map-missing-default", embedded::MAP_MISSING_DEFAULT),
+    ("ssl-on-deprecated", embedded::SSL_ON_DEPRECATED),
+    ("listen-http2-deprecated", embedded::LISTEN_HTTP2_DEPRECATED),
+    (
+        "proxy-missing-host-header",
+        embedded::PROXY_MISSING_HOST_HEADER,
+    ),
+    (
+        "client-max-body-size-not-set",
+        embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
+    ),
+    ("nginx-rift", embedded::NGINX_RIFT),
+];
+
+#[cfg(all(test, feature = "wasm-builtin-plugins"))]
+mod tests {
+    use super::*;
+
+    /// The enabled/disabled filter operates on the `PLUGIN_ENTRIES` names
+    /// before compiling, while everything else (config validation, docs,
+    /// `--list-rules`) uses `BUILTIN_PLUGIN_NAMES`. The two tables are
+    /// maintained by hand; a drift would make a rule impossible to
+    /// enable/disable by name.
+    #[test]
+    fn test_plugin_entries_match_builtin_plugin_names() {
+        let entry_names: Vec<&str> = PLUGIN_ENTRIES.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            entry_names, BUILTIN_PLUGIN_NAMES,
+            "PLUGIN_ENTRIES and BUILTIN_PLUGIN_NAMES must list the same rules in the same order"
+        );
+    }
+
+    /// Every loaded builtin's `spec()` name must match its `PLUGIN_ENTRIES`
+    /// table name: the enabled/disabled filter operates on the table name,
+    /// so a mismatch would make the rule impossible to filter under the
+    /// name it reports errors as. The load path only checks this with a
+    /// `debug_assert`; this test covers release builds too.
+    #[test]
+    fn test_loaded_spec_names_match_table_names() {
+        super::configure_builtin_plugin_cache(crate::plugin::CompilationCache::Disabled);
+
+        let rules = load_builtin_plugins().expect("builtin load should succeed");
+        let spec_names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+        assert_eq!(
+            spec_names, BUILTIN_PLUGIN_NAMES,
+            "spec() names must match PLUGIN_ENTRIES/BUILTIN_PLUGIN_NAMES in order"
+        );
+    }
+
+    /// Filtered loading must compile only the requested plugins and return
+    /// them in declaration order regardless of the filter's own ordering.
+    #[test]
+    fn test_load_builtin_plugins_filtered_returns_declaration_order() {
+        // Avoid touching the real per-user cache directory from tests. This
+        // is a process-wide OnceLock; setting it here is safe because unit
+        // tests share the same requirement.
+        super::configure_builtin_plugin_cache(crate::plugin::CompilationCache::Disabled);
+
+        let wanted = ["trailing-whitespace", "autoindex-enabled"];
+        let rules = load_builtin_plugins_filtered(|name| wanted.contains(&name))
+            .expect("filtered builtin load should succeed");
+        let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+        // Declaration order in PLUGIN_ENTRIES: autoindex-enabled comes first
+        assert_eq!(names, ["autoindex-enabled", "trailing-whitespace"]);
+    }
 }
