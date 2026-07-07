@@ -128,6 +128,27 @@ impl Linter {
     }
 
     pub fn with_config(config: Option<&LintConfig>, include_prefix: Option<&Path>) -> Self {
+        Self::with_config_and_rule_only(config, include_prefix, None)
+    }
+
+    /// Like [`with_config`](Self::with_config), but additionally restricted
+    /// to the given rule names (the CLI's `--rule-only`).
+    ///
+    /// The restriction is applied *before* rules are constructed, so builtin
+    /// rules outside the set are never built — in particular, WASM builtin
+    /// plugins outside the set are never compiled. Rules that the config
+    /// enables but the set excludes are recorded as inactive, so
+    /// ignore-comment parsing keeps recognising them (see
+    /// [`set_inactive_rules`](Self::set_inactive_rules)).
+    ///
+    /// The filter only covers builtin rules; external plugins are loaded by
+    /// the CLI after this and must be filtered there (their names are not
+    /// known until they are compiled).
+    pub fn with_config_and_rule_only(
+        config: Option<&LintConfig>,
+        include_prefix: Option<&Path>,
+        rule_only: Option<&HashSet<String>>,
+    ) -> Self {
         #[cfg(feature = "cli")]
         use crate::rules::IncludePathExists;
         use crate::rules::{
@@ -136,11 +157,31 @@ impl Linter {
 
         let mut linter = Self::new();
 
-        let is_enabled = |name: &str| {
+        let enabled_in_config = |name: &str| {
             config
                 .map(|c| c.is_rule_enabled(name))
                 .unwrap_or_else(|| !LintConfig::DISABLED_BY_DEFAULT.contains(&name))
         };
+        let kept = |name: &str| rule_only.is_none_or(|set| set.contains(name));
+        let is_enabled = |name: &str| enabled_in_config(name) && kept(name);
+
+        // Builtin rules that the config enables but the rule-only set
+        // excludes would have been registered: record them as inactive so
+        // their `# nginx-lint:ignore` directives neither warn as unknown
+        // rules nor as unused. Computed by name over the builtin catalog —
+        // this must not construct (or compile) the excluded rules.
+        if rule_only.is_some() {
+            #[allow(unused_mut)]
+            let mut catalog: Vec<&str> = LintConfig::NATIVE_RULE_NAMES.to_vec();
+            #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+            catalog.extend_from_slice(crate::plugin::BUILTIN_PLUGIN_NAMES);
+            linter.inactive_rules.extend(
+                catalog
+                    .into_iter()
+                    .filter(|name| enabled_in_config(name) && !kept(name))
+                    .map(String::from),
+            );
+        }
 
         // Syntax rules
         if is_enabled("unmatched-braces") {
@@ -409,6 +450,14 @@ impl Linter {
         self.inactive_rules = names;
     }
 
+    /// Rule names currently registered as inactive (see
+    /// [`set_inactive_rules`](Self::set_inactive_rules)): rules excluded by
+    /// version filtering or by the rule-only restriction of
+    /// [`with_config_and_rule_only`](Self::with_config_and_rule_only).
+    pub fn inactive_rule_names(&self) -> &HashSet<String> {
+        &self.inactive_rules
+    }
+
     /// Names recognised by the ignore-comment parser: registered rules plus
     /// any inactive rules supplied via [`set_inactive_rules`].
     fn valid_rule_names_for_ignore(&self) -> HashSet<String> {
@@ -575,6 +624,48 @@ pub struct RuleProfile {
 impl Default for Linter {
     fn default() -> Self {
         Self::with_default_rules()
+    }
+}
+
+#[cfg(test)]
+mod rule_only_tests {
+    use super::*;
+
+    #[test]
+    fn rule_only_registers_only_requested_rules() {
+        let only: HashSet<String> = ["indent".to_string()].into();
+        let linter = Linter::with_config_and_rule_only(None, None, Some(&only));
+        assert_eq!(linter.rule_names(), only);
+    }
+
+    #[test]
+    fn rule_only_records_excluded_enabled_rules_as_inactive() {
+        let only: HashSet<String> = ["indent".to_string()].into();
+        let linter = Linter::with_config_and_rule_only(None, None, Some(&only));
+        let inactive = linter.inactive_rule_names();
+        // Excluded default-enabled rules become inactive so their ignore
+        // comments keep parsing...
+        assert!(inactive.contains("unmatched-braces"));
+        // ...the kept rule must NOT be inactive (its own unused-ignore
+        // directives must still warn)...
+        assert!(!inactive.contains("indent"));
+        // ...and rules the config disables anyway were never going to run,
+        // so they are not inactive either (matching the previous behavior
+        // where inactive was computed from the registered set).
+        for name in LintConfig::DISABLED_BY_DEFAULT {
+            assert!(
+                !inactive.contains(*name),
+                "disabled-by-default rule {} must not be marked inactive",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn no_rule_only_keeps_inactive_empty() {
+        let linter = Linter::with_config_and_rule_only(None, None, None);
+        assert!(linter.rule_names().contains("indent"));
+        assert!(linter.inactive_rule_names().is_empty());
     }
 }
 
