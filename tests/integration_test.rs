@@ -2563,14 +2563,19 @@ fn test_rule_only_kept_rule_still_emits_unused_ignore_warning() {
 }
 
 // Regression test for the --rule-only / version-gate interaction: the CLI
-// used to REPLACE the linter's inactive set with `registered \ keep`, which
-// dropped rules the version gate had marked inactive — an ignore comment
-// targeting such a rule then warned as referencing an unknown rule. With
-// rule-only filtering inside the constructor, excluded builtin rules are
-// recorded as inactive by name (whether or not they are also
-// version-gated), and the CLI extends the set instead of replacing it.
-// nginx-rift declares max_nginx_version = "1.30.1", so with target 1.31.0
-// it is both version-gated and excluded by `--rule-only indent`.
+// used to REPLACE the linter's inactive set with `registered \ keep`, and a
+// rule that was not registered (here nginx-rift: max_nginx_version =
+// "1.30.1", filtered out by target 1.31.0) fell out of that set — an ignore
+// comment targeting it then warned as referencing an unknown rule.
+//
+// With the fix, the rule-only sweep inside the constructor records every
+// excluded-but-config-enabled builtin as inactive by name, before any rule
+// is constructed. nginx-rift therefore never reaches the version gate here
+// (it is excluded by `--rule-only indent` first); its inactive status — and
+// this test's outcome — do not depend on target_nginx_version at all. The
+// version setting is kept to document the scenario that originally
+// triggered the bug; the version-gate-only inactive path (no --rule-only)
+// is covered by test_version_gated_rule_ignore_stays_quiet below.
 #[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
 #[test]
 fn test_rule_only_keeps_ignore_for_version_gated_rule_quiet() {
@@ -2597,6 +2602,34 @@ fn test_rule_only_keeps_ignore_for_version_gated_rule_quiet() {
         !errors.iter().any(|e| e.rule == "invalid-nginx-lint-ignore"),
         "ignore comment targeting a version-gated rule must stay quiet under \
          --rule-only (neither unknown-rule nor unused-ignore warnings); got: {:?}",
+        errors
+            .iter()
+            .map(|e| (&e.rule, &e.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+// The version-gate-only counterpart of the test above: without --rule-only,
+// a rule dropped by target_nginx_version (nginx-rift on target 1.31.0) is
+// marked inactive by the version gate itself, so an ignore comment
+// targeting it neither warns as an unknown rule nor as unused.
+#[cfg(any(feature = "native-builtin-plugins", feature = "wasm-builtin-plugins"))]
+#[test]
+fn test_version_gated_rule_ignore_stays_quiet() {
+    let lint_config = LintConfig::parse("target_nginx_version = \"1.31.0\"\n").unwrap();
+    let linter = Linter::with_config(Some(&lint_config), None);
+    assert!(
+        linter.inactive_rule_names().contains("nginx-rift"),
+        "nginx-rift should be version-gated into the inactive set on target 1.31.0"
+    );
+
+    let content = "# nginx-lint:ignore nginx-rift version-gated reason\nhttp {\n}\n";
+    let (config, _) = parse_string_with_errors(content);
+    let (errors, _) = linter.lint_with_content(&config, &PathBuf::from("test.conf"), content);
+
+    assert!(
+        !errors.iter().any(|e| e.rule == "invalid-nginx-lint-ignore"),
+        "ignore comment targeting a version-gated rule must stay quiet; got: {:?}",
         errors
             .iter()
             .map(|e| (&e.rule, &e.message))
