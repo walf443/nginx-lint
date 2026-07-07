@@ -284,35 +284,35 @@ impl Linter {
             }
         }
 
-        // Load WASM builtin plugins when wasm-builtin-plugins is enabled but native-builtin-plugins is not
+        // Load WASM builtin plugins when wasm-builtin-plugins is enabled but native-builtin-plugins is not.
+        // Filtering happens before loading so that disabled plugins (and the
+        // ones replaced by a configured native implementation) are never
+        // compiled at all.
         #[cfg(all(
             feature = "wasm-builtin-plugins",
             not(feature = "native-builtin-plugins")
         ))]
         {
-            use crate::plugin::builtin::load_builtin_plugins;
+            use crate::plugin::builtin::load_builtin_plugins_filtered;
 
-            if let Ok(plugins) = load_builtin_plugins() {
+            let wanted = |name: &str| {
+                // Skip invalid-directive-context if native implementation is used
+                if name == "invalid-directive-context" && use_native_invalid_directive_context {
+                    return false;
+                }
+                // Skip block-lines if configured max_block_lines is used
+                if name == "block-lines" && use_configured_block_lines {
+                    return false;
+                }
+                // Skip directive-inheritance if configured excluded/additional is used
+                if name == "directive-inheritance" && use_configured_directive_inheritance {
+                    return false;
+                }
+                is_enabled(name)
+            };
+            if let Ok(plugins) = load_builtin_plugins_filtered(wanted) {
                 for plugin in plugins {
-                    // Skip invalid-directive-context if native implementation is used
-                    if plugin.name() == "invalid-directive-context"
-                        && use_native_invalid_directive_context
-                    {
-                        continue;
-                    }
-                    // Skip block-lines if configured max_block_lines is used
-                    if plugin.name() == "block-lines" && use_configured_block_lines {
-                        continue;
-                    }
-                    // Skip directive-inheritance if configured excluded/additional is used
-                    if plugin.name() == "directive-inheritance"
-                        && use_configured_directive_inheritance
-                    {
-                        continue;
-                    }
-                    if is_enabled(plugin.name()) {
-                        linter.add_rule(Box::new(plugin));
-                    }
+                    linter.add_rule(Box::new(plugin));
                 }
             }
         }
