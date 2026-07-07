@@ -29,7 +29,7 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.25.0",
+    "@bytecodealliance/jco": "1.25.1",
     "typescript": "^6.0.0"
   }
 }
