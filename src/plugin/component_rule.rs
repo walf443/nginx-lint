@@ -177,6 +177,25 @@ impl config_api::HostConfig for ComponentStoreData {
         }
     }
 
+    fn snapshot_filtered(
+        &mut self,
+        self_: Resource<ConfigResource>,
+        names: Vec<String>,
+    ) -> config_api::ConfigSnapshot {
+        let config = self.get_config(&self_).clone();
+        let mut all_items = Vec::new();
+        let top_level_indices = config
+            .items
+            .iter()
+            .filter_map(|item| flatten_item_to_wit_filtered(item, &names, &mut all_items))
+            .collect();
+        config_api::ConfigSnapshot {
+            all_items,
+            top_level_indices,
+            include_context: config.include_context.clone(),
+        }
+    }
+
     fn all_directives_with_context(
         &mut self,
         self_: Resource<ConfigResource>,
@@ -679,6 +698,49 @@ fn flatten_item_to_wit(item: &ast::ConfigItem, all_items: &mut Vec<config_api::F
     }
 }
 
+/// Recursively flatten a config item for [`HostConfig::snapshot_filtered`],
+/// keeping only directives whose name is in `names` and the ancestor
+/// directives needed to reach them (so guest-side `is_inside` context stays
+/// correct). Returns `None` when this item is neither a match nor an
+/// ancestor of one, so the caller can drop it from the parent's child list
+/// entirely. Comments and blank lines are never kept: no builtin rule reads
+/// them through the filtered path, and they cannot be ancestors of a match.
+fn flatten_item_to_wit_filtered(
+    item: &ast::ConfigItem,
+    names: &[String],
+    all_items: &mut Vec<config_api::FlatItem>,
+) -> Option<u32> {
+    use bindings::nginx_lint::plugin::parser_types::ConfigItemValue;
+
+    let ast::ConfigItem::Directive(directive) = item else {
+        return None;
+    };
+
+    let child_indices: Vec<u32> = directive
+        .block
+        .as_ref()
+        .map(|block| {
+            block
+                .items
+                .iter()
+                .filter_map(|child| flatten_item_to_wit_filtered(child, names, all_items))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let is_match = names.iter().any(|name| name == &directive.name);
+    if !is_match && child_indices.is_empty() {
+        return None;
+    }
+
+    let index = all_items.len() as u32;
+    all_items.push(config_api::FlatItem {
+        value: ConfigItemValue::DirectiveItem(make_directive_data(directive)),
+        child_indices,
+    });
+    Some(index)
+}
+
 /// Convert a parser Argument to WIT ArgumentInfo.
 fn convert_argument_to_wit(arg: &ast::Argument) -> config_api::ArgumentInfo {
     config_api::ArgumentInfo {
@@ -1034,6 +1096,69 @@ impl LintRule for ComponentLintRule {
 mod tests {
     use super::*;
 
+    /// Load a real compiled builtin plugin by rule-table name (e.g.
+    /// `"autoindex_enabled"`), skipping the test if `make build-plugins`
+    /// (or `make collect-plugins`) has not been run.
+    fn load_real_plugin(name: &str) -> Option<ComponentLintRule> {
+        use crate::plugin::{CompilationCache, PluginLoader};
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target/builtin-plugins/{name}.wasm"));
+        if !wasm_path.exists() {
+            eprintln!("SKIP: run `make build-plugins` first (missing {wasm_path:?})");
+            return None;
+        }
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
+        Some(
+            loader
+                .load_component_from_bytes(&wasm_path, &bytes)
+                .unwrap(),
+        )
+    }
+
+    /// End-to-end check that `relevant_directives()`-based filtering (see
+    /// `autoindex_enabled`'s `snapshot_filtered` opt-in) does not change
+    /// observable behavior: same warnings, same ancestor-context handling
+    /// (`is_inside("http")`), as running through the real host+WASM stack
+    /// (not the plugin's native unit tests, which call `Plugin::check`
+    /// directly and never exercise `snapshot_filtered` or the pruning in
+    /// `flatten_item_to_wit_filtered`).
+    #[test]
+    fn autoindex_enabled_filtered_snapshot_matches_expected_behavior() {
+        let Some(rule) = load_real_plugin("autoindex_enabled") else {
+            return;
+        };
+
+        let cases: &[(&str, usize)] = &[
+            // Warns: autoindex on, inside http.
+            ("http { server { location / { autoindex on; } } }", 1),
+            // No warning: explicitly off.
+            ("http { server { location / { autoindex off; } } }", 0),
+            // No warning: absent entirely (empty filtered snapshot).
+            ("http { server { listen 80; } }", 0),
+            // No warning: autoindex outside http context. This is the case
+            // that would break if ancestor pruning dropped the "stream"
+            // ancestor needed for is_inside("http") to return false.
+            ("stream { autoindex on; }", 0),
+            // Warns on both, each under its own location ancestor chain.
+            (
+                "http { server { location /a { autoindex on; } location /b { autoindex on; } } }",
+                2,
+            ),
+        ];
+
+        for (src, expected_count) in cases {
+            let config = Arc::new(crate::parser::parse_string(src).unwrap());
+            let errors = rule.check_shared(&config, Path::new("test.conf"));
+            assert_eq!(
+                errors.len(),
+                *expected_count,
+                "unexpected error count for {src:?}: {errors:?}"
+            );
+        }
+    }
+
     /// Temporary measurement harness for the WIT-boundary cost investigation.
     /// Run manually with:
     /// cargo test --release --features plugins --lib phase_timing -- --ignored --nocapture
@@ -1124,6 +1249,53 @@ mod tests {
                         walk_items(data, children);
                     }
                 }
+            }
+        }
+    }
+
+    /// Measures the real win from `relevant_directives()` filtering for one
+    /// plugin (autoindex-enabled: `Some(&["autoindex"])`) against a large,
+    /// realistic config where the target directive never appears (the
+    /// common case for most files and most rules) versus where it appears
+    /// once. Run manually with:
+    /// cargo test --release --features plugins --lib filtered_snapshot_timing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn filtered_snapshot_timing() {
+        use std::time::Instant;
+
+        let Some(rule) = load_real_plugin("autoindex_enabled") else {
+            return;
+        };
+
+        for n_servers in [30, 300] {
+            for autoindex_present in [false, true] {
+                let mut src = String::from("http {\n  gzip on;\n");
+                for i in 0..n_servers {
+                    src.push_str(&format!(
+                        "  server {{\n    listen 80;\n    server_name s{i}.example.com;\n    server_tokens off;\n    location / {{\n      proxy_pass http://127.0.0.1:8080;\n      proxy_set_header Host $host;\n    }}\n    error_log /var/log/nginx/error.log;\n  }}\n"
+                    ));
+                }
+                if autoindex_present {
+                    src.push_str(
+                        "  server {\n    location /files {\n      autoindex on;\n    }\n  }\n",
+                    );
+                }
+                src.push_str("}\n");
+                let config = crate::parser::parse_string(&src).unwrap();
+                let n_directives = config.all_directives().count();
+                let shared = Arc::new(config);
+                let iters = 200;
+
+                let start = Instant::now();
+                for _ in 0..iters {
+                    let _ = rule.check_shared(&shared, Path::new("test.conf"));
+                }
+                let elapsed = start.elapsed() / iters;
+
+                println!(
+                    "directives={n_directives} autoindex_present={autoindex_present}: check={elapsed:?}"
+                );
             }
         }
     }

@@ -214,6 +214,14 @@ interface config-api {
         /// one host call transfers everything, which avoids per-directive
         /// call overhead when reconstructing the whole tree guest-side.
         snapshot: func() -> config-snapshot;
+        /// Get a snapshot pruned to directives whose name is in `names`,
+        /// plus the ancestor directives needed to preserve block-context
+        /// queries (e.g. `is-inside("http")`) for the matches. Directives
+        /// outside every match's ancestor chain are dropped entirely, so
+        /// the transferred/reconstructed tree is proportional to how much
+        /// of the config is actually relevant, not its total size.
+        /// Comments and blank lines are always omitted from this snapshot.
+        snapshot-filtered: func(names: list<string>) -> config-snapshot;
         /// Iterate over all directives recursively with parent context
         all-directives-with-context: func() -> list<directive-context>;
         /// Iterate over all directives recursively

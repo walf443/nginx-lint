@@ -78,9 +78,31 @@ pub fn convert_lint_error(error: super::LintError) -> nginx_lint::plugin::types:
 pub fn reconstruct_config(
     config: &nginx_lint::plugin::config_api::Config,
 ) -> crate::parser::ast::Config {
+    config_from_snapshot(config.snapshot())
+}
+
+/// Like [`reconstruct_config`], but built from a snapshot pruned to
+/// directives named in `names` (plus their ancestors), via
+/// `snapshot-filtered`. See [`crate::Plugin::relevant_directives`].
+///
+/// Comments and blank lines are always absent from the result: the host's
+/// `snapshot-filtered` never includes them (see the WIT interface doc).
+pub fn reconstruct_config_filtered(
+    config: &nginx_lint::plugin::config_api::Config,
+    names: &[&str],
+) -> crate::parser::ast::Config {
+    let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
+    config_from_snapshot(config.snapshot_filtered(&names))
+}
+
+/// Shared rebuild step for [`reconstruct_config`] and
+/// [`reconstruct_config_filtered`]: turn a (possibly pruned) flat snapshot
+/// into a native `ast::Config` tree.
+fn config_from_snapshot(
+    snapshot: nginx_lint::plugin::config_api::ConfigSnapshot,
+) -> crate::parser::ast::Config {
     use crate::parser::ast;
 
-    let snapshot = config.snapshot();
     // Slots let each flat item be moved out exactly once while children are
     // resolved by index, avoiding a clone of every string in the config
     let mut slots: Vec<Option<nginx_lint::plugin::config_api::FlatItem>> =
