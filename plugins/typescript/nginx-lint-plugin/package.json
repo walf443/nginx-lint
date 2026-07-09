@@ -30,7 +30,7 @@
     "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.25.1",
+    "@bytecodealliance/jco": "1.25.2",
     "@types/node": "^25.9.5",
     "typescript": "^7.0.0"
   }
