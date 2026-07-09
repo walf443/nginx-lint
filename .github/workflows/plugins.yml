@@ -235,6 +235,9 @@ jobs:
       - name: Build shared library
         working-directory: plugins/typescript/nginx-lint-plugin
         run: npm run build
+      - name: Run shared library unit tests
+        working-directory: plugins/typescript/nginx-lint-plugin
+        run: npm test
       - name: Build TypeScript plugin
         working-directory: plugins/typescript/server-tokens-enabled-ts
         run: |
