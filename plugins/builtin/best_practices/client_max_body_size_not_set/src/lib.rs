@@ -40,6 +40,10 @@ impl Plugin for ClientMaxBodySizeNotSetPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["http", "client_max_body_size"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut has_client_max_body_size = false;
         let mut http_directive: Option<&Directive> = None;

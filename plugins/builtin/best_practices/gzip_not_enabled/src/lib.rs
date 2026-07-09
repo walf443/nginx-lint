@@ -38,6 +38,10 @@ impl Plugin for GzipNotEnabledPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["http", "gzip"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut gzip_on = false;
         let mut has_http_block = false;

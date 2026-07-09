@@ -430,6 +430,14 @@ impl Plugin for UnreachableLocationPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        // "server" is not needed: check_server_locations only reads the
+        // "location" siblings it's given (via block.items), never the
+        // server directive's own data, and any server containing a kept
+        // "location" descendant is retained as an ancestor regardless.
+        Some(&["location"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 

@@ -37,6 +37,10 @@ impl Plugin for ListenHttp2DeprecatedPlugin {
         .with_min_version("1.25.1")
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["listen", "http2"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();

@@ -35,6 +35,10 @@ impl Plugin for MissingErrorLogPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["error_log"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         // Check if error_log directive exists anywhere in the config
         for directive in config.all_directives() {

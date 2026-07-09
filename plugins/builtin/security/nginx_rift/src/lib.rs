@@ -96,6 +96,10 @@ impl Plugin for NginxRiftPlugin {
         .with_max_version("1.30.1")
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["rewrite", "set"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();

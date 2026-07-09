@@ -71,6 +71,14 @@ impl Plugin for RootInLocationPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        // "location" is not needed: any location containing a kept "root"
+        // descendant is retained as a full-fidelity ancestor regardless, so
+        // check_items still sees directive.name == "location" correctly
+        // when propagating the in_location flag downward.
+        Some(&["root"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();

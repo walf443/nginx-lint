@@ -379,6 +379,34 @@ impl Plugin for DirectiveInheritancePlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        // The WASM guest is always constructed via Default::default() (see
+        // export_component_plugin!), which always uses the base
+        // CHECKED_DIRECTIVES — the with_config() excluded/additional variant
+        // is only reachable through the native (non-WASM) plugin path in
+        // src/linter.rs, so this static list is safe to hardcode here.
+        //
+        // check_block's context-boundary names ("http", "server", "location",
+        // "if", "limit_except") are NOT needed: a block of one of these types
+        // that has no CHECKED_DIRECTIVES descendant is a no-op in the
+        // original algorithm too (current.is_empty() skips pushing a layer),
+        // and any such block that DOES have a kept descendant is retained as
+        // a full-fidelity ancestor regardless of whether its own name is
+        // listed here.
+        Some(&[
+            "proxy_set_header",
+            "add_header",
+            "fastcgi_param",
+            "proxy_hide_header",
+            "grpc_set_header",
+            "uwsgi_param",
+            "scgi_param",
+            "error_page",
+            "limit_conn",
+            "limit_req",
+        ])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let spec_map = self.build_spec_map();
