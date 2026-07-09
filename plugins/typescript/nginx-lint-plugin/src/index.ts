@@ -78,3 +78,4 @@ export type {
  * for a worked example.
  */
 export { buildConfigFromSnapshot } from "./config-builder.js";
+export type { ReconstructedConfig } from "./config-builder.js";

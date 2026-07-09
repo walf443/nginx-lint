@@ -246,7 +246,18 @@ function collectDirectiveContexts(
   }
 }
 
-export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): Config {
+/**
+ * A {@link Config} reconstructed from a snapshot, minus `snapshot()` and
+ * `snapshotFiltered()` themselves: {@link buildConfigFromSnapshot} doesn't
+ * implement them (there's no live host resource behind a reconstructed
+ * config to re-fetch from), so calling either on the result would throw at
+ * runtime. Omitting them from the type makes that a compile-time error
+ * instead of a runtime surprise for a plugin that tries to re-filter an
+ * already-filtered config.
+ */
+export type ReconstructedConfig = Omit<Config, "snapshot" | "snapshotFiltered">;
+
+export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): ReconstructedConfig {
   const inclCtx = snapshot.includeContext;
   const allItems = snapshot.allItems;
   const topLevelIndices = Array.from(snapshot.topLevelIndices);
@@ -269,5 +280,5 @@ export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): Config {
     allDirectives() { return directiveContexts.map((c) => c.directive); },
     items() { return topLevelItems; },
     ...makeIncludeContextMethods(inclCtx),
-  } as Config;
+  } as ReconstructedConfig;
 }

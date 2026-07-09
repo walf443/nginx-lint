@@ -1312,6 +1312,29 @@ mod tests {
         ("nginx_rift", "plugins/builtin/security/nginx_rift"),
     ];
 
+    /// `ALL_BUILTIN_PLUGIN_DIRS` is a third, hand-maintained table alongside
+    /// `PLUGIN_ENTRIES` (builtin.rs) and `BUILTIN_PLUGIN_NAMES` (mod.rs;
+    /// itself already checked against `PLUGIN_ENTRIES` by
+    /// `test_plugin_entries_match_builtin_plugin_names` in builtin.rs).
+    /// Guard against it silently going stale: a plugin added, removed, or
+    /// renamed here without updating this table would make
+    /// `all_builtin_plugins_match_expected_behavior_via_real_wasm` quietly
+    /// skip it (`load_real_plugin` just returns `None`) instead of failing.
+    #[test]
+    fn test_all_builtin_plugin_dirs_matches_builtin_plugin_names() {
+        let table_names: Vec<String> = ALL_BUILTIN_PLUGIN_DIRS
+            .iter()
+            .map(|(wasm_name, _)| wasm_name.replace('_', "-"))
+            .collect();
+        let table_names: Vec<&str> = table_names.iter().map(String::as_str).collect();
+        assert_eq!(
+            table_names,
+            crate::plugin::BUILTIN_PLUGIN_NAMES,
+            "ALL_BUILTIN_PLUGIN_DIRS (component_rule.rs test) and BUILTIN_PLUGIN_NAMES \
+             (plugin/mod.rs) must list the same rules in the same order (modulo '-' vs '_')"
+        );
+    }
+
     /// Regression net for the `relevant_directives()` rollout (2026-07-09):
     /// for every builtin plugin, run its OWN `tests/fixtures/*/{error,expected}`
     /// pairs and `examples/{bad,good}.conf` through the REAL compiled .wasm
