@@ -153,8 +153,14 @@ macro_rules! export_component_plugin {
                     path: String,
                 ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
                     let plugin = get_plugin();
-                    // Reconstruct parser Config from host resource handle
-                    let config = $crate::wit_guest::reconstruct_config(config);
+                    // Reconstruct parser Config from host resource handle,
+                    // pruned to relevant_directives() if the plugin declared it
+                    let config = match $crate::Plugin::relevant_directives(plugin) {
+                        Some(names) => {
+                            $crate::wit_guest::reconstruct_config_filtered(config, names)
+                        }
+                        None => $crate::wit_guest::reconstruct_config(config),
+                    };
                     let errors = $crate::Plugin::check(plugin, &config, &path);
                     errors
                         .into_iter()

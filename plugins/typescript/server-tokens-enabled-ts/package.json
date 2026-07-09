@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && jco componentize dist/plugin.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/server-tokens-enabled-ts.wasm",
+    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/server-tokens-enabled-ts.wasm",
+    "bundle": "esbuild dist/plugin.js --bundle --format=esm --platform=neutral --outfile=dist/plugin.bundle.js",
     "test": "tsc && node --test dist/plugin.test.js"
   },
   "dependencies": {
@@ -13,6 +14,7 @@
     "@bytecodealliance/componentize-js": "^0.21.0",
     "@bytecodealliance/jco": "1.25.1",
     "@types/node": "^25.5.0",
+    "esbuild": "^0.28.1",
     "typescript": "^7.0.0"
   }
 }

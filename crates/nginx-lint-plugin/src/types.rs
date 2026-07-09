@@ -446,6 +446,26 @@ pub trait Plugin: Default {
     /// or [`config.all_directives_with_context()`](ConfigExt::all_directives_with_context)
     /// when you need to know the parent block context.
     fn check(&self, config: &Config, path: &str) -> Vec<LintError>;
+
+    /// Declare the directive names this plugin's [`check()`](Plugin::check)
+    /// reads, if it only reads a fixed, known set.
+    ///
+    /// When overridden, the host builds `config` from a snapshot pruned to
+    /// only those directive names (plus the ancestor directives needed for
+    /// block-context queries like [`is_inside`](DirectiveWithContext::is_inside)
+    /// to keep working) instead of the whole file, which is faster the less
+    /// of the file is relevant. **Comments and blank lines are always
+    /// omitted** from the pruned config, so do not override this if `check`
+    /// reads [`ConfigItem::Comment`] or [`ConfigItem::BlankLine`] — the
+    /// default (`None`) gives `check` the complete, unpruned config, as
+    /// before this method existed.
+    ///
+    /// This is purely a guest-side, non-breaking hint: it is never part of
+    /// the WIT component interface, so overriding it does not change what a
+    /// plugin exports or its compatibility with any host version.
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        None
+    }
 }
 
 // Re-export AST types from nginx-lint-common

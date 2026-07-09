@@ -174,6 +174,10 @@ impl Plugin for ProxyKeepalivePlugin {
         .with_max_version("1.29.6")
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["proxy_set_header", "proxy_http_version"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 

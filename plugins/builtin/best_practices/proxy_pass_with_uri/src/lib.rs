@@ -139,6 +139,10 @@ impl Plugin for ProxyPassWithUriPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["proxy_pass"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         self.check_items(&config.items, &mut errors);

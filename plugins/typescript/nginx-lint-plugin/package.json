@@ -26,10 +26,12 @@
     "generate": "jco types wit -n plugin -o src/generated",
     "copy-types": "rm -rf dist/generated && cp -R src/generated dist/generated",
     "build": "npm run copy-wit && npm run generate && tsc && npm run copy-types",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/*.test.js"
   },
   "devDependencies": {
     "@bytecodealliance/jco": "1.25.1",
+    "@types/node": "^25.9.5",
     "typescript": "^7.0.0"
   }
 }

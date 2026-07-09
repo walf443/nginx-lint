@@ -11,7 +11,20 @@
  *   plugins/builtin/security/server_tokens_enabled/
  */
 
+import { buildConfigFromSnapshot } from "nginx-lint-plugin";
 import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
+
+/**
+ * Directive names this plugin reads. "http" must be included alongside
+ * "server_tokens" even though the plugin only reports on server_tokens:
+ * the warning for a MISSING server_tokens is keyed on "an http block
+ * exists but none of its children matched" — if "http" weren't in this
+ * list, an http block with no server_tokens inside would have no name
+ * match and no kept descendant, so the host would prune it away entirely,
+ * silently losing the exact case this plugin needs to detect. (See the
+ * Rust port's relevant_directives() for the same reasoning.)
+ */
+const RELEVANT_DIRECTIVES = ["http", "server_tokens"];
 
 /**
  * Return plugin metadata.
@@ -43,7 +56,13 @@ export function spec(): PluginSpec {
  * Check the nginx config and return lint errors.
  * Exported as `check` per the WIT world definition.
  */
-export function check(cfg: Config, path: string): LintError[] {
+export function check(rawCfg: Config, path: string): LintError[] {
+  // Fetch only "http"/"server_tokens" (plus their ancestors) instead of the
+  // whole file: cfg.allDirectivesWithContext() makes one host call per
+  // directive in the file, while snapshotFiltered() transfers everything
+  // needed in a single call proportional to what's actually relevant.
+  const cfg = buildConfigFromSnapshot(rawCfg.snapshotFiltered(RELEVANT_DIRECTIVES));
+
   const errors: LintError[] = [];
   let hasServerTokensOff = false;
   let hasServerTokensOn = false;

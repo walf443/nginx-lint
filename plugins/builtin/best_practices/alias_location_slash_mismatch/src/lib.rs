@@ -186,6 +186,17 @@ impl Plugin for AliasLocationSlashMismatchPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        // "location" is NOT needed here even though check_items reads a
+        // location's own args (to compute location_ends_with_slash): any
+        // location containing a kept "alias" descendant is retained by the
+        // host with full fidelity as an ancestor, regardless of whether
+        // "location" itself is in this list (see flatten_item_to_wit_filtered
+        // in component_rule.rs). Adding it would only pull in location
+        // blocks that have no alias inside, for no correctness benefit.
+        Some(&["alias"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         // Start with location_ends_with_slash=false and is_regex_location=false

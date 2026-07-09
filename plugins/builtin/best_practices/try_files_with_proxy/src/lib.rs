@@ -121,6 +121,13 @@ impl Plugin for TryFilesWithProxyPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        // "location" is not needed: check_block only needs to reach the
+        // try_files/proxy_pass matches, and any location containing one is
+        // retained as a full-fidelity ancestor regardless.
+        Some(&["try_files", "proxy_pass"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 

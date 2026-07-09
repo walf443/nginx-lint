@@ -152,3 +152,43 @@ server {
     runner.testExamples(badConf, goodConf);
   });
 });
+
+describe("check calls snapshotFiltered with the right names", () => {
+  // The `check` tests above exercise plugin.ts's actual RELEVANT_DIRECTIVES
+  // list end-to-end (parseConfig -> check), so a typo that drops "http"
+  // would already fail "warns when http block has no server_tokens
+  // directive" above. This block additionally verifies the *mechanism*
+  // directly: that cfg.snapshotFiltered() itself prunes unrelated
+  // directives rather than silently behaving like the unfiltered path
+  // (e.g. if a future edit accidentally called allDirectivesWithContext()
+  // instead, these tests would still pass the `check` describe block above
+  // but should fail here).
+  it("prunes directives not in the requested names", () => {
+    const cfg = parseConfig(`\
+http {
+  gzip on;
+  server {
+    listen 80;
+    server_tokens off;
+    location / {
+      proxy_pass http://backend;
+    }
+  }
+}`);
+    const snapshot = cfg.snapshotFiltered(["http", "server_tokens"]);
+    const names = snapshot.allItems
+      .filter((item) => item.value.tag === "directive-item")
+      .map((item) => (item.value as { tag: "directive-item"; val: { name: string } }).val.name);
+
+    // "server" survives even though it's not in `names`: it's an ancestor
+    // of the kept "server_tokens" match. "gzip", "listen", "location",
+    // "proxy_pass" are unrelated siblings/descendants and must be gone.
+    assert.deepEqual(new Set(names), new Set(["http", "server", "server_tokens"]));
+  });
+
+  it("keeps includeContext even though it is not a directive name", () => {
+    const cfg = parseConfig("server_tokens on;", { includeContext: ["http"] });
+    const snapshot = cfg.snapshotFiltered(["http", "server_tokens"]);
+    assert.deepEqual(snapshot.includeContext, ["http"]);
+  });
+});

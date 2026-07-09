@@ -162,6 +162,10 @@ impl Plugin for ProxyMissingHostHeaderPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["proxy_set_header", "proxy_pass"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
 

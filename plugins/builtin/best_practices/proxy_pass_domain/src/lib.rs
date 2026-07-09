@@ -44,6 +44,10 @@ impl Plugin for ProxyPassDomainPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["proxy_pass"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();

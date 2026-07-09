@@ -177,6 +177,25 @@ impl config_api::HostConfig for ComponentStoreData {
         }
     }
 
+    fn snapshot_filtered(
+        &mut self,
+        self_: Resource<ConfigResource>,
+        names: Vec<String>,
+    ) -> config_api::ConfigSnapshot {
+        let config = self.get_config(&self_).clone();
+        let mut all_items = Vec::new();
+        let top_level_indices = config
+            .items
+            .iter()
+            .filter_map(|item| flatten_item_to_wit_filtered(item, &names, &mut all_items))
+            .collect();
+        config_api::ConfigSnapshot {
+            all_items,
+            top_level_indices,
+            include_context: config.include_context.clone(),
+        }
+    }
+
     fn all_directives_with_context(
         &mut self,
         self_: Resource<ConfigResource>,
@@ -679,6 +698,49 @@ fn flatten_item_to_wit(item: &ast::ConfigItem, all_items: &mut Vec<config_api::F
     }
 }
 
+/// Recursively flatten a config item for [`HostConfig::snapshot_filtered`],
+/// keeping only directives whose name is in `names` and the ancestor
+/// directives needed to reach them (so guest-side `is_inside` context stays
+/// correct). Returns `None` when this item is neither a match nor an
+/// ancestor of one, so the caller can drop it from the parent's child list
+/// entirely. Comments and blank lines are never kept: no builtin rule reads
+/// them through the filtered path, and they cannot be ancestors of a match.
+fn flatten_item_to_wit_filtered(
+    item: &ast::ConfigItem,
+    names: &[String],
+    all_items: &mut Vec<config_api::FlatItem>,
+) -> Option<u32> {
+    use bindings::nginx_lint::plugin::parser_types::ConfigItemValue;
+
+    let ast::ConfigItem::Directive(directive) = item else {
+        return None;
+    };
+
+    let child_indices: Vec<u32> = directive
+        .block
+        .as_ref()
+        .map(|block| {
+            block
+                .items
+                .iter()
+                .filter_map(|child| flatten_item_to_wit_filtered(child, names, all_items))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let is_match = names.iter().any(|name| name == &directive.name);
+    if !is_match && child_indices.is_empty() {
+        return None;
+    }
+
+    let index = all_items.len() as u32;
+    all_items.push(config_api::FlatItem {
+        value: ConfigItemValue::DirectiveItem(make_directive_data(directive)),
+        child_indices,
+    });
+    Some(index)
+}
+
 /// Convert a parser Argument to WIT ArgumentInfo.
 fn convert_argument_to_wit(arg: &ast::Argument) -> config_api::ArgumentInfo {
     config_api::ArgumentInfo {
@@ -1034,6 +1096,327 @@ impl LintRule for ComponentLintRule {
 mod tests {
     use super::*;
 
+    /// Load a real compiled builtin plugin by rule-table name (e.g.
+    /// `"autoindex_enabled"`), skipping the test if `make build-plugins`
+    /// (or `make collect-plugins`) has not been run.
+    fn load_real_plugin(name: &str) -> Option<ComponentLintRule> {
+        use crate::plugin::{CompilationCache, PluginLoader};
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(format!("target/builtin-plugins/{name}.wasm"));
+        if !wasm_path.exists() {
+            eprintln!("SKIP: run `make build-plugins` first (missing {wasm_path:?})");
+            return None;
+        }
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
+        Some(
+            loader
+                .load_component_from_bytes(&wasm_path, &bytes)
+                .unwrap(),
+        )
+    }
+
+    /// End-to-end check that `relevant_directives()`-based filtering (see
+    /// `autoindex_enabled`'s `snapshot_filtered` opt-in) does not change
+    /// observable behavior: same warnings, same ancestor-context handling
+    /// (`is_inside("http")`), as running through the real host+WASM stack
+    /// (not the plugin's native unit tests, which call `Plugin::check`
+    /// directly and never exercise `snapshot_filtered` or the pruning in
+    /// `flatten_item_to_wit_filtered`).
+    #[test]
+    fn autoindex_enabled_filtered_snapshot_matches_expected_behavior() {
+        let Some(rule) = load_real_plugin("autoindex_enabled") else {
+            return;
+        };
+
+        let cases: &[(&str, usize)] = &[
+            // Warns: autoindex on, inside http.
+            ("http { server { location / { autoindex on; } } }", 1),
+            // No warning: explicitly off.
+            ("http { server { location / { autoindex off; } } }", 0),
+            // No warning: absent entirely (empty filtered snapshot).
+            ("http { server { listen 80; } }", 0),
+            // No warning: autoindex outside http context. This is the case
+            // that would break if ancestor pruning dropped the "stream"
+            // ancestor needed for is_inside("http") to return false.
+            ("stream { autoindex on; }", 0),
+            // Warns on both, each under its own location ancestor chain.
+            (
+                "http { server { location /a { autoindex on; } location /b { autoindex on; } } }",
+                2,
+            ),
+        ];
+
+        for (src, expected_count) in cases {
+            let config = Arc::new(crate::parser::parse_string(src).unwrap());
+            let errors = rule.check_shared(&config, Path::new("test.conf"));
+            assert_eq!(
+                errors.len(),
+                *expected_count,
+                "unexpected error count for {src:?}: {errors:?}"
+            );
+        }
+    }
+
+    /// `include_context` (the `--context` CLI flag / included-file scenario)
+    /// is a separate top-level `Config` field, not part of the pruned items
+    /// tree, and `HostConfig::snapshot_filtered` copies it unconditionally
+    /// regardless of the `names` filter. Confirms a directive matched only
+    /// via `include_context` (no literal ancestor directive in this file)
+    /// still resolves `is_inside` correctly under filtering, using the real
+    /// compiled server-tokens-enabled.wasm (relevant_directives() ->
+    /// ["http", "server_tokens"]).
+    #[test]
+    fn server_tokens_enabled_filtered_snapshot_respects_include_context() {
+        let Some(rule) = load_real_plugin("server_tokens_enabled") else {
+            return;
+        };
+
+        let cases: &[(&str, &[&str], usize)] = &[
+            // Warns: server_tokens on, reached only via include_context
+            // ("http"), no literal http directive in this file at all.
+            ("server_tokens on;", &["http"], 1),
+            // No warning: same include_context, but off.
+            ("server_tokens off;", &["http"], 0),
+            // No warning: matches the plugin's own documented behavior
+            // (skip the "missing server_tokens" warning for included
+            // files — the parent config should set it) — unaffected by
+            // filtering either way, since this file has no server_tokens
+            // directive and no literal http block.
+            ("listen 80;", &["http"], 0),
+            // No warning: include_context doesn't mention http, so
+            // is_inside("http") must stay false even though "server_tokens"
+            // matches the filter.
+            ("server_tokens on;", &["stream"], 0),
+        ];
+
+        for (src, include_context, expected_count) in cases {
+            let mut config = crate::parser::parse_string(src).unwrap();
+            config.include_context = include_context.iter().map(|s| s.to_string()).collect();
+            let config = Arc::new(config);
+            let errors = rule.check_shared(&config, Path::new("test.conf"));
+            assert_eq!(
+                errors.len(),
+                *expected_count,
+                "unexpected error count for {src:?} with include_context {include_context:?}: {errors:?}"
+            );
+        }
+    }
+
+    /// (rule table name, plugin directory relative to CARGO_MANIFEST_DIR)
+    /// for every builtin, matching the declaration order in
+    /// `src/plugin/builtin.rs`'s `PLUGIN_ENTRIES` (checked by a test there).
+    const ALL_BUILTIN_PLUGIN_DIRS: &[(&str, &str)] = &[
+        (
+            "server_tokens_enabled",
+            "plugins/builtin/security/server_tokens_enabled",
+        ),
+        (
+            "autoindex_enabled",
+            "plugins/builtin/security/autoindex_enabled",
+        ),
+        (
+            "gzip_not_enabled",
+            "plugins/builtin/best_practices/gzip_not_enabled",
+        ),
+        (
+            "duplicate_directive",
+            "plugins/builtin/syntax/duplicate_directive",
+        ),
+        (
+            "space_before_semicolon",
+            "plugins/builtin/style/space_before_semicolon",
+        ),
+        (
+            "trailing_whitespace",
+            "plugins/builtin/style/trailing_whitespace",
+        ),
+        ("block_lines", "plugins/builtin/style/block_lines"),
+        (
+            "proxy_pass_domain",
+            "plugins/builtin/best_practices/proxy_pass_domain",
+        ),
+        (
+            "upstream_server_no_resolve",
+            "plugins/builtin/best_practices/upstream_server_no_resolve",
+        ),
+        (
+            "directive_inheritance",
+            "plugins/builtin/best_practices/directive_inheritance",
+        ),
+        (
+            "root_in_location",
+            "plugins/builtin/best_practices/root_in_location",
+        ),
+        (
+            "alias_location_slash_mismatch",
+            "plugins/builtin/best_practices/alias_location_slash_mismatch",
+        ),
+        (
+            "proxy_pass_with_uri",
+            "plugins/builtin/best_practices/proxy_pass_with_uri",
+        ),
+        (
+            "proxy_keepalive",
+            "plugins/builtin/best_practices/proxy_keepalive",
+        ),
+        (
+            "try_files_with_proxy",
+            "plugins/builtin/best_practices/try_files_with_proxy",
+        ),
+        (
+            "if_is_evil_in_location",
+            "plugins/builtin/best_practices/if_is_evil_in_location",
+        ),
+        (
+            "unreachable_location",
+            "plugins/builtin/best_practices/unreachable_location",
+        ),
+        (
+            "missing_error_log",
+            "plugins/builtin/best_practices/missing_error_log",
+        ),
+        (
+            "deprecated_ssl_protocol",
+            "plugins/builtin/security/deprecated_ssl_protocol",
+        ),
+        (
+            "weak_ssl_ciphers",
+            "plugins/builtin/security/weak_ssl_ciphers",
+        ),
+        (
+            "invalid_directive_context",
+            "plugins/builtin/syntax/invalid_directive_context",
+        ),
+        (
+            "map_missing_default",
+            "plugins/builtin/best_practices/map_missing_default",
+        ),
+        (
+            "ssl_on_deprecated",
+            "plugins/builtin/deprecation/ssl_on_deprecated",
+        ),
+        (
+            "listen_http2_deprecated",
+            "plugins/builtin/deprecation/listen_http2_deprecated",
+        ),
+        (
+            "proxy_missing_host_header",
+            "plugins/builtin/best_practices/proxy_missing_host_header",
+        ),
+        (
+            "client_max_body_size_not_set",
+            "plugins/builtin/best_practices/client_max_body_size_not_set",
+        ),
+        ("nginx_rift", "plugins/builtin/security/nginx_rift"),
+    ];
+
+    /// `ALL_BUILTIN_PLUGIN_DIRS` is a third, hand-maintained table alongside
+    /// `PLUGIN_ENTRIES` (builtin.rs) and `BUILTIN_PLUGIN_NAMES` (mod.rs;
+    /// itself already checked against `PLUGIN_ENTRIES` by
+    /// `test_plugin_entries_match_builtin_plugin_names` in builtin.rs).
+    /// Guard against it silently going stale: a plugin added, removed, or
+    /// renamed here without updating this table would make
+    /// `all_builtin_plugins_match_expected_behavior_via_real_wasm` quietly
+    /// skip it (`load_real_plugin` just returns `None`) instead of failing.
+    #[test]
+    fn test_all_builtin_plugin_dirs_matches_builtin_plugin_names() {
+        let table_names: Vec<String> = ALL_BUILTIN_PLUGIN_DIRS
+            .iter()
+            .map(|(wasm_name, _)| wasm_name.replace('_', "-"))
+            .collect();
+        let table_names: Vec<&str> = table_names.iter().map(String::as_str).collect();
+        assert_eq!(
+            table_names,
+            crate::plugin::BUILTIN_PLUGIN_NAMES,
+            "ALL_BUILTIN_PLUGIN_DIRS (component_rule.rs test) and BUILTIN_PLUGIN_NAMES \
+             (plugin/mod.rs) must list the same rules in the same order (modulo '-' vs '_')"
+        );
+    }
+
+    /// Regression net for the `relevant_directives()` rollout (2026-07-09):
+    /// for every builtin plugin, run its OWN `tests/fixtures/*/{error,expected}`
+    /// pairs and `examples/{bad,good}.conf` through the REAL compiled .wasm
+    /// (not `Plugin::check()` directly, which every plugin's own unit tests
+    /// already do and which never exercises `snapshot_filtered` or the
+    /// pruning in `flatten_item_to_wit_filtered`). `error`/`bad.conf` must
+    /// produce at least one error from that plugin's rule; `expected`/
+    /// `good.conf` must produce none. This validates every builtin equally,
+    /// whether or not it overrides `relevant_directives()`.
+    #[test]
+    fn all_builtin_plugins_match_expected_behavior_via_real_wasm() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+
+        for (wasm_name, plugin_dir) in ALL_BUILTIN_PLUGIN_DIRS {
+            // Skip (not fail) when `make build-plugins` hasn't been run —
+            // CI's plain `cargo test` job doesn't build the .wasm files, so
+            // this must degrade to a no-op there, same as `load_real_plugin`'s
+            // other callers (phase_timing, autoindex_enabled_filtered_...).
+            let Some(rule) = load_real_plugin(wasm_name) else {
+                continue;
+            };
+            let rule_name = rule.name().to_string();
+            let plugin_dir = manifest_dir.join(plugin_dir);
+
+            let mut cases: Vec<(String, PathBuf, usize)> = Vec::new();
+
+            let fixtures_dir = plugin_dir.join("tests/fixtures");
+            if fixtures_dir.is_dir() {
+                for entry in std::fs::read_dir(&fixtures_dir).unwrap() {
+                    let case_path = entry.unwrap().path();
+                    if !case_path.is_dir() {
+                        continue;
+                    }
+                    let case_name = case_path.file_name().unwrap().to_string_lossy().to_string();
+                    let error_path = case_path.join("error/nginx.conf");
+                    if error_path.exists() {
+                        cases.push((format!("{wasm_name}/{case_name}/error"), error_path, 1));
+                    }
+                    let expected_path = case_path.join("expected/nginx.conf");
+                    if expected_path.exists() {
+                        cases.push((
+                            format!("{wasm_name}/{case_name}/expected"),
+                            expected_path,
+                            0,
+                        ));
+                    }
+                }
+            }
+
+            let bad_path = plugin_dir.join("examples/bad.conf");
+            if bad_path.exists() {
+                cases.push((format!("{wasm_name}/examples/bad"), bad_path, 1));
+            }
+            let good_path = plugin_dir.join("examples/good.conf");
+            if good_path.exists() {
+                cases.push((format!("{wasm_name}/examples/good"), good_path, 0));
+            }
+
+            for (label, path, min_or_exact_zero) in cases {
+                let content = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
+                let config = Arc::new(crate::parser::parse_string(&content).unwrap_or_else(|e| {
+                    panic!("failed to parse {path:?}: {e}");
+                }));
+                let errors = rule.check_shared(&config, Path::new("test.conf"));
+                let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == rule_name).collect();
+
+                if min_or_exact_zero == 0 {
+                    assert!(
+                        rule_errors.is_empty(),
+                        "{label}: expected no {rule_name} errors, got: {rule_errors:?}"
+                    );
+                } else {
+                    assert!(
+                        !rule_errors.is_empty(),
+                        "{label}: expected at least one {rule_name} error, got none"
+                    );
+                }
+            }
+        }
+    }
+
     /// Temporary measurement harness for the WIT-boundary cost investigation.
     /// Run manually with:
     /// cargo test --release --features plugins --lib phase_timing -- --ignored --nocapture
@@ -1124,6 +1507,53 @@ mod tests {
                         walk_items(data, children);
                     }
                 }
+            }
+        }
+    }
+
+    /// Measures the real win from `relevant_directives()` filtering for one
+    /// plugin (autoindex-enabled: `Some(&["autoindex"])`) against a large,
+    /// realistic config where the target directive never appears (the
+    /// common case for most files and most rules) versus where it appears
+    /// once. Run manually with:
+    /// cargo test --release --features plugins --lib filtered_snapshot_timing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn filtered_snapshot_timing() {
+        use std::time::Instant;
+
+        let Some(rule) = load_real_plugin("autoindex_enabled") else {
+            return;
+        };
+
+        for n_servers in [30, 300] {
+            for autoindex_present in [false, true] {
+                let mut src = String::from("http {\n  gzip on;\n");
+                for i in 0..n_servers {
+                    src.push_str(&format!(
+                        "  server {{\n    listen 80;\n    server_name s{i}.example.com;\n    server_tokens off;\n    location / {{\n      proxy_pass http://127.0.0.1:8080;\n      proxy_set_header Host $host;\n    }}\n    error_log /var/log/nginx/error.log;\n  }}\n"
+                    ));
+                }
+                if autoindex_present {
+                    src.push_str(
+                        "  server {\n    location /files {\n      autoindex on;\n    }\n  }\n",
+                    );
+                }
+                src.push_str("}\n");
+                let config = crate::parser::parse_string(&src).unwrap();
+                let n_directives = config.all_directives().count();
+                let shared = Arc::new(config);
+                let iters = 200;
+
+                let start = Instant::now();
+                for _ in 0..iters {
+                    let _ = rule.check_shared(&shared, Path::new("test.conf"));
+                }
+                let elapsed = start.elapsed() / iters;
+
+                println!(
+                    "directives={n_directives} autoindex_present={autoindex_present}: check={elapsed:?}"
+                );
             }
         }
     }

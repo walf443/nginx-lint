@@ -9,6 +9,7 @@
 import type {
   Config,
   ConfigItem,
+  ConfigSnapshot,
   Directive,
   DirectiveContext,
 } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
@@ -145,6 +146,139 @@ export function buildConfigFromParseOutput(output: ParseOutput): Config {
     allDirectivesWithContext() { return directiveContexts; },
     allDirectives() { return directiveContexts.map((c) => c.directive); },
     items() { return topLevelItems; },
+    snapshot() {
+      return { allItems, topLevelIndices: output.topLevelIndices, includeContext: inclCtx };
+    },
+    snapshotFiltered(names: string[]) {
+      const filteredItems: ParserConfigItem[] = [];
+      const filteredTopLevel = filterItemsByName(
+        allItems,
+        Array.from(output.topLevelIndices),
+        names,
+        filteredItems,
+      );
+      return {
+        allItems: filteredItems,
+        topLevelIndices: Uint32Array.from(filteredTopLevel),
+        includeContext: inclCtx,
+      };
+    },
     ...makeIncludeContextMethods(inclCtx),
   } as Config;
+}
+
+// ── Filter a flat item tree by directive name (mirrors the host's
+// flatten_item_to_wit_filtered in src/plugin/component_rule.rs) ─────
+//
+// Keeps a directive if its own name is in `names`, OR it has at least one
+// kept descendant (so ancestor context like is_inside("http") stays
+// correct); comments/blank-lines are always dropped. Used by the parser-
+// output-backed test mock's snapshotFiltered() so plugin tests exercise the
+// same semantics the real host applies.
+
+function filterItemsByName(
+  allItems: ParserConfigItem[],
+  indices: number[],
+  names: string[],
+  outItems: ParserConfigItem[],
+): number[] {
+  const kept: number[] = [];
+  for (const index of indices) {
+    const item = allItems[index];
+    if (item.value.tag !== "directive-item") continue;
+    const data = item.value.val;
+    const keptChildIndices = filterItemsByName(
+      allItems,
+      Array.from(item.childIndices),
+      names,
+      outItems,
+    );
+    if (!names.includes(data.name) && keptChildIndices.length === 0) continue;
+
+    const newIndex = outItems.length;
+    outItems.push({
+      value: { tag: "directive-item", val: data },
+      childIndices: Uint32Array.from(keptChildIndices),
+    });
+    kept.push(newIndex);
+  }
+  return kept;
+}
+
+// ── Build Config from a (possibly filtered) ConfigSnapshot ──────────
+//
+// Unlike ParseOutput (produced by the parser component for testing),
+// ConfigSnapshot (produced by the host's Config.snapshot()/snapshotFiltered())
+// does not come with a pre-computed directives-with-context list — the DFS
+// walk with parent-stack tracking has to be done here, seeded with
+// includeContext exactly as the host does for allDirectivesWithContext().
+// Works for both the full snapshot() and a snapshotFiltered(names) result:
+// the walk itself doesn't know or care whether the tree was pruned.
+
+function collectDirectiveContexts(
+  allItems: ParserConfigItem[],
+  indices: number[],
+  parentStack: string[],
+  depth: number,
+  results: DirectiveContext[],
+): void {
+  for (const index of indices) {
+    const item = allItems[index];
+    if (item.value.tag !== "directive-item") continue;
+    const data = item.value.val;
+    const childIndices = Array.from(item.childIndices);
+
+    results.push({
+      directive: wrapDirective(data, () =>
+        childIndices.map((i) => resolveConfigItem(allItems, i)),
+      ),
+      parentStack: [...parentStack],
+      depth,
+    });
+
+    collectDirectiveContexts(
+      allItems,
+      childIndices,
+      [...parentStack, data.name],
+      depth + 1,
+      results,
+    );
+  }
+}
+
+/**
+ * A {@link Config} reconstructed from a snapshot, minus `snapshot()` and
+ * `snapshotFiltered()` themselves: {@link buildConfigFromSnapshot} doesn't
+ * implement them (there's no live host resource behind a reconstructed
+ * config to re-fetch from), so calling either on the result would throw at
+ * runtime. Omitting them from the type makes that a compile-time error
+ * instead of a runtime surprise for a plugin that tries to re-filter an
+ * already-filtered config.
+ */
+export type ReconstructedConfig = Omit<Config, "snapshot" | "snapshotFiltered">;
+
+export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): ReconstructedConfig {
+  const inclCtx = snapshot.includeContext;
+  const allItems = snapshot.allItems;
+  const topLevelIndices = Array.from(snapshot.topLevelIndices);
+
+  const directiveContexts: DirectiveContext[] = [];
+  collectDirectiveContexts(
+    allItems,
+    topLevelIndices,
+    inclCtx,
+    inclCtx.length,
+    directiveContexts,
+  );
+
+  const topLevelItems: ConfigItem[] = topLevelIndices.map((i) =>
+    resolveConfigItem(allItems, i),
+  );
+
+  return {
+    allDirectivesWithContext() { return directiveContexts; },
+    allDirectives() { return directiveContexts.map((c) => c.directive); },
+    items() { return topLevelItems; },
+    ...makeIncludeContextMethods(inclCtx),
+  } as ReconstructedConfig;
 }

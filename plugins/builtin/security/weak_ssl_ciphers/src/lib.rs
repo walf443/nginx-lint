@@ -57,6 +57,10 @@ impl Plugin for WeakSslCiphersPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["ssl_ciphers"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();

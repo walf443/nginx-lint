@@ -38,6 +38,10 @@ impl Plugin for ServerTokensEnabledPlugin {
         ])
     }
 
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["http", "server_tokens"])
+    }
+
     fn check(&self, config: &Config, _path: &str) -> Vec<LintError> {
         let mut errors = Vec::new();
         let err = self.spec().error_builder();
