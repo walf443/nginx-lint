@@ -40,12 +40,11 @@ impl ProxyPassWithUriPlugin {
             return None;
         }
 
-        // Find the scheme (http:// or https://)
-        let after_scheme = if let Some(pos) = url.find("://") {
+        // Find the scheme (http:// or https://); no scheme means it's a
+        // variable or unix socket, so bail out via `?`.
+        let after_scheme = {
+            let pos = url.find("://")?;
             &url[pos + 3..]
-        } else {
-            // No scheme, might be a variable or unix socket
-            return None;
         };
 
         // Find the first / after the host:port
