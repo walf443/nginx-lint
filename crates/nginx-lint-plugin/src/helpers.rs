@@ -106,10 +106,9 @@ pub fn is_ipv4_address(s: &str) -> bool {
 /// ```
 pub fn extract_host_from_url(url: &str) -> Option<&str> {
     // Remove protocol
-    let after_protocol = if let Some(pos) = url.find("://") {
+    let after_protocol = {
+        let pos = url.find("://")?;
         &url[pos + 3..]
-    } else {
-        return None;
     };
 
     // Handle unix socket URLs (e.g., "unix:/var/run/app.sock")
