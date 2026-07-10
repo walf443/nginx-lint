@@ -163,6 +163,28 @@ if config.is_included_from_http_server() {
 }
 ```
 
+## Performance: Reading Only What Your Rule Needs
+
+By default, `check()` gets the entire parsed config, and the host has to send every directive across the WASM boundary and the SDK has to reconstruct the whole tree — even if your rule only reads one or two directive names. For large config files this dominates the per-check cost.
+
+If your rule only ever inspects a fixed, known set of directive names, declare them with `relevant_directives()`:
+
+```rust
+impl Plugin for NoAutoindexPlugin {
+    fn relevant_directives(&self) -> Option<&'static [&'static str]> {
+        Some(&["autoindex"])
+    }
+
+    // ... spec(), check() unchanged
+}
+```
+
+The host then sends a config pruned to just those directives (plus the ancestor blocks needed for `is_inside()` to keep working), instead of the whole file. This is purely additive: omitting it (the default) behaves exactly as before, and it never changes what your rule can see — `check()` still receives a normal `Config` with `all_directives_with_context()` etc. working the same way.
+
+**One important exception**: if your rule warns when a directive is *missing* inside some block (e.g. "this `http` block has no `server_tokens`"), you must include that enclosing block's own name (`"http"`) in the list, not just the directive you're checking for. Otherwise a block with none of the listed directives inside it has nothing to keep it in the pruned config, and the host drops it entirely — along with the evidence your rule needs to report the block exists but is missing something. If your rule only reports on directives it finds (the common case), you don't need to list any ancestor block names — a matched directive's ancestors are always kept automatically so `is_inside()` and similar checks keep working.
+
+Don't declare this if `check()` reads comments or blank lines (`ConfigItem::Comment`/`ConfigItem::BlankLine`): the pruned config never includes them, regardless of `relevant_directives()`.
+
 ## Testing
 
 The SDK provides `PluginTestRunner` and `TestCase` for testing plugins:

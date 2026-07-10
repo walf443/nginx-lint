@@ -54,6 +54,53 @@ export function check(cfg: Config, path: string): LintError[] {
 }
 ```
 
+## Performance: Reading Only What Your Rule Needs
+
+By default, `check()` gets the entire parsed config: `cfg.allDirectivesWithContext()` makes one host call per directive in the file. For large config files this dominates the per-check cost, even if your rule only ever reads one or two directive names.
+
+If your rule only inspects a fixed, known set of directive names, fetch a filtered snapshot instead and rebuild a `Config` from it with `buildConfigFromSnapshot`:
+
+```typescript
+import { buildConfigFromSnapshot } from "nginx-lint-plugin";
+import type { Config, LintError } from "nginx-lint-plugin";
+
+const RELEVANT_DIRECTIVES = ["autoindex"];
+
+export function check(rawCfg: Config, path: string): LintError[] {
+  const cfg = buildConfigFromSnapshot(rawCfg.snapshotFiltered(RELEVANT_DIRECTIVES));
+
+  const errors: LintError[] = [];
+  for (const ctx of cfg.allDirectivesWithContext()) {
+    // ... same logic as before, now walking a much smaller tree
+  }
+  return errors;
+}
+```
+
+The host sends back a config pruned to just those directive names (plus the ancestor blocks needed for `parentStack`/`is_inside`-style checks to keep working), instead of the whole file. Skipping this (calling `allDirectivesWithContext()` on `rawCfg` directly, as in Quick Start above) behaves exactly as before — this is purely opt-in.
+
+**One important exception**: if your rule warns when a directive is *missing* inside some block (e.g. "this `http` block has no `server_tokens`"), include that enclosing block's own name (`"http"`) in the list, not just the directive you're checking for. Otherwise a block with none of the listed directives inside it has nothing to keep it in the pruned config, and the host drops it entirely — along with the evidence your rule needs to report the block exists but is missing something. If your rule only reports on directives it finds (the common case), you don't need to list ancestor block names — a matched directive's ancestors are always kept automatically.
+
+Don't do this if `check()` reads comments or blank lines (`ConfigItem`'s `comment-item`/`blank-line-item` variants): the pruned snapshot never includes them.
+
+### Bundling required for `jco componentize`
+
+`jco componentize`'s bundler (StarlingMonkey/wizer) does not resolve local module imports at componentize time — not a bare package specifier, not even a relative import to a file in your own plugin's directory. If your `check()` imports a real value from `nginx-lint-plugin` (like `buildConfigFromSnapshot` above — type-only imports are fine, they're erased by `tsc`), bundle it away first with a tool like [esbuild](https://esbuild.github.io/) before handing the output to `jco componentize`:
+
+```json
+{
+  "scripts": {
+    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/my-plugin.wasm",
+    "bundle": "esbuild dist/plugin.js --bundle --format=esm --platform=neutral --outfile=dist/plugin.bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28"
+  }
+}
+```
+
+`npm test` can keep running directly against `tsc`'s unbundled output (see Testing below) — bundling only needs to happen on the `.wasm` build path. See `plugins/typescript/server-tokens-enabled-ts` in the nginx-lint repo for a complete worked example.
+
 ## Testing
 
 The `nginx-lint-plugin/testing` entry provides parser-based testing utilities. Tests parse real nginx configuration strings using the same Rust parser that powers the production linter.
@@ -216,6 +263,8 @@ import type {
 
 | Method | Description |
 |--------|-------------|
+| `snapshot()` | Entire config as one flat value, for `buildConfigFromSnapshot` |
+| `snapshotFiltered(names)` | Like `snapshot()`, pruned to `names` plus ancestor blocks — see Performance above |
 | `allDirectivesWithContext()` | All directives with parent context (DFS order) |
 | `allDirectives()` | All directives without context |
 | `items()` | Top-level config items (directives, comments, blank lines) |
