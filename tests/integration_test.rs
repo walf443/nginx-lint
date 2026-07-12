@@ -2943,12 +2943,14 @@ fn test_fix_unwritable_file_keeps_errors_and_fails() {
     );
 }
 
-/// The same problem detected twice (registered syntax rule + pre-parse
-/// check) must apply its fix only once: `listen 80` becomes `listen 80;`,
-/// not `listen 80;;`. (Historical note: this used to guard against two
-/// independent computations of the same rule producing the same fix twice;
-/// there is now only one computation, but the invariant is still worth
-/// protecting against regression.)
+/// A rule's fix must never be applied more than once for the same reported
+/// error: `listen 80` becomes `listen 80;`, not `listen 80;;`.
+///
+/// Historical note: this used to guard against missing-semicolon being
+/// computed via two independent paths (a registered syntax rule and a
+/// separate pre-parse check) that could both report the same problem and
+/// both apply the same fix. There is now only one computation, but the
+/// invariant is still worth protecting against regression.
 #[cfg(feature = "cli")]
 #[test]
 fn test_fix_applies_duplicate_reported_fix_once() {
