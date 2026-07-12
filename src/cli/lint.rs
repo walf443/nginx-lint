@@ -28,11 +28,14 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
 
 /// Extend `errors` with `additional`, dropping exact duplicates.
 ///
-/// Used to merge in rowan's own generic syntax errors alongside the
-/// registered syntax rules' (missing-semicolon, unmatched-braces,
-/// unclosed-quote) more specific diagnostics, which can overlap; keeping both
-/// copies would report each problem twice and, under `--fix`, apply the same
-/// fix twice (e.g. inserting `;;` for one missing semicolon).
+/// Used to merge in rowan's own generic syntax errors (always tagged
+/// `rule: "syntax-error"`, see `syntax_errors_to_lint_errors`) on top of the
+/// errors already collected from the registered rules. The duplicate check
+/// compares `rule` too, so this can only dedupe rowan's syntax errors against
+/// each other — e.g. if error recovery reports the same position twice —
+/// never against a registered syntax rule's diagnostic
+/// (missing-semicolon/unmatched-braces/unclosed-quote), since those are
+/// always tagged with a different rule name.
 fn extend_errors_dedup(errors: &mut Vec<LintError>, additional: Vec<LintError>) {
     for err in additional {
         let is_duplicate = errors.iter().any(|existing| {
@@ -216,7 +219,7 @@ fn lint_file(included: &IncludedFile, linter: &Linter, profile: bool) -> FileRes
     let mut result = run_lint_on_config(&config, path, &content, linter, profile);
 
     // Merge in rowan's own generic syntax errors, dropping exact duplicates
-    // (they may repeat what a registered syntax rule already reported).
+    // among themselves (see extend_errors_dedup's doc comment).
     if !syntax_errors.is_empty() {
         let FileResult::LintErrors { ref mut errors, .. } = result;
         extend_errors_dedup(
