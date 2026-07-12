@@ -25,7 +25,23 @@ are balanced, and that block directives have their opening brace."#,
 };
 
 /// Check for unmatched braces
-pub struct UnmatchedBraces;
+#[derive(Default)]
+pub struct UnmatchedBraces {
+    /// Directive names treated as block directives beyond nginx's built-ins
+    /// (for extension modules), used when checking via the registered
+    /// `LintRule` path (see [`check_with_content`](LintRule::check_with_content)).
+    additional_block_directives: Vec<String>,
+}
+
+impl UnmatchedBraces {
+    /// Construct a rule instance that also treats `additional_block_directives`
+    /// as block directives, per the user's `.nginx-lint.toml` configuration.
+    pub fn with_additional_block_directives(additional_block_directives: Vec<String>) -> Self {
+        Self {
+            additional_block_directives,
+        }
+    }
+}
 
 /// Information about an opening brace on the stack.
 #[derive(Debug, Clone)]
@@ -437,7 +453,15 @@ impl LintRule for UnmatchedBraces {
             Err(_) => return Vec::new(),
         };
 
-        self.check_cst(&content, &[])
+        self.check_cst(&content, &self.additional_block_directives)
+    }
+
+    fn wants_content(&self) -> bool {
+        true
+    }
+
+    fn check_with_content(&self, _config: &Config, _path: &Path, content: &str) -> Vec<LintError> {
+        self.check_cst(content, &self.additional_block_directives)
     }
 }
 
@@ -453,7 +477,7 @@ mod tests {
         write!(file, "{}", content).unwrap();
         let path = file.path().to_path_buf();
 
-        let rule = UnmatchedBraces;
+        let rule = UnmatchedBraces::default();
         let config = Config::new();
         rule.check(&config, &path)
     }
@@ -945,7 +969,7 @@ http {
     // =========================================================================
 
     fn check_braces_with_extras(content: &str, extras: &[String]) -> Vec<LintError> {
-        let rule = UnmatchedBraces;
+        let rule = UnmatchedBraces::default();
         rule.check_content_with_extras(content, extras)
     }
 
@@ -993,26 +1017,62 @@ http {
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
     }
 
+    /// `additional_block_directives` must also be respected via the
+    /// registered `LintRule` dispatch (`check`/`check_with_content`), not
+    /// just the standalone `check_content_with_extras` helper — this is the
+    /// path the CLI actually uses once a rule is registered with
+    /// [`with_additional_block_directives`](UnmatchedBraces::with_additional_block_directives).
+    #[test]
+    fn test_registered_rule_respects_additional_block_directives() {
+        let content = r#"http {
+    my_custom_block
+        some_directive value;
+    }
+}
+"#;
+        let config = Config::new();
+        let path = Path::new("test.conf");
+
+        // Without configuring the extra block directive, the registered
+        // rule must not know about it.
+        let plain_rule = UnmatchedBraces::default();
+        assert!(
+            plain_rule
+                .check_with_content(&config, path, content)
+                .iter()
+                .all(|e| !e.message.contains("my_custom_block")),
+            "should not detect custom directive without config"
+        );
+
+        // Once configured, both check() (disk-reading fallback) and
+        // check_with_content() (the CLI's actual dispatch path) must detect it.
+        let configured_rule =
+            UnmatchedBraces::with_additional_block_directives(vec!["my_custom_block".to_string()]);
+        let errors = configured_rule.check_with_content(&config, path, content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("my_custom_block"));
+    }
+
     // =========================================================================
     // Edge cases
     // =========================================================================
 
     #[test]
     fn test_empty_input() {
-        let errors = UnmatchedBraces.check_content("");
+        let errors = UnmatchedBraces::default().check_content("");
         assert!(errors.is_empty(), "Expected no errors for empty input");
     }
 
     #[test]
     fn test_only_braces() {
-        let errors = UnmatchedBraces.check_content("{}");
+        let errors = UnmatchedBraces::default().check_content("{}");
         assert!(errors.is_empty(), "Expected no errors for matched braces");
 
-        let errors = UnmatchedBraces.check_content("{");
+        let errors = UnmatchedBraces::default().check_content("{");
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("Unclosed brace"));
 
-        let errors = UnmatchedBraces.check_content("}");
+        let errors = UnmatchedBraces::default().check_content("}");
         assert_eq!(errors.len(), 1);
         assert!(errors[0].message.contains("Unexpected closing brace"));
     }
@@ -1132,7 +1192,7 @@ events {
         // R_BRACE-only lines (`}`) are skipped, so the fix falls back to EOF
         // rather than inserting before the existing `}`.
         let content = "http {\n  server_tokens on;\n  autoindex on;\n\n  upstream backend {\n    server api.example.com:8080;\n  \n\n  server {\n    listen 80;\n    server_name example.com;\n  }\n}\n";
-        let rule = UnmatchedBraces;
+        let rule = UnmatchedBraces::default();
         let errors = rule.check_content(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("Unclosed brace"));

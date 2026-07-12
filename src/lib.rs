@@ -76,68 +76,6 @@ pub fn syntax_errors_to_lint_errors(
         .collect()
 }
 
-/// Run pre-parse checks that can detect errors before parsing
-/// These checks work on the raw file content and don't require a valid AST
-#[cfg(feature = "cli")]
-pub fn pre_parse_checks(path: &Path) -> Vec<LintError> {
-    pre_parse_checks_with_config(path, None)
-}
-
-/// Run pre-parse checks with optional LintConfig
-#[cfg(feature = "cli")]
-pub fn pre_parse_checks_with_config(
-    path: &Path,
-    lint_config: Option<&LintConfig>,
-) -> Vec<LintError> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-
-    pre_parse_checks_from_content(&content, lint_config)
-}
-
-/// Run pre-parse checks on string content with optional LintConfig
-#[cfg(feature = "cli")]
-pub fn pre_parse_checks_from_content(
-    content: &str,
-    lint_config: Option<&LintConfig>,
-) -> Vec<LintError> {
-    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors};
-    use rules::{MissingSemicolon, UnclosedQuote, UnmatchedBraces};
-
-    // Build ignore tracker from content without rule name validation
-    // (rule name validation is done later in lint_with_content when all plugins are loaded)
-    let (mut tracker, _warnings) = IgnoreTracker::from_content(content);
-
-    let additional_block_directives: Vec<String> = lint_config
-        .map(|c| c.additional_block_directives().to_vec())
-        .unwrap_or_default();
-
-    let mut errors = Vec::new();
-
-    // Check for unmatched braces
-    let brace_rule = UnmatchedBraces;
-    errors.extend(brace_rule.check_content_with_extras(content, &additional_block_directives));
-
-    // Check for unclosed quotes
-    let quote_rule = UnclosedQuote;
-    errors.extend(quote_rule.check_content(content));
-
-    // Check for missing semicolons
-    let semicolon_rule = MissingSemicolon;
-    errors.extend(semicolon_rule.check_content_with_extras(content, &additional_block_directives));
-
-    // Filter ignored errors using the local tracker.
-    // Note: we intentionally do NOT emit parse warnings or unused-directive
-    // warnings here — those are emitted by `lint_with_content`, whose tracker
-    // sees errors from ALL rules (not just pre-parse ones). Emitting unused
-    // warnings here would falsely flag ignore directives that target later
-    // rules like `include-path-exists`.
-    let result = filter_errors(errors, &mut tracker);
-    result.errors
-}
-
 /// Apply fixes to a file
 /// Returns the application result, including applied and skipped fix counts
 #[cfg(feature = "cli")]
