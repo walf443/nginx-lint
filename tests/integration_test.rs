@@ -1,6 +1,6 @@
 use nginx_lint::{
     LintConfig, Linter, Severity, apply_fixes, parse_config, parse_string,
-    parse_string_with_errors, pre_parse_checks, syntax_errors_to_lint_errors,
+    parse_string_with_errors, syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
 use std::fs;
@@ -567,6 +567,36 @@ fn dir_name_to_rule_name(dir_name: &str) -> String {
     dir_name.replace('_', "-")
 }
 
+/// Fixtures whose fix-application check is known to fail for reasons
+/// unrelated to fix correctness of the general mechanism — tracked
+/// separately rather than silently ignored.
+///
+/// `(rule_dir_name, case)`. None of these were ever actually exercised by
+/// `test_all_rule_fixtures`'s fix-check before it started using
+/// error-recovery parsing (parse_string_with_errors) uniformly: the check
+/// used to run only when `parse_config` (which fails on any syntax error)
+/// succeeded on the error fixture, which it never does for these rules' own
+/// fixtures (they deliberately contain syntax errors).
+///
+/// - unmatched_braces/001_basic, 002_without_comment, 004_nested_missing,
+///   005_multiple_blocks: see
+///   https://github.com/walf443/nginx-lint/issues/294 — `find_close_brace_offset`
+///   treats comment-only lines as trivia rather than valid insertion anchors,
+///   so when everything after an unclosed block is comment-only, all of that
+///   block's missing closing braces fall back to end-of-file instead of their
+///   intended positions.
+/// - unclosed_quote/005_no_semicolon: see
+///   https://github.com/walf443/nginx-lint/issues/295 — the fix leaves the
+///   actual unclosed quote untouched and instead adds a spurious closing
+///   quote to a different, already-correctly-quoted line.
+const FIXTURES_WITH_KNOWN_FIX_BUGS: &[(&str, &str)] = &[
+    ("unmatched_braces", "001_basic"),
+    ("unmatched_braces", "002_without_comment"),
+    ("unmatched_braces", "004_nested_missing"),
+    ("unmatched_braces", "005_multiple_blocks"),
+    ("unclosed_quote", "005_no_semicolon"),
+];
+
 /// Test case information for parallel execution
 struct RuleTestCase {
     category: String,
@@ -639,30 +669,15 @@ fn test_all_rule_fixtures() {
         .flat_map(|tc| {
             let mut case_failures = Vec::new();
 
-            // Parse error fixture once
-            let error_config = if tc.error_path.exists() {
-                parse_config(&tc.error_path).ok()
-            } else {
-                None
-            };
-
-            // Parse expected fixture once
-            let expected_config = if tc.expected_path.exists() {
-                parse_config(&tc.expected_path).ok()
-            } else {
-                None
-            };
-
-            // Test error fixture: should detect errors
+            // Test error fixture: should detect errors. Uses the same
+            // error-recovery parsing (parse_string_with_errors) the real CLI
+            // uses, so a fixture containing a genuine syntax error (as the
+            // syntax rules' own fixtures do) is still linted rather than
+            // silently skipped.
             if tc.error_path.exists() {
-                let mut errors = pre_parse_checks(&tc.error_path);
-
-                if let Some(ref config) = error_config {
-                    let content = fs::read_to_string(&tc.error_path).unwrap_or_default();
-                    let (lint_errors, _) =
-                        linter.lint_with_content(config, &tc.error_path, &content);
-                    errors.extend(lint_errors);
-                }
+                let content = fs::read_to_string(&tc.error_path).unwrap_or_default();
+                let (config, _) = parse_string_with_errors(&content);
+                let (errors, _) = linter.lint_with_content(&config, &tc.error_path, &content);
 
                 let rule_errors: Vec<_> = errors
                     .iter()
@@ -679,14 +694,9 @@ fn test_all_rule_fixtures() {
 
             // Test expected fixture: should have no errors for this rule
             if tc.expected_path.exists() {
-                let mut errors = pre_parse_checks(&tc.expected_path);
-
-                if let Some(ref config) = expected_config {
-                    let content = fs::read_to_string(&tc.expected_path).unwrap_or_default();
-                    let (lint_errors, _) =
-                        linter.lint_with_content(config, &tc.expected_path, &content);
-                    errors.extend(lint_errors);
-                }
+                let content = fs::read_to_string(&tc.expected_path).unwrap_or_default();
+                let (config, _) = parse_string_with_errors(&content);
+                let (errors, _) = linter.lint_with_content(&config, &tc.expected_path, &content);
 
                 let rule_errors: Vec<_> = errors
                     .iter()
@@ -702,19 +712,17 @@ fn test_all_rule_fixtures() {
             }
 
             // Test fix: if both error and expected exist, verify fix produces expected
-            if tc.error_path.exists() && tc.expected_path.exists() && error_config.is_some() {
+            let skip_fix_check = FIXTURES_WITH_KNOWN_FIX_BUGS
+                .contains(&(tc.rule_dir_name.as_str(), tc.case.as_str()));
+            if tc.error_path.exists() && tc.expected_path.exists() && !skip_fix_check {
                 if let Ok(error_content) = fs::read_to_string(&tc.error_path) {
                     if let Ok(mut temp_file) = NamedTempFile::new() {
                         if write!(temp_file, "{}", error_content).is_ok() {
                             let temp_path = temp_file.path();
 
-                            let mut all_errors = pre_parse_checks(temp_path);
-                            if let Ok(config) = parse_config(temp_path) {
-                                let content = fs::read_to_string(temp_path).unwrap_or_default();
-                                let (lint_errors, _) =
-                                    linter.lint_with_content(&config, temp_path, &content);
-                                all_errors.extend(lint_errors);
-                            }
+                            let (config, _) = parse_string_with_errors(&error_content);
+                            let (all_errors, _) =
+                                linter.lint_with_content(&config, temp_path, &error_content);
 
                             let rule_errors_with_fixes: Vec<_> = all_errors
                                 .iter()
@@ -1272,15 +1280,11 @@ http {
     );
 }
 
-// Regression: pre_parse_checks_from_content must not emit "unused" warnings
-// for ignore directives whose target rule only runs later in lint_with_content
-// (e.g. include-path-exists). Previously, pre-parse built its own tracker,
-// filtered only the pre-parse rules, and prematurely flagged such directives
-// as unused.
+// Regression: ignore directives whose target rule runs later within
+// lint_with_content's rule pass (e.g. include-path-exists) must not be
+// flagged as unused just because earlier rules haven't matched them yet.
 #[test]
 fn test_ignore_include_path_exists_not_flagged_as_unused() {
-    use nginx_lint::pre_parse_checks_from_content;
-
     let content =
         "http {\n    include mime.types; # nginx-lint:ignore include-path-exists versioning\n}\n";
 
@@ -1288,11 +1292,9 @@ fn test_ignore_include_path_exists_not_flagged_as_unused() {
     let conf_path = tmp_dir.path().join("nginx.conf");
     fs::write(&conf_path, content).expect("write conf");
 
-    let pre_parse_errors = pre_parse_checks_from_content(content, None);
     let config = parse_string(content).expect("parse");
     let linter = get_default_linter();
-    let (mut errors, ignored_count) = linter.lint_with_content(&config, &conf_path, content);
-    errors.extend(pre_parse_errors);
+    let (errors, ignored_count) = linter.lint_with_content(&config, &conf_path, content);
 
     assert_eq!(ignored_count, 1, "include-path-exists should be ignored");
     let unused: Vec<_> = errors
@@ -1306,13 +1308,11 @@ fn test_ignore_include_path_exists_not_flagged_as_unused() {
     );
 }
 
-// Pre-parse rules (missing-semicolon, unmatched-braces, unclosed-quote) are
-// also registered as LintRule and re-run inside lint_with_content. Verify
-// that a genuinely unused ignore for such a rule is still reported.
+// Regression: an unused ignore comment targeting a registered syntax rule
+// (missing-semicolon, unmatched-braces, unclosed-quote) must still be
+// reported as unused when the rule finds nothing to suppress.
 #[test]
-fn test_unused_ignore_for_pre_parse_rule_is_still_reported() {
-    use nginx_lint::pre_parse_checks_from_content;
-
+fn test_unused_ignore_for_syntax_rule_is_still_reported() {
     // Well-formed file: the missing-semicolon ignore has nothing to suppress.
     let content =
         "http {\n    # nginx-lint:ignore missing-semicolon not needed\n    server_tokens off;\n}\n";
@@ -1321,11 +1321,9 @@ fn test_unused_ignore_for_pre_parse_rule_is_still_reported() {
     let conf_path = tmp_dir.path().join("nginx.conf");
     fs::write(&conf_path, content).expect("write conf");
 
-    let pre_parse_errors = pre_parse_checks_from_content(content, None);
     let config = parse_string(content).expect("parse");
     let linter = get_default_linter();
-    let (mut errors, _) = linter.lint_with_content(&config, &conf_path, content);
-    errors.extend(pre_parse_errors);
+    let (errors, _) = linter.lint_with_content(&config, &conf_path, content);
 
     let unused: Vec<_> = errors
         .iter()
@@ -1336,7 +1334,7 @@ fn test_unused_ignore_for_pre_parse_rule_is_still_reported() {
     assert_eq!(
         unused.len(),
         1,
-        "unused ignore for a pre-parse rule must still be flagged, got errors: {:?}",
+        "unused ignore for a registered syntax rule must still be flagged, got errors: {:?}",
         errors,
     );
 }
