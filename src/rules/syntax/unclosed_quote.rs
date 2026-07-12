@@ -178,6 +178,14 @@ impl LintRule for UnclosedQuote {
 
         self.check_cst(&content)
     }
+
+    fn wants_content(&self) -> bool {
+        true
+    }
+
+    fn check_with_content(&self, _config: &Config, _path: &Path, content: &str) -> Vec<LintError> {
+        self.check_cst(content)
+    }
 }
 
 #[cfg(test)]

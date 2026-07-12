@@ -1,8 +1,8 @@
 // Re-export core types from nginx-lint-common
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
-use nginx_lint_common::linter::run_rule;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
+use nginx_lint_common::linter::{run_rule, run_rule_with_content};
 use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
@@ -185,7 +185,12 @@ impl Linter {
 
         // Syntax rules
         if is_enabled("unmatched-braces") {
-            linter.add_rule(Box::new(UnmatchedBraces));
+            let additional_block_directives = config
+                .map(|c| c.additional_block_directives().to_vec())
+                .unwrap_or_default();
+            linter.add_rule(Box::new(UnmatchedBraces::with_additional_block_directives(
+                additional_block_directives,
+            )));
         }
         if is_enabled("unclosed-quote") {
             linter.add_rule(Box::new(UnclosedQuote));
@@ -488,25 +493,49 @@ impl Linter {
     /// Uses parallel iteration when the cli feature is enabled (via rayon)
     #[cfg(feature = "cli")]
     pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        self.lint_internal(config, path, None)
+    }
+
+    /// Run all lint rules and collect errors (sequential version for WASM)
+    #[cfg(not(feature = "cli"))]
+    pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+        self.lint_internal(config, path, None)
+    }
+
+    /// Shared implementation behind [`lint`](Self::lint)/[`lint_with_content`](Self::lint_with_content).
+    ///
+    /// `content` is `Some` only when the caller already has the file content in
+    /// memory (see [`lint_with_content`](Self::lint_with_content)), in which
+    /// case rules that [want it](nginx_lint_common::linter::LintRule::wants_content)
+    /// receive it directly instead of re-reading the file from disk.
+    #[cfg(feature = "cli")]
+    fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
         self.rules
             .par_iter()
-            .map(|rule| run_rule(rule.as_ref(), config, path, &shared_config))
+            .map(|rule| match content {
+                Some(c) => run_rule_with_content(rule.as_ref(), config, path, c, &shared_config),
+                None => run_rule(rule.as_ref(), config, path, &shared_config),
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
             .collect()
     }
 
-    /// Run all lint rules and collect errors (sequential version for WASM)
+    /// Shared implementation behind [`lint`](Self::lint)/[`lint_with_content`](Self::lint_with_content)
+    /// (sequential version for WASM). See the `cli`-feature variant for details.
     #[cfg(not(feature = "cli"))]
-    pub fn lint(&self, config: &Config, path: &Path) -> Vec<LintError> {
+    fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
         self.rules
             .iter()
-            .flat_map(|rule| run_rule(rule.as_ref(), config, path, &shared_config))
+            .flat_map(|rule| match content {
+                Some(c) => run_rule_with_content(rule.as_ref(), config, path, c, &shared_config),
+                None => run_rule(rule.as_ref(), config, path, &shared_config),
+            })
             .collect()
     }
 
@@ -524,7 +553,7 @@ impl Linter {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
         let (mut tracker, warnings) = self.make_ignore_tracker(content);
-        let errors = self.lint(config, path);
+        let errors = self.lint_internal(config, path, Some(content));
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
         errors.extend(warnings_to_errors(warnings));
@@ -543,7 +572,7 @@ impl Linter {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
         let (mut tracker, warnings) = self.make_ignore_tracker(content);
-        let errors = self.lint(config, path);
+        let errors = self.lint_internal(config, path, Some(content));
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
         errors.extend(warnings_to_errors(warnings));
@@ -561,6 +590,19 @@ impl Linter {
         config: &Config,
         path: &Path,
     ) -> (Vec<LintError>, Vec<RuleProfile>) {
+        self.lint_with_profile_internal(config, path, None)
+    }
+
+    /// Shared implementation behind [`lint_with_profile`](Self::lint_with_profile)/
+    /// [`lint_with_content_and_profile`](Self::lint_with_content_and_profile). See
+    /// [`lint_internal`](Self::lint_internal) for the meaning of `content`.
+    #[cfg(feature = "cli")]
+    fn lint_with_profile_internal(
+        &self,
+        config: &Config,
+        path: &Path,
+        content: Option<&str>,
+    ) -> (Vec<LintError>, Vec<RuleProfile>) {
         use std::time::Instant;
 
         let shared_config = std::sync::OnceLock::new();
@@ -570,7 +612,12 @@ impl Linter {
             .iter()
             .map(|rule| {
                 let start = Instant::now();
-                let errors = run_rule(rule.as_ref(), config, path, &shared_config);
+                let errors = match content {
+                    Some(c) => {
+                        run_rule_with_content(rule.as_ref(), config, path, c, &shared_config)
+                    }
+                    None => run_rule(rule.as_ref(), config, path, &shared_config),
+                };
                 let duration = start.elapsed();
                 let profile = RuleProfile {
                     name: rule.name().to_string(),
@@ -599,7 +646,7 @@ impl Linter {
         use nginx_lint_common::ignore::{filter_errors, warnings_to_errors};
 
         let (mut tracker, warnings) = self.make_ignore_tracker(content);
-        let (errors, profiles) = self.lint_with_profile(config, path);
+        let (errors, profiles) = self.lint_with_profile_internal(config, path, Some(content));
         let result = filter_errors(errors, &mut tracker);
         let mut errors = result.errors;
         errors.extend(warnings_to_errors(warnings));

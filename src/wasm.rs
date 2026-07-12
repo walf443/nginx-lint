@@ -170,7 +170,7 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     let mut pre_parse_errors = Vec::new();
 
     if is_enabled("unmatched-braces") {
-        let rule = UnmatchedBraces;
+        let rule = UnmatchedBraces::default();
         pre_parse_errors
             .extend(rule.check_content_with_extras(content, &additional_block_directives));
     }

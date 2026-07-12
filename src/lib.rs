@@ -117,7 +117,7 @@ pub fn pre_parse_checks_from_content(
     let mut errors = Vec::new();
 
     // Check for unmatched braces
-    let brace_rule = UnmatchedBraces;
+    let brace_rule = UnmatchedBraces::default();
     errors.extend(brace_rule.check_content_with_extras(content, &additional_block_directives));
 
     // Check for unclosed quotes

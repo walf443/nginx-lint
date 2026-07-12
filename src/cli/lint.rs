@@ -5,7 +5,7 @@ use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content_detailed, collect_included_files,
     collect_included_files_with_context, parse_config, parse_string_with_errors,
-    pre_parse_checks_from_content, syntax_errors_to_lint_errors,
+    syntax_errors_to_lint_errors,
 };
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -28,8 +28,9 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
 
 /// Extend `errors` with `additional`, dropping exact duplicates.
 ///
-/// Pre-parse checks and the registered syntax rules (missing-semicolon,
-/// unmatched-braces, unclosed-quote) detect the same problems; keeping both
+/// Used to merge in rowan's own generic syntax errors alongside the
+/// registered syntax rules' (missing-semicolon, unmatched-braces,
+/// unclosed-quote) more specific diagnostics, which can overlap; keeping both
 /// copies would report each problem twice and, under `--fix`, apply the same
 /// fix twice (e.g. inserting `;;` for one missing semicolon).
 fn extend_errors_dedup(errors: &mut Vec<LintError>, additional: Vec<LintError>) {
@@ -199,18 +200,10 @@ fn run_lint_on_config(
 }
 
 /// Lint a single included file and return the result
-fn lint_file(
-    included: &IncludedFile,
-    linter: &Linter,
-    lint_config: Option<&LintConfig>,
-    profile: bool,
-) -> FileResult {
+fn lint_file(included: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
     let path = &included.path;
 
     let content = std::fs::read_to_string(path).unwrap_or_default();
-
-    // Run pre-parse checks on already-read content to avoid reading the file twice
-    let pre_parse_errors = pre_parse_checks_from_content(&content, lint_config);
 
     // Always parse with error recovery — rowan produces a usable AST even with errors
     let (config, syntax_errors) = if let Some(ref config) = included.config {
@@ -222,12 +215,10 @@ fn lint_file(
 
     let mut result = run_lint_on_config(&config, path, &content, linter, profile);
 
-    // Merge pre-parse errors and syntax errors into lint errors, dropping
-    // exact duplicates (the linter's syntax rules and pre_parse_checks
-    // overlap; rowan syntax-error may also repeat).
-    let FileResult::LintErrors { ref mut errors, .. } = result;
-    extend_errors_dedup(errors, pre_parse_errors);
+    // Merge in rowan's own generic syntax errors, dropping exact duplicates
+    // (they may repeat what a registered syntax rule already reported).
     if !syntax_errors.is_empty() {
+        let FileResult::LintErrors { ref mut errors, .. } = result;
         extend_errors_dedup(
             errors,
             syntax_errors_to_lint_errors(&syntax_errors, &content),
@@ -244,18 +235,13 @@ fn lint_file(
 /// in the written file: positions are computed against the rewritten
 /// content, and problems left behind by fixes that failed to apply or were
 /// skipped stay visible.
-fn fix_file(
-    inc: &IncludedFile,
-    linter: &Linter,
-    lint_config: Option<&LintConfig>,
-    profile: bool,
-) -> FileResult {
+fn fix_file(inc: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
     let FileResult::LintErrors {
         path,
         errors,
         ignored_count,
         profiles,
-    } = lint_file(inc, linter, lint_config, profile);
+    } = lint_file(inc, linter, profile);
 
     if errors.iter().all(|e| e.fixes.is_empty()) {
         return FileResult::LintErrors {
@@ -287,7 +273,6 @@ fn fix_file(
                 &result.content,
                 &path,
                 linter,
-                lint_config,
                 false,
                 inc.include_context.clone(),
             );
@@ -317,7 +302,6 @@ fn fix_stdin(
     result: FileResult,
     content: &str,
     linter: &Linter,
-    lint_config: Option<&LintConfig>,
     initial_context: Vec<String>,
 ) -> FileResult {
     let FileResult::LintErrors {
@@ -347,14 +331,7 @@ fn fix_stdin(
         errors: remaining,
         ignored_count: remaining_ignored,
         ..
-    } = lint_content(
-        &apply_result.content,
-        &path,
-        linter,
-        lint_config,
-        false,
-        initial_context,
-    );
+    } = lint_content(&apply_result.content, &path, linter, false, initial_context);
     FileResult::LintErrors {
         path,
         errors: remaining,
@@ -441,13 +418,9 @@ fn lint_content(
     content: &str,
     path: &Path,
     linter: &Linter,
-    lint_config: Option<&LintConfig>,
     profile: bool,
     initial_context: Vec<String>,
 ) -> FileResult {
-    // Run pre-parse checks on the content
-    let pre_parse_errors = pre_parse_checks_from_content(content, lint_config);
-
     // Parse the content (always produces AST, even with syntax errors)
     let (mut parse_result, syntax_errors) = parse_string_with_errors(content);
 
@@ -458,11 +431,10 @@ fn lint_content(
 
     let mut result = run_lint_on_config(&parse_result, path, content, linter, profile);
 
-    // Merge pre-parse errors and syntax errors into lint errors, dropping
-    // exact duplicates (see lint_file)
-    let FileResult::LintErrors { ref mut errors, .. } = result;
-    extend_errors_dedup(errors, pre_parse_errors);
+    // Merge in rowan's own generic syntax errors, dropping exact duplicates
+    // (see lint_file)
     if !syntax_errors.is_empty() {
+        let FileResult::LintErrors { ref mut errors, .. } = result;
         extend_errors_dedup(
             errors,
             syntax_errors_to_lint_errors(&syntax_errors, content),
@@ -799,18 +771,11 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             content,
             Path::new("<stdin>"),
             &linter,
-            lint_config.as_ref(),
             cli.profile,
             initial_context.clone(),
         );
         if cli.fix {
-            vec![fix_stdin(
-                result,
-                content,
-                &linter,
-                lint_config.as_ref(),
-                initial_context,
-            )]
+            vec![fix_stdin(result, content, &linter, initial_context)]
         } else {
             vec![result]
         }
@@ -862,17 +827,17 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         if cli.fix {
             included_files
                 .iter()
-                .map(|inc| fix_file(inc, &linter, lint_config.as_ref(), cli.profile))
+                .map(|inc| fix_file(inc, &linter, cli.profile))
                 .collect()
         } else if cli.profile {
             included_files
                 .iter()
-                .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), true))
+                .map(|inc| lint_file(inc, &linter, true))
                 .collect()
         } else {
             included_files
                 .par_iter()
-                .map(|inc| lint_file(inc, &linter, lint_config.as_ref(), false))
+                .map(|inc| lint_file(inc, &linter, false))
                 .collect()
         }
     };

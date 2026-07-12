@@ -2947,7 +2947,10 @@ fn test_fix_unwritable_file_keeps_errors_and_fails() {
 
 /// The same problem detected twice (registered syntax rule + pre-parse
 /// check) must apply its fix only once: `listen 80` becomes `listen 80;`,
-/// not `listen 80;;`.
+/// not `listen 80;;`. (Historical note: this used to guard against two
+/// independent computations of the same rule producing the same fix twice;
+/// there is now only one computation, but the invariant is still worth
+/// protecting against regression.)
 #[cfg(feature = "cli")]
 #[test]
 fn test_fix_applies_duplicate_reported_fix_once() {
@@ -2974,6 +2977,77 @@ fn test_fix_applies_duplicate_reported_fix_once() {
         "exit code should be zero after everything was fixed; stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Multiple simultaneous missing-semicolons must each be detected exactly
+/// once (not duplicated, not merged away) through the real CLI.
+#[cfg(feature = "cli")]
+#[test]
+fn test_multiple_missing_semicolons_reported_individually() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let mut file = NamedTempFile::new().unwrap();
+    file.write_all(
+        b"events {\n    worker_connections 1024\n}\nhttp {\n    client_max_body_size 10m\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg(file.path().to_str().unwrap())
+        .output()
+        .expect("Failed to run nginx-lint");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let missing_semicolon_lines: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.contains("missing-semicolon"))
+        .collect();
+    assert_eq!(
+        missing_semicolon_lines.len(),
+        2,
+        "expected exactly one missing-semicolon report for each of the two \
+         missing semicolons; got:\n{}",
+        stdout
+    );
+}
+
+/// A custom block directive configured via `[parser] block_directives = [...]`
+/// (for extension modules, e.g. nginx-rtmp-module) must be recognised by
+/// `unmatched-braces` through the real CLI end-to-end, not just via the
+/// standalone `check_content_with_extras` helper — this is the registered
+/// `LintRule` dispatch path the CLI actually uses.
+#[cfg(feature = "cli")]
+#[test]
+fn test_unmatched_braces_respects_configured_additional_block_directives_via_cli() {
+    use std::io::Write;
+    use std::process::Command;
+
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    std::fs::write(
+        temp_dir.path().join(".nginx-lint.toml"),
+        "[parser]\nblock_directives = [\"my_custom_block\"]\n",
+    )
+    .unwrap();
+
+    let conf_path = temp_dir.path().join("nginx.conf");
+    let mut file = std::fs::File::create(&conf_path).unwrap();
+    file.write_all(b"http {\n    my_custom_block\n        some_directive value;\n    }\n}\n")
+        .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg(conf_path.to_str().unwrap())
+        .output()
+        .expect("Failed to run nginx-lint");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("unmatched-braces") && stdout.contains("my_custom_block"),
+        "expected an unmatched-braces error naming the configured custom \
+         block directive; got:\n{}",
+        stdout
     );
 }
 

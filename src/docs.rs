@@ -420,7 +420,7 @@ mod example_tests {
         // Test unmatched-braces
         {
             let doc = get_rule_doc("unmatched-braces").unwrap();
-            let rule = UnmatchedBraces;
+            let rule = UnmatchedBraces::default();
             let errors = rule.check_content(doc.bad_example);
             assert!(
                 !errors.is_empty(),
@@ -465,7 +465,7 @@ mod example_tests {
         // Test unmatched-braces
         {
             let doc = get_rule_doc("unmatched-braces").unwrap();
-            let rule = UnmatchedBraces;
+            let rule = UnmatchedBraces::default();
             let errors = rule.check_content(doc.good_example);
             assert!(
                 errors.is_empty(),
@@ -539,7 +539,7 @@ mod example_tests {
         // Test unmatched-braces fix
         {
             let doc = get_rule_doc("unmatched-braces").unwrap();
-            let rule = UnmatchedBraces;
+            let rule = UnmatchedBraces::default();
             let errors = rule.check_content(doc.bad_example);
             if !errors.is_empty() && errors.iter().all(|e| !e.fixes.is_empty()) {
                 let fixed = apply_fixes(doc.bad_example, &errors);

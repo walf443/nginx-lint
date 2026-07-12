@@ -282,6 +282,30 @@ pub trait LintRule: Send + Sync {
         self.check(config, path)
     }
 
+    /// Whether this rule wants the raw file content directly.
+    ///
+    /// Rules that need to re-derive diagnostics from the source text itself
+    /// (rather than the parsed `Config`) should return `true` so the linter
+    /// hands them the content it already has in memory, instead of each rule
+    /// independently re-reading the file from disk and re-parsing it.
+    ///
+    /// Note: this does not compose with [`wants_shared_config`](Self::wants_shared_config) —
+    /// the default [`check_with_content`](Self::check_with_content) delegates to
+    /// [`check`](Self::check), not [`check_shared`](Self::check_shared). No current
+    /// rule needs both; a future one that does would need a custom override.
+    fn wants_content(&self) -> bool {
+        false
+    }
+
+    /// Run the rule with the raw file content already available.
+    ///
+    /// The linter calls this instead of [`check`](Self::check)/[`check_shared`](Self::check_shared)
+    /// when [`wants_content`](Self::wants_content) returns `true` and content is available.
+    /// Default implementation ignores `content` and calls `check()`.
+    fn check_with_content(&self, config: &Config, path: &Path, _content: &str) -> Vec<LintError> {
+        self.check(config, path)
+    }
+
     /// Get detailed explanation of why this rule exists
     fn why(&self) -> Option<&str> {
         None
@@ -389,6 +413,25 @@ pub fn run_rule(
         rule.check_shared(shared, path)
     } else {
         rule.check(config, path)
+    }
+}
+
+/// Like [`run_rule`], but additionally dispatches to
+/// [`LintRule::check_with_content`] for rules that
+/// [want raw content](LintRule::wants_content), so those rules don't have to
+/// re-read the file from disk when the caller already has it in memory.
+/// Falls back to [`run_rule`]'s dispatch policy otherwise.
+pub fn run_rule_with_content(
+    rule: &dyn LintRule,
+    config: &Config,
+    path: &Path,
+    content: &str,
+    shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+) -> Vec<LintError> {
+    if rule.wants_content() {
+        rule.check_with_content(config, path, content)
+    } else {
+        run_rule(rule, config, path, shared_config)
     }
 }
 
