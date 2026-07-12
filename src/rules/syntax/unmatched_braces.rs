@@ -340,7 +340,14 @@ impl UnmatchedBraces {
     /// Scans lines after `brace_line` (1-based) looking for the first line
     /// whose first non-trivia token starts at indentation ≤ `brace_indent`.
     /// Returns the byte offset of that line's start (so `}` is inserted
-    /// before it). Falls back to `source.len()` (EOF) if no such line exists.
+    /// before it). A comment-only line at or before `brace_indent` is also
+    /// treated as a valid anchor (e.g. a `# missing closing brace here`
+    /// marker) — a comment can't be block content that needs to stay inside,
+    /// so there's no ambiguity to guard against the way there is for real
+    /// directives at the same indent (see the `is_block_boundary` check
+    /// below). A comment indented deeper than `brace_indent` is just part of
+    /// the block's content and is skipped, same as blank lines. Falls back
+    /// to `source.len()` (EOF) if no such line exists.
     fn find_close_brace_offset(
         source: &str,
         line_tokens: &[Vec<&FlatToken>],
@@ -353,7 +360,19 @@ impl UnmatchedBraces {
             let mut meaningful = line_toks.iter().filter(|t| !t.kind.is_trivia());
             let first_meaningful = match meaningful.next() {
                 Some(tok) => tok,
-                None => continue, // blank or comment-only line
+                None => {
+                    // Blank or comment-only line.
+                    if let Some(comment) = line_toks.iter().find(|t| t.kind == SyntaxKind::COMMENT)
+                    {
+                        let indent = Self::line_indent(source, comment.offset);
+                        if indent <= brace_indent {
+                            let line_start =
+                                source[..comment.offset].rfind('\n').map_or(0, |i| i + 1);
+                            return Self::skip_blank_lines_backward(source, line_start);
+                        }
+                    }
+                    continue;
+                }
             };
 
             // Skip lines that only contain `}` — those closing braces were
@@ -1151,6 +1170,66 @@ events {
             result.ends_with("}\n"),
             "Fix should append at EOF, got:\n{}",
             result
+        );
+    }
+
+    /// A comment at or below the unclosed block's own indentation is a valid
+    /// anchor for the missing `}` — regression test for
+    /// https://github.com/walf443/nginx-lint/issues/294, where three such
+    /// braces all fell back to EOF instead of their marked positions because
+    /// comment-only lines were skipped entirely rather than considered.
+    #[test]
+    fn test_fix_unclosed_inserts_before_marker_comment() {
+        let content = "http {\n    server_tokens on;\n# closing brace goes here\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result, "http {\n    server_tokens on;\n}\n# closing brace goes here\n",
+            "Fix should insert }} right before the marker comment"
+        );
+    }
+
+    /// A comment indented deeper than the unclosed block is just part of the
+    /// block's content (e.g. an inline explanatory comment), not a boundary
+    /// marker — it must be skipped like a blank line, not used as an anchor.
+    #[test]
+    fn test_fix_unclosed_skips_deeper_indented_comment() {
+        let content = "http {\n    server {\n        listen 80;\n        # inline comment about listen\n    }\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert!(errors[0].message.contains("Unclosed brace"));
+
+        let fix = errors[0].fixes.first().expect("Expected fix");
+        let result = apply_fix(content, fix);
+        // `http {` (indent 0) is unclosed; the deeper-indented comment inside
+        // `server {}` must not be mistaken for the boundary, so the fix falls
+        // through to EOF (there's no line at indent <= 0 after it).
+        assert!(
+            result.ends_with("}\n"),
+            "Fix should append at EOF, not before the deeper-indented comment, got:\n{}",
+            result
+        );
+    }
+
+    /// Multiple nested unclosed blocks, each marked only by a trailing
+    /// comment at its own indentation, must each get their own `}` inserted
+    /// at the right position — the original repro shape for issue #294.
+    #[test]
+    fn test_fix_unclosed_nested_multiple_marker_comments() {
+        let content =
+            "http {\n  server {\n    listen 80;\n  # missing server brace\n# missing http brace\n";
+        let errors = check_braces(content);
+        assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
+
+        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+        let (result, applied) = crate::apply_fixes_to_content(content, &fixes);
+        assert_eq!(applied, 2, "Both fixes should apply without conflict");
+        assert_eq!(
+            result,
+            "http {\n  server {\n    listen 80;\n  }\n  # missing server brace\n}\n# missing http brace\n",
         );
     }
 
