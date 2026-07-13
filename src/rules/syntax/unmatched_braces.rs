@@ -1180,14 +1180,22 @@ events {
     /// comment-only lines were skipped entirely rather than considered.
     #[test]
     fn test_fix_unclosed_inserts_before_marker_comment() {
-        let content = "http {\n    server_tokens on;\n# closing brace goes here\n";
+        let content = r#"http {
+    server_tokens on;
+# closing brace goes here
+"#;
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
 
         let fix = errors[0].fixes.first().expect("Expected fix");
         let result = apply_fix(content, fix);
         assert_eq!(
-            result, "http {\n    server_tokens on;\n}\n# closing brace goes here\n",
+            result,
+            r#"http {
+    server_tokens on;
+}
+# closing brace goes here
+"#,
             "Fix should insert }} right before the marker comment"
         );
     }
@@ -1197,7 +1205,12 @@ events {
     /// marker — it must be skipped like a blank line, not used as an anchor.
     #[test]
     fn test_fix_unclosed_skips_deeper_indented_comment() {
-        let content = "http {\n    server {\n        listen 80;\n        # inline comment about listen\n    }\n";
+        let content = r#"http {
+    server {
+        listen 80;
+        # inline comment about listen
+    }
+"#;
         let errors = check_braces(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("Unclosed brace"));
@@ -1219,8 +1232,12 @@ events {
     /// at the right position — the original repro shape for issue #294.
     #[test]
     fn test_fix_unclosed_nested_multiple_marker_comments() {
-        let content =
-            "http {\n  server {\n    listen 80;\n  # missing server brace\n# missing http brace\n";
+        let content = r#"http {
+  server {
+    listen 80;
+  # missing server brace
+# missing http brace
+"#;
         let errors = check_braces(content);
         assert_eq!(errors.len(), 2, "Expected 2 errors, got: {:?}", errors);
 
@@ -1229,7 +1246,14 @@ events {
         assert_eq!(applied, 2, "Both fixes should apply without conflict");
         assert_eq!(
             result,
-            "http {\n  server {\n    listen 80;\n  }\n  # missing server brace\n}\n# missing http brace\n",
+            r#"http {
+  server {
+    listen 80;
+  }
+  # missing server brace
+}
+# missing http brace
+"#,
         );
     }
 
