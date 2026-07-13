@@ -562,6 +562,20 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
     (result.content, result.applied)
 }
 
+/// Whether `s` is non-empty and consists entirely of whitespace — i.e. an
+/// insert of `s` is pure reformatting (e.g. `indent`'s fixes), not content.
+fn is_whitespace_only(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(char::is_whitespace)
+}
+
+/// Whether `s` contains at least one non-whitespace character — i.e. an
+/// insert of `s` adds real content (e.g. a missing closing brace), not just
+/// whitespace. The complement of [`is_whitespace_only`] over non-empty
+/// strings; both are `false` for the empty string (a no-op insert).
+fn has_non_whitespace(s: &str) -> bool {
+    s.chars().any(|c| !c.is_whitespace())
+}
+
 /// Apply fixes to content string, reporting skipped fixes.
 ///
 /// All fixes (both line-based and offset-based) are normalized to offset-based,
@@ -608,6 +622,20 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
         }
     });
 
+    // Offsets that have at least one structural (content-inserting) zero-width
+    // insert, e.g. `unmatched-braces` inserting a missing `}`. Computed over
+    // the whole fix set up front so the decision below doesn't depend on the
+    // order fixes happen to be processed in — the ascending-indent sort tiebreak
+    // means a structural insert with more leading whitespace than a competing
+    // reformatting insert would otherwise be processed second and let both apply.
+    let structural_insert_offsets: std::collections::HashSet<usize> = range_fixes
+        .iter()
+        .filter(|f| {
+            f.start_offset.unwrap() == f.end_offset.unwrap() && has_non_whitespace(&f.new_text)
+        })
+        .map(|f| f.start_offset.unwrap())
+        .collect();
+
     let mut fix_count = 0;
     let mut result = content.to_string();
     let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
@@ -615,10 +643,25 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
     for fix in &range_fixes {
         let start = fix.start_offset.unwrap();
         let end = fix.end_offset.unwrap();
+        let is_insert = start == end;
 
         // Check if this range overlaps with any already applied range
         let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
-        if overlaps {
+
+        // Two zero-width inserts at the identical point don't trip the
+        // check above (touching, not overlapping) — which is intentional
+        // when both are pure whitespace (e.g. two `indent` fixes for the
+        // same line combine into the right total indentation). But
+        // stacking a whitespace-only reformatting insert next to one that
+        // inserts real content (e.g. `unmatched-braces` inserting a missing
+        // `}`) produces nonsensical interleaved output — the whitespace fix
+        // was computed against a structure this other fix is about to
+        // change anyway, so drop it (regardless of which is processed first).
+        let conflicts_with_structural_insert = is_insert
+            && is_whitespace_only(&fix.new_text)
+            && structural_insert_offsets.contains(&start);
+
+        if overlaps || conflicts_with_structural_insert {
             continue;
         }
 
@@ -828,6 +871,75 @@ mod fix_tests {
         let result = apply_fixes_to_content_detailed(content, &fixes);
         assert_eq!(result.applied, 1);
         assert_eq!(result.skipped_invalid, 0);
+    }
+
+    /// Two whitespace-only inserts at the exact same point (e.g. two
+    /// `indent` errors reconciling to the same total indentation) must
+    /// still stack in ascending-indent order — this is the legitimate use
+    /// of same-point insertion the conflict check below must not break.
+    #[test]
+    fn test_same_point_whitespace_only_inserts_stack() {
+        let content = "#note\n";
+        let four_spaces = Fix::replace_range(0, 0, "    ");
+        let two_spaces = Fix::replace_range(0, 0, "  ");
+        let fixes: Vec<&Fix> = vec![&four_spaces, &two_spaces];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(result.content, "      #note\n");
+        assert_eq!(
+            result.applied, 2,
+            "both whitespace-only inserts should apply"
+        );
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/296.
+    ///
+    /// A structural insert (e.g. `unmatched-braces` inserting a missing
+    /// `}`) and a whitespace-only reformatting insert (e.g. `indent`
+    /// reformatting the very line the brace is being inserted before) at
+    /// the exact same point don't trip the ordinary range-overlap check
+    /// (both are zero-width, touching but not overlapping) — without a
+    /// dedicated conflict check they get concatenated in whatever order the
+    /// sort happens to produce, yielding nonsensical interleaved output
+    /// (e.g. `      }` — 6 spaces of indentation matching neither fix's own
+    /// intent). The whitespace-only fix must be dropped instead, since it
+    /// was computed against content this other fix is about to change
+    /// immediately adjacent to it anyway.
+    #[test]
+    fn test_whitespace_only_insert_skipped_when_it_conflicts_with_structural_insert() {
+        let content = "# Missing closing brace for http\n";
+        let close_brace = Fix::replace_range(0, 0, "}\n");
+        let reindent = Fix::replace_range(0, 0, "      ");
+        let fixes: Vec<&Fix> = vec![&close_brace, &reindent];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(
+            result.content, "}\n# Missing closing brace for http\n",
+            "the whitespace-only fix must be dropped, not interleaved with the brace"
+        );
+        assert_eq!(result.applied, 1);
+    }
+
+    /// The whitespace-vs-structural conflict must be resolved independently
+    /// of processing order. A structural insert's own `new_text` can carry
+    /// MORE leading whitespace than the competing whitespace-only fix — e.g.
+    /// `unmatched-braces` closing a deeply-nested block emits
+    /// `"      }\n"` (its brace at the block's own indent), while `indent`
+    /// proposes a smaller reindent for the same line (plausible on
+    /// unclosed-brace input, cf. #300). The ascending-indent sort tiebreak
+    /// then processes the whitespace-only fix FIRST, so a check that only
+    /// looked at already-applied fixes would miss the conflict and let both
+    /// apply. The structural fix must still win.
+    #[test]
+    fn test_whitespace_only_insert_skipped_even_when_structural_insert_is_more_indented() {
+        let content = "# note\n";
+        let close_brace = Fix::replace_range(0, 0, "      }\n"); // 6 leading spaces
+        let reindent = Fix::replace_range(0, 0, "  "); // 2 leading spaces
+        let fixes: Vec<&Fix> = vec![&close_brace, &reindent];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(
+            result.content, "      }\n# note\n",
+            "structural fix must win regardless of relative leading-whitespace ordering"
+        );
+        assert_eq!(result.applied, 1);
     }
 
     #[test]
