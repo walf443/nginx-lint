@@ -230,10 +230,12 @@ impl UnclosedQuote {
     /// missing fix):
     /// - A value *intended* to contain `;` then `#` (a literal `"a; #b"`) is
     ///   indistinguishable from a value plus a trailing comment.
-    /// - An unclosed quote *before* a raw (lua) block whose body contains a
-    ///   `;` (`add_header "v;` then `ngx.say("a; b")`): the mispairing exposes
-    ///   the lua `;` as a real terminator token that stops the backward walk,
-    ///   so the culprit line isn't reached and no fix is offered.
+    /// - When the mispairing exposes a `;` or brace that was meant to be raw
+    ///   block content (lua code has both — `ngx.say("a; b")`, `local t = {1}`)
+    ///   as a real boundary token between the culprit and the flagged token,
+    ///   the backward walk stops there and the culprit isn't reached, so no fix
+    ///   is offered. This is acceptable: that exposed token belongs to raw
+    ///   block content, which shouldn't drive quote fixing anyway.
     ///
     /// Neither can be resolved without knowing the author's intent.
     fn locate_real_culprit(unclosed: &SyntaxToken, quote: char) -> Option<(usize, Fix)> {
