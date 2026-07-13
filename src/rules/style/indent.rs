@@ -56,7 +56,15 @@ impl Indent {
     /// Check indentation on content string directly (used by WASM and docs)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
         // Parse with error recovery so we get an AST even for broken configs
-        let (config, _errors) = crate::parser::parse_string_with_errors(content);
+        let (config, errors) = crate::parser::parse_string_with_errors(content);
+        // Unbalanced braces make the recovered AST's block nesting a guess, so
+        // every depth we'd compute — and every fix built from it — is unreliable
+        // (e.g. closing braces synthesised at EOF produce spurious "indent the
+        // end of file" fixes). Skip until the braces are balanced; the brace
+        // problem itself is reported by unmatched-braces and the syntax-error pass.
+        if has_brace_structure_error(&errors) {
+            return Vec::new();
+        }
         self.check_config(&config)
     }
 
@@ -156,6 +164,32 @@ impl LintRule for Indent {
     fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
         self.check_config(config)
     }
+
+    fn wants_content(&self) -> bool {
+        true
+    }
+
+    fn check_with_content(&self, _config: &Config, _path: &Path, content: &str) -> Vec<LintError> {
+        // Re-check from content so we can see the parser's syntax errors and
+        // skip on unbalanced braces (see `check_content`). The passed `config`
+        // is parsed from this same content, so re-parsing yields the same AST.
+        self.check_content(content)
+    }
+}
+
+/// Whether any parser syntax error indicates an unbalanced closing brace — a
+/// missing `}` (`"expected '}'"`, `"expected '}' for lua block"`) or an extra
+/// one (`"unexpected '}'"`). Either leaves the recovered AST's block nesting —
+/// and therefore indentation depth — a guess.
+///
+/// `SyntaxError` carries no typed kind, so we key off the message, gating on
+/// the `}` character. Deliberately *not* gated: `"expected ';' or '{'"`, which
+/// the parser emits both for a missing semicolon (braces still balanced,
+/// nesting intact — indent should keep working) and for a missing opening
+/// brace; since the message can't tell them apart and the missing-`;` case is
+/// the common one, this diagnostic doesn't suppress indentation.
+pub(crate) fn has_brace_structure_error(errors: &[crate::parser::parser::SyntaxError]) -> bool {
+    errors.iter().any(|e| e.message.contains('}'))
 }
 
 /// Detect indent size from AST by finding the first item inside a top-level block
@@ -579,5 +613,76 @@ content_by_lua_block {
             result.contains("location /static/"),
             "Directives after lua block should be preserved"
         );
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/300.
+    ///
+    /// With unbalanced braces the recovered AST's nesting is a guess: the 3
+    /// unclosed blocks here all get closing braces synthesised at EOF, and
+    /// the trailing marker comments land inside the innermost block. Computing
+    /// indentation from that produced spurious "Expected N spaces" errors —
+    /// including fixes that insert whitespace at end-of-file where no line
+    /// exists. Indent must skip such files entirely rather than emit guesses.
+    #[test]
+    fn test_no_indent_errors_on_unclosed_braces() {
+        let content = r#"http {
+  server {
+    listen 80;
+
+    location / {
+      root /var/www/html;
+    # Missing closing brace for location
+  # Missing closing brace for server
+# Missing closing brace for http
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "indent must not report on a file with unbalanced braces, got: {:?}",
+            errors
+        );
+    }
+
+    /// The opposite direction of #300: an *extra* closing brace also makes the
+    /// brace structure malformed, so indent skips it too.
+    #[test]
+    fn test_no_indent_errors_on_extra_closing_brace() {
+        let content = "http {\n  server {\n    listen 80;\n  }\n}\n}\n";
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "indent must not report on a file with an extra closing brace, got: {:?}",
+            errors
+        );
+    }
+
+    /// A *non-brace* syntax error (here a missing semicolon) leaves the brace
+    /// structure — and therefore nesting — intact, so indent must still run
+    /// and catch genuine indentation problems.
+    #[test]
+    fn test_indent_still_runs_when_only_a_semicolon_is_missing() {
+        // `listen 80` is missing its `;`, but every brace is balanced.
+        // The inner directives are wrongly indented (4 spaces under a
+        // 2-space file), which indent should still flag.
+        let content = "http {\n  server {\n      listen 80\n  }\n}\n";
+        let errors = check_content(content);
+        assert!(
+            !errors.is_empty(),
+            "indent should still report indentation issues when braces are balanced"
+        );
+    }
+
+    #[test]
+    fn test_has_brace_structure_error() {
+        use crate::parser::parse_string_with_errors;
+
+        let (_c, unclosed) = parse_string_with_errors("http {\n  server {\n");
+        assert!(has_brace_structure_error(&unclosed));
+
+        let (_c, extra) = parse_string_with_errors("http {\n}\n}\n");
+        assert!(has_brace_structure_error(&extra));
+
+        let (_c, clean) = parse_string_with_errors("http {\n  server {\n  }\n}\n");
+        assert!(!has_brace_structure_error(&clean));
     }
 }

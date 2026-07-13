@@ -189,12 +189,19 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
     let mut errors = pre_parse_errors;
 
     // Create linter to get rule names for ignore validation
-    let linter = Linter::with_config(lint_config.as_ref(), None);
+    let mut linter = Linter::with_config(lint_config.as_ref(), None);
 
     // Build ignore tracker with rule name validation using linter's rule names
+    // (captured before removing indent below, so `indent` stays a valid ignore
+    // target).
     let valid_rules = linter.rule_names();
     let (mut tracker, ignore_warnings) =
         IgnoreTracker::from_content_with_rules(content, Some(&valid_rules));
+
+    // Indent is run separately below on the already-parsed AST (avoiding a
+    // second parse), so drop it from the linter here — otherwise `linter.lint`
+    // would run and report it a second time.
+    linter.remove_rules_by_name(|name| name == "indent");
 
     // Parse with error recovery — always produces an AST even with syntax errors
     let (config, syntax_errors) = parse_string_with_errors(content);
@@ -206,8 +213,13 @@ pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResu
         errors.extend(syntax_errors_to_lint_errors(&syntax_errors, content));
     }
 
-    // Run indentation check using the already-parsed AST
-    if is_enabled("indent") {
+    // Run indentation check using the already-parsed AST — but only when the
+    // braces are balanced. Unbalanced braces make the recovered AST's nesting
+    // (and thus every indentation depth) a guess, so indent would emit spurious
+    // fixes (see the indent rule); the brace problem itself is already reported.
+    if is_enabled("indent")
+        && !crate::rules::style::indent::has_brace_structure_error(&syntax_errors)
+    {
         let indent_rule = if let Some(indent_size) = lint_config
             .as_ref()
             .and_then(|c| c.get_rule_config("indent"))
