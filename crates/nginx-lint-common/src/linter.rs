@@ -562,6 +562,13 @@ pub fn apply_fixes_to_content(content: &str, fixes: &[&Fix]) -> (String, usize) 
     (result.content, result.applied)
 }
 
+/// Whether `s` is non-empty and consists entirely of whitespace — used to
+/// tell a pure reformatting insert (e.g. `indent`'s fixes) apart from one
+/// that inserts real content (e.g. a missing closing brace).
+fn is_whitespace_only(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(char::is_whitespace)
+}
+
 /// Apply fixes to content string, reporting skipped fixes.
 ///
 /// All fixes (both line-based and offset-based) are normalized to offset-based,
@@ -610,15 +617,33 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
 
     let mut fix_count = 0;
     let mut result = content.to_string();
-    let mut applied_ranges: Vec<(usize, usize)> = Vec::new();
+    // (start, end, was this insert's new_text whitespace-only)
+    let mut applied_ranges: Vec<(usize, usize, bool)> = Vec::new();
 
     for fix in &range_fixes {
         let start = fix.start_offset.unwrap();
         let end = fix.end_offset.unwrap();
+        let is_insert = start == end;
 
         // Check if this range overlaps with any already applied range
-        let overlaps = applied_ranges.iter().any(|(s, e)| start < *e && end > *s);
-        if overlaps {
+        let overlaps = applied_ranges
+            .iter()
+            .any(|(s, e, _)| start < *e && end > *s);
+
+        // Two zero-width inserts at the identical point don't trip the
+        // check above (touching, not overlapping) — which is intentional
+        // when both are pure whitespace (e.g. two `indent` fixes for the
+        // same line combine into the right total indentation). But
+        // stacking a whitespace-only reformatting insert next to one that
+        // inserts real content (e.g. `unmatched-braces` inserting a missing
+        // `}`) produces nonsensical interleaved output — the whitespace fix
+        // was computed against a structure this other fix is about to
+        // change anyway, so drop it.
+        let conflicts_with_structural_insert = is_insert
+            && is_whitespace_only(&fix.new_text)
+            && applied_ranges.iter().any(|(s, _, ws)| *s == start && !*ws);
+
+        if overlaps || conflicts_with_structural_insert {
             continue;
         }
 
@@ -630,7 +655,11 @@ pub fn apply_fixes_to_content_detailed(content: &str, fixes: &[&Fix]) -> FixAppl
             && result.is_char_boundary(end)
         {
             result.replace_range(start..end, &fix.new_text);
-            applied_ranges.push((start, start + fix.new_text.len()));
+            applied_ranges.push((
+                start,
+                start + fix.new_text.len(),
+                is_insert && is_whitespace_only(&fix.new_text),
+            ));
             fix_count += 1;
         } else {
             skipped_invalid += 1;
@@ -828,6 +857,51 @@ mod fix_tests {
         let result = apply_fixes_to_content_detailed(content, &fixes);
         assert_eq!(result.applied, 1);
         assert_eq!(result.skipped_invalid, 0);
+    }
+
+    /// Two whitespace-only inserts at the exact same point (e.g. two
+    /// `indent` errors reconciling to the same total indentation) must
+    /// still stack in ascending-indent order — this is the legitimate use
+    /// of same-point insertion the conflict check below must not break.
+    #[test]
+    fn test_same_point_whitespace_only_inserts_stack() {
+        let content = "#note\n";
+        let four_spaces = Fix::replace_range(0, 0, "    ");
+        let two_spaces = Fix::replace_range(0, 0, "  ");
+        let fixes: Vec<&Fix> = vec![&four_spaces, &two_spaces];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(result.content, "      #note\n");
+        assert_eq!(
+            result.applied, 2,
+            "both whitespace-only inserts should apply"
+        );
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/296.
+    ///
+    /// A structural insert (e.g. `unmatched-braces` inserting a missing
+    /// `}`) and a whitespace-only reformatting insert (e.g. `indent`
+    /// reformatting the very line the brace is being inserted before) at
+    /// the exact same point don't trip the ordinary range-overlap check
+    /// (both are zero-width, touching but not overlapping) — without a
+    /// dedicated conflict check they get concatenated in whatever order the
+    /// sort happens to produce, yielding nonsensical interleaved output
+    /// (e.g. `      }` — 6 spaces of indentation matching neither fix's own
+    /// intent). The whitespace-only fix must be dropped instead, since it
+    /// was computed against content this other fix is about to change
+    /// immediately adjacent to it anyway.
+    #[test]
+    fn test_whitespace_only_insert_skipped_when_it_conflicts_with_structural_insert() {
+        let content = "# Missing closing brace for http\n";
+        let close_brace = Fix::replace_range(0, 0, "}\n");
+        let reindent = Fix::replace_range(0, 0, "      ");
+        let fixes: Vec<&Fix> = vec![&close_brace, &reindent];
+        let result = apply_fixes_to_content_detailed(content, &fixes);
+        assert_eq!(
+            result.content, "}\n# Missing closing brace for http\n",
+            "the whitespace-only fix must be dropped, not interleaved with the brace"
+        );
+        assert_eq!(result.applied, 1);
     }
 
     #[test]
