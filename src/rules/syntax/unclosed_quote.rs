@@ -130,8 +130,24 @@ impl UnclosedQuote {
         // Only consider the first line of the token (the line where the quote opened)
         let first_line = token_text.lines().next().unwrap_or(token_text);
 
-        // If the first line doesn't contain a semicolon, we can't auto-fix
+        // Close before the last semicolon on the line: for a plain unclosed
+        // value that legitimately contains `;` (e.g. `"a; b;`) the final one
+        // is the directive terminator.
         let semicolon_pos = first_line.rfind(';')?;
+        Self::build_close_fix(quote, first_line, token_offset, semicolon_pos)
+    }
+
+    /// Build a fix that inserts `quote` before the semicolon at
+    /// `semicolon_pos` (a byte index into `first_line`), unless the value
+    /// ends with an nginx flag keyword (`permanent`, `redirect`, …) that
+    /// belongs *outside* the string, in which case it closes before that
+    /// keyword instead. `token_offset` is the token's start offset in source.
+    fn build_close_fix(
+        quote: char,
+        first_line: &str,
+        token_offset: usize,
+        semicolon_pos: usize,
+    ) -> Option<Fix> {
         let before_semicolon = &first_line[..semicolon_pos];
 
         // The token always starts with a quote character, so before_semicolon
@@ -181,11 +197,12 @@ impl UnclosedQuote {
     /// anything the string swallowed *past* that `;` is the tell. If what
     /// follows runs onto the next line (`"value;` … `return 200 "`, issue #295)
     /// or contains a `#` comment (`"value; # note "`, issue #299), the closing
-    /// quote paired across a boundary and this token is the real culprit —
-    /// [`create_fix`] then places the missing quote before its `;`. Keying on
-    /// content *after* the first `;` keeps legitimately-closed values whose own
-    /// data contains `#` before the `;` (e.g. a `"#aabbcc"` colour) from being
-    /// misread as culprits.
+    /// quote paired across a boundary and this token is the real culprit — the
+    /// missing quote is placed before its *first* `;` (the terminator the
+    /// directive should have ended at). Keying detection on content *after*
+    /// the first `;` keeps legitimately-closed values whose own data contains
+    /// `#` before the `;` (e.g. a `"#aabbcc"` colour) from being misread as
+    /// culprits.
     ///
     /// Known limitation: a closed value that legitimately swallows a `#` after
     /// a `;` (e.g. `"a;#b"`) before an unclosed quote in the same directive
@@ -217,7 +234,12 @@ impl UnclosedQuote {
             let spans_newline = text.contains('\n');
             let swallowed_comment = first_line[semi + 1..].contains('#');
             if spans_newline || swallowed_comment {
-                let fix = Self::create_fix(quote, text, start)?;
+                // Close before the *first* `;` — it's the terminator the
+                // directive should have ended at; everything after it (a
+                // comment, the next line) was swallowed by the missing quote.
+                // (`create_fix`'s last-`;` rule would wrongly close inside a
+                // swallowed comment that itself contains a `;`.)
+                let fix = Self::build_close_fix(quote, first_line, start, semi)?;
                 return Some((start, fix));
             }
         }
@@ -580,6 +602,31 @@ mod tests {
             "fixed content should re-lint clean, got: {:?}",
             check_quotes(&result)
         );
+    }
+
+    /// When the swallowed comment itself contains a `;`, the quote must still
+    /// close before the directive's *first* `;` (the real terminator), not the
+    /// last one — otherwise the fix would fold the comment text into the value
+    /// (`"value; # note"`). Covers `create_fix`'s last-`;` rule being wrong for
+    /// the redirect path.
+    #[test]
+    fn test_fix_closes_before_first_semicolon_when_comment_has_semicolon() {
+        let content = r#"add_header X-Custom "value; # note; with "quote" inside
+    return 200 "ok";
+"#;
+        let fix = check_quotes(content)
+            .first()
+            .and_then(|e| e.fixes.first().cloned())
+            .expect("Expected a fix");
+        let result = apply_fix(content, &fix);
+        assert_eq!(
+            result,
+            r#"add_header X-Custom "value"; # note; with "quote" inside
+    return 200 "ok";
+"#,
+            "Quote must close before the first ; (the terminator), keeping the comment whole"
+        );
+        assert!(check_quotes(&result).is_empty());
     }
 
     /// A legitimately-closed value whose data contains `#` *before* its `;`
