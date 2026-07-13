@@ -188,7 +188,7 @@ impl LintRule for Indent {
 /// nesting intact — indent should keep working) and for a missing opening
 /// brace; since the message can't tell them apart and the missing-`;` case is
 /// the common one, this diagnostic doesn't suppress indentation.
-fn has_brace_structure_error(errors: &[crate::parser::parser::SyntaxError]) -> bool {
+pub(crate) fn has_brace_structure_error(errors: &[crate::parser::parser::SyntaxError]) -> bool {
     errors.iter().any(|e| e.message.contains('}'))
 }
 
