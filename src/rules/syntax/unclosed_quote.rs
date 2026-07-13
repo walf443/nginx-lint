@@ -574,6 +574,38 @@ mod tests {
         );
     }
 
+    /// Robustness when the unclosed quote sits at the very end of the config:
+    /// no trailing newline (offset arithmetic reaches EOF), and the #299 case
+    /// where the dangling flagged token runs all the way to EOF (the backward
+    /// walk must still reach the culprit).
+    #[test]
+    fn test_fix_handles_unclosed_quote_at_end_of_file() {
+        // Directly at EOF, no trailing newline (apply_fix inserts in place,
+        // so no trailing newline is appended here).
+        let errors = check_quotes("add_header X-Custom \"value;");
+        let fix = errors
+            .first()
+            .and_then(|e| e.fixes.first().cloned())
+            .expect("Expected a fix");
+        assert_eq!(
+            apply_fix("add_header X-Custom \"value;", &fix),
+            "add_header X-Custom \"value\";"
+        );
+
+        // #299 comment where the dangling token extends to EOF.
+        let content = "add_header X-Custom \"value; # note \"quote\" inside";
+        let fix = check_quotes(content)
+            .first()
+            .and_then(|e| e.fixes.first().cloned())
+            .expect("Expected a fix");
+        let result = apply_fix(content, &fix);
+        assert_eq!(
+            result,
+            "add_header X-Custom \"value\"; # note \"quote\" inside"
+        );
+        assert!(check_quotes(&result).is_empty());
+    }
+
     /// Same redirect as `test_fix_redirects_to_real_unclosed_line_not_dangling_artifact`,
     /// but for single-quoted strings — a separate token kind, so this
     /// exercises the same-kind matching in `locate_real_culprit` for `'`.
