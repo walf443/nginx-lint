@@ -577,12 +577,7 @@ fn dir_name_to_rule_name(dir_name: &str) -> String {
 /// used to run only when `parse_config` (which fails on any syntax error)
 /// succeeded on the error fixture, which it never does for these rules' own
 /// fixtures (they deliberately contain syntax errors).
-///
-/// - unclosed_quote/005_no_semicolon: see
-///   https://github.com/walf443/nginx-lint/issues/295 — the fix leaves the
-///   actual unclosed quote untouched and instead adds a spurious closing
-///   quote to a different, already-correctly-quoted line.
-const FIXTURES_WITH_KNOWN_FIX_BUGS: &[(&str, &str)] = &[("unclosed_quote", "005_no_semicolon")];
+const FIXTURES_WITH_KNOWN_FIX_BUGS: &[(&str, &str)] = &[];
 
 /// Test case information for parallel execution
 struct RuleTestCase {

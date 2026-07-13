@@ -55,8 +55,16 @@ impl UnclosedQuote {
         let (root, _syntax_errors) = parse_string_rowan(source);
         let line_index = LineIndex::new(source);
         let mut errors = Vec::new();
+        let mut last_double: Option<(String, usize)> = None;
+        let mut last_single: Option<(String, usize)> = None;
 
-        Self::walk_node(&root, &line_index, &mut errors);
+        Self::walk_node(
+            &root,
+            &line_index,
+            &mut errors,
+            &mut last_double,
+            &mut last_single,
+        );
 
         errors
     }
@@ -65,7 +73,20 @@ impl UnclosedQuote {
     ///
     /// BLOCK nodes belonging to raw block directives (lua etc.) are skipped
     /// entirely, avoiding per-token ancestor checks.
-    fn walk_node(node: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
+    ///
+    /// `last_double`/`last_single` track the most recently seen
+    /// DOUBLE_QUOTED_STRING/SINGLE_QUOTED_STRING token's own text and start
+    /// offset, in document order across the whole file — used by
+    /// [`redirect_to_prior_open_quote`](Self::redirect_to_prior_open_quote)
+    /// to find the real culprit when an unrelated later quote happens to
+    /// make the lexer's naive pairing land on the wrong token.
+    fn walk_node(
+        node: &SyntaxNode,
+        line_index: &LineIndex,
+        errors: &mut Vec<LintError>,
+        last_double: &mut Option<(String, usize)>,
+        last_single: &mut Option<(String, usize)>,
+    ) {
         for child in node.children_with_tokens() {
             match child {
                 SyntaxElement::Node(child_node) => {
@@ -75,7 +96,7 @@ impl UnclosedQuote {
                     {
                         continue;
                     }
-                    Self::walk_node(&child_node, line_index, errors);
+                    Self::walk_node(&child_node, line_index, errors, last_double, last_single);
                 }
                 SyntaxElement::Token(token) => {
                     let (quote_char, quote_name) = match token.kind() {
@@ -85,19 +106,34 @@ impl UnclosedQuote {
                     };
 
                     let text = token.text();
+                    let offset: usize = token.text_range().start().into();
+                    let prior = if quote_char == '"' {
+                        &mut *last_double
+                    } else {
+                        &mut *last_single
+                    };
 
                     // A properly closed string starts and ends with the same quote
                     if text.len() >= 2 && text.ends_with(quote_char) {
+                        // Remember it in case a later token turns out to be a
+                        // dangling artifact caused by this one swallowing more
+                        // than one line (see redirect_to_prior_open_quote).
+                        *prior = Some((text.to_string(), offset));
                         continue;
                     }
 
-                    // Unclosed quote detected
-                    let offset: usize = token.text_range().start().into();
-                    let pos = line_index.position(offset);
+                    // Unclosed quote detected (per the lexer's naive pairing).
+                    // If this looks like a dangling artifact rather than a
+                    // genuine unclosed string, redirect to the real culprit.
+                    let (report_offset, fix) =
+                        match Self::redirect_to_prior_open_quote(quote_char, text, prior) {
+                            Some((prior_offset, fix)) => (prior_offset, Some(fix)),
+                            None => (offset, Self::create_fix(quote_char, text, offset)),
+                        };
+
+                    let pos = line_index.position(report_offset);
                     let message =
                         format!("Unclosed {} - missing closing {}", quote_name, quote_char);
-
-                    let fix = Self::create_fix(quote_char, text, offset);
 
                     let mut error =
                         LintError::new("unclosed-quote", "syntax", &message, Severity::Error)
@@ -154,6 +190,52 @@ impl UnclosedQuote {
             insert_offset,
             &quote.to_string(),
         ))
+    }
+
+    /// If `text` looks like a dangling artifact rather than a genuinely
+    /// unclosed string, and `prior` (the preceding same-kind quoted-string
+    /// token) looks like the real culprit, return a redirected `(offset,
+    /// fix)` pointing at `prior` instead.
+    ///
+    /// A single unclosed `"`/`'` followed later by an unrelated line that
+    /// happens to contain the same quote character makes the lexer pair
+    /// them up: e.g. `add_header X-Custom "value;\nreturn 200 "ok";` lexes
+    /// as one (nominally "closed") string spanning both lines, followed by
+    /// a second string starting right after `ok`'s closing quote and
+    /// running to EOF (or the next quote) — genuinely unclosed, but not the
+    /// real problem. That dangling token has essentially no content of its
+    /// own before its line's semicolon (it starts right where a real
+    /// quote's closing character was); `prior` spanning multiple lines with
+    /// a semicolon on its own first line is the actual missing-quote line.
+    fn redirect_to_prior_open_quote(
+        quote: char,
+        text: &str,
+        prior: &Option<(String, usize)>,
+    ) -> Option<(usize, Fix)> {
+        let first_line = text.lines().next().unwrap_or(text);
+        let semicolon_pos = first_line.rfind(';')?;
+        let before_semicolon = &first_line[..semicolon_pos];
+
+        // The token always starts with a quote character, so before_semicolon
+        // is at least 1 byte. Guard defensively anyway.
+        if before_semicolon.is_empty() {
+            return None;
+        }
+        if !before_semicolon[1..].trim().is_empty() {
+            return None; // has real content of its own; not a dangling artifact
+        }
+
+        let (prior_text, prior_offset) = prior.as_ref()?;
+        if !prior_text.contains('\n') {
+            return None; // prior didn't span multiple lines, nothing to redirect
+        }
+        let prior_first_line = prior_text.lines().next().unwrap_or(prior_text);
+        if !prior_first_line.contains(';') {
+            return None;
+        }
+
+        let fix = Self::create_fix(quote, prior_text, *prior_offset)?;
+        Some((*prior_offset, fix))
     }
 }
 
@@ -404,6 +486,75 @@ mod tests {
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert!(errors[0].message.contains("double quote"));
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/295.
+    ///
+    /// `add_header`'s string is genuinely unclosed; `return`'s string on the
+    /// next line is already fine. The lexer's naive pairing makes
+    /// `add_header`'s opening quote look "closed" by `return`'s opening
+    /// quote (spanning both lines), leaving `return`'s own closing quote as
+    /// a dangling, genuinely-unclosed token to EOF — the wrong place to
+    /// report and fix. The fix must redirect to the real culprit
+    /// (`add_header`'s line) instead of adding a spurious `"` next to
+    /// `return`'s already-correct string.
+    #[test]
+    fn test_fix_redirects_to_real_unclosed_line_not_dangling_artifact() {
+        let content = r#"location / {
+    add_header X-Custom "value;
+    return 200 "ok";
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(
+            errors[0].line,
+            Some(2),
+            "Error should be reported on add_header's line, not return's"
+        );
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result,
+            r#"location / {
+    add_header X-Custom "value";
+    return 200 "ok";
+}
+"#,
+            "Fix should close add_header's quote, not add a spurious quote to return's line"
+        );
+    }
+
+    /// Same redirect as `test_fix_redirects_to_real_unclosed_line_not_dangling_artifact`,
+    /// but for single-quoted strings — `last_double`/`last_single` are
+    /// tracked independently, so this exercises that path separately.
+    #[test]
+    fn test_fix_redirects_to_real_unclosed_line_not_dangling_artifact_single_quote() {
+        let content = r#"location / {
+    add_header X-Custom 'value;
+    return 200 'ok';
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(
+            errors[0].line,
+            Some(2),
+            "Error should be reported on add_header's line, not return's"
+        );
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result,
+            r#"location / {
+    add_header X-Custom 'value';
+    return 200 'ok';
+}
+"#,
+            "Fix should close add_header's quote, not add a spurious quote to return's line"
+        );
     }
 
     #[test]
