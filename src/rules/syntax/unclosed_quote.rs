@@ -180,6 +180,26 @@ impl UnclosedQuote {
         ))
     }
 
+    /// The byte index within `first_line` of the `;` that terminates the
+    /// directive: the earliest `;` whose remainder on the line is blank or a
+    /// trailing `# comment`. Everything past it belongs to the next line or a
+    /// comment, so the quoted value should close right before it — even when
+    /// the value itself legitimately contains earlier `;`s (`"a; b"; # note`)
+    /// or the comment contains later ones (`"value"; # a; b`). Returns `None`
+    /// if no `;` on the line has a blank-or-comment remainder.
+    fn terminator_semicolon(first_line: &str) -> Option<usize> {
+        let mut from = 0;
+        while let Some(rel) = first_line[from..].find(';') {
+            let pos = from + rel;
+            let rest = first_line[pos + 1..].trim_start();
+            if rest.is_empty() || rest.starts_with('#') {
+                return Some(pos);
+            }
+            from = pos + 1;
+        }
+        None
+    }
+
     /// Find the token the user actually failed to close when the flagged
     /// `unclosed` token is really a downstream artifact of the lexer's greedy
     /// quote pairing, returning a `(offset, fix)` pointing at the real culprit.
@@ -193,20 +213,22 @@ impl UnclosedQuote {
     /// target) for the earliest same-kind quoted-string token that spuriously
     /// crosses a boundary it shouldn't.
     ///
-    /// The directive should have ended at the first `;` on such a token's line;
-    /// anything the string swallowed *past* that `;` is the tell. If what
-    /// follows runs onto the next line (`"value;` … `return 200 "`, issue #295)
-    /// or contains a `#` comment (`"value; # note "`, issue #299), the closing
-    /// quote paired across a boundary and this token is the real culprit — the
-    /// missing quote is placed before its *first* `;` (the terminator the
-    /// directive should have ended at). Keying detection on content *after*
-    /// the first `;` keeps legitimately-closed values whose own data contains
-    /// `#` before the `;` (e.g. a `"#aabbcc"` colour) from being misread as
-    /// culprits.
+    /// A `#` after the first `;` on such a token's line, or the string running
+    /// onto the next line, is the tell of a mispairing: if what follows the
+    /// first `;` runs onto the next line (`"value;` … `return 200 "`, issue
+    /// #295) or opens a `#` comment (`"value; # note "`, issue #299), the
+    /// closing quote paired across a boundary and this token is the real
+    /// culprit. The missing quote is placed before the directive's real
+    /// terminator via [`terminator_semicolon`](Self::terminator_semicolon).
+    /// Keying detection on content *after* the first `;` keeps
+    /// legitimately-closed values whose own data contains `#` before the `;`
+    /// (e.g. a `"#aabbcc"` colour) from being misread as culprits.
     ///
-    /// Known limitation: a closed value that legitimately swallows a `#` after
-    /// a `;` (e.g. `"a;#b"`) before an unclosed quote in the same directive
-    /// could still be misread; such values are rare in nginx configs.
+    /// Fundamental limitation: a value *intended* to contain a `;` followed by
+    /// a `#` (e.g. a literal `"a; #b"`) is indistinguishable from a value plus
+    /// a trailing comment, so this can still mis-place the quote in that case.
+    /// There's no way to resolve that ambiguity without knowing the author's
+    /// intent, and such values are rare in nginx configs — accepted as-is.
     fn locate_real_culprit(unclosed: &SyntaxToken, quote: char) -> Option<(usize, Fix)> {
         let kind = unclosed.kind();
         let unclosed_start: usize = unclosed.text_range().start().into();
@@ -226,19 +248,19 @@ impl UnclosedQuote {
 
             let text = token.text();
             let first_line = text.lines().next().unwrap_or(text);
-            // The directive should have ended at the first `;` on this line;
-            // content the string swallowed *past* it is the tell of a mispairing.
-            let Some(semi) = first_line.find(';') else {
+            // A `#` after the first `;` (comment) or the string running onto
+            // the next line means the closing quote paired across a boundary.
+            let Some(first_semi) = first_line.find(';') else {
                 continue; // no terminator to close before
             };
             let spans_newline = text.contains('\n');
-            let swallowed_comment = first_line[semi + 1..].contains('#');
+            let swallowed_comment = first_line[first_semi + 1..].contains('#');
             if spans_newline || swallowed_comment {
-                // Close before the *first* `;` — it's the terminator the
-                // directive should have ended at; everything after it (a
-                // comment, the next line) was swallowed by the missing quote.
-                // (`create_fix`'s last-`;` rule would wrongly close inside a
-                // swallowed comment that itself contains a `;`.)
+                // Close before the directive's real terminator — the earliest
+                // `;` whose remainder is blank or a comment. Not the last `;`
+                // (would close inside a comment that contains a `;`) nor always
+                // the first (would split a value that itself contains a `;`).
+                let semi = Self::terminator_semicolon(first_line)?;
                 let fix = Self::build_close_fix(quote, first_line, start, semi)?;
                 return Some((start, fix));
             }
@@ -604,13 +626,12 @@ mod tests {
         );
     }
 
-    /// When the swallowed comment itself contains a `;`, the quote must still
-    /// close before the directive's *first* `;` (the real terminator), not the
-    /// last one — otherwise the fix would fold the comment text into the value
-    /// (`"value; # note"`). Covers `create_fix`'s last-`;` rule being wrong for
-    /// the redirect path.
+    /// When the swallowed comment itself contains a `;`, the quote must close
+    /// before the directive's terminator (the `;` before the comment), not the
+    /// last `;` — otherwise the fix would fold the comment text into the value
+    /// (`"value; # note"`).
     #[test]
-    fn test_fix_closes_before_first_semicolon_when_comment_has_semicolon() {
+    fn test_fix_ignores_semicolon_inside_swallowed_comment() {
         let content = r#"add_header X-Custom "value; # note; with "quote" inside
     return 200 "ok";
 "#;
@@ -624,9 +645,47 @@ mod tests {
             r#"add_header X-Custom "value"; # note; with "quote" inside
     return 200 "ok";
 "#,
-            "Quote must close before the first ; (the terminator), keeping the comment whole"
+            "Quote must close before the terminator, keeping the comment whole"
         );
         assert!(check_quotes(&result).is_empty());
+    }
+
+    /// The mirror concern: a value that legitimately contains a `;` before its
+    /// terminator (`"a; b"`) must not be split at that internal `;`. The
+    /// terminator is the `;` whose remainder is a comment (or the line end),
+    /// so the quote closes after the whole value.
+    #[test]
+    fn test_fix_keeps_value_with_internal_semicolon_intact() {
+        // Comment path (embedded quote forces the mispairing) and newline path.
+        let comment = r#"add_header X-Custom "a; b; # note "quote" inside
+    return 200 "ok";
+"#;
+        let fix = check_quotes(comment)
+            .first()
+            .and_then(|e| e.fixes.first().cloned())
+            .expect("Expected a fix");
+        assert_eq!(
+            apply_fix(comment, &fix),
+            r#"add_header X-Custom "a; b"; # note "quote" inside
+    return 200 "ok";
+"#,
+            "Value 'a; b' must stay whole; close before the ; that precedes the comment"
+        );
+
+        let newline = r#"add_header X-Custom "a; b;
+    return 200 "ok";
+"#;
+        let fix = check_quotes(newline)
+            .first()
+            .and_then(|e| e.fixes.first().cloned())
+            .expect("Expected a fix");
+        assert_eq!(
+            apply_fix(newline, &fix),
+            r#"add_header X-Custom "a; b";
+    return 200 "ok";
+"#,
+            "Value 'a; b' must stay whole; close before the ; that precedes the newline"
+        );
     }
 
     /// A legitimately-closed value whose data contains `#` *before* its `;`
