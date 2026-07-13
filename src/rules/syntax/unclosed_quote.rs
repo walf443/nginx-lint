@@ -554,7 +554,9 @@ mod tests {
     /// pins `add_header`'s line, leaving the `return` line untouched.
     #[test]
     fn test_fix_redirects_across_comment_embedded_quote() {
-        let content = "add_header X-Custom \"value; # trailing comment with \"quote\" inside\n    return 200 \"ok\";\n";
+        let content = r#"add_header X-Custom "value; # trailing comment with "quote" inside
+    return 200 "ok";
+"#;
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
         assert_eq!(
@@ -567,7 +569,9 @@ mod tests {
         let result = apply_fix(content, fix);
         assert_eq!(
             result,
-            "add_header X-Custom \"value\"; # trailing comment with \"quote\" inside\n    return 200 \"ok\";\n",
+            r#"add_header X-Custom "value"; # trailing comment with "quote" inside
+    return 200 "ok";
+"#,
             "Fix should close add_header's quote before its ;, leaving the comment and return line intact"
         );
         // The fixed content must itself be free of unclosed-quote errors.
@@ -584,14 +588,18 @@ mod tests {
     /// must target the real unclosed token, not corrupt the colour value.
     #[test]
     fn test_fix_does_not_redirect_onto_hash_colour_value() {
-        let content = "add_header X-C \"#aabbcc; note\" \"value;\n";
+        // `r##"…"##` because the content contains the `"#` sequence.
+        let content = r##"add_header X-C "#aabbcc; note" "value;
+"##;
         let errors = check_quotes(content);
         assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
 
         let fix = errors[0].fixes.first().expect("Expected a fix");
         let result = apply_fix(content, fix);
         assert_eq!(
-            result, "add_header X-C \"#aabbcc; note\" \"value\";\n",
+            result,
+            r##"add_header X-C "#aabbcc; note" "value";
+"##,
             "Fix should close the real unclosed quote, not the colour value"
         );
     }
@@ -632,6 +640,43 @@ mod tests {
             errors.is_empty(),
             "Expected no errors for quotes inside lua block, got: {:?}",
             errors
+        );
+    }
+
+    /// A well-formed raw (lua) block whose content legitimately contains `"`,
+    /// `;`, and `#` must be skipped entirely — and must not interfere with
+    /// fixing a genuinely-unclosed quote in a later directive. The
+    /// directive-scoped culprit search only looks within the flagged token's
+    /// own directive, and the raw block's tokens live in a skipped BLOCK node.
+    #[test]
+    fn test_unclosed_quote_after_lua_block_fixes_only_the_real_one() {
+        let content = r#"http {
+    content_by_lua_block {
+        ngx.say("hi; # not a comment")
+    }
+    add_header X-Custom "value;
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(
+            errors[0].line,
+            Some(5),
+            "Only add_header's line should be flagged, not the lua content"
+        );
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result,
+            r#"http {
+    content_by_lua_block {
+        ngx.say("hi; # not a comment")
+    }
+    add_header X-Custom "value";
+}
+"#,
+            "Fix should close add_header's quote and leave the lua block untouched"
         );
     }
 }
