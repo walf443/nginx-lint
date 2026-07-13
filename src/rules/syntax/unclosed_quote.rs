@@ -934,14 +934,37 @@ mod tests {
     #[test]
     fn test_fixes_never_increase_error_count() {
         let cases = [
-            "foo \"a; b\nbar; \"ok\";\n",
-            "map $x $y {\n    default \"a;\n}\nadd_header X-C \"value;\n",
-            "server {\n    listen 80;\n    add_header \"a; # x\nreturn 200 \"b\";\n}\n",
-            "http { \"a; } \"b; } \"c;\n",
-            "x y;\n\"z;\n",
-            "a \"b\" \"c\" \"d;\n",
-            "location / {\n  try_files $uri \"a; b\n  index \"x;\n}\n",
-            "content_by_lua_block {\n    ngx.say(\"a; b\")\nadd_header X-C \"value;\n}\n",
+            r#"foo "a; b
+bar; "ok";
+"#,
+            r#"map $x $y {
+    default "a;
+}
+add_header X-C "value;
+"#,
+            r#"server {
+    listen 80;
+    add_header "a; # x
+return 200 "b";
+}
+"#,
+            r#"http { "a; } "b; } "c;
+"#,
+            r#"x y;
+"z;
+"#,
+            r#"a "b" "c" "d;
+"#,
+            r#"location / {
+  try_files $uri "a; b
+  index "x;
+}
+"#,
+            r#"content_by_lua_block {
+    ngx.say("a; b")
+add_header X-C "value;
+}
+"#,
         ];
         for content in cases {
             let before = check_quotes(content).len();
