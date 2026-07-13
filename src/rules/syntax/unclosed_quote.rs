@@ -926,4 +926,36 @@ mod tests {
             "the lua body must stay intact, got:\n{result}"
         );
     }
+
+    /// Safety invariant across adversarial / doubly-broken inputs: applying
+    /// the offered fixes must never *increase* the unclosed-quote error count.
+    /// When the culprit can't be confidently located the rule declines to fix
+    /// (a no-op) rather than corrupting a line — it never makes things worse.
+    #[test]
+    fn test_fixes_never_increase_error_count() {
+        let cases = [
+            "foo \"a; b\nbar; \"ok\";\n",
+            "map $x $y {\n    default \"a;\n}\nadd_header X-C \"value;\n",
+            "server {\n    listen 80;\n    add_header \"a; # x\nreturn 200 \"b\";\n}\n",
+            "http { \"a; } \"b; } \"c;\n",
+            "x y;\n\"z;\n",
+            "a \"b\" \"c\" \"d;\n",
+            "location / {\n  try_files $uri \"a; b\n  index \"x;\n}\n",
+            "content_by_lua_block {\n    ngx.say(\"a; b\")\nadd_header X-C \"value;\n}\n",
+        ];
+        for content in cases {
+            let before = check_quotes(content).len();
+            let fixes: Vec<_> = check_quotes(content)
+                .iter()
+                .flat_map(|e| e.fixes.clone())
+                .collect();
+            let fix_refs: Vec<&Fix> = fixes.iter().collect();
+            let (result, _) = crate::apply_fixes_to_content(content, &fix_refs);
+            let after = check_quotes(&result).len();
+            assert!(
+                after <= before,
+                "fix increased error count ({before} -> {after}) for {content:?}\n -> {result:?}"
+            );
+        }
+    }
 }
