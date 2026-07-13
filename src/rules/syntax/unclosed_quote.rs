@@ -96,8 +96,8 @@ impl UnclosedQuote {
                     // The lexer pairs quotes greedily, so a missing quote
                     // earlier in the statement can shift every following
                     // pairing and leave a *later* token flagged instead. If we
-                    // can pin the real culprit within the same directive,
-                    // report and fix there; otherwise fix this token directly.
+                    // can pin the real culprit earlier in the statement, report
+                    // and fix there; otherwise fix this token directly.
                     let (report_offset, fix) = match Self::locate_real_culprit(&token, quote_char) {
                         Some((culprit_offset, fix)) => (culprit_offset, Some(fix)),
                         None => (offset, Self::create_fix(quote_char, text, offset)),
@@ -207,11 +207,13 @@ impl UnclosedQuote {
     /// The lexer pairs quote characters greedily left-to-right and knows
     /// nothing about `#` comments or line boundaries inside a string, so a
     /// single missing quote earlier in a statement shifts every subsequent
-    /// pairing and can leave a later token flagged instead. All the mispaired
-    /// tokens share one `DIRECTIVE` CST node, so we search that node (bounding
-    /// the search — a correctly-closed string elsewhere in the file is never a
-    /// target) for the earliest same-kind quoted-string token that spuriously
-    /// crosses a boundary it shouldn't.
+    /// pairing and can leave a later token flagged instead. We walk backward
+    /// through the token stream — stopping at the first real `;` or brace,
+    /// which the mispairing can't cross (a `;`/brace *inside* a swallowed
+    /// string isn't a boundary token) — and pick the earliest same-kind
+    /// quoted-string token that spuriously crosses a boundary it shouldn't.
+    /// This bounds the search so a correctly-closed string in another
+    /// statement is never a target.
     ///
     /// A `#` after the first `;` on such a token's line, or the string running
     /// onto the next line, is the tell of a mispairing: if what follows the
@@ -224,43 +226,58 @@ impl UnclosedQuote {
     /// legitimately-closed values whose own data contains `#` before the `;`
     /// (e.g. a `"#aabbcc"` colour) from being misread as culprits.
     ///
-    /// Fundamental limitation: a value *intended* to contain a `;` followed by
-    /// a `#` (e.g. a literal `"a; #b"`) is indistinguishable from a value plus
-    /// a trailing comment, so this can still mis-place the quote in that case.
-    /// There's no way to resolve that ambiguity without knowing the author's
-    /// intent, and such values are rare in nginx configs — accepted as-is.
+    /// Fundamental limitations (rare; no corruption, just an imperfect or
+    /// missing fix):
+    /// - A value *intended* to contain `;` then `#` (a literal `"a; #b"`) is
+    ///   indistinguishable from a value plus a trailing comment.
+    /// - An unclosed quote *before* a raw (lua) block whose body contains a
+    ///   `;` (`add_header "v;` then `ngx.say("a; b")`): the mispairing exposes
+    ///   the lua `;` as a real terminator token that stops the backward walk,
+    ///   so the culprit line isn't reached and no fix is offered.
+    ///
+    /// Neither can be resolved without knowing the author's intent.
     fn locate_real_culprit(unclosed: &SyntaxToken, quote: char) -> Option<(usize, Fix)> {
         let kind = unclosed.kind();
-        let unclosed_start: usize = unclosed.text_range().start().into();
-        let directive = unclosed.parent()?;
 
-        for child in directive.children_with_tokens() {
-            let SyntaxElement::Token(token) = child else {
-                continue;
-            };
-            if token.kind() != kind {
-                continue;
+        // Walk backward in document order, collecting same-kind quoted-string
+        // tokens, until a real boundary. The greedy mispairing chain can't
+        // cross a terminated directive (`;`) or a block edge (`{`/`}`) — a
+        // `;`/brace *inside* a swallowed string is part of a string token, not
+        // a boundary token, so it doesn't stop the walk. (The parser can split
+        // the mispaired strings across sibling DIRECTIVE nodes — e.g. an
+        // unclosed quote before a lua block — so searching only the flagged
+        // token's own node would miss the culprit.)
+        let mut candidates: Vec<SyntaxToken> = Vec::new();
+        let mut cursor = unclosed.prev_token();
+        while let Some(token) = cursor {
+            match token.kind() {
+                SyntaxKind::SEMICOLON | SyntaxKind::L_BRACE | SyntaxKind::R_BRACE => break,
+                k if k == kind => candidates.push(token.clone()),
+                _ => {}
             }
-            let start: usize = token.text_range().start().into();
-            if start >= unclosed_start {
-                break; // reached the flagged token; nothing earlier remains
-            }
+            cursor = token.prev_token();
+        }
 
+        // `candidates` is nearest-first; scan earliest-first for the culprit.
+        for token in candidates.iter().rev() {
             let text = token.text();
             let first_line = text.lines().next().unwrap_or(text);
             // A `#` after the first `;` (comment) or the string running onto
             // the next line means the closing quote paired across a boundary.
             let Some(first_semi) = first_line.find(';') else {
-                continue; // no terminator to close before
+                continue;
             };
             let spans_newline = text.contains('\n');
             let swallowed_comment = first_line[first_semi + 1..].contains('#');
             if spans_newline || swallowed_comment {
-                // Close before the directive's real terminator — the earliest
-                // `;` whose remainder is blank or a comment. Not the last `;`
-                // (would close inside a comment that contains a `;`) nor always
-                // the first (would split a value that itself contains a `;`).
-                let semi = Self::terminator_semicolon(first_line)?;
+                // Close before the real terminator — the earliest `;` whose
+                // remainder is blank or a comment (not the last `;`, which
+                // could sit inside a swallowed comment). Fall back to the last
+                // `;` so the fix still targets this culprit, never the flagged
+                // token on another line.
+                let semi =
+                    Self::terminator_semicolon(first_line).or_else(|| first_line.rfind(';'))?;
+                let start: usize = token.text_range().start().into();
                 let fix = Self::build_close_fix(quote, first_line, start, semi)?;
                 return Some((start, fix));
             }
@@ -826,6 +843,53 @@ mod tests {
             check_quotes(&result).is_empty(),
             "fixed content should re-lint clean, got: {:?}",
             check_quotes(&result)
+        );
+    }
+
+    /// A culprit that spans a newline but has no clean terminator on its first
+    /// line (`"a; b` with no `;` before the newline) falls back to closing
+    /// before the last `;` on the culprit's own line. The important property is
+    /// that the fix targets the *culprit* line, never the dangling flagged
+    /// token on a later line (which would spuriously double-quote it).
+    #[test]
+    fn test_fix_targets_culprit_line_when_no_clean_terminator() {
+        let content = r#"add_header X-Custom "a; b
+    return 200 "ok";
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        let result = apply_fix(content, errors[0].fixes.first().expect("Expected a fix"));
+        // The already-correct `return 200 "ok";` line must be untouched.
+        assert!(
+            result.contains(r#"    return 200 "ok";"#),
+            "the return line must not be corrupted, got:\n{result}"
+        );
+        assert!(check_quotes(&result).is_empty());
+    }
+
+    /// Limitation guard: an unclosed quote before a lua block whose body has a
+    /// `;` can't be auto-fixed (the exposed lua `;` stops the culprit search),
+    /// but it must still be *reported* and must never corrupt the lua body.
+    #[test]
+    fn test_unclosed_quote_before_lua_block_with_semicolon_is_safe() {
+        let content = r#"http {
+    add_header X-Custom "value;
+    content_by_lua_block {
+        ngx.say("a; b")
+    }
+}
+"#;
+        let errors = check_quotes(content);
+        assert!(
+            !errors.is_empty(),
+            "the unclosed quote must still be reported"
+        );
+        // Applying whatever fix (if any) must not corrupt the lua body.
+        let fixes: Vec<_> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
+        let (result, _) = crate::apply_fixes_to_content(content, &fixes);
+        assert!(
+            result.contains(r#"        ngx.say("a; b")"#),
+            "the lua body must stay intact, got:\n{result}"
         );
     }
 }
