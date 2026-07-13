@@ -679,4 +679,47 @@ mod tests {
             "Fix should close add_header's quote and leave the lua block untouched"
         );
     }
+
+    /// An unclosed quote *before* a `content_by_lua_block` is the dangerous
+    /// direction: the greedy lexer swallows the block-opening (`{`) and the
+    /// lua body's own `"` into one string, so the block is never recognised
+    /// as raw. All the resulting tokens land in one directive node, so the
+    /// culprit search still redirects to `add_header`'s line, and the fixed
+    /// output re-lints clean (the lua block then parses correctly).
+    #[test]
+    fn test_unclosed_quote_before_lua_block_fixes_the_real_one() {
+        let content = r#"http {
+    add_header X-Custom "value;
+    content_by_lua_block {
+        ngx.say("hello")
+    }
+}
+"#;
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(
+            errors[0].line,
+            Some(2),
+            "Error should be reported on add_header's line, not inside the lua body"
+        );
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result,
+            r#"http {
+    add_header X-Custom "value";
+    content_by_lua_block {
+        ngx.say("hello")
+    }
+}
+"#,
+            "Fix should close add_header's quote, leaving the lua block intact"
+        );
+        assert!(
+            check_quotes(&result).is_empty(),
+            "fixed content should re-lint clean, got: {:?}",
+            check_quotes(&result)
+        );
+    }
 }
