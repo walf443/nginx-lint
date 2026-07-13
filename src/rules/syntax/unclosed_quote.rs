@@ -3,7 +3,7 @@ use crate::linter::{Fix, LintError, LintRule, Severity};
 use crate::parser::ast::Config;
 use crate::parser::line_index::LineIndex;
 use crate::parser::parse_string_rowan;
-use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
+use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use std::fs;
 use std::path::Path;
 
@@ -55,16 +55,8 @@ impl UnclosedQuote {
         let (root, _syntax_errors) = parse_string_rowan(source);
         let line_index = LineIndex::new(source);
         let mut errors = Vec::new();
-        let mut last_double: Option<(String, usize)> = None;
-        let mut last_single: Option<(String, usize)> = None;
 
-        Self::walk_node(
-            &root,
-            &line_index,
-            &mut errors,
-            &mut last_double,
-            &mut last_single,
-        );
+        Self::walk_node(&root, &line_index, &mut errors);
 
         errors
     }
@@ -73,20 +65,7 @@ impl UnclosedQuote {
     ///
     /// BLOCK nodes belonging to raw block directives (lua etc.) are skipped
     /// entirely, avoiding per-token ancestor checks.
-    ///
-    /// `last_double`/`last_single` track the most recently seen
-    /// DOUBLE_QUOTED_STRING/SINGLE_QUOTED_STRING token's own text and start
-    /// offset, in document order across the whole file — used by
-    /// [`redirect_to_prior_open_quote`](Self::redirect_to_prior_open_quote)
-    /// to find the real culprit when an unrelated later quote happens to
-    /// make the lexer's naive pairing land on the wrong token.
-    fn walk_node(
-        node: &SyntaxNode,
-        line_index: &LineIndex,
-        errors: &mut Vec<LintError>,
-        last_double: &mut Option<(String, usize)>,
-        last_single: &mut Option<(String, usize)>,
-    ) {
+    fn walk_node(node: &SyntaxNode, line_index: &LineIndex, errors: &mut Vec<LintError>) {
         for child in node.children_with_tokens() {
             match child {
                 SyntaxElement::Node(child_node) => {
@@ -96,7 +75,7 @@ impl UnclosedQuote {
                     {
                         continue;
                     }
-                    Self::walk_node(&child_node, line_index, errors, last_double, last_single);
+                    Self::walk_node(&child_node, line_index, errors);
                 }
                 SyntaxElement::Token(token) => {
                     let (quote_char, quote_name) = match token.kind() {
@@ -106,30 +85,23 @@ impl UnclosedQuote {
                     };
 
                     let text = token.text();
-                    let offset: usize = token.text_range().start().into();
-                    let prior = if quote_char == '"' {
-                        &mut *last_double
-                    } else {
-                        &mut *last_single
-                    };
 
                     // A properly closed string starts and ends with the same quote
                     if text.len() >= 2 && text.ends_with(quote_char) {
-                        // Remember it in case a later token turns out to be a
-                        // dangling artifact caused by this one swallowing more
-                        // than one line (see redirect_to_prior_open_quote).
-                        *prior = Some((text.to_string(), offset));
                         continue;
                     }
 
-                    // Unclosed quote detected (per the lexer's naive pairing).
-                    // If this looks like a dangling artifact rather than a
-                    // genuine unclosed string, redirect to the real culprit.
-                    let (report_offset, fix) =
-                        match Self::redirect_to_prior_open_quote(quote_char, text, prior) {
-                            Some((prior_offset, fix)) => (prior_offset, Some(fix)),
-                            None => (offset, Self::create_fix(quote_char, text, offset)),
-                        };
+                    let offset: usize = token.text_range().start().into();
+
+                    // The lexer pairs quotes greedily, so a missing quote
+                    // earlier in the statement can shift every following
+                    // pairing and leave a *later* token flagged instead. If we
+                    // can pin the real culprit within the same directive,
+                    // report and fix there; otherwise fix this token directly.
+                    let (report_offset, fix) = match Self::locate_real_culprit(&token, quote_char) {
+                        Some((culprit_offset, fix)) => (culprit_offset, Some(fix)),
+                        None => (offset, Self::create_fix(quote_char, text, offset)),
+                    };
 
                     let pos = line_index.position(report_offset);
                     let message =
@@ -192,50 +164,65 @@ impl UnclosedQuote {
         ))
     }
 
-    /// If `text` looks like a dangling artifact rather than a genuinely
-    /// unclosed string, and `prior` (the preceding same-kind quoted-string
-    /// token) looks like the real culprit, return a redirected `(offset,
-    /// fix)` pointing at `prior` instead.
+    /// Find the token the user actually failed to close when the flagged
+    /// `unclosed` token is really a downstream artifact of the lexer's greedy
+    /// quote pairing, returning a `(offset, fix)` pointing at the real culprit.
     ///
-    /// A single unclosed `"`/`'` followed later by an unrelated line that
-    /// happens to contain the same quote character makes the lexer pair
-    /// them up: e.g. `add_header X-Custom "value;\nreturn 200 "ok";` lexes
-    /// as one (nominally "closed") string spanning both lines, followed by
-    /// a second string starting right after `ok`'s closing quote and
-    /// running to EOF (or the next quote) — genuinely unclosed, but not the
-    /// real problem. That dangling token has essentially no content of its
-    /// own before its line's semicolon (it starts right where a real
-    /// quote's closing character was); `prior` spanning multiple lines with
-    /// a semicolon on its own first line is the actual missing-quote line.
-    fn redirect_to_prior_open_quote(
-        quote: char,
-        text: &str,
-        prior: &Option<(String, usize)>,
-    ) -> Option<(usize, Fix)> {
-        let first_line = text.lines().next().unwrap_or(text);
-        let semicolon_pos = first_line.rfind(';')?;
-        let before_semicolon = &first_line[..semicolon_pos];
+    /// The lexer pairs quote characters greedily left-to-right and knows
+    /// nothing about `#` comments or line boundaries inside a string, so a
+    /// single missing quote earlier in a statement shifts every subsequent
+    /// pairing and can leave a later token flagged instead. All the mispaired
+    /// tokens share one `DIRECTIVE` CST node, so we search that node (bounding
+    /// the search — a correctly-closed string elsewhere in the file is never a
+    /// target) for the earliest same-kind quoted-string token that spuriously
+    /// crosses a boundary it shouldn't.
+    ///
+    /// The directive should have ended at the first `;` on such a token's line;
+    /// anything the string swallowed *past* that `;` is the tell. If what
+    /// follows runs onto the next line (`"value;` … `return 200 "`, issue #295)
+    /// or contains a `#` comment (`"value; # note "`, issue #299), the closing
+    /// quote paired across a boundary and this token is the real culprit —
+    /// [`create_fix`] then places the missing quote before its `;`. Keying on
+    /// content *after* the first `;` keeps legitimately-closed values whose own
+    /// data contains `#` before the `;` (e.g. a `"#aabbcc"` colour) from being
+    /// misread as culprits.
+    ///
+    /// Known limitation: a closed value that legitimately swallows a `#` after
+    /// a `;` (e.g. `"a;#b"`) before an unclosed quote in the same directive
+    /// could still be misread; such values are rare in nginx configs.
+    fn locate_real_culprit(unclosed: &SyntaxToken, quote: char) -> Option<(usize, Fix)> {
+        let kind = unclosed.kind();
+        let unclosed_start: usize = unclosed.text_range().start().into();
+        let directive = unclosed.parent()?;
 
-        // The token always starts with a quote character, so before_semicolon
-        // is at least 1 byte. Guard defensively anyway.
-        if before_semicolon.is_empty() {
-            return None;
-        }
-        if !before_semicolon[1..].trim().is_empty() {
-            return None; // has real content of its own; not a dangling artifact
+        for child in directive.children_with_tokens() {
+            let SyntaxElement::Token(token) = child else {
+                continue;
+            };
+            if token.kind() != kind {
+                continue;
+            }
+            let start: usize = token.text_range().start().into();
+            if start >= unclosed_start {
+                break; // reached the flagged token; nothing earlier remains
+            }
+
+            let text = token.text();
+            let first_line = text.lines().next().unwrap_or(text);
+            // The directive should have ended at the first `;` on this line;
+            // content the string swallowed *past* it is the tell of a mispairing.
+            let Some(semi) = first_line.find(';') else {
+                continue; // no terminator to close before
+            };
+            let spans_newline = text.contains('\n');
+            let swallowed_comment = first_line[semi + 1..].contains('#');
+            if spans_newline || swallowed_comment {
+                let fix = Self::create_fix(quote, text, start)?;
+                return Some((start, fix));
+            }
         }
 
-        let (prior_text, prior_offset) = prior.as_ref()?;
-        if !prior_text.contains('\n') {
-            return None; // prior didn't span multiple lines, nothing to redirect
-        }
-        let prior_first_line = prior_text.lines().next().unwrap_or(prior_text);
-        if !prior_first_line.contains(';') {
-            return None;
-        }
-
-        let fix = Self::create_fix(quote, prior_text, *prior_offset)?;
-        Some((*prior_offset, fix))
+        None
     }
 }
 
@@ -527,8 +514,8 @@ mod tests {
     }
 
     /// Same redirect as `test_fix_redirects_to_real_unclosed_line_not_dangling_artifact`,
-    /// but for single-quoted strings — `last_double`/`last_single` are
-    /// tracked independently, so this exercises that path separately.
+    /// but for single-quoted strings — a separate token kind, so this
+    /// exercises the same-kind matching in `locate_real_culprit` for `'`.
     #[test]
     fn test_fix_redirects_to_real_unclosed_line_not_dangling_artifact_single_quote() {
         let content = r#"location / {
@@ -554,6 +541,58 @@ mod tests {
 }
 "#,
             "Fix should close add_header's quote, not add a spurious quote to return's line"
+        );
+    }
+
+    /// Regression test for https://github.com/walf443/nginx-lint/issues/299.
+    ///
+    /// A `"` inside a trailing `#` comment makes the lexer pair the real
+    /// unclosed quote's opening `"` with the comment's `"`, so the culprit
+    /// token (`"value; # trailing comment with "`) is single-line and the
+    /// one-hop redirect from #298 couldn't reach it. Searching the whole
+    /// directive for the earliest token that swallowed a `#` past its `;`
+    /// pins `add_header`'s line, leaving the `return` line untouched.
+    #[test]
+    fn test_fix_redirects_across_comment_embedded_quote() {
+        let content = "add_header X-Custom \"value; # trailing comment with \"quote\" inside\n    return 200 \"ok\";\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(
+            errors[0].line,
+            Some(1),
+            "Error should be reported on add_header's line"
+        );
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result,
+            "add_header X-Custom \"value\"; # trailing comment with \"quote\" inside\n    return 200 \"ok\";\n",
+            "Fix should close add_header's quote before its ;, leaving the comment and return line intact"
+        );
+        // The fixed content must itself be free of unclosed-quote errors.
+        assert!(
+            check_quotes(&result).is_empty(),
+            "fixed content should re-lint clean, got: {:?}",
+            check_quotes(&result)
+        );
+    }
+
+    /// A legitimately-closed value whose data contains `#` *before* its `;`
+    /// (e.g. a `"#aabbcc"` colour) must not be mistaken for the culprit when
+    /// a genuinely-unclosed quote follows it in the same directive — the fix
+    /// must target the real unclosed token, not corrupt the colour value.
+    #[test]
+    fn test_fix_does_not_redirect_onto_hash_colour_value() {
+        let content = "add_header X-C \"#aabbcc; note\" \"value;\n";
+        let errors = check_quotes(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+
+        let fix = errors[0].fixes.first().expect("Expected a fix");
+        let result = apply_fix(content, fix);
+        assert_eq!(
+            result, "add_header X-C \"#aabbcc; note\" \"value\";\n",
+            "Fix should close the real unclosed quote, not the colour value"
         );
     }
 
