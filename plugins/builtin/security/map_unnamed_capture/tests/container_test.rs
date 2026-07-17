@@ -41,6 +41,11 @@
 //! Measured 8/8 across {arm64, x86_64} × {1.29, 1.30.3, 1.30.4, 1.31.3}, and
 //! the 1.30.3 → 1.30.4 boundary lands exactly on the upstream fix.
 //!
+//! This is not a universal oracle, and the asymmetry matters: a *failure* is
+//! proof of the bug, but a *clean run* only means the stale read happened to
+//! land on zeroed memory. Known builds where that happens despite the bug being
+//! present are skipped rather than declared fixed — see [`is_stock_nginx`].
+//!
 //! # The trigger
 //!
 //! 1. A `map` with a **capturing** regex entry that **mismatches** at runtime
@@ -213,14 +218,21 @@ fn parse_nginx_version(output: &str) -> Option<(u32, u32, u32)> {
     ))
 }
 
-/// Whether the running engine is stock nginx, the only one whose fix status is
-/// established here.
+/// Whether the running engine is stock nginx, the only one this repro can
+/// actually judge.
 ///
-/// openresty and freenginx are skipped rather than judged: they may well carry
-/// the bug, but whether they have picked up the fix has not been established,
-/// so asserting *either* the affected or the fixed behaviour would be a guess.
-/// Skipping is the honest option — treating a fork as fixed just because
-/// `is_affected_build` says so would silently vouch for it.
+/// Forks are skipped, and NOT because their fix status is unknown — as of
+/// 2026-07-17 both carry the bug: openresty 1.31.1.1 bundles nginx 1.31.1 with
+/// no `r->ncaptures = 0;` at the realloc site (its patch set touches only
+/// OpenSSL), and freenginx 1.31.3 is likewise missing it.
+///
+/// They are skipped because **this repro cannot detect that**. On both, the
+/// stale read lands on zeroed memory, so `$1` comes through empty and the
+/// subrequest succeeds — outwardly identical to a fixed build. That is the
+/// honest limit of the signature: it proves the bug when the stale read hits
+/// non-zero memory (as it does on every official nginx image tested), but a
+/// clean run is not evidence of a fix. Asserting the fixed behaviour here would
+/// vouch for builds that are in fact vulnerable.
 fn is_stock_nginx() -> bool {
     nginx_server_name() == "nginx"
 }
