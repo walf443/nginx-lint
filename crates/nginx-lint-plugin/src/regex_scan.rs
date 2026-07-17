@@ -344,4 +344,53 @@ mod tests {
         assert_eq!(unnamed("(*MARK:[)(a)"), vec![9]);
         assert!(unnamed("(*PRUNE)").is_empty());
     }
+
+    /// Truncated and degenerate inputs. PCRE rejects all of these, so nginx
+    /// would refuse the config either way — what matters is only that `scan`
+    /// does not panic and does not read past the end.
+    ///
+    /// `(?'` answering "named" is a deliberate loosening: the previous walker
+    /// guarded on `i + 3 < len` and said "no", this one asks `bytes.get()` and
+    /// says "yes". Callers use the answer to decline an autofix, so erring
+    /// towards "named" on a regex that cannot compile costs nothing.
+    #[test]
+    fn truncated_input_is_handled_without_panicking() {
+        assert!(!named("("));
+        assert!(!named("(?"));
+        assert!(!named("(?<"));
+        assert!(!named("(?P"));
+        assert!(!named("(?<="));
+        assert!(!named("(?<!"));
+        assert!(!named(""));
+        assert!(named("(?'"));
+
+        assert_eq!(unnamed("("), vec![0]);
+        assert!(unnamed("").is_empty());
+        assert!(unnamed(")").is_empty());
+    }
+
+    /// Byte offsets must land on the `(` itself even when multibyte characters
+    /// precede it, or a caller slicing at them would split a char.
+    #[test]
+    fn offsets_are_char_boundaries_with_multibyte_input() {
+        for (regex, expected) in [
+            ("é(a)", vec![2]),
+            (r"\é(a)", vec![3]),
+            ("あ(.*)い", vec![3]),
+        ] {
+            let found = unnamed(regex);
+            assert_eq!(found, expected, "{regex}");
+            for pos in found {
+                assert!(
+                    regex.is_char_boundary(pos),
+                    "{regex}: offset {pos} splits a char"
+                );
+                assert_eq!(
+                    regex.as_bytes()[pos],
+                    b'(',
+                    "{regex}: offset {pos} is not a paren"
+                );
+            }
+        }
+    }
 }

@@ -176,24 +176,6 @@ pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
         .collect()
 }
 
-/// Whether a regex source string contains at least one unnamed PCRE capture
-/// group. See [`find_unnamed_capture_positions`].
-///
-/// # Examples
-///
-/// ```
-/// use nginx_lint_plugin::helpers::has_unnamed_capture;
-///
-/// assert!(has_unnamed_capture("^/old/(.*)$"));
-/// assert!(!has_unnamed_capture("^/old/(?<rest>.*)$"));
-/// assert!(!has_unnamed_capture("^/old/(?:.*)$"));
-/// ```
-pub fn has_unnamed_capture(regex: &str) -> bool {
-    scan(regex)
-        .iter()
-        .any(|(_, group)| *group == Group::Unnamed)
-}
-
 /// Detect whether a regex source string contains any named capture group —
 /// `(?<name>...)`, `(?'name'...)` or `(?P<name>...)`. Lookbehinds
 /// `(?<=...)` / `(?<!...)` are NOT named captures and don't count.
