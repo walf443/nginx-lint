@@ -248,7 +248,7 @@ pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
                 // is arbitrary text, so step over the whole thing rather than
                 // scanning it as regex.
                 Some(b'*') => {
-                    i = find_unescaped_close_paren(bytes, i + 2);
+                    i = find_close_paren(bytes, i + 2);
                     continue;
                 }
                 Some(b'?') => match bytes.get(i + 2).copied() {
@@ -257,7 +257,7 @@ pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
                     // as regex both invents groups and — via a stray `[` or
                     // `\Q` — swallows the real ones after it.
                     Some(b'#') => {
-                        i = find_unescaped_close_paren(bytes, i + 3);
+                        i = find_close_paren(bytes, i + 3);
                         continue;
                     }
                     // A conditional `(?(1)...)` / `(?(<name>)...)` nests a
@@ -283,7 +283,14 @@ pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
 /// Offset just past the next `)` at or after `from`, or the end of the input
 /// when there is none. Used for constructs whose body is opaque text — a
 /// `(?#...)` comment or a `(*VERB:name)` — which PCRE ends at the first `)`.
-fn find_unescaped_close_paren(bytes: &[u8], from: usize) -> usize {
+///
+/// **Escapes are deliberately not honoured, and must not be.** PCRE gives no
+/// way to put a `)` inside these: a comment ends at the first one even when a
+/// backslash precedes it, so `a(?#x\)b` is `a`, a comment, then `b` — it
+/// matches `ab`. Teaching this function to skip `\)` would desynchronise it
+/// from PCRE and hide the group that follows. Pinned by
+/// `comment_ends_at_first_paren_even_after_a_backslash`.
+fn find_close_paren(bytes: &[u8], from: usize) -> usize {
     let mut i = from;
     while i < bytes.len() {
         if bytes[i] == b')' {
@@ -564,5 +571,13 @@ mod tests {
         assert!(regex_has_named_capture("(?'a'x)(y)"));
         // Not a named capture.
         assert!(!regex_has_named_capture("(x)"));
+    }
+
+    /// PCRE gives no way to put a `)` inside a `(?#...)` comment — the first
+    /// one ends it, backslash or not (`a(?#x\)b` matches "ab"). So the group
+    /// after it is real, and skipping `\)` here would hide it.
+    #[test]
+    fn comment_ends_at_first_paren_even_after_a_backslash() {
+        assert_eq!(find_unnamed_capture_positions(r"(?#x\)(a)"), vec![6]);
     }
 }

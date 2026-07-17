@@ -1889,4 +1889,73 @@ http {
         assert_eq!(spec.min_nginx_version.as_deref(), Some("0.6.27"));
         assert_eq!(spec.max_nginx_version.as_deref(), Some("1.30.1"));
     }
+
+    /// Regexes whose capture-scanning this plugin gets from
+    /// `nginx_lint_plugin::helpers`, where the scanner used to disagree with
+    /// PCRE. Each autofix below was verified to load on nginx 1.29, as was the
+    /// config it replaces.
+    ///
+    /// The comment case is the one that mattered: the scanner used to report
+    /// the `(` *inside* `(?#(`, so this plugin emitted
+    /// `"^/a(?#(?<cap1>)/(?<cap2>.*)$"` — the comment swallowed `(?<cap1>`, and
+    /// nginx refused to start with `unknown "cap1" variable`.
+    #[test]
+    fn autofix_is_correct_for_regexes_the_scanner_used_to_misread() {
+        let cases = [
+            // (regex, expected rewritten regex)
+            (r"^/a(?# [ )(x)$", r"^/a(?# [ )(?<cap1>x)$"),
+            (r"^/a(*MARK:[)(x)$", r"^/a(*MARK:[)(?<cap1>x)$"),
+            (r"^/a(?#()/(.*)$", r"^/a(?#()/(?<cap1>.*)$"),
+            (r"^/a[]()]/(x)$", r"^/a[]()]/(?<cap1>x)$"),
+            (r"^/a\Q(a)\E/(x)$", r"^/a\Q(a)\E/(?<cap1>x)$"),
+        ];
+
+        for (regex, expected) in cases {
+            let src = format!(
+                "http {{\n  server {{\n    location ~ \"{regex}\" {{\n      \
+                 rewrite \"{regex}\" /internal?migrated=true;\n      \
+                 set $original_endpoint $1;\n    }}\n  }}\n}}\n"
+            );
+            let errors = PluginTestRunner::new(NginxRiftPlugin)
+                .check_string(&src)
+                .expect("check failed");
+            let rewritten: Vec<&str> = errors
+                .iter()
+                .flat_map(|e| e.fixes.iter())
+                .map(|f| f.new_text.as_str())
+                .collect();
+
+            assert!(
+                rewritten.contains(&format!("\"{expected}\"").as_str()),
+                "{regex}: expected the rewrite regex to become {expected}, got {rewritten:?}"
+            );
+        }
+    }
+
+    /// A branch reset makes both parens group 1, so naming them apart is
+    /// invalid PCRE (`different names for subpatterns of the same number`) and
+    /// nginx will not start. This plugin has no guard for it and emits the
+    /// broken fix — pinned as a known bug, tracked separately. Predates the
+    /// helper extraction: the pre-move scanner returned the same positions.
+    #[test]
+    fn known_bug_branch_reset_autofix_is_invalid() {
+        let src = "http {\n  server {\n    location ~ \"^/(?|(a)|(b))$\" {\n      \
+                   rewrite \"^/(?|(a)|(b))$\" /internal?migrated=true;\n      \
+                   set $original_endpoint $1;\n    }\n  }\n}\n";
+        let errors = PluginTestRunner::new(NginxRiftPlugin)
+            .check_string(src)
+            .expect("check failed");
+        let rewritten: Vec<&str> = errors
+            .iter()
+            .flat_map(|e| e.fixes.iter())
+            .map(|f| f.new_text.as_str())
+            .collect();
+
+        assert!(
+            rewritten
+                .iter()
+                .any(|r| r.contains("cap1") && r.contains("cap2")),
+            "expected the (known bad) two-name rewrite, got {rewritten:?}"
+        );
+    }
 }
