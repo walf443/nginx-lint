@@ -81,9 +81,13 @@ impl Plugin for MapUnnamedCapturePlugin {
              reading unnamed `$1`..`$9` too. So replace `(...)` with a named capture \
              `(?<name>...)` in the map AND reference captures by name (`$name`) in the blocks that \
              consume them; named captures resolve through a separate path that never touches the \
-             stale-count read. Use a non-capturing group `(?:...)` when the group is only for \
-             grouping — this is the right fix for alternations like `~*(bot|crawler)`, which do \
-             not need a capture at all.",
+             stale-count read. Better still, use a non-capturing group `(?:...)` when the group is \
+             only for grouping (as in `~*(bot|crawler)`): with no capture left the regex stops \
+             reallocating at all, which is the one remediation that needs no change outside the \
+             map. Scope note: this rule reports only unnamed captures, so a map whose captures are \
+             already named is not reported even though it still arms the bug — that combination \
+             (named map, unnamed `$1` read elsewhere) is a known blind spot, traded away to keep \
+             the rule quiet on configs that follow the vendor's advice.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
@@ -92,10 +96,15 @@ impl Plugin for MapUnnamedCapturePlugin {
             "https://github.com/nginx/nginx/commit/0cca8e055a2d909f1a00c2071665b502ec2fe94c"
                 .to_string(),
         ])
-        .with_min_version("0.9.6")
+        // The vulnerability report says 0.9.6+, which is when `map` learned
+        // regex entries — but the bug also needs a cloned subrequest to exist,
+        // and `NGX_HTTP_SUBREQUEST_CLONE` arrived with the slice module in
+        // 1.9.8 (`CHANGES`: "Changes with nginx 1.9.8 ... Feature: the
+        // ngx_http_slice_module"). Nothing in `[0.9.6, 1.9.7]` can reach it.
+        .with_min_version("1.9.8")
         // Inclusive upper bound. The fix shipped on two branches — stable
         // 1.30.4 and mainline 1.31.3 — so the affected set is
-        // `[0.9.6, 1.30.3]` plus mainline `[1.31.0, 1.31.2]`, which a single
+        // `[1.9.8, 1.30.3]` plus mainline `[1.31.0, 1.31.2]`, which a single
         // min..max interval cannot express exactly. We take `1.31.2` (the last
         // affected mainline release) rather than the stable fix point `1.30.3`:
         // for a security rule a false negative (staying silent on an affected
@@ -138,8 +147,7 @@ impl Plugin for MapUnnamedCapturePlugin {
             // variable cache is shared with subrequests
             // (`sr->variables = r->variables`), so a cached map is also
             // vulnerable whenever its *first* evaluation lands inside the
-            // clone. Verified — see `non_volatile_map_via_background_update`
-            // in the container tests.
+            // clone. See the module docs for the evidence.
             for entry in block.directives() {
                 let Some(pattern) = map_regex_pattern(&entry.name) else {
                     continue;
@@ -180,16 +188,26 @@ impl Plugin for MapUnnamedCapturePlugin {
 /// `include`d file, and needs a variable name that is guaranteed not to
 /// collide. None of that is decidable here.
 ///
-/// Going non-capturing is also the *stronger* fix. `ngx_http_regex_exec()`
-/// reallocates only `if (re->ncaptures)`, and PCRE counts named groups too — so
-/// a named capture still reallocates and only makes its own read safe, whereas
-/// dropping to `(?:...)` means the array is never reallocated for this regex at
-/// all.
+/// Going non-capturing is also the *stronger* fix, when it removes the last
+/// capture. `ngx_http_regex_exec()` reallocates only `if (re->ncaptures)`, and
+/// PCRE counts named groups too — so a named capture still reallocates and only
+/// makes its own read safe. Dropping every unnamed group to `(?:...)` stops the
+/// realloc outright *if no named group remains*; if one does, the regex still
+/// reallocates and this only removes the unnamed reads.
 ///
-/// Only safe when the entry's value does not read a positional capture: the
-/// group is then pure grouping (`~*(bot|crawler) 1;`), and `(?:...)` is the
-/// better idiom regardless of the CVE. If the value reads `$1`, rewriting is
-/// refused and the warning is reported without a fix.
+/// Refused unless the whole entry is safe to rewrite:
+///
+/// - the **value** must not read a positional capture — otherwise `(?:...)`
+///   deletes the group it names (`~^/old/(.*)$ /new/$1;`);
+/// - the **pattern** must not reference a group by number either. A
+///   backreference outlives the group: `~^/(a|b)/\1$` rewrites to
+///   `~^/(?:a|b)/\1$`, whose `\1` now points at nothing, and nginx refuses to
+///   start with `pcre_compile() failed`. Same for `\g{1}`, recursion `(?1)`,
+///   and conditionals `(?(1)...)`.
+///
+/// What survives is pure grouping (`~*(bot|crawler) 1;`), where `(?:...)` is
+/// the better idiom regardless of the CVE. Anything else is reported without a
+/// fix.
 ///
 /// Caveat: nginx also lets a *later* directive read `$1` left behind by a
 /// matching map regex. That aliasing is exactly the footgun this CVE is about
@@ -200,6 +218,10 @@ fn non_capturing_fixes(entry: &Directive, pattern: &str, positions: &[usize]) ->
         .iter()
         .any(|arg| reads_positional_capture(&arg.raw))
     {
+        return None;
+    }
+
+    if references_group_by_number(pattern) {
         return None;
     }
 
@@ -246,6 +268,40 @@ fn key_quote_len(entry: &Directive) -> Option<usize> {
         2 => Some(1),
         _ => None,
     }
+}
+
+/// Whether the regex refers to one of its own groups by number, which makes
+/// dropping that group to `(?:...)` a breaking change rather than a no-op.
+///
+/// Covers backreferences (`\1`, `\g1`, `\g{1}`, `\g{-1}`), subroutine calls and
+/// recursion (`(?1)`, `(?+1)`, `(?R)`), and conditionals (`(?(1)...)`). Like
+/// [`reads_positional_capture`] this is deliberately blunt: anything resembling
+/// a numeric reference suppresses the autofix rather than risking a rewrite
+/// that nginx then refuses to load.
+fn references_group_by_number(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+
+    for (i, &b) in bytes.iter().enumerate() {
+        let next = bytes.get(i + 1).copied();
+        match b {
+            // `\1`, `\g...`. Any other escape is skipped by the `\\` arm below
+            // only when it is the escape itself, so check before that.
+            b'\\' => match next {
+                Some(c) if c.is_ascii_digit() => return true,
+                Some(b'g') | Some(b'k') => return true,
+                _ => {}
+            },
+            // `(?1)`, `(?+1)`, `(?-1)`, `(?R)`, `(?(1)...)`, `(?&name)`
+            b'(' if next == Some(b'?') => match bytes.get(i + 2).copied() {
+                Some(c) if c.is_ascii_digit() => return true,
+                Some(b'+') | Some(b'-') | Some(b'R') | Some(b'(') | Some(b'&') => return true,
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+
+    false
 }
 
 /// Whether the text reads a positional capture — `$1`..`$9` or `${1}`.
@@ -475,9 +531,8 @@ map $uri $target {
 
     /// `volatile` is not a precondition for the bug, so it must not gate the
     /// rule: a cached map is exploitable too when its first evaluation lands
-    /// inside a clone subrequest (verified by the
-    /// `non_volatile_map_via_background_update` container test, which crashes a
-    /// worker with exactly this shape of map).
+    /// inside a clone subrequest. See the module docs for why that is not
+    /// covered by a container test.
     ///
     /// This alternation also shows why the resulting report is not mere noise:
     /// `(bot|crawler)` never needed to capture, and `(?:bot|crawler)` is the
@@ -650,6 +705,13 @@ http {
 
     /// A named group in the same entry is left alone — only the unnamed one is
     /// rewritten, and `$name` keeps resolving because PCRE still numbers it.
+    ///
+    /// Note what this fix does NOT achieve. The surviving named group keeps
+    /// `re->ncaptures` non-zero, so the regex still reallocates and still arms
+    /// the bug for any unnamed `$1` read elsewhere on the request path. The
+    /// rule reports nothing afterwards because its predicate is "unnamed
+    /// capture in a map regex", not "this regex is now harmless" — the
+    /// `assert_no_errors` below pins the predicate, not safety.
     #[test]
     fn test_named_group_is_preserved_while_unnamed_is_fixed() {
         let source = r#"
@@ -737,6 +799,73 @@ http {
             errors[0].fixes.is_empty(),
             "a key with escapes must not be autofixed, got: {:?}",
             errors[0].fixes
+        );
+    }
+
+    /// Regression: `(?:...)` deletes the group a backreference points at, and
+    /// nginx then refuses to start (`pcre_compile() failed`). Verified against
+    /// nginx 1.29: `~^/(a|b)/\1$` loads, `~^/(?:a|b)/\1$` does not.
+    #[test]
+    fn test_backreference_in_pattern_blocks_the_fix() {
+        let errors = runner()
+            .check_string(
+                r#"
+http {
+    map $uri $flag {
+        default 0;
+        ~^/(a|b)/\1$ 1;
+    }
+}
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].fixes.is_empty(),
+            "a backreference must block the fix, got: {:?}",
+            errors[0].fixes
+        );
+    }
+
+    /// Same class as the backreference: these all name a group by number, so
+    /// removing the group breaks them.
+    #[test]
+    fn test_numeric_group_references_block_the_fix() {
+        for pattern in [
+            r"~^/(a|b)/\g{1}$",
+            r"~^/(a|b)(?1)$",
+            r"~^/(a)(?(1)x|y)$",
+            r"~^/(a|b)/\g1$",
+        ] {
+            let errors = runner()
+                .check_string(&format!(
+                    "http {{\n    map $uri $flag {{\n        default 0;\n        {pattern} 1;\n    }}\n}}\n"
+                ))
+                .unwrap();
+
+            assert!(
+                !errors.is_empty() && errors[0].fixes.is_empty(),
+                "{pattern} must be reported without a fix, got: {errors:?}"
+            );
+        }
+    }
+
+    /// The detector must not see regex syntax inside a `\Q...\E` literal span
+    /// or a character class whose first member is `]`.
+    #[test]
+    fn test_literal_parens_are_not_reported() {
+        runner().assert_no_errors(
+            r#"
+http {
+    map $uri $flag {
+        default 0;
+        ~^/q/\Q(a)\E$ 1;
+        ~^/c/[]()]$ 2;
+        ~^/p/[[:alpha:]()]$ 3;
+    }
+}
+"#,
         );
     }
 

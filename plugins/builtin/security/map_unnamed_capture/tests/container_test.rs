@@ -153,8 +153,10 @@ fn safe_config() -> String {
 /// reads no positional capture, so the autofix applies here.)
 ///
 /// This is the sharpest test of the fix's premise: `ngx_http_regex_exec()`
-/// reallocates only `if (re->ncaptures)`, so a non-capturing group stops the
-/// realloc outright, whereas a named capture would not.
+/// reallocates only `if (re->ncaptures)`, so removing the regex's last capture
+/// stops the realloc outright, whereas naming it would not (PCRE counts named
+/// groups). Note the premise needs the last capture gone — an entry keeping a
+/// named group alongside the rewritten one still reallocates.
 fn autofixed_config() -> String {
     config_with(
         r#"~mismatch(?:.*)  1;"#,
