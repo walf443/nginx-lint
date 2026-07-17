@@ -142,6 +142,159 @@ pub fn extract_domain(host: &str) -> &str {
     host.split(':').next().unwrap_or(host)
 }
 
+/// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
+///
+/// nginx stores unnamed captures in the shared `$1`..`$9` slots, so rules that
+/// care about capture collisions need to tell a real capture group apart from a
+/// paren that merely looks like one.
+///
+/// Skips: escapes (`\(`), character classes (`[...]`), the `(?...)` family —
+/// non-capturing `(?:...)`, named `(?<name>...)` / `(?P<name>...)`,
+/// lookarounds `(?=...)` / `(?!...)` / `(?<=...)` / `(?<!...)`, atomic
+/// `(?>...)`, comments `(?#...)`, and inline modifiers `(?i)` — and the
+/// `(*VERB)` family — PCRE control verbs like `(*PRUNE)`, `(*SKIP)`,
+/// `(*FAIL)`, `(*MARK:name)`, etc.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_plugin::helpers::find_unnamed_capture_positions;
+///
+/// assert_eq!(find_unnamed_capture_positions("^/api/(.*)$"), vec![6]);
+/// assert_eq!(find_unnamed_capture_positions("(a)(b)(?:c)(d)"), vec![0, 3, 11]);
+///
+/// // Not unnamed captures
+/// assert!(find_unnamed_capture_positions("^/(?<name>.*)$").is_empty());
+/// assert!(find_unnamed_capture_positions(r"\(literal\)").is_empty());
+/// assert!(find_unnamed_capture_positions("[()]").is_empty());
+/// assert!(find_unnamed_capture_positions("(*PRUNE)").is_empty());
+/// ```
+pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
+    let bytes = regex.as_bytes();
+    let mut positions = Vec::new();
+    let mut i = 0;
+    let mut in_char_class = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if b == b'\\' && i + 1 < bytes.len() {
+            // Escaped byte — skip both bytes.
+            i += 2;
+            continue;
+        }
+
+        if in_char_class {
+            if b == b']' {
+                in_char_class = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if b == b'[' {
+            in_char_class = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'(' {
+            let next = bytes.get(i + 1).copied();
+            // `(?...)` constructs and `(*VERB)` control verbs are never
+            // unnamed captures.
+            if next != Some(b'?') && next != Some(b'*') {
+                positions.push(i);
+            }
+        }
+
+        i += 1;
+    }
+
+    positions
+}
+
+/// Whether a regex source string contains at least one unnamed PCRE capture
+/// group. See [`find_unnamed_capture_positions`] for what counts as one.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_plugin::helpers::has_unnamed_capture;
+///
+/// assert!(has_unnamed_capture("^/old/(.*)$"));
+/// assert!(!has_unnamed_capture("^/old/(?<rest>.*)$"));
+/// assert!(!has_unnamed_capture("^/old/(?:.*)$"));
+/// ```
+pub fn has_unnamed_capture(regex: &str) -> bool {
+    !find_unnamed_capture_positions(regex).is_empty()
+}
+
+/// Detect whether a regex source string contains any named capture group
+/// (`(?<name>...)` or `(?P<name>...)`). Lookbehinds `(?<=...)` / `(?<!...)`
+/// are NOT named captures and don't count.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_plugin::helpers::regex_has_named_capture;
+///
+/// assert!(regex_has_named_capture("(?<name>.*)"));
+/// assert!(regex_has_named_capture("(?P<name>.*)"));
+///
+/// assert!(!regex_has_named_capture("(.*)"));
+/// assert!(!regex_has_named_capture("(?<=foo)bar"));
+/// assert!(!regex_has_named_capture("(?<!foo)bar"));
+/// ```
+pub fn regex_has_named_capture(regex: &str) -> bool {
+    let bytes = regex.as_bytes();
+    let mut i = 0;
+    let mut in_char_class = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        if b == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+
+        if in_char_class {
+            if b == b']' {
+                in_char_class = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        if b == b'[' {
+            in_char_class = true;
+            i += 1;
+            continue;
+        }
+
+        if b == b'(' && i + 3 < bytes.len() && bytes[i + 1] == b'?' {
+            // `(?<name>...)` — named iff the char after `<` is a name-start
+            // byte. `(?<=...)` and `(?<!...)` are lookbehinds; not captures.
+            if bytes[i + 2] == b'<' {
+                let after_lt = bytes[i + 3];
+                if after_lt != b'=' && after_lt != b'!' {
+                    return true;
+                }
+            }
+            // `(?P<name>...)` — Python-style named capture.
+            // (Only `bytes[i + 3]` is read; the outer `i + 3 < bytes.len()`
+            // guard is already sufficient.)
+            if bytes[i + 2] == b'P' && bytes[i + 3] == b'<' {
+                return true;
+            }
+        }
+
+        i += 1;
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

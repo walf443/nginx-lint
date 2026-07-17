@@ -26,6 +26,8 @@
 
 use nginx_lint_plugin::prelude::*;
 
+use nginx_lint_plugin::helpers::{find_unnamed_capture_positions, regex_has_named_capture};
+
 #[derive(Default)]
 pub struct NginxRiftPlugin;
 
@@ -284,116 +286,6 @@ fn build_renamed_regex(raw: &str) -> (String, usize) {
     }
     out.push_str(std::str::from_utf8(&bytes[cursor..]).expect("ASCII boundary"));
     (out, positions.len())
-}
-
-/// Detect whether a regex source string contains any named capture group
-/// (`(?<name>...)` or `(?P<name>...)`). Lookbehinds `(?<=...)` / `(?<!...)`
-/// are NOT named captures and don't count.
-///
-/// Used to bail out of autofix on regexes that mix named and unnamed
-/// captures: our cap-numbering (index among unnamed) diverges from PCRE's
-/// positional numbering once a named group is present, so a `$1` could end
-/// up renamed to point at a different capture.
-fn regex_has_named_capture(raw: &str) -> bool {
-    let bytes = raw.as_bytes();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            if b == b']' {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' && i + 3 < bytes.len() && bytes[i + 1] == b'?' {
-            // `(?<name>...)` — named iff the char after `<` is a name-start
-            // byte. `(?<=...)` and `(?<!...)` are lookbehinds; not captures.
-            if bytes[i + 2] == b'<' {
-                let after_lt = bytes[i + 3];
-                if after_lt != b'=' && after_lt != b'!' {
-                    return true;
-                }
-            }
-            // `(?P<name>...)` — Python-style named capture.
-            // (Only `bytes[i + 3]` is read; the outer `i + 3 < bytes.len()`
-            // guard is already sufficient.)
-            if bytes[i + 2] == b'P' && bytes[i + 3] == b'<' {
-                return true;
-            }
-        }
-
-        i += 1;
-    }
-
-    false
-}
-
-/// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
-///
-/// Skips: escapes (`\(`), character classes (`[...]`), the `(?...)` family —
-/// non-capturing `(?:...)`, named `(?<name>...)` / `(?P<name>...)`,
-/// lookarounds `(?=...)` / `(?!...)` / `(?<=...)` / `(?<!...)`, atomic
-/// `(?>...)`, comments `(?#...)`, and inline modifiers `(?i)` — and the
-/// `(*VERB)` family — PCRE control verbs like `(*PRUNE)`, `(*SKIP)`,
-/// `(*FAIL)`, `(*MARK:name)`, etc.
-fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
-    let bytes = regex.as_bytes();
-    let mut positions = Vec::new();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            // Escaped byte — skip both bytes.
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            if b == b']' {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' {
-            let next = bytes.get(i + 1).copied();
-            // `(?...)` constructs and `(*VERB)` control verbs are never
-            // unnamed captures.
-            if next != Some(b'?') && next != Some(b'*') {
-                positions.push(i);
-            }
-        }
-
-        i += 1;
-    }
-
-    positions
 }
 
 /// Rewrite `$1`..`$9` and `${1}`..`${9}` references inside a raw argument
