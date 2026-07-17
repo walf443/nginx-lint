@@ -26,6 +26,8 @@
 
 use nginx_lint_plugin::prelude::*;
 
+use nginx_lint_plugin::helpers::{find_unnamed_capture_positions, regex_has_named_capture};
+
 #[derive(Default)]
 pub struct NginxRiftPlugin;
 
@@ -284,116 +286,6 @@ fn build_renamed_regex(raw: &str) -> (String, usize) {
     }
     out.push_str(std::str::from_utf8(&bytes[cursor..]).expect("ASCII boundary"));
     (out, positions.len())
-}
-
-/// Detect whether a regex source string contains any named capture group
-/// (`(?<name>...)` or `(?P<name>...)`). Lookbehinds `(?<=...)` / `(?<!...)`
-/// are NOT named captures and don't count.
-///
-/// Used to bail out of autofix on regexes that mix named and unnamed
-/// captures: our cap-numbering (index among unnamed) diverges from PCRE's
-/// positional numbering once a named group is present, so a `$1` could end
-/// up renamed to point at a different capture.
-fn regex_has_named_capture(raw: &str) -> bool {
-    let bytes = raw.as_bytes();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            if b == b']' {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' && i + 3 < bytes.len() && bytes[i + 1] == b'?' {
-            // `(?<name>...)` — named iff the char after `<` is a name-start
-            // byte. `(?<=...)` and `(?<!...)` are lookbehinds; not captures.
-            if bytes[i + 2] == b'<' {
-                let after_lt = bytes[i + 3];
-                if after_lt != b'=' && after_lt != b'!' {
-                    return true;
-                }
-            }
-            // `(?P<name>...)` — Python-style named capture.
-            // (Only `bytes[i + 3]` is read; the outer `i + 3 < bytes.len()`
-            // guard is already sufficient.)
-            if bytes[i + 2] == b'P' && bytes[i + 3] == b'<' {
-                return true;
-            }
-        }
-
-        i += 1;
-    }
-
-    false
-}
-
-/// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
-///
-/// Skips: escapes (`\(`), character classes (`[...]`), the `(?...)` family —
-/// non-capturing `(?:...)`, named `(?<name>...)` / `(?P<name>...)`,
-/// lookarounds `(?=...)` / `(?!...)` / `(?<=...)` / `(?<!...)`, atomic
-/// `(?>...)`, comments `(?#...)`, and inline modifiers `(?i)` — and the
-/// `(*VERB)` family — PCRE control verbs like `(*PRUNE)`, `(*SKIP)`,
-/// `(*FAIL)`, `(*MARK:name)`, etc.
-fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
-    let bytes = regex.as_bytes();
-    let mut positions = Vec::new();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            // Escaped byte — skip both bytes.
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            if b == b']' {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' {
-            let next = bytes.get(i + 1).copied();
-            // `(?...)` constructs and `(*VERB)` control verbs are never
-            // unnamed captures.
-            if next != Some(b'?') && next != Some(b'*') {
-                positions.push(i);
-            }
-        }
-
-        i += 1;
-    }
-
-    positions
 }
 
 /// Rewrite `$1`..`$9` and `${1}`..`${9}` references inside a raw argument
@@ -1996,5 +1888,74 @@ http {
         let spec = NginxRiftPlugin.spec();
         assert_eq!(spec.min_nginx_version.as_deref(), Some("0.6.27"));
         assert_eq!(spec.max_nginx_version.as_deref(), Some("1.30.1"));
+    }
+
+    /// Regexes whose capture-scanning this plugin gets from
+    /// `nginx_lint_plugin::helpers`, where the scanner used to disagree with
+    /// PCRE. Each autofix below was verified to load on nginx 1.29, as was the
+    /// config it replaces.
+    ///
+    /// The comment case is the one that mattered: the scanner used to report
+    /// the `(` *inside* `(?#(`, so this plugin emitted
+    /// `"^/a(?#(?<cap1>)/(?<cap2>.*)$"` — the comment swallowed `(?<cap1>`, and
+    /// nginx refused to start with `unknown "cap1" variable`.
+    #[test]
+    fn autofix_is_correct_for_regexes_the_scanner_used_to_misread() {
+        let cases = [
+            // (regex, expected rewritten regex)
+            (r"^/a(?# [ )(x)$", r"^/a(?# [ )(?<cap1>x)$"),
+            (r"^/a(*MARK:[)(x)$", r"^/a(*MARK:[)(?<cap1>x)$"),
+            (r"^/a(?#()/(.*)$", r"^/a(?#()/(?<cap1>.*)$"),
+            (r"^/a[]()]/(x)$", r"^/a[]()]/(?<cap1>x)$"),
+            (r"^/a\Q(a)\E/(x)$", r"^/a\Q(a)\E/(?<cap1>x)$"),
+        ];
+
+        for (regex, expected) in cases {
+            let src = format!(
+                "http {{\n  server {{\n    location ~ \"{regex}\" {{\n      \
+                 rewrite \"{regex}\" /internal?migrated=true;\n      \
+                 set $original_endpoint $1;\n    }}\n  }}\n}}\n"
+            );
+            let errors = PluginTestRunner::new(NginxRiftPlugin)
+                .check_string(&src)
+                .expect("check failed");
+            let rewritten: Vec<&str> = errors
+                .iter()
+                .flat_map(|e| e.fixes.iter())
+                .map(|f| f.new_text.as_str())
+                .collect();
+
+            assert!(
+                rewritten.contains(&format!("\"{expected}\"").as_str()),
+                "{regex}: expected the rewrite regex to become {expected}, got {rewritten:?}"
+            );
+        }
+    }
+
+    /// A branch reset makes both parens group 1, so naming them apart is
+    /// invalid PCRE (`different names for subpatterns of the same number`) and
+    /// nginx will not start. This plugin has no guard for it and emits the
+    /// broken fix — pinned as a known bug, tracked separately. Predates the
+    /// helper extraction: the pre-move scanner returned the same positions.
+    #[test]
+    fn known_bug_branch_reset_autofix_is_invalid() {
+        let src = "http {\n  server {\n    location ~ \"^/(?|(a)|(b))$\" {\n      \
+                   rewrite \"^/(?|(a)|(b))$\" /internal?migrated=true;\n      \
+                   set $original_endpoint $1;\n    }\n  }\n}\n";
+        let errors = PluginTestRunner::new(NginxRiftPlugin)
+            .check_string(src)
+            .expect("check failed");
+        let rewritten: Vec<&str> = errors
+            .iter()
+            .flat_map(|e| e.fixes.iter())
+            .map(|f| f.new_text.as_str())
+            .collect();
+
+        assert!(
+            rewritten
+                .iter()
+                .any(|r| r.contains("cap1") && r.contains("cap2")),
+            "expected the (known bad) two-name rewrite, got {rewritten:?}"
+        );
     }
 }

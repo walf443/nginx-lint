@@ -1,0 +1,19 @@
+[package]
+name = "map-unnamed-capture-plugin"
+version = "0.17.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nginx-lint-plugin = { path = "../../../../crates/nginx-lint-plugin" }
+
+[dev-dependencies]
+nginx-lint-plugin = { path = "../../../../crates/nginx-lint-plugin", features = ["container-testing"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[features]
+default = ["wit-export"]
+wit-export = ["nginx-lint-plugin/wit-export"]

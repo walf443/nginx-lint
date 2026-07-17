@@ -76,6 +76,9 @@ mod embedded {
     /// map-missing-default plugin
     pub const MAP_MISSING_DEFAULT: &[u8] =
         include_bytes!("../../target/builtin-plugins/map_missing_default.wasm");
+    /// map-unnamed-capture plugin
+    pub const MAP_UNNAMED_CAPTURE: &[u8] =
+        include_bytes!("../../target/builtin-plugins/map_unnamed_capture.wasm");
     /// ssl-on-deprecated plugin
     pub const SSL_ON_DEPRECATED: &[u8] =
         include_bytes!("../../target/builtin-plugins/ssl_on_deprecated.wasm");
@@ -303,6 +306,7 @@ const PLUGIN_ENTRIES: &[(&str, &[u8])] = &[
         embedded::CLIENT_MAX_BODY_SIZE_NOT_SET,
     ),
     ("nginx-rift", embedded::NGINX_RIFT),
+    ("map-unnamed-capture", embedded::MAP_UNNAMED_CAPTURE),
 ];
 
 #[cfg(all(test, feature = "wasm-builtin-plugins"))]

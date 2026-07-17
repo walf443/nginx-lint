@@ -142,6 +142,61 @@ pub fn extract_domain(host: &str) -> &str {
     host.split(':').next().unwrap_or(host)
 }
 
+use crate::regex_scan::{Group, scan};
+
+/// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
+///
+/// A view over [`crate::regex_scan::scan`], which is the single place that
+/// knows PCRE syntax — see its docs for what counts as a capture group and why
+/// this is not a parser of its own.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_plugin::helpers::find_unnamed_capture_positions;
+///
+/// assert_eq!(find_unnamed_capture_positions("^/api/(.*)$"), vec![6]);
+/// assert_eq!(find_unnamed_capture_positions("(a)(b)(?:c)(d)"), vec![0, 3, 11]);
+///
+/// // Not unnamed captures
+/// assert!(find_unnamed_capture_positions("^/(?<name>.*)$").is_empty());
+/// assert!(find_unnamed_capture_positions(r"\(literal\)").is_empty());
+/// assert!(find_unnamed_capture_positions("[()]").is_empty());
+/// assert!(find_unnamed_capture_positions("(*PRUNE)").is_empty());
+/// assert!(find_unnamed_capture_positions("[]()]").is_empty());
+/// assert!(find_unnamed_capture_positions("[[:^print:]()]").is_empty());
+/// assert!(find_unnamed_capture_positions(r"\Q(a)\E").is_empty());
+/// assert_eq!(find_unnamed_capture_positions("(?# [ )(a)"), vec![7]);
+/// ```
+pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
+    scan(regex)
+        .into_iter()
+        .filter(|(_, group)| *group == Group::Unnamed)
+        .map(|(pos, _)| pos)
+        .collect()
+}
+
+/// Detect whether a regex source string contains any named capture group —
+/// `(?<name>...)`, `(?'name'...)` or `(?P<name>...)`. Lookbehinds
+/// `(?<=...)` / `(?<!...)` are NOT named captures and don't count.
+///
+/// # Examples
+///
+/// ```
+/// use nginx_lint_plugin::helpers::regex_has_named_capture;
+///
+/// assert!(regex_has_named_capture("(?<name>.*)"));
+/// assert!(regex_has_named_capture("(?'name'.*)"));
+/// assert!(regex_has_named_capture("(?P<name>.*)"));
+///
+/// assert!(!regex_has_named_capture("(.*)"));
+/// assert!(!regex_has_named_capture("(?<=foo)bar"));
+/// assert!(!regex_has_named_capture("(?<!foo)bar"));
+/// ```
+pub fn regex_has_named_capture(regex: &str) -> bool {
+    scan(regex).iter().any(|(_, group)| *group == Group::Named)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1747,6 +1747,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "map-unnamed-capture-plugin"
+version = "0.17.0"
+dependencies = [
+ "nginx-lint-plugin",
+ "tokio",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1811,6 +1819,7 @@ dependencies = [
  "invalid-directive-context-plugin",
  "listen-http2-deprecated-plugin",
  "map-missing-default-plugin",
+ "map-unnamed-capture-plugin",
  "missing-error-log-plugin",
  "nginx-lint-common",
  "nginx-lint-plugin",

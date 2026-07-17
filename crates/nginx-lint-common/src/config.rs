@@ -707,6 +707,7 @@ impl LintConfig {
         "proxy-missing-host-header",
         "client-max-body-size-not-set",
         "nginx-rift",
+        "map-unnamed-capture",
     ];
 
     /// Check if a rule is enabled
