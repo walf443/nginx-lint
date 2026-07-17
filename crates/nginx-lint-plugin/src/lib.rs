@@ -100,6 +100,8 @@ pub use nginx_lint_common::parser;
 /// This re-exports all core types ([`Plugin`], [`PluginSpec`], [`LintError`], [`Fix`],
 /// [`Config`], [`Directive`], etc.), extension traits ([`ConfigExt`], [`DirectiveExt`]),
 /// the [`helpers`] module, and the [`export_component_plugin!`] macro.
+pub mod regex_scan;
+
 pub mod prelude {
     pub use super::export_component_plugin;
     pub use super::helpers;

@@ -142,19 +142,13 @@ pub fn extract_domain(host: &str) -> &str {
     host.split(':').next().unwrap_or(host)
 }
 
+use crate::regex_scan::{Group, scan};
+
 /// Find byte offsets of `(` characters that open an unnamed PCRE capture group.
 ///
-/// nginx stores unnamed captures in the shared `$1`..`$9` slots, so rules that
-/// care about capture collisions need to tell a real capture group apart from a
-/// paren that merely looks like one.
-///
-/// Skips: escapes (`\(`), `\Q...\E` literal spans, character classes (`[...]`,
-/// including a leading `]` member), the `(?...)` family — non-capturing
-/// `(?:...)`, named `(?<name>...)` / `(?P<name>...)`, lookarounds `(?=...)` /
-/// `(?!...)` / `(?<=...)` / `(?<!...)`, atomic `(?>...)`, comments `(?#...)`,
-/// inline modifiers `(?i)`, and conditionals `(?(1)...)` — and the `(*VERB)`
-/// family — PCRE control verbs like `(*PRUNE)`, `(*SKIP)`, `(*FAIL)`,
-/// `(*MARK:name)`, etc.
+/// A view over [`crate::regex_scan::scan`], which is the single place that
+/// knows PCRE syntax — see its docs for what counts as a capture group and why
+/// this is not a parser of its own.
 ///
 /// # Examples
 ///
@@ -169,176 +163,21 @@ pub fn extract_domain(host: &str) -> &str {
 /// assert!(find_unnamed_capture_positions(r"\(literal\)").is_empty());
 /// assert!(find_unnamed_capture_positions("[()]").is_empty());
 /// assert!(find_unnamed_capture_positions("(*PRUNE)").is_empty());
-///
-/// // `]` first in a class is a member, so these parens are still inside it
 /// assert!(find_unnamed_capture_positions("[]()]").is_empty());
-/// assert!(find_unnamed_capture_positions("[^]()]").is_empty());
-/// assert!(find_unnamed_capture_positions("[[:alpha:]()]").is_empty());
-///
-/// // `\Q...\E` makes its contents literal
-/// assert!(find_unnamed_capture_positions(r"\Q(a)\E").is_empty());
-///
-/// // The inner paren of a conditional is syntax, not a group
-/// assert_eq!(find_unnamed_capture_positions("(a)(?(1)x|y)"), vec![0]);
-///
-/// // A `(?#...)` comment body is opaque text — parens in it are not groups,
-/// // and a `[` or `\Q` in it must not swallow the captures that follow
-/// assert!(find_unnamed_capture_positions("^/a(?#()$").is_empty());
-/// assert_eq!(find_unnamed_capture_positions("(?# [ )(a)"), vec![7]);
-///
-/// // Negated POSIX classes are classes too
 /// assert!(find_unnamed_capture_positions("[[:^print:]()]").is_empty());
+/// assert!(find_unnamed_capture_positions(r"\Q(a)\E").is_empty());
+/// assert_eq!(find_unnamed_capture_positions("(?# [ )(a)"), vec![7]);
 /// ```
 pub fn find_unnamed_capture_positions(regex: &str) -> Vec<usize> {
-    let bytes = regex.as_bytes();
-    let mut positions = Vec::new();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    // Byte offset just past `[` (and an optional negating `^`), where a `]` is
-    // a literal member rather than the class terminator.
-    let mut class_body_start = 0;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            // `\Q...\E` quotes everything up to `\E` (or end of pattern).
-            if bytes[i + 1] == b'Q' {
-                i = find_literal_span_end(bytes, i + 2);
-                continue;
-            }
-            // Any other escape — skip both bytes.
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            // A POSIX class such as `[:alpha:]` nests inside the class, and its
-            // `]` does not end the enclosing one.
-            if b == b'['
-                && bytes.get(i + 1) == Some(&b':')
-                && let Some(end) = find_posix_class_end(bytes, i + 2)
-            {
-                i = end;
-                continue;
-            }
-            // PCRE reads `]` as a member when it opens the class body, so only
-            // a later one closes it. `[]()]`, `[^]()]` are single classes.
-            if b == b']' && i > class_body_start {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            class_body_start = i + 1;
-            if bytes.get(class_body_start) == Some(&b'^') {
-                class_body_start += 1;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' {
-            match bytes.get(i + 1).copied() {
-                // `(*VERB)` / `(*MARK:name)` — never a capture, and the name
-                // is arbitrary text, so step over the whole thing rather than
-                // scanning it as regex.
-                Some(b'*') => {
-                    i = find_close_paren(bytes, i + 2);
-                    continue;
-                }
-                Some(b'?') => match bytes.get(i + 2).copied() {
-                    // `(?#...)` is a comment: its body is arbitrary text and
-                    // runs to the very next `)`, with no escaping. Scanning it
-                    // as regex both invents groups and — via a stray `[` or
-                    // `\Q` — swallows the real ones after it.
-                    Some(b'#') => {
-                        i = find_close_paren(bytes, i + 3);
-                        continue;
-                    }
-                    // A conditional `(?(1)...)` / `(?(<name>)...)` nests a
-                    // paren that is syntax, not a group.
-                    Some(b'(') => {
-                        i += 3;
-                        continue;
-                    }
-                    // Every other `(?...)` construct is not a capture, but its
-                    // body is regex and must still be scanned.
-                    _ => {}
-                },
-                _ => positions.push(i),
-            }
-        }
-
-        i += 1;
-    }
-
-    positions
-}
-
-/// Offset just past the next `)` at or after `from`, or the end of the input
-/// when there is none. Used for constructs whose body is opaque text — a
-/// `(?#...)` comment or a `(*VERB:name)` — which PCRE ends at the first `)`.
-///
-/// **Escapes are deliberately not honoured, and must not be.** PCRE gives no
-/// way to put a `)` inside these: a comment ends at the first one even when a
-/// backslash precedes it, so `a(?#x\)b` is `a`, a comment, then `b` — it
-/// matches `ab`. Teaching this function to skip `\)` would desynchronise it
-/// from PCRE and hide the group that follows. Pinned by
-/// `comment_ends_at_first_paren_even_after_a_backslash`.
-fn find_close_paren(bytes: &[u8], from: usize) -> usize {
-    let mut i = from;
-    while i < bytes.len() {
-        if bytes[i] == b')' {
-            return i + 1;
-        }
-        i += 1;
-    }
-    bytes.len()
-}
-
-/// Offset just past the `:]` closing a POSIX class whose body starts at
-/// `from`, or `None` when there is none — in which case the `[` was an
-/// ordinary member and should be treated as such.
-fn find_posix_class_end(bytes: &[u8], from: usize) -> Option<usize> {
-    // `[[:^alpha:]]` negates the class; the `^` is part of the syntax, not the
-    // name. Missing it ended the class at the `:]` and exposed everything after
-    // it as regex.
-    let mut i = from + usize::from(bytes.get(from) == Some(&b'^'));
-
-    while i + 1 < bytes.len() {
-        if bytes[i] == b':' && bytes[i + 1] == b']' {
-            return Some(i + 2);
-        }
-        // A POSIX class name is alphabetic; anything else means this was not
-        // one, e.g. a literal `[` followed by `:` in the class.
-        if !bytes[i].is_ascii_alphabetic() {
-            return None;
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Offset just past the `\E` closing a `\Q` literal span that starts at
-/// `from`, or the end of the pattern when it is unterminated.
-fn find_literal_span_end(bytes: &[u8], from: usize) -> usize {
-    let mut i = from;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'\\' && bytes[i + 1] == b'E' {
-            return i + 2;
-        }
-        i += 1;
-    }
-    bytes.len()
+    scan(regex)
+        .into_iter()
+        .filter(|(_, group)| *group == Group::Unnamed)
+        .map(|(pos, _)| pos)
+        .collect()
 }
 
 /// Whether a regex source string contains at least one unnamed PCRE capture
-/// group. See [`find_unnamed_capture_positions`] for what counts as one.
+/// group. See [`find_unnamed_capture_positions`].
 ///
 /// # Examples
 ///
@@ -350,12 +189,14 @@ fn find_literal_span_end(bytes: &[u8], from: usize) -> usize {
 /// assert!(!has_unnamed_capture("^/old/(?:.*)$"));
 /// ```
 pub fn has_unnamed_capture(regex: &str) -> bool {
-    !find_unnamed_capture_positions(regex).is_empty()
+    scan(regex)
+        .iter()
+        .any(|(_, group)| *group == Group::Unnamed)
 }
 
-/// Detect whether a regex source string contains any named capture group
-/// (`(?<name>...)` or `(?P<name>...)`). Lookbehinds `(?<=...)` / `(?<!...)`
-/// are NOT named captures and don't count.
+/// Detect whether a regex source string contains any named capture group —
+/// `(?<name>...)`, `(?'name'...)` or `(?P<name>...)`. Lookbehinds
+/// `(?<=...)` / `(?<!...)` are NOT named captures and don't count.
 ///
 /// # Examples
 ///
@@ -363,6 +204,7 @@ pub fn has_unnamed_capture(regex: &str) -> bool {
 /// use nginx_lint_plugin::helpers::regex_has_named_capture;
 ///
 /// assert!(regex_has_named_capture("(?<name>.*)"));
+/// assert!(regex_has_named_capture("(?'name'.*)"));
 /// assert!(regex_has_named_capture("(?P<name>.*)"));
 ///
 /// assert!(!regex_has_named_capture("(.*)"));
@@ -370,58 +212,7 @@ pub fn has_unnamed_capture(regex: &str) -> bool {
 /// assert!(!regex_has_named_capture("(?<!foo)bar"));
 /// ```
 pub fn regex_has_named_capture(regex: &str) -> bool {
-    let bytes = regex.as_bytes();
-    let mut i = 0;
-    let mut in_char_class = false;
-
-    while i < bytes.len() {
-        let b = bytes[i];
-
-        if b == b'\\' && i + 1 < bytes.len() {
-            i += 2;
-            continue;
-        }
-
-        if in_char_class {
-            if b == b']' {
-                in_char_class = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'[' {
-            in_char_class = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b'(' && i + 3 < bytes.len() && bytes[i + 1] == b'?' {
-            // `(?<name>...)` — named iff the char after `<` is a name-start
-            // byte. `(?<=...)` and `(?<!...)` are lookbehinds; not captures.
-            if bytes[i + 2] == b'<' {
-                let after_lt = bytes[i + 3];
-                if after_lt != b'=' && after_lt != b'!' {
-                    return true;
-                }
-            }
-            // `(?'name'...)` — the quoted form. Missing it let callers treat a
-            // named group as unnamed, which silently misnumbers the rest.
-            if bytes[i + 2] == b'\'' {
-                return true;
-            }
-            // `(?P<name>...)` — Python-style named capture.
-            // (Only `bytes[i + 3]` is read; the outer `i + 3 < bytes.len()`
-            // guard is already sufficient.)
-            if bytes[i + 2] == b'P' && bytes[i + 3] == b'<' {
-                return true;
-            }
-        }
-
-        i += 1;
-    }
-
-    false
+    scan(regex).iter().any(|(_, group)| *group == Group::Named)
 }
 
 #[cfg(test)]
@@ -500,84 +291,5 @@ mod tests {
         assert_eq!(extract_domain("example.com:8080"), "example.com");
         assert_eq!(extract_domain("localhost:3000"), "localhost");
         assert_eq!(extract_domain("127.0.0.1:80"), "127.0.0.1");
-    }
-
-    /// PCRE reads `]` as a member when it opens the class body, so the class
-    /// runs on past it. Terminating there made the following literal parens
-    /// look like groups.
-    #[test]
-    fn class_with_leading_bracket_member_is_not_a_capture() {
-        assert!(find_unnamed_capture_positions("[]()]").is_empty());
-        assert!(find_unnamed_capture_positions("[^]()]").is_empty());
-        assert!(find_unnamed_capture_positions("[[:alpha:]()]").is_empty());
-        // A `]` that is not first still closes the class.
-        assert_eq!(find_unnamed_capture_positions("[abc](d)"), vec![5]);
-    }
-
-    /// `\Q...\E` quotes its contents, so parens inside are literal.
-    #[test]
-    fn quoted_literal_span_is_not_scanned() {
-        assert!(find_unnamed_capture_positions(r"\Q(a)\E").is_empty());
-        assert_eq!(find_unnamed_capture_positions(r"\Q(a)\E(b)"), vec![7]);
-        // Unterminated `\Q` quotes to the end.
-        assert!(find_unnamed_capture_positions(r"\Q(a)").is_empty());
-    }
-
-    /// The paren nested in a conditional is syntax, not a group.
-    #[test]
-    fn conditional_inner_paren_is_not_a_capture() {
-        assert_eq!(find_unnamed_capture_positions("(a)(?(1)x|y)"), vec![0]);
-        assert!(find_unnamed_capture_positions("(?(<n>)x|y)").is_empty());
-    }
-
-    /// A `(?#...)` comment body is opaque text ending at the first `)`.
-    /// Scanning it as regex invented groups, and a stray `[` or `\Q` in the
-    /// prose swallowed every real capture after it.
-    #[test]
-    fn comment_body_is_skipped() {
-        // `(` in the prose is not a group.
-        assert!(find_unnamed_capture_positions("^/a(?#()$").is_empty());
-        // A capture after such a comment is still found.
-        assert_eq!(find_unnamed_capture_positions("^/a(?#()/(.*)$"), vec![9]);
-        // `[` / `\Q` in the prose must not swallow what follows.
-        assert_eq!(find_unnamed_capture_positions("(?# [ )(a)"), vec![7]);
-        assert_eq!(find_unnamed_capture_positions(r"(?#\Q)(a)"), vec![6]);
-        assert_eq!(find_unnamed_capture_positions("(?#c)(a)"), vec![5]);
-    }
-
-    /// `(*MARK:name)` carries arbitrary text; a `[` in it must not swallow the
-    /// rest of the pattern.
-    #[test]
-    fn verb_name_is_skipped() {
-        assert_eq!(find_unnamed_capture_positions("(*MARK:[)(a)"), vec![9]);
-        assert!(find_unnamed_capture_positions("(*PRUNE)").is_empty());
-    }
-
-    /// `[[:^alpha:]]` negates the class — the `^` is syntax, not the name.
-    /// Missing it closed the class at the `:]`.
-    #[test]
-    fn negated_posix_class_does_not_end_the_class() {
-        assert!(find_unnamed_capture_positions("[[:^print:]()]").is_empty());
-        assert!(find_unnamed_capture_positions("[[:^alpha:]]").is_empty());
-        // Still finds a real capture after the class.
-        assert_eq!(find_unnamed_capture_positions("[[:^print:]](a)"), vec![12]);
-    }
-
-    /// PCRE has three named-capture syntaxes; treating `(?'n'...)` as unnamed
-    /// made callers renumber the groups around it.
-    #[test]
-    fn quoted_named_capture_is_recognised() {
-        assert!(regex_has_named_capture("(?'a'x)"));
-        assert!(regex_has_named_capture("(?'a'x)(y)"));
-        // Not a named capture.
-        assert!(!regex_has_named_capture("(x)"));
-    }
-
-    /// PCRE gives no way to put a `)` inside a `(?#...)` comment — the first
-    /// one ends it, backslash or not (`a(?#x\)b` matches "ab"). So the group
-    /// after it is real, and skipping `\)` here would hide it.
-    #[test]
-    fn comment_ends_at_first_paren_even_after_a_backslash() {
-        assert_eq!(find_unnamed_capture_positions(r"(?#x\)(a)"), vec![6]);
     }
 }
