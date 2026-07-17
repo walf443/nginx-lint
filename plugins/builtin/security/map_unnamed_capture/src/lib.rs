@@ -22,12 +22,14 @@
 //! Two stock callers pass `NGX_HTTP_SUBREQUEST_CLONE`:
 //! `ngx_http_slice_filter_module.c` and, via
 //! `ngx_http_upstream_cache_background_update()`, `proxy_cache_background_update
-//! on` + `proxy_cache_use_stale updating`. Under `slice` a non-volatile map
-//! happens to stay clean, but only because the main request proxies the first
-//! slice itself and so evaluates and caches the map before any clone exists —
-//! a property of that path, not of non-volatile maps. Under
-//! `proxy_cache_background_update` the clone is created during
-//! `ngx_http_file_cache_open()`, *before* `create_request`, and the main
+//! on` (reached via `proxy_cache_use_stale updating`, or equally via
+//! `stale-while-revalidate` from the upstream's own `Cache-Control`). Under
+//! `slice` a non-volatile map happens to stay clean, but only because the main
+//! request proxies the first slice itself and so evaluates and caches the map
+//! before any clone exists — a property of that path, not of non-volatile
+//! maps. Under `proxy_cache_background_update` the clone is created when
+//! `ngx_http_upstream_cache()` sees `ngx_http_file_cache_open()` return
+//! `NGX_HTTP_CACHE_STALE`, which is *before* `create_request`; the main
 //! request then answers straight from cache without ever evaluating
 //! `proxy_set_header` — leaving the background subrequest as the map's first
 //! evaluator, with `realloc_captures` already set.
@@ -84,10 +86,14 @@ impl Plugin for MapUnnamedCapturePlugin {
              stale-count read. Better still, use a non-capturing group `(?:...)` when the group is \
              only for grouping (as in `~*(bot|crawler)`): with no capture left the regex stops \
              reallocating at all, which is the one remediation that needs no change outside the \
-             map. Scope note: this rule reports only unnamed captures, so a map whose captures are \
-             already named is not reported even though it still arms the bug — that combination \
-             (named map, unnamed `$1` read elsewhere) is a known blind spot, traded away to keep \
-             the rule quiet on configs that follow the vendor's advice.",
+             map. Scope warning: this rule reports only UNNAMED captures, so a map whose captures \
+             are already named is never reported — even though it still reallocates and so still \
+             arms the bug for any unnamed `$1`..`$9` read elsewhere on the request path. That is \
+             not a rounding error: on a config with a named map capture and an unnamed `$1` \
+             consumer, nginx 1.29 fails 100% of requests while this rule reports nothing at all \
+             (measured). Silence from this rule therefore does not mean the config is safe; it \
+             means no map regex has an unnamed capture. Detecting the rest needs the `$1`..`$9` \
+             readers checked too, which this rule does not do.",
         )
         .with_bad_example(include_str!("../examples/bad.conf").trim())
         .with_good_example(include_str!("../examples/good.conf").trim())
@@ -260,6 +266,14 @@ fn non_capturing_fixes(entry: &Directive, pattern: &str, positions: &[usize]) ->
 /// `"~^/a{2,3}/(x|y)$"` (quoted because nginx requires it for `{n,m}`) would
 /// get its `/` rewritten instead of its `(`, leaving unbalanced parens that
 /// nginx refuses to load.
+///
+/// The `2` case leans on a quirk of *this* parser: nginx's own
+/// `ngx_conf_read_token` decodes `\\`, `\"`, `\'`, `\t`, `\r`, `\n` in
+/// unquoted tokens as well, and if nginx-lint's parser ever did the same, two
+/// such escapes in a bare key would also give a gap of 2 and shift every fix
+/// by a byte. It does not decode them today (checked), so a gap of 2 means
+/// quotes and nothing else. If that ever changes, this must become an explicit
+/// "is the first byte a quote" test against the source text.
 fn key_quote_len(entry: &Directive) -> Option<usize> {
     let raw_len = entry.name_span.end.offset - entry.name_span.start.offset;
 
@@ -284,8 +298,9 @@ fn references_group_by_number(pattern: &str) -> bool {
     for (i, &b) in bytes.iter().enumerate() {
         let next = bytes.get(i + 1).copied();
         match b {
-            // `\1`, `\g...`. Any other escape is skipped by the `\\` arm below
-            // only when it is the escape itself, so check before that.
+            // `\1`, `\g...`. Every byte is inspected, escape pairs included —
+            // no skipping. That over-matches (a literal `\\1` trips the second
+            // `\`), but over-blocking only costs a fix, so it stays blunt.
             b'\\' => match next {
                 Some(c) if c.is_ascii_digit() => return true,
                 Some(b'g') | Some(b'k') => return true,
@@ -304,7 +319,13 @@ fn references_group_by_number(pattern: &str) -> bool {
     false
 }
 
-/// Whether the text reads a positional capture — `$1`..`$9` or `${1}`.
+/// Whether the text reads a positional capture — `$1`..`$9`.
+///
+/// `${1}` is also matched, but only out of bluntness: it is NOT a braced
+/// positional reference. `ngx_http_script_compile()` tests the digit before the
+/// brace, so `${1}` takes the variable path and becomes a variable *named* "1",
+/// which nginx rejects at load with `unknown "1" variable`. Blocking the fix
+/// there costs nothing — the config never ran.
 ///
 /// Deliberately blunt: anything that looks like a positional reference counts,
 /// so an odd spelling suppresses the autofix rather than risking a rewrite that
@@ -683,9 +704,14 @@ http {
         );
     }
 
-    /// `${1}` is the same reference in braced form.
+    /// `${1}` is NOT a braced positional reference — nginx reads it as a
+    /// variable named "1" and refuses to load (`unknown "1" variable`),
+    /// verified on 1.29. The fix is blocked anyway because
+    /// [`reads_positional_capture`] is deliberately blunt, which is free: the
+    /// config could never have run. Pinned so nobody "simplifies" the check on
+    /// the false premise that `${1}` means `$1`.
     #[test]
-    fn test_braced_capture_reference_blocks_the_fix() {
+    fn test_braced_variable_named_1_blocks_the_fix() {
         let errors = runner()
             .check_string(
                 r#"
@@ -863,6 +889,27 @@ http {
         ~^/q/\Q(a)\E$ 1;
         ~^/c/[]()]$ 2;
         ~^/p/[[:alpha:]()]$ 3;
+    }
+}
+"#,
+        );
+    }
+
+    /// Known miss, pinned so it is not mistaken for correct behaviour.
+    ///
+    /// nginx honours a quote only at the start of a token
+    /// (`ngx_conf_read_token` checks `last_space`), so `~^/"a"/(x|y)$` is one
+    /// key with a literal `"` in it and loads fine. nginx-lint's parser splits
+    /// the token at the quote instead, so the plugin never sees the capture and
+    /// stays silent. The fix belongs in the parser, not here.
+    #[test]
+    fn test_key_with_embedded_quote_is_missed() {
+        runner().assert_no_errors(
+            r#"
+http {
+    map $uri $flag {
+        default 0;
+        ~^/"a"/(x|y)$ 1;
     }
 }
 "#,

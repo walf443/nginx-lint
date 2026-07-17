@@ -388,12 +388,20 @@ async fn unnamed_map_capture_breaks_the_slice_subrequest() {
 // The remediations neutralise it on the same affected build
 // ============================================================================
 //
-// Same image, no version gate beyond observability: these prove the fixes
-// actually work rather than merely compiling.
+// These only mean something on a build that actually has the bug — on a fixed
+// one the config would serve either way, so they would pass without proving
+// anything. Hence the `is_affected_build` skip.
 
 #[tokio::test]
 #[ignore]
 async fn named_captures_keep_the_subrequest_working() {
+    if !is_stock_nginx() {
+        eprintln!(
+            "SKIP named_captures_keep_the_subrequest_working: fix status not established for {}",
+            nginx_server_name()
+        );
+        return;
+    }
     if !has_slice_module().await {
         eprintln!("SKIP named_captures_keep_the_subrequest_working: image lacks http_slice_module");
         return;
@@ -403,6 +411,13 @@ async fn named_captures_keep_the_subrequest_working() {
         .health_path("/healthz")
         .start(safe_config().as_str())
         .await;
+
+    if !is_affected_build(&nginx).await {
+        eprintln!(
+            "SKIP named_captures_keep_the_subrequest_working: build is not affected, so there is nothing to neutralise"
+        );
+        return;
+    }
 
     seed_backend_file(&nginx).await;
     let seen = drive(&nginx, "/big.txt").await;
@@ -417,6 +432,13 @@ async fn named_captures_keep_the_subrequest_working() {
 #[tokio::test]
 #[ignore]
 async fn autofix_keeps_the_subrequest_working() {
+    if !is_stock_nginx() {
+        eprintln!(
+            "SKIP autofix_keeps_the_subrequest_working: fix status not established for {}",
+            nginx_server_name()
+        );
+        return;
+    }
     if !has_slice_module().await {
         eprintln!("SKIP autofix_keeps_the_subrequest_working: image lacks http_slice_module");
         return;
@@ -426,6 +448,13 @@ async fn autofix_keeps_the_subrequest_working() {
         .health_path("/healthz")
         .start(autofixed_config().as_str())
         .await;
+
+    if !is_affected_build(&nginx).await {
+        eprintln!(
+            "SKIP autofix_keeps_the_subrequest_working: build is not affected, so there is nothing to neutralise"
+        );
+        return;
+    }
 
     seed_backend_file(&nginx).await;
     let seen = drive(&nginx, "/big.txt").await;
