@@ -24,6 +24,19 @@
 //! This classifies parens. It does not validate the regex — an input PCRE
 //! rejects may produce anything, which is fine because nginx would refuse such
 //! a config anyway.
+//!
+//! It also tracks no nesting, which bounds one case deliberately: `(?n)` (PCRE2
+//! 10.43+) turns off auto-capture until the end of the *enclosing group*, and
+//! `(?n:...)` only within its own. Honouring that needs a group stack, so it is
+//! not honoured — `(?n)(a)` is reported as an unnamed capture though PCRE gives
+//! it none.
+//!
+//! That over-reports, which is the safe direction and costs nothing real: the
+//! spurious warning lands on a regex that has no captures to leak, and the
+//! rewrite it invites, `(?n)(a)` -> `(?n)(?:a)`, has the same zero captures and
+//! still loads (checked on nginx 1.29). A global flag was tried and rejected:
+//! it made `(?n:(a))(b)` report *no* captures where PCRE has one, turning a
+//! harmless over-report into a security rule missing a real capture.
 
 /// What a `(` in the pattern opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,15 +127,37 @@ pub fn scan(regex: &str) -> Vec<(usize, Group)> {
 
         if b == b'(' {
             match bytes.get(i + 1).copied() {
-                // `(*VERB)` / `(*MARK:name)` — never a capture, and the name is
-                // arbitrary text.
                 Some(b'*') => {
-                    i = find_close_paren(bytes, i + 2);
+                    // `(*` spells two unrelated things. A control verb or
+                    // option setting — `(*PRUNE)`, `(*MARK:name)`, `(*UTF)`,
+                    // `(*:name)` — carries arbitrary text, so it is opaque. But
+                    // `(*pla:...)`, `(*atomic:...)`, `(*sr:...)` and friends are
+                    // *groups*, spelled with a lowercase name, and their bodies
+                    // are regex holding real captures. Skipping those as if they
+                    // were verbs hid every capture inside them.
+                    if is_alpha_group_prefix(bytes, i + 2) {
+                        i += 2;
+                    } else {
+                        i = find_close_paren(bytes, i + 2);
+                    }
                     continue;
                 }
                 Some(b'?') => match bytes.get(i + 2).copied() {
                     // `(?#...)` is a comment; its body is arbitrary text.
                     Some(b'#') => {
+                        i = find_close_paren(bytes, i + 3);
+                        continue;
+                    }
+                    // A callout with a string argument — `(?C'...'`, `(?C"..."`,
+                    // `` (?C`...` ``, `(?C{...}` etc. Like a comment, the body is
+                    // arbitrary text: a `[` or `\Q` in it would otherwise open a
+                    // class or literal span that never closes. Numeric callouts
+                    // `(?C1)` have no body and need no special case.
+                    Some(b'C')
+                        if bytes
+                            .get(i + 3)
+                            .is_some_and(|c| !c.is_ascii_digit() && *c != b')') =>
+                    {
                         i = find_close_paren(bytes, i + 3);
                         continue;
                     }
@@ -134,9 +169,15 @@ pub fn scan(regex: &str) -> Vec<(usize, Group)> {
                     }
                     // `(?'name'...)`.
                     Some(b'\'') => groups.push((i, Group::Named)),
-                    // `(?<name>...)`, but `(?<=...)` / `(?<!...)` are
-                    // lookbehinds and capture nothing.
-                    Some(b'<') if !matches!(bytes.get(i + 3), Some(b'=') | Some(b'!') | None) => {
+                    // `(?<name>...)`. Not `(?<=...)` / `(?<!...)` (lookbehinds)
+                    // nor `(?<*...)` (non-atomic lookbehind) — those capture
+                    // nothing.
+                    Some(b'<')
+                        if !matches!(
+                            bytes.get(i + 3),
+                            Some(b'=') | Some(b'!') | Some(b'*') | None
+                        ) =>
+                    {
                         groups.push((i, Group::Named))
                     }
                     // `(?P<name>...)`.
@@ -153,6 +194,29 @@ pub fn scan(regex: &str) -> Vec<(usize, Group)> {
     }
 
     groups
+}
+
+/// Whether `(*` at `from - 2` introduces a *group* rather than a control verb.
+///
+/// PCRE spells both with `(*`. Groups use a lowercase name followed by `:` —
+/// `(*pla:`, `(*plb:`, `(*nla:`, `(*nlb:`, `(*napla:`, `(*naplb:`,
+/// `(*atomic:`, `(*sr:`, `(*asr:`, and the long forms
+/// (`(*positive_lookahead:`, `(*script_run:`, `(*atomic_script_run:`, ...).
+/// Their bodies are regex and hold real captures.
+///
+/// Verbs and option settings use uppercase (`(*PRUNE)`, `(*MARK:name)`,
+/// `(*UTF)`) or no name at all (`(*:name)`), and carry arbitrary text.
+///
+/// Underscores appear in the long forms, so they count as part of a name.
+fn is_alpha_group_prefix(bytes: &[u8], from: usize) -> bool {
+    let mut i = from;
+    while bytes
+        .get(i)
+        .is_some_and(|b| b.is_ascii_lowercase() || *b == b'_')
+    {
+        i += 1;
+    }
+    i > from && bytes.get(i) == Some(&b':')
 }
 
 /// Offset just past the next `)` at or after `from`, or the end of the input
@@ -392,5 +456,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// `(*` spells two unrelated things, and treating them alike hid captures.
+    /// A lowercase name plus `:` is a *group* whose body is regex —
+    /// `(*pla:...)`, `(*atomic:...)`, `(*script_run:...)` — while verbs and
+    /// option settings carry opaque text. All verified against libpcre2: the
+    /// group forms really do hold the captures below.
+    #[test]
+    fn alpha_groups_are_scanned_but_verbs_stay_opaque() {
+        // Groups: the body is regex, so its captures count.
+        assert_eq!(unnamed("(*atomic:(a))b"), vec![9]);
+        assert_eq!(unnamed("(*sr:(a))b"), vec![5]);
+        assert_eq!(unnamed("(*nla:(a))b"), vec![6]);
+        assert_eq!(unnamed("(*script_run:(a))b"), vec![13]);
+        assert_eq!(unnamed("(*positive_lookahead:(a))b"), vec![21]);
+        assert!(named("^/a(*pla:(?<n>x))(.*)$"));
+        assert_eq!(unnamed("^/a(*pla:(y))(.*)$"), vec![9, 13]);
+
+        // Verbs and option settings: opaque, and no capture of their own.
+        assert_eq!(unnamed("(*MARK:n)(a)"), vec![9]);
+        assert_eq!(unnamed("(*PRUNE)(a)"), vec![8]);
+        assert_eq!(unnamed("(*:name)(a)"), vec![8]);
+        assert_eq!(unnamed("(*UTF)(a)"), vec![6]);
+        assert_eq!(unnamed("(*MARK:[)(a)"), vec![9]);
+    }
+
+    /// A callout's string argument is arbitrary text, exactly like a comment
+    /// body — a `[` or `\Q` in one used to open a class or literal span that
+    /// never closed, hiding every capture after it.
+    #[test]
+    fn callout_string_bodies_are_opaque() {
+        assert_eq!(unnamed("(?C'[')(a)"), vec![7]);
+        assert_eq!(unnamed(r"(?C'\Q')(a)"), vec![8]);
+        // ...and their contents are not groups.
+        assert!(unnamed("(?C'(a)')x").is_empty());
+        // A numeric callout has no body.
+        assert_eq!(unnamed("(?C1)(a)"), vec![5]);
+        assert_eq!(unnamed("(?C)(a)"), vec![4]);
+    }
+
+    /// `(?<*...)` is a non-atomic lookbehind, not a name.
+    #[test]
+    fn non_atomic_lookbehind_is_not_named() {
+        assert!(!named("(?<*ab)c"));
+        assert!(!named("(?<=ab)c"));
+        assert!(!named("(?<!ab)c"));
+        assert!(named("(?<n>x)"));
     }
 }
