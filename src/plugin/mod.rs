@@ -61,6 +61,7 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
     "proxy-missing-host-header",
     "client-max-body-size-not-set",
     "nginx-rift",
+    "map-unnamed-capture",
 ];
 
 /// Check if a rule name is a builtin plugin

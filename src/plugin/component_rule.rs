@@ -1310,6 +1310,10 @@ mod tests {
             "plugins/builtin/best_practices/client_max_body_size_not_set",
         ),
         ("nginx_rift", "plugins/builtin/security/nginx_rift"),
+        (
+            "map_unnamed_capture",
+            "plugins/builtin/security/map_unnamed_capture",
+        ),
     ];
 
     /// `ALL_BUILTIN_PLUGIN_DIRS` is a third, hand-maintained table alongside
