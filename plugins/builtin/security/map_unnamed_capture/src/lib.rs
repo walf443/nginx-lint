@@ -19,15 +19,27 @@
 //! (`sr->variables = r->variables`), a non-volatile map is equally exposed
 //! whenever its **first** evaluation happens inside the clone.
 //!
-//! Both stock clone paths were tested. Under `slice` the main request proxies
-//! the first slice itself, so it evaluates and caches the map before any clone
-//! exists — non-volatile stays clean there. Under
-//! `proxy_cache_background_update`, the clone is created during cache open and
-//! the main request then answers from cache without ever evaluating
-//! `proxy_set_header`, leaving the background subrequest as the map's first
-//! evaluator — and a **non-volatile** map crashes the worker (verified on
-//! 1.29 and 1.31.2; see `non_volatile_map_via_background_update`). Gating on
-//! `volatile` would therefore miss the more mainstream of the two paths.
+//! Two stock callers pass `NGX_HTTP_SUBREQUEST_CLONE`:
+//! `ngx_http_slice_filter_module.c` and, via
+//! `ngx_http_upstream_cache_background_update()`, `proxy_cache_background_update
+//! on` + `proxy_cache_use_stale updating`. Under `slice` a non-volatile map
+//! happens to stay clean, but only because the main request proxies the first
+//! slice itself and so evaluates and caches the map before any clone exists —
+//! a property of that path, not of non-volatile maps. Under
+//! `proxy_cache_background_update` the clone is created during
+//! `ngx_http_file_cache_open()`, *before* `create_request`, and the main
+//! request then answers straight from cache without ever evaluating
+//! `proxy_set_header` — leaving the background subrequest as the map's first
+//! evaluator, with `realloc_captures` already set.
+//!
+//! A **non-volatile** map has been observed crashing a worker through that
+//! background-update path (nginx 1.29, x86_64). It is not covered by a
+//! container test: whether the stale read faults there depends on what the
+//! uninitialized memory holds, and the outcome flips on unrelated config
+//! details — a test asserting it passes or fails by luck. The rule's scope
+//! rests on the structural facts above, which the tested `slice` path
+//! demonstrates end-to-end. Gating on `volatile` would miss the more
+//! mainstream of the two clone paths.
 //!
 //! The vendor mitigation is to use named captures instead of unnamed ones:
 //! named captures resolve through a separate code path that never touches the
@@ -100,6 +112,20 @@ impl Plugin for MapUnnamedCapturePlugin {
 
         for ctx in config.all_directives_with_context() {
             if !ctx.directive.is("map") {
+                continue;
+            }
+
+            // `stream` cannot reach this bug: it has no subrequests, and
+            // `ngx_stream_regex_exec()` allocates `s->captures` only
+            // `if (s->captures == NULL)` — there is no `realloc_captures`
+            // equivalent, so the array is never reallocated and the count is
+            // never left stale.
+            //
+            // Tested as `!is_inside("stream")` rather than `is_inside("http")`
+            // on purpose: a snippet `include`d into `http` does not have the
+            // `http` block in its own parse tree, and missing a real
+            // vulnerability is worse than reporting one in a stray fragment.
+            if ctx.is_inside("stream") {
                 continue;
             }
 
@@ -177,10 +203,12 @@ fn non_capturing_fixes(entry: &Directive, pattern: &str, positions: &[usize]) ->
         return None;
     }
 
-    // `positions` are byte offsets into `pattern`, which sits `~` / `~*` bytes
-    // into the key token.
-    let modifier_len = entry.name.len() - pattern.len();
-    let pattern_start = entry.name_span.start.offset + modifier_len;
+    // `positions` index into `pattern`, which is a slice of `entry.name` — the
+    // *decoded* key. Rewriting bytes needs source offsets, and `name_span`
+    // covers the raw token, so the two only line up once the quoting is
+    // accounted for.
+    let key_start = entry.name_span.start.offset + key_quote_len(entry)?;
+    let pattern_start = key_start + (entry.name.len() - pattern.len());
 
     Some(
         positions
@@ -191,6 +219,33 @@ fn non_capturing_fixes(entry: &Directive, pattern: &str, positions: &[usize]) ->
             })
             .collect(),
     )
+}
+
+/// Width of the opening quote on this entry's key, or `None` when offsets into
+/// the decoded key cannot be mapped back onto the source.
+///
+/// The parser hands back `name` decoded but `name_span` covering the raw token,
+/// so the gap between them is what the quoting occupies:
+///
+/// - `0` — a bare token such as `~^/old/(.*)$`; offsets already line up.
+/// - `2` — a plain `"..."` / `'...'` with nothing else decoded away, so the
+///   opening quote is one byte and the rest of the key maps over one-to-one.
+///
+/// Any other gap means the parser also unescaped something inside the key, and
+/// positions in the decoded string no longer correspond linearly to source
+/// bytes — in that case there is no fix, only the warning. Rewriting on a
+/// mis-mapped offset would silently corrupt the config: a key like
+/// `"~^/a{2,3}/(x|y)$"` (quoted because nginx requires it for `{n,m}`) would
+/// get its `/` rewritten instead of its `(`, leaving unbalanced parens that
+/// nginx refuses to load.
+fn key_quote_len(entry: &Directive) -> Option<usize> {
+    let raw_len = entry.name_span.end.offset - entry.name_span.start.offset;
+
+    match raw_len.checked_sub(entry.name.len())? {
+        0 => Some(0),
+        2 => Some(1),
+        _ => None,
+    }
 }
 
 /// Whether the text reads a positional capture — `$1`..`$9` or `${1}`.
@@ -363,8 +418,29 @@ http {
         );
     }
 
+    /// `stream` has no subrequests, and `ngx_stream_regex_exec()` allocates
+    /// `s->captures` only when it is null — it never reallocates, so the stale
+    /// count this CVE depends on cannot arise. Reporting here would be a pure
+    /// false positive.
     #[test]
-    fn test_map_in_stream() {
+    fn test_map_in_stream_is_ignored() {
+        runner().assert_no_errors(
+            r#"
+stream {
+    map $ssl_preread_server_name $backend {
+        default default_backend;
+        ~^(.+)\.example\.com$ $1_backend;
+    }
+}
+"#,
+        );
+    }
+
+    /// A map inside `http` is still reported when a `stream` block sits
+    /// alongside it — the skip must key off the map's own context, not the
+    /// presence of `stream` anywhere in the file.
+    #[test]
+    fn test_http_map_is_reported_alongside_a_stream_block() {
         runner().assert_has_errors(
             r#"
 stream {
@@ -372,6 +448,26 @@ stream {
         default default_backend;
         ~^(.+)\.example\.com$ $1_backend;
     }
+}
+http {
+    map $uri $target {
+        default /;
+        ~^/old/(.*)$ /new/$1;
+    }
+}
+"#,
+        );
+    }
+
+    /// A bare `map` with no visible `http` parent — the shape of an
+    /// `include`d snippet — must still be reported.
+    #[test]
+    fn test_map_without_visible_http_parent_is_reported() {
+        runner().assert_has_errors(
+            r#"
+map $uri $target {
+    default /;
+    ~^/old/(.*)$ /new/$1;
 }
 "#,
         );
@@ -572,6 +668,76 @@ http {
             "expected only the unnamed group to change, got:\n{fixed}"
         );
         runner().assert_no_errors(&fixed);
+    }
+
+    /// Regression: nginx requires quoting for keys containing `{n,m}`, and the
+    /// parser decodes `name` while `name_span` still covers the quotes. Getting
+    /// this wrong rewrote the `/` instead of the `(`, emitting a config with
+    /// unbalanced parens that nginx refuses to load.
+    #[test]
+    fn test_quoted_key_is_fixed_at_the_right_offset() {
+        let source = r#"
+http {
+    map $uri $flag {
+        default 0;
+        "~^/a{2,3}/(x|y)$" 1;
+    }
+}
+"#;
+        let errors = runner().check_string(source).unwrap();
+        let fixed = apply_fixes(source, &errors);
+
+        assert!(
+            fixed.contains(r#""~^/a{2,3}/(?:x|y)$" 1;"#),
+            "quoted key must be rewritten at the right offset, got:\n{fixed}"
+        );
+        runner().assert_no_errors(&fixed);
+    }
+
+    #[test]
+    fn test_single_quoted_key_is_fixed_at_the_right_offset() {
+        let source = "
+http {
+    map $uri $flag {
+        default 0;
+        '~^/a{2,3}/(x|y)$' 1;
+    }
+}
+";
+        let errors = runner().check_string(source).unwrap();
+        let fixed = apply_fixes(source, &errors);
+
+        assert!(
+            fixed.contains("'~^/a{2,3}/(?:x|y)$' 1;"),
+            "single-quoted key must be rewritten at the right offset, got:\n{fixed}"
+        );
+        runner().assert_no_errors(&fixed);
+    }
+
+    /// An escape inside the key means the decoded `name` is shorter than the
+    /// source by an amount that is not just the quotes, so positions no longer
+    /// map linearly. Report, but do not risk a corrupting rewrite.
+    #[test]
+    fn test_key_with_escapes_is_reported_without_a_fix() {
+        let errors = runner()
+            .check_string(
+                r#"
+http {
+    map $uri $flag {
+        default 0;
+        "~^/a\"b/(x|y)$" 1;
+    }
+}
+"#,
+            )
+            .unwrap();
+
+        assert_eq!(errors.len(), 1);
+        assert!(
+            errors[0].fixes.is_empty(),
+            "a key with escapes must not be autofixed, got: {:?}",
+            errors[0].fixes
+        );
     }
 
     #[test]
