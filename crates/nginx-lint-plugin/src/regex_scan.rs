@@ -149,16 +149,16 @@ pub fn scan(regex: &str) -> Vec<(usize, Group)> {
                         continue;
                     }
                     // A callout with a string argument — `(?C'...'`, `(?C"..."`,
-                    // `` (?C`...` ``, `(?C{...}` etc. Like a comment, the body is
-                    // arbitrary text: a `[` or `\Q` in it would otherwise open a
-                    // class or literal span that never closes. Numeric callouts
-                    // `(?C1)` have no body and need no special case.
-                    Some(b'C')
-                        if bytes
-                            .get(i + 3)
-                            .is_some_and(|c| !c.is_ascii_digit() && *c != b')') =>
-                    {
-                        i = find_close_paren(bytes, i + 3);
+                    // `` (?C`...` ``, `(?C{...}` etc. The body is arbitrary
+                    // text: a `[` or `\Q` in it would otherwise open a class or
+                    // literal span that never closes. Numeric callouts `(?C1)`
+                    // and the bare `(?C)` have no body and need no case.
+                    //
+                    // Unlike a comment, this does NOT end at the first `)` — it
+                    // ends at the delimiter, so the body may contain parens.
+                    Some(b'C') if callout_delimiter(bytes.get(i + 3)).is_some() => {
+                        let close = callout_delimiter(bytes.get(i + 3)).unwrap();
+                        i = find_callout_end(bytes, i + 4, close);
                         continue;
                     }
                     // A conditional `(?(1)...)` / `(?(<name>)...)` nests a paren
@@ -194,6 +194,47 @@ pub fn scan(regex: &str) -> Vec<(usize, Group)> {
     }
 
     groups
+}
+
+/// The closing delimiter for a callout's string argument, given the byte right
+/// after `(?C`, or `None` when there is no string argument (`(?C)`, `(?C1)`).
+///
+/// PCRE2 accepts several delimiters and closes on the matching one, not on the
+/// first `)` — a callout string may legitimately contain parens. Doubling the
+/// delimiter escapes it (`(?C'a''b')`), which [`find_callout_end`] handles.
+fn callout_delimiter(after_c: Option<&u8>) -> Option<u8> {
+    match after_c? {
+        b'`' => Some(b'`'),
+        b'\'' => Some(b'\''),
+        b'"' => Some(b'"'),
+        b'^' => Some(b'^'),
+        b'%' => Some(b'%'),
+        b'#' => Some(b'#'),
+        b'$' => Some(b'$'),
+        b'{' => Some(b'}'),
+        _ => None,
+    }
+}
+
+/// Offset just past the `)` closing a callout whose string body starts at
+/// `from` and ends at `close`, or the end of the input when unterminated.
+///
+/// A doubled delimiter is a literal one and does not end the string.
+fn find_callout_end(bytes: &[u8], from: usize, close: u8) -> usize {
+    let mut i = from;
+    while i < bytes.len() {
+        if bytes[i] == close {
+            if bytes.get(i + 1) == Some(&close) {
+                // Doubled — a literal delimiter, keep going.
+                i += 2;
+                continue;
+            }
+            // The `)` that ends the whole callout follows the delimiter.
+            return find_close_paren(bytes, i + 1);
+        }
+        i += 1;
+    }
+    bytes.len()
 }
 
 /// Whether `(*` at `from - 2` introduces a *group* rather than a control verb.
@@ -482,18 +523,41 @@ mod tests {
         assert_eq!(unnamed("(*MARK:[)(a)"), vec![9]);
     }
 
-    /// A callout's string argument is arbitrary text, exactly like a comment
-    /// body — a `[` or `\Q` in one used to open a class or literal span that
-    /// never closed, hiding every capture after it.
+    /// A callout's string argument is arbitrary text — a `[` or `\Q` in one
+    /// would otherwise open a class or literal span that never closes, hiding
+    /// every capture after it.
+    ///
+    /// Unlike a `(?#...)` comment, it does NOT end at the first `)`: it ends at
+    /// its delimiter, so the body may contain parens. Treating it like a
+    /// comment both invented captures out of the body and lost the real ones.
+    /// Every case below was checked against libpcre2.
     #[test]
-    fn callout_string_bodies_are_opaque() {
+    fn callout_string_bodies_are_opaque_and_end_at_their_delimiter() {
+        // The body may contain parens; the capture after it is the only one.
+        assert_eq!(unnamed("(?C'a)(b')(x)"), vec![10]);
+        assert_eq!(unnamed("(?C{a)(b})(x)"), vec![10]);
+        assert_eq!(unnamed(r#"(?C"a)(b")(x)"#), vec![10]);
+        // A `[` in the body must not swallow what follows.
+        assert_eq!(unnamed("(?C'a)[b')(x)"), vec![10]);
         assert_eq!(unnamed("(?C'[')(a)"), vec![7]);
         assert_eq!(unnamed(r"(?C'\Q')(a)"), vec![8]);
-        // ...and their contents are not groups.
+        // A doubled delimiter is a literal one, not the end.
+        assert_eq!(unnamed("(?C'a''b')(x)"), vec![10]);
+        // The body's own parens are not groups.
         assert!(unnamed("(?C'(a)')x").is_empty());
-        // A numeric callout has no body.
+        // Every delimiter PCRE accepts.
+        for p in [
+            "(?C^a)(b^)(x)",
+            "(?C%a)(b%)(x)",
+            "(?C$a)(b$)(x)",
+            "(?C#a)(b#)(x)",
+        ] {
+            assert_eq!(unnamed(p), vec![10], "{p}");
+        }
+        // No body at all.
         assert_eq!(unnamed("(?C1)(a)"), vec![5]);
         assert_eq!(unnamed("(?C)(a)"), vec![4]);
+        assert_eq!(unnamed("(a)(?C'x')(b)"), vec![0, 10]);
     }
 
     /// `(?<*...)` is a non-atomic lookbehind, not a name.
