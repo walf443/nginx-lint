@@ -290,8 +290,8 @@ impl<'a> ConvertCtx<'a> {
 
         for child in children.iter().skip(name_idx + 1) {
             match child.kind() {
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => continue,
-                SyntaxKind::SEMICOLON | SyntaxKind::COMMENT => break,
+                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT => continue,
+                SyntaxKind::SEMICOLON => break,
                 SyntaxKind::BLOCK => break,
                 kind if is_argument_token(kind) => {
                     if let Some(token) = child.as_token() {
@@ -753,6 +753,19 @@ mod tests {
         let d = config.directives().next().unwrap();
         assert!(d.trailing_comment.is_some());
         assert_eq!(d.trailing_comment.as_ref().unwrap().text, "# port");
+    }
+
+    #[test]
+    fn multiline_directive_with_comment_between_args() {
+        let config = parse_and_convert("set_by_lua_file $var\narg1\n# Comment\narg2;\n");
+        let dirs: Vec<_> = config.directives().collect();
+        assert_eq!(dirs.len(), 1);
+        let d = dirs[0];
+        assert_eq!(d.name, "set_by_lua_file");
+        assert_eq!(d.args.len(), 3);
+        assert_eq!(d.args[0].raw, "$var");
+        assert_eq!(d.args[1].raw, "arg1");
+        assert_eq!(d.args[2].raw, "arg2");
     }
 
     #[test]

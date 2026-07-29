@@ -76,10 +76,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Consume whitespace and newline tokens (trivia), adding them to the tree.
+    /// Consume whitespace, newline and comment tokens (trivia), adding them
+    /// to the tree.
     fn eat_trivia(&mut self) {
         while let Some(kind) = self.current() {
-            if kind == SyntaxKind::WHITESPACE || kind == SyntaxKind::NEWLINE {
+            if kind == SyntaxKind::WHITESPACE
+                || kind == SyntaxKind::NEWLINE
+                || kind == SyntaxKind::COMMENT
+            {
                 self.bump();
             } else {
                 break;
@@ -92,7 +96,10 @@ impl<'a> Parser<'a> {
         let mut i = self.pos;
         while i < self.tokens.len() {
             let kind = self.tokens[i].0;
-            if kind != SyntaxKind::WHITESPACE && kind != SyntaxKind::NEWLINE {
+            if kind != SyntaxKind::WHITESPACE
+                && kind != SyntaxKind::NEWLINE
+                && kind != SyntaxKind::COMMENT
+            {
                 return Some(kind);
             }
             i += 1;
@@ -241,12 +248,15 @@ impl<'a> Parser<'a> {
     /// span multiple lines (e.g. `log_format ... '...'\n    "...";`).
     fn parse_arguments(&mut self) {
         loop {
-            // Peek past whitespace and newlines to see if next meaningful token
-            // is an argument.
+            // Peek past whitespace, newlines and comments to see if the next
+            // meaningful token is an argument.
             let mut lookahead = self.pos;
             while lookahead < self.tokens.len() {
                 let kind = self.tokens[lookahead].0;
-                if kind == SyntaxKind::WHITESPACE || kind == SyntaxKind::NEWLINE {
+                if kind == SyntaxKind::WHITESPACE
+                    || kind == SyntaxKind::NEWLINE
+                    || kind == SyntaxKind::COMMENT
+                {
                     lookahead += 1;
                 } else {
                     break;
@@ -258,7 +268,8 @@ impl<'a> Parser<'a> {
             let next_kind = self.tokens[lookahead].0;
 
             if is_argument_kind(next_kind) {
-                // Consume trivia (whitespace + newlines) before the argument
+                // Consume trivia (whitespace + newlines + comments) before
+                // the argument
                 self.eat_trivia();
                 self.bump(); // the argument token
             } else {
@@ -584,6 +595,51 @@ mod tests {
     }
 
     // ── Lossless round-trip tests ───────────────────────────────────
+
+    // ── Comments inside multi-line directives ───────────────────────
+
+    #[test]
+    fn multiline_directive_with_comment_between_args() {
+        let source = "set_by_lua_file $var\narg1\n# Comment\narg2;\n";
+        let root = assert_no_errors(source);
+        assert_lossless(source);
+
+        // Everything up to the semicolon belongs to one directive,
+        // including the comment line between the arguments.
+        let dir = first_directive(&root);
+        let kinds = child_kinds(&dir);
+        assert!(kinds.contains(&SyntaxKind::COMMENT));
+        assert!(kinds.contains(&SyntaxKind::SEMICOLON));
+    }
+
+    #[test]
+    fn comment_before_semicolon() {
+        let source = "listen 80\n# comment\n;";
+        assert_no_errors(source);
+        assert_lossless(source);
+    }
+
+    #[test]
+    fn comment_before_block() {
+        let source = "server # comment\n{\n    listen 80;\n}";
+        let root = assert_no_errors(source);
+        assert_lossless(source);
+
+        let dir = first_directive(&root);
+        assert!(child_kinds(&dir).contains(&SyntaxKind::BLOCK));
+    }
+
+    #[test]
+    fn missing_semicolon_before_standalone_comment_still_error() {
+        let source = "listen 80\n# comment\n";
+        let (root, errors) = parse_source(source);
+        assert_lossless(source);
+        assert!(!errors.is_empty(), "should report missing semicolon");
+
+        // The trailing comment must stay outside the directive node.
+        let dir = first_directive(&root);
+        assert!(!child_kinds(&dir).contains(&SyntaxKind::COMMENT));
+    }
 
     #[test]
     fn lossless_empty() {
