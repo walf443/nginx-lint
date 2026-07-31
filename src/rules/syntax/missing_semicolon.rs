@@ -634,12 +634,16 @@ arg2 arg3;
 
     #[test]
     fn test_known_limitation_missing_semicolon_before_bare_directive_missed() {
-        // False negative: `autoindex_localtime` takes no argument on its line,
-        // so it is indistinguishable from a continued argument.
+        // False negative: `internal` takes no argument of its own, so it is
+        // indistinguishable from a continued argument of `proxy_pass`. The
+        // semicolon really is missing — nginx rejects this config with
+        // "invalid number of arguments in proxy_pass".
         let content = r#"http {
     server {
-        listen 80
-        autoindex_localtime;
+        location / {
+            proxy_pass http://x
+            internal;
+        }
     }
 }
 "#;
