@@ -149,6 +149,8 @@ impl MissingSemicolon {
     /// - Arguments have already been seen after the directive name
     /// - The next non-trivia token after the NEWLINE is an IDENT
     ///   (suggesting a new directive name)
+    /// - That IDENT looks like it starts a directive of its own
+    ///   (see [`starts_own_directive`])
     fn check_merged_directives(
         directive: &SyntaxNode,
         line_index: &LineIndex,
@@ -178,15 +180,17 @@ impl MissingSemicolon {
 
             // Look for NEWLINE after we've seen arguments
             if kind == SyntaxKind::NEWLINE && seen_args {
-                // Find the next non-whitespace/newline token
-                let next_ident = children[i + 1..].iter().find(|c| {
-                    c.kind() != SyntaxKind::WHITESPACE && c.kind() != SyntaxKind::NEWLINE
-                });
+                // Find the next meaningful token after the newline.
+                let next_idx = children[i + 1..]
+                    .iter()
+                    .position(|c| !c.kind().is_trivia())
+                    .map(|offset| i + 1 + offset);
 
-                if let Some(next) = next_ident
-                    && next.kind() == SyntaxKind::IDENT
+                if let Some(next_idx) = next_idx
+                    && children[next_idx].kind() == SyntaxKind::IDENT
+                    && starts_own_directive(&children, next_idx)
                 {
-                    // NEWLINE followed by IDENT after args → likely merged directive
+                    // NEWLINE followed by a stand-alone directive → merged directive.
                     // Find the last non-trivia token before this NEWLINE
                     let last_before = children[..i].iter().rev().find(|c| !c.kind().is_trivia());
 
@@ -213,6 +217,38 @@ impl MissingSemicolon {
             }
         }
     }
+}
+
+/// Returns `true` when the IDENT at `name_idx` looks like the start of a
+/// directive in its own right, rather than a continued argument of the
+/// directive it was merged into.
+///
+/// nginx treats newlines as ordinary whitespace, so a directive may legally
+/// spread its arguments over several lines:
+///
+/// ```nginx
+/// set_by_lua_file file.lua $var
+/// arg1
+/// arg2;
+/// ```
+///
+/// The lexer cannot help here — a bare argument like `arg1` is an `IDENT`
+/// exactly like a directive name is. To avoid flagging valid multi-line
+/// directives (which extension modules such as ngx_lua rely on), we require
+/// structural evidence that the candidate stands on its own: on the *same
+/// line* it must either take an argument of its own (`server_name
+/// example.com`) or open a block (`http {`). A line holding nothing but a bare
+/// identifier is treated as a continued argument and left alone.
+///
+/// This deliberately trades recall for precision: `arg2 arg3;` as the final
+/// line of a multi-line directive still reports a false positive, and a
+/// genuinely missing semicolon before a single-token directive is missed.
+/// Silence on a valid config matters more than catching every broken one.
+fn starts_own_directive(children: &[SyntaxElement], name_idx: usize) -> bool {
+    children[name_idx + 1..]
+        .iter()
+        .take_while(|c| c.kind() != SyntaxKind::NEWLINE)
+        .any(|c| is_value_kind(c.kind()) || c.kind() == SyntaxKind::BLOCK)
 }
 
 /// Returns `true` for token kinds that represent directive names or arguments.
@@ -504,12 +540,10 @@ worker_processes auto;
     }
 
     #[test]
-    fn test_multiline_ident_continuation_flagged() {
-        // When an IDENT token follows a NEWLINE after arguments, the heuristic
-        // treats it as a merged directive. This is a known limitation: legitimate
-        // multi-line directives where a continuation arg is an IDENT (e.g.
-        // `add_header X-H\n    value;`) will be flagged as missing semicolon.
-        // In practice, such line-splitting is uncommon in nginx configs.
+    fn test_multiline_ident_continuation_not_flagged() {
+        // A continuation line holding nothing but a bare IDENT is a legal
+        // multi-line directive, not a missing semicolon. `value` takes no
+        // arguments of its own, so it cannot stand alone as a directive.
         let content = r#"http {
     server {
         add_header X-Header
@@ -518,10 +552,128 @@ worker_processes auto;
 }
 "#;
         let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "bare IDENT continuation is a valid multi-line directive, got: {:?}",
+            errors
+        );
+    }
+
+    /// Regression test for the report behind PR #336: an extension-module
+    /// directive spreading its arguments over several lines, with a comment
+    /// in between, is valid nginx and must not be reported.
+    #[test]
+    fn test_multiline_extension_directive_with_comment_not_flagged() {
+        let content = r#"set_by_lua_file file.lua $var
+arg1
+# Some comment
+arg2;
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "valid multi-line extension directive must not be reported, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_merged_directive_with_own_argument_still_flagged() {
+        // `server_name example.com` carries its own argument on the same line,
+        // so it stands alone as a directive: the semicolon after `80` is missing.
+        let content = r#"http {
+    server {
+        listen 80
+        server_name example.com;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(errors[0].line, Some(3));
+    }
+
+    #[test]
+    fn test_merged_directive_opening_block_still_flagged() {
+        // `http {` opens a block, which can never be a continued argument.
+        let content = r#"worker_processes auto
+http {
+    server {
+        listen 80;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert_eq!(errors.len(), 1, "Expected 1 error, got: {:?}", errors);
+        assert_eq!(errors[0].line, Some(1));
+    }
+
+    // ── Known limitations of the heuristic ──────────────────────────
+    //
+    // `starts_own_directive` trades recall for precision. The cases below are
+    // the price of that trade, pinned here so a future change to the heuristic
+    // has to acknowledge them rather than move them silently.
+
+    #[test]
+    fn test_known_limitation_multiline_final_line_with_argument_flagged() {
+        // False positive: the last line of a valid multi-line directive
+        // carries two tokens, so `arg2` looks like a directive taking `arg3`.
+        let content = r#"set_by_lua_file file.lua $var
+arg1
+arg2 arg3;
+"#;
+        let errors = check_content(content);
         assert_eq!(
             errors.len(),
             1,
-            "IDENT after NEWLINE is flagged as merged directive (known limitation)"
+            "known limitation: a multi-token final line is indistinguishable \
+             from a directive with its own argument; got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_known_limitation_missing_semicolon_before_bare_directive_missed() {
+        // False negative: `internal` takes no argument of its own, so it is
+        // indistinguishable from a continued argument of `proxy_pass`. The
+        // semicolon really is missing — nginx rejects this config with
+        // "invalid number of arguments in proxy_pass".
+        let content = r#"http {
+    server {
+        location / {
+            proxy_pass http://x
+            internal;
+        }
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "known limitation: a directive with no arguments of its own cannot \
+             be told apart from a continued argument; got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_known_limitation_block_on_next_line_missed() {
+        // False negative: `starts_own_directive` only inspects the candidate's
+        // own line, so a brace opened on the following line is not evidence.
+        let content = r#"worker_processes auto
+http
+{
+    server {
+        listen 80;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "known limitation: only the candidate's own line is inspected; \
+             got: {:?}",
+            errors
         );
     }
 
