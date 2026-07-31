@@ -11,7 +11,7 @@
     "nginx-lint-plugin": "file:../nginx-lint-plugin"
   },
   "devDependencies": {
-    "@bytecodealliance/componentize-js": "^0.21.0",
+    "@bytecodealliance/componentize-js": "^0.22.0",
     "@bytecodealliance/jco": "1.26.1",
     "@types/node": "^25.5.0",
     "esbuild": "^0.28.1",
