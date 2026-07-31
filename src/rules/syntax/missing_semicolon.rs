@@ -608,6 +608,71 @@ http {
         assert_eq!(errors[0].line, Some(1));
     }
 
+    // ── Known limitations of the heuristic ──────────────────────────
+    //
+    // `starts_own_directive` trades recall for precision. The cases below are
+    // the price of that trade, pinned here so a future change to the heuristic
+    // has to acknowledge them rather than move them silently.
+
+    #[test]
+    fn test_known_limitation_multiline_final_line_with_argument_flagged() {
+        // False positive: the last line of a valid multi-line directive
+        // carries two tokens, so `arg2` looks like a directive taking `arg3`.
+        let content = r#"set_by_lua_file file.lua $var
+arg1
+arg2 arg3;
+"#;
+        let errors = check_content(content);
+        assert_eq!(
+            errors.len(),
+            1,
+            "known limitation: a multi-token final line is indistinguishable \
+             from a directive with its own argument; got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_known_limitation_missing_semicolon_before_bare_directive_missed() {
+        // False negative: `autoindex_localtime` takes no argument on its line,
+        // so it is indistinguishable from a continued argument.
+        let content = r#"http {
+    server {
+        listen 80
+        autoindex_localtime;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "known limitation: a directive with no arguments of its own cannot \
+             be told apart from a continued argument; got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn test_known_limitation_block_on_next_line_missed() {
+        // False negative: `starts_own_directive` only inspects the candidate's
+        // own line, so a brace opened on the following line is not evidence.
+        let content = r#"worker_processes auto
+http
+{
+    server {
+        listen 80;
+    }
+}
+"#;
+        let errors = check_content(content);
+        assert!(
+            errors.is_empty(),
+            "known limitation: only the candidate's own line is inspected; \
+             got: {:?}",
+            errors
+        );
+    }
+
     #[test]
     fn test_hash_in_regex_not_treated_as_comment() {
         // Hash inside regex pattern should not be treated as comment start
