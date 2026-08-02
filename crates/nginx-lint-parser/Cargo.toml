@@ -15,7 +15,7 @@ default = []
 wasm = ["dep:wit-bindgen"]
 
 [dependencies]
-rowan = "0.16"
+rowan = "0.17"
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 wit-bindgen = { version = "0.60.0", optional = true }
