@@ -209,12 +209,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
-name = "base64"
-version = "0.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
-
-[[package]]
 name = "bitflags"
 version = "1.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -244,12 +238,12 @@ dependencies = [
 
 [[package]]
 name = "bollard"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9d0a013e3d3ee4edd61e779adf117944c08902d375f18630a0c5b8f95659734"
+checksum = "dbe8358268799ebb3e4df23cb9d47f4c72bbc4f5247e2fa6a1bf7b6c0baea220"
 dependencies = [
  "async-stream",
- "base64 0.22.1",
+ "base64",
  "bitflags 2.13.1",
  "bollard-buildkit-proto",
  "bollard-stubs",
@@ -289,15 +283,14 @@ dependencies = [
 
 [[package]]
 name = "bollard-buildkit-proto"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06961b3a889aadf51ad938dfcd07a29e49bd77c6e25ed8c1021764ea888ec7bd"
+checksum = "b5c97450e79c7c565302dd92e86b08823b47550fcb4fc5ce910194d1b087a1a3"
 dependencies = [
  "prost",
  "prost-types",
  "tonic",
  "tonic-prost",
- "ureq",
 ]
 
 [[package]]
@@ -306,7 +299,7 @@ version = "1.53.1-rc.29.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce412eb6f7096743011dc3cb5c674caeb24ced61d8c498fe07cf7998a4fea889"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bollard-buildkit-proto",
  "bytes",
  "prost",
@@ -883,7 +876,7 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29547a1dc60885a552306986316bc9701ba120c1a8db6769fa68691529ad373d"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "serde",
  "serde_json",
 ]
@@ -1365,7 +1358,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -2500,7 +2493,7 @@ version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -2616,7 +2609,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0283386ce02abc0151e1761d08802dfe86c173b0b494af5cbc086574e453da06"
 dependencies = [
  "aws-lc-rs",
- "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -2878,7 +2870,7 @@ version = "3.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee78f1fbe43ac4a0e47aadb3dbd357b69eb0d3793e948624cd03dd2750ab1c0a"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "bs58",
  "chrono",
  "hex",
@@ -3405,7 +3397,7 @@ checksum = "ac2a5518c70fa84342385732db33fb3f44bc4cc748936eb5833d2df34d6445ef"
 dependencies = [
  "async-trait",
  "axum",
- "base64 0.22.1",
+ "base64",
  "bytes",
  "h2",
  "http",
@@ -3579,34 +3571,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ureq"
-version = "3.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "972d7902c8735f2695410b8aed7df6ed12a47394aa1c8d7af49f0497b731a94d"
-dependencies = [
- "base64 0.23.1",
- "log",
- "percent-encoding",
- "rustls",
- "rustls-pki-types",
- "ureq-proto",
- "utf8-zero",
- "webpki-roots",
-]
-
-[[package]]
-name = "ureq-proto"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da5f78b09e6941e1a0f2e30e695e4b120377b54d5e0aec11b594bb57b3971613"
-dependencies = [
- "base64 0.23.1",
- "http",
- "httparse",
- "log",
-]
-
-[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3618,12 +3582,6 @@ dependencies = [
  "serde",
  "serde_derive",
 ]
-
-[[package]]
-name = "utf8-zero"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8c0a043c9540bae7c578c88f91dda8bd82e59ae27c21baca69c8b191aaf5a6e"
 
 [[package]]
 name = "utf8_iter"
@@ -3900,7 +3858,7 @@ version = "48.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e1464c6a7ece16f1aeeab9a62d4a821581d143d6dfd462a99b66b04d31431da"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "directories-next",
  "log",
  "postcard",
@@ -4102,15 +4060,6 @@ name = "webpki-root-certs"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
-name = "webpki-roots"
-version = "1.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
 dependencies = [
  "rustls-pki-types",
 ]
