@@ -169,7 +169,10 @@ jobs:
           shared-key: "python-plugin"
           workspaces: "plugins/python/nginx-lint-plugin"
       - name: Install Python tooling
-        run: pip install "componentize-py==0.25.0" pytest
+        # From the example plugin's dependency group, so CI and the
+        # documented developer setup install the same versions
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: pip install --group dev
       - name: Install nginx-lint-plugin SDK
         working-directory: plugins/python/nginx-lint-plugin
         # `make install` regenerates the bindings from the WIT first: they are

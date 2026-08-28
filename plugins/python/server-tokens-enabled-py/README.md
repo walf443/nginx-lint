@@ -43,13 +43,19 @@ Unit tests are plain pytest (`test_plugin.py`, a 1:1 port of the TS plugin's
 `plugin.test.ts`), using the SDK at `../nginx-lint-plugin`:
 
 ```bash
-# one-time setup: install the SDK (includes the native parser module)
-pip install pytest
+# one-time setup: dev tools from pyproject.toml, then the SDK itself
+# (from the sibling directory, since it is not on PyPI yet)
+pip install --group dev
 make -C ../nginx-lint-plugin install
 
 make test        # pytest
 make test-e2e    # componentize + run through the nginx-lint CLI
 ```
+
+`pyproject.toml` declares the dependencies and points pytest at this
+directory, so `app.py` is importable from the tests without a `sys.path`
+shim. There is no `[build-system]`: a plugin is compiled to a WASM
+component, not installed as a Python distribution.
 
 The same `WitWorld` class in `app.py` runs unmodified under pytest and
 inside the WASM component.
