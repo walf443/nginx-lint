@@ -7,7 +7,8 @@ name = "nginx-lint-plugin"
 description = "Python SDK for writing and testing nginx-lint WASM plugins"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.10"
+# 3.11+: the committed componentize-py bindings use typing.Self
+requires-python = ">=3.11"
 # Version comes from Cargo.toml
 dynamic = ["version"]
 

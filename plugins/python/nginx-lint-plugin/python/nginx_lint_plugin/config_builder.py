@@ -93,16 +93,33 @@ class BuiltDirective:
     def block_is_raw(self) -> bool:
         return self._data.block_is_raw
 
-    def replace_with(self, new_text: str) -> Fix:
+    # The fix constructors below must produce byte-identical Fix records to
+    # the host's implementations in src/plugin/component_rule.rs
+    # (replace_with / delete_line_fix / insert_* on DirectiveResource), so a
+    # plugin gets the same --fix result whether its Config came from the
+    # host resource or from a reconstructed snapshot.
+
+    def _range_fix(self, start: int, end: int, new_text: str) -> Fix:
         return Fix(
-            line=self._data.line,
+            line=0,
             old_text=None,
             new_text=new_text,
             delete_line=False,
             insert_after=False,
-            start_offset=self._data.start_offset,
-            end_offset=self._data.end_offset,
+            start_offset=start,
+            end_offset=end,
         )
+
+    def _indent(self) -> str:
+        return " " * max(self._data.column - 1, 0)
+
+    def _line_start_offset(self) -> int:
+        return max(self._data.start_offset - (self._data.column - 1), 0)
+
+    def replace_with(self, new_text: str) -> Fix:
+        leading = self._data.leading_whitespace
+        start = self._data.start_offset - len(leading)
+        return self._range_fix(start, self._data.end_offset, leading + new_text)
 
     def delete_line_fix(self) -> Fix:
         return Fix(
@@ -116,48 +133,24 @@ class BuiltDirective:
         )
 
     def insert_after(self, new_text: str) -> Fix:
-        return Fix(
-            line=self._data.line,
-            old_text=None,
-            new_text=new_text,
-            delete_line=False,
-            insert_after=True,
-            start_offset=None,
-            end_offset=None,
-        )
+        offset = self._data.end_offset
+        return self._range_fix(offset, offset, "\n" + self._indent() + new_text)
 
     def insert_before(self, new_text: str) -> Fix:
-        return Fix(
-            line=self._data.line,
-            old_text=None,
-            new_text=new_text,
-            delete_line=False,
-            insert_after=False,
-            start_offset=None,
-            end_offset=None,
-        )
+        offset = self._line_start_offset()
+        return self._range_fix(offset, offset, self._indent() + new_text + "\n")
 
     def insert_after_many(self, lines: List[str]) -> Fix:
-        return Fix(
-            line=self._data.line,
-            old_text=None,
-            new_text="\n".join(lines),
-            delete_line=False,
-            insert_after=True,
-            start_offset=None,
-            end_offset=None,
-        )
+        indent = self._indent()
+        text = "".join(f"\n{indent}{line}" for line in lines)
+        offset = self._data.end_offset
+        return self._range_fix(offset, offset, text)
 
     def insert_before_many(self, lines: List[str]) -> Fix:
-        return Fix(
-            line=self._data.line,
-            old_text=None,
-            new_text="\n".join(lines),
-            delete_line=False,
-            insert_after=False,
-            start_offset=None,
-            end_offset=None,
-        )
+        indent = self._indent()
+        text = "".join(f"{indent}{line}\n" for line in lines)
+        offset = self._line_start_offset()
+        return self._range_fix(offset, offset, text)
 
 
 # ── Resolve index-based items to ConfigItem tree ────────────────────

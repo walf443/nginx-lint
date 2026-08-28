@@ -17,16 +17,18 @@ test:
 	pytest
 
 # End-to-end test through the nginx-lint CLI (requires the plugin built).
-# Other rules also fire on these files, so assert on this rule's output
-# rather than the exit code.
+# --rule-only makes the exit code meaningful: bad.conf must fail with this
+# rule's warning, and good.conf must exit 0 (so a CLI crash or plugin-load
+# failure fails the test instead of masquerading as "no findings").
 test-e2e: build
 	cd ../../.. && \
 	cargo run --features plugins -- --plugins plugins/python/server-tokens-enabled-py \
-		plugins/python/server-tokens-enabled-py/examples/bad.conf 2>/dev/null \
+		--rule-only server-tokens-enabled-py \
+		plugins/python/server-tokens-enabled-py/examples/bad.conf \
 		| grep -q 'security/server-tokens-enabled-py' && \
-	{ cargo run --features plugins -- --plugins plugins/python/server-tokens-enabled-py \
-		plugins/python/server-tokens-enabled-py/examples/good.conf 2>/dev/null \
-		| grep -q 'security/server-tokens-enabled-py'; test $$? -eq 1; } && \
+	cargo run --features plugins -- --plugins plugins/python/server-tokens-enabled-py \
+		--rule-only server-tokens-enabled-py \
+		plugins/python/server-tokens-enabled-py/examples/good.conf && \
 	echo "OK"
 
 clean:

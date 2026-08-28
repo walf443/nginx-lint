@@ -74,7 +74,7 @@ mod tests {
     use super::API_VERSION;
 
     /// Extract the value of an `API_VERSION = "..."` declaration from source
-    /// code, tolerating Rust and TypeScript syntax.
+    /// code, tolerating Rust, TypeScript, and Python syntax.
     fn extract_api_version(source: &str) -> Option<String> {
         let line = source
             .lines()
@@ -84,10 +84,11 @@ mod tests {
         Some(line[start..end].to_string())
     }
 
-    /// The plugin API version is declared in three places (this host
-    /// constant, the Rust SDK, and the TypeScript SDK) that have already
-    /// drifted apart once. Enforce that they stay identical. The SDK files
-    /// are read from the workspace, so this only runs on a repo checkout.
+    /// The plugin API version is declared in four places (this host
+    /// constant, the Rust SDK, the TypeScript SDK, and the Python SDK) that
+    /// have already drifted apart once. Enforce that they stay identical.
+    /// The SDK files are read from the workspace, so this only runs on a
+    /// repo checkout.
     #[test]
     fn test_api_version_constants_stay_in_sync() {
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -99,6 +100,11 @@ mod tests {
             (
                 "TypeScript SDK (plugins/typescript/nginx-lint-plugin/src/index.ts)",
                 workspace_root.join("plugins/typescript/nginx-lint-plugin/src/index.ts"),
+            ),
+            (
+                "Python SDK (plugins/python/nginx-lint-plugin/python/nginx_lint_plugin/__init__.py)",
+                workspace_root
+                    .join("plugins/python/nginx-lint-plugin/python/nginx_lint_plugin/__init__.py"),
             ),
         ];
 

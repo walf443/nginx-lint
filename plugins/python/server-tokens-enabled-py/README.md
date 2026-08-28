@@ -7,7 +7,7 @@ mirroring the TypeScript example at `plugins/typescript/server-tokens-enabled-ts
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+ (the generated bindings use `typing.Self`)
 - componentize-py 0.25+ (`uv tool install componentize-py` or `pip install componentize-py`)
 
 ## Build

@@ -172,6 +172,11 @@ jobs:
         run: pip install "componentize-py==0.25.0" pytest
       - name: Install nginx-lint-plugin SDK
         run: pip install ./plugins/python/nginx-lint-plugin
+      - name: Run SDK unit tests
+        working-directory: plugins/python/nginx-lint-plugin
+        run: pytest
+        env:
+          PYTEST_ADDOPTS: -v
       - name: Run Python unit tests
         working-directory: plugins/python/server-tokens-enabled-py
         run: make test
@@ -229,34 +234,34 @@ jobs:
             run: |
               NGINX_LINT=./artifacts/nginx-lint
 
-              # bad.conf should produce warnings from the TS plugin
-              output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
+              # --rule-only makes the exit code meaningful: bad.conf must
+              # fail with this rule's warning, and good.conf must exit 0
+              # (a CLI crash or plugin-load failure fails either leg).
+              if output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-ts"
+                exit 1
+              fi
               echo "$output"
               echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
 
-              # good.conf should NOT produce warnings from the TS plugin
-              output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf || true)
+              output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf)
               echo "$output"
-              if echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null 2>&1; then
-                echo "ERROR: good.conf should not produce errors from server-tokens-enabled-ts"
-                exit 1
-              fi
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
           - name: Test Python plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
 
-              # bad.conf should produce warnings from the Python plugin
-              output=$($NGINX_LINT --plugins target/py-plugins --format json plugins/python/server-tokens-enabled-py/examples/bad.conf || true)
+              # Same shape as the TypeScript step above; keep the two in sync.
+              if output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-py"
+                exit 1
+              fi
               echo "$output"
               echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-py")' > /dev/null
 
-              # good.conf should NOT produce warnings from the Python plugin
-              output=$($NGINX_LINT --plugins target/py-plugins --format json plugins/python/server-tokens-enabled-py/examples/good.conf || true)
+              output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/good.conf)
               echo "$output"
-              if echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-py")' > /dev/null 2>&1; then
-                echo "ERROR: good.conf should not produce errors from server-tokens-enabled-py"
-                exit 1
-              fi
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
 
   typescript-plugin:
     name: TypeScript Plugin

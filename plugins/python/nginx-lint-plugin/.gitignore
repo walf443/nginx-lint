@@ -1,3 +1,6 @@
 __pycache__/
 /target
 /dist
+# maturin develop drops the compiled module into the source tree
+*.so
+*.pyd
