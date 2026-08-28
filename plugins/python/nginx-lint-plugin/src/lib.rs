@@ -75,6 +75,9 @@ struct BlankLineInfoJson {
 
 #[derive(Serialize)]
 #[serde(tag = "tag", content = "val", rename_all = "kebab-case")]
+// The shared `Item` suffix mirrors the WIT `config-item-value` variants, and
+// the kebab-case rename turns it into the tag the Python side matches on
+#[allow(clippy::enum_variant_names)]
 enum ConfigItemValueJson {
     DirectiveItem(DirectiveDataJson),
     CommentItem(CommentInfoJson),

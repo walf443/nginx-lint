@@ -3,7 +3,7 @@ name = "nginx-lint-plugin-py"
 # Keep in sync with the repository version (like the TS SDK's package.json);
 # maturin uses this as the wheel version (pyproject declares version dynamic)
 version = "0.19.1"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 description = "Python SDK for nginx-lint WASM plugins (native parser module)"
 
