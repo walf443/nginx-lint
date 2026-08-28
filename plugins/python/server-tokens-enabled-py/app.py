@@ -16,10 +16,21 @@ Built as a WASM component with componentize-py:
 from typing import List
 
 import wit_world
+from nginx_lint_plugin import build_config_from_snapshot
 from wit_world.imports import config_api
 from wit_world.imports.types import LintError, PluginSpec, Severity
 
 RULE_NAME = "server-tokens-enabled-py"
+
+# Directive names this plugin reads. "http" must be included alongside
+# "server_tokens" even though the plugin only reports on server_tokens:
+# the warning for a MISSING server_tokens is keyed on "an http block
+# exists but none of its children matched" — if "http" weren't in this
+# list, an http block with no server_tokens inside would have no name
+# match and no kept descendant, so the host would prune it away entirely,
+# silently losing the exact case this plugin needs to detect. (See the
+# Rust port's relevant_directives() for the same reasoning.)
+RELEVANT_DIRECTIVES = ["http", "server_tokens"]
 
 BAD_EXAMPLE = """http {
   server_tokens on;
@@ -61,7 +72,14 @@ class WitWorld(wit_world.WitWorld):
             max_nginx_version=None,
         )
 
-    def check(self, cfg: config_api.Config, path: str) -> List[LintError]:
+    def check(self, raw_cfg: config_api.Config, path: str) -> List[LintError]:
+        # Fetch only "http"/"server_tokens" (plus their ancestors) instead of
+        # the whole file: raw_cfg.all_directives_with_context() makes one host
+        # call per directive in the file, while snapshot_filtered() transfers
+        # everything needed in a single call proportional to what's actually
+        # relevant.
+        cfg = build_config_from_snapshot(raw_cfg.snapshot_filtered(RELEVANT_DIRECTIVES))
+
         errors: List[LintError] = []
         has_server_tokens_off = False
         has_server_tokens_on = False

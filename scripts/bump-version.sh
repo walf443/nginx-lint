@@ -27,6 +27,9 @@ CARGO_FILES=(
     "$ROOT_DIR/crates/nginx-lint-parser/Cargo.toml"
     "$ROOT_DIR/crates/nginx-lint-common/Cargo.toml"
     "$ROOT_DIR/crates/nginx-lint-plugin/Cargo.toml"
+    # The Python SDK's crate version is the wheel version (pyproject
+    # declares version dynamic), so it bumps with everything else
+    "$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
 )
 
 # Add all plugin Cargo.toml files
@@ -77,4 +80,4 @@ dockerfile-pin run --write
 echo ""
 echo "Done! Updated ${#CARGO_FILES[@]} Cargo.toml files and TypeScript plugin to version $NEW_VERSION."
 echo ""
-echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json && grep 'nginx-lint-plugin' plugins/typescript/nginx-lint-plugin/README.md"
+echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml plugins/python/nginx-lint-plugin/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json && grep 'nginx-lint-plugin' plugins/typescript/nginx-lint-plugin/README.md"

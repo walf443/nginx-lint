@@ -1,3 +1,2 @@
 *.wasm
-bindings/
 __pycache__/

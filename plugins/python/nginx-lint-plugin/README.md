@@ -22,12 +22,19 @@ as a native module.
 - `python/wit_world/`, `python/componentize_py_types.py` — committed
   componentize-py bindings generated from `wit/nginx-lint-plugin.wit`, shipped
   as top-level modules so the same imports resolve inside a componentized
-  plugin (the Python analog of the TS SDK's `dist/generated`). Regenerate
-  after WIT changes with
-  `componentize-py -d ../../../wit -w plugin bindings python` — this
-  committed copy is what pytest imports; a plugin's local `make bindings`
-  output is IDE-only and must be regenerated together with it, or the two
-  diverge.
+  plugin (the Python analog of the TS SDK's `dist/generated`). Both pytest and
+  the componentized plugin import these, so they must be regenerated whenever
+  the WIT changes; CI enforces it (the `python-plugin` job diffs them against
+  freshly generated bindings). componentize-py refuses to write into an
+  existing directory, so regenerate via a temporary one:
+
+  ```bash
+  # from the repository root
+  rm -rf /tmp/py-bindings && componentize-py -d wit -w plugin bindings /tmp/py-bindings
+  sdk=plugins/python/nginx-lint-plugin/python
+  rm -rf "$sdk/wit_world" && cp -R /tmp/py-bindings/wit_world "$sdk/"
+  cp /tmp/py-bindings/componentize_py_types.py "$sdk/"
+  ```
 - `Cargo.toml` / `src/lib.rs` — the native parser module (its own cargo
   workspace, excluded from the repository's root workspace; the crate
   version is the wheel version, kept in sync with the repository version)

@@ -1,15 +1,15 @@
 WIT_DIR := ../../../wit
 WASM := server-tokens-enabled-py.wasm
+# The SDK is bundled into the component from its source tree rather than
+# from site-packages: `maturin develop` installs it as a .pth link, which
+# componentize-py does not follow.
+SDK_DIR := ../nginx-lint-plugin/python
 
-.PHONY: build bindings test test-e2e clean
+.PHONY: build test test-e2e clean
 
 build:
-	componentize-py -d $(WIT_DIR) -w plugin componentize app -o $(WASM) --stub-wasi
-
-# Generate typed bindings for IDE / type checking (not needed for build;
-# componentize-py generates its own bindings internally)
-bindings:
-	componentize-py -d $(WIT_DIR) -w plugin bindings ./bindings
+	componentize-py -d $(WIT_DIR) -w plugin componentize app -o $(WASM) --stub-wasi \
+		-p . -p $(SDK_DIR)
 
 # Unit tests (plain pytest; requires the SDK installed:
 # pip install ../nginx-lint-plugin)
@@ -32,4 +32,4 @@ test-e2e: build
 	echo "OK"
 
 clean:
-	rm -rf $(WASM) bindings __pycache__
+	rm -rf $(WASM) __pycache__

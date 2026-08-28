@@ -50,17 +50,18 @@ inside the WASM component.
 
 ## Development
 
-`make bindings` generates typed Python bindings under `bindings/` for IDE
-completion and type checking. They are not needed for the build itself —
-componentize-py regenerates bindings internally — and are gitignored.
-
 The plugin implements the `plugin` world from `wit/nginx-lint-plugin.wit`:
-a `WitWorld` class with `spec()` and `check(cfg, path)`. `cfg` is a host-backed
-resource; each method call (`all_directives_with_context()`, `directive.line()`,
-…) crosses the component boundary. For large configs, the snapshot API
-(`cfg.snapshot_filtered([...])` + guest-side reconstruction, as done by the
-TypeScript SDK's `buildConfigFromSnapshot`) would reduce host calls; this
-prototype keeps the simple per-call style.
+a `WitWorld` class with `spec()` and `check(cfg, path)`. The typed bindings
+(`wit_world`) come from the SDK, so no per-plugin binding generation is
+needed.
+
+`cfg` is a host-backed resource: every method call crosses the component
+boundary, so `check()` starts by pulling the directives it cares about over
+in one call (`cfg.snapshot_filtered(RELEVANT_DIRECTIVES)`) and rebuilding a
+Config guest-side with `build_config_from_snapshot()` — the same approach the
+TypeScript plugin takes. Walking `cfg.all_directives_with_context()` on the
+host resource directly would instead cost one host call per directive in the
+file.
 
 ## Known trade-offs vs TypeScript plugins
 

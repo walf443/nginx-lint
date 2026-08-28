@@ -172,6 +172,16 @@ jobs:
         run: pip install "componentize-py==0.25.0" pytest
       - name: Install nginx-lint-plugin SDK
         run: pip install ./plugins/python/nginx-lint-plugin
+      - name: Check committed bindings match the WIT
+        run: |
+          # The SDK commits its componentize-py bindings (unlike the TS SDK,
+          # which regenerates on every build), and both pytest and the
+          # componentized plugin import them — so a WIT change that isn't
+          # regenerated here would go unnoticed until runtime.
+          componentize-py -d wit -w plugin bindings "$RUNNER_TEMP/py-bindings"
+          sdk=plugins/python/nginx-lint-plugin/python
+          diff -ru -x '__pycache__' "$RUNNER_TEMP/py-bindings/wit_world" "$sdk/wit_world"
+          diff -u "$RUNNER_TEMP/py-bindings/componentize_py_types.py" "$sdk/componentize_py_types.py"
       - name: Run SDK unit tests
         working-directory: plugins/python/nginx-lint-plugin
         run: pytest
