@@ -16,8 +16,9 @@ the production linter uses. Usage:
 """
 
 import json
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, cast
 
+from wit_world.imports.config_api import Config
 from wit_world.imports import parser_types
 from wit_world.imports.data_types import (
     ArgumentInfo,
@@ -30,7 +31,7 @@ from wit_world.imports.parser_types import ParseOutput
 from wit_world.imports.types import LintError, PluginSpec
 
 from . import _native
-from .config_builder import BuiltConfig, build_config_from_parse_output
+from .config_builder import build_config_from_parse_output
 
 # ── JSON → generated dataclasses ────────────────────────────────────
 
@@ -134,14 +135,21 @@ def _parse_output_from_json(d: dict) -> ParseOutput:
 
 def parse_config(
     source: str, include_context: Optional[List[str]] = None
-) -> BuiltConfig:
+) -> Config:
     """Parse an nginx configuration string into a WIT-compatible Config.
 
     Uses the native nginx-lint-parser module for parsing identical to the
     production Rust parser. Raises ValueError on parse errors.
+
+    The result is a :class:`BuiltConfig`, which reproduces the host-backed
+    `config` resource's methods without inheriting from it (the generated
+    class is a stub whose bodies raise). It is annotated as ``Config`` so
+    that a plugin's ``check(cfg: Config, ...)`` type-checks when called
+    with a parsed config; the substitution is contained here.
     """
     raw = _native.parse_config_json(source, include_context or [])
-    return build_config_from_parse_output(_parse_output_from_json(json.loads(raw)))
+    built = build_config_from_parse_output(_parse_output_from_json(json.loads(raw)))
+    return cast(Config, built)
 
 
 # ── Test runner ─────────────────────────────────────────────────────

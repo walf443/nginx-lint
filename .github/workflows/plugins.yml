@@ -189,6 +189,9 @@ jobs:
         run: make test
         env:
           PYTEST_ADDOPTS: -v
+      - name: Type-check the Python plugin
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: make typecheck
       - name: Build Python plugin
         working-directory: plugins/python/server-tokens-enabled-py
         run: make build

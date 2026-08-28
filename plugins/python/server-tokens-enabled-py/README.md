@@ -49,6 +49,7 @@ pip install --group dev
 make -C ../nginx-lint-plugin install
 
 make test        # pytest
+make typecheck   # mypy, against the SDK's shipped type annotations
 make test-e2e    # componentize + run through the nginx-lint CLI
 ```
 

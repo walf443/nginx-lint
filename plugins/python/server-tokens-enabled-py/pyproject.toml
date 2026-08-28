@@ -24,9 +24,19 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest",
+    "mypy",
     "componentize-py==0.25.0",
 ]
 
 [tool.pytest.ini_options]
 # Make app.py importable from the tests without a sys.path shim
 pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+# Check the bodies of unannotated functions too, so plain `def test_x():`
+# still gets type-checked without demanding `-> None` everywhere. The SDK
+# ships a py.typed marker, so its types resolve here.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

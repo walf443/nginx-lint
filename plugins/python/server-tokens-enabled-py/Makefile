@@ -8,7 +8,7 @@ WIT_DIR = $(shell python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')
 # for a regular install, the source tree for `maturin develop`).
 SDK_DIR = $(shell python -c 'import nginx_lint_plugin as p, pathlib; print(pathlib.Path(p.__file__).parent.parent)')
 
-.PHONY: build test test-e2e clean
+.PHONY: build test typecheck test-e2e clean
 
 build:
 	componentize-py -d "$(WIT_DIR)" -w plugin componentize app -o $(WASM) --stub-wasi \
@@ -18,6 +18,10 @@ build:
 # pip install ../nginx-lint-plugin)
 test:
 	pytest
+
+# Type-check against the SDK's published annotations (it ships py.typed)
+typecheck:
+	mypy app.py test_plugin.py
 
 # End-to-end test through the nginx-lint CLI (requires the plugin built).
 # --rule-only makes the exit code meaningful: bad.conf must fail with this
