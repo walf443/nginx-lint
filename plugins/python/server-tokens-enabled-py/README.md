@@ -39,7 +39,8 @@ Unit tests are plain pytest (`test_plugin.py`, a 1:1 port of the TS plugin's
 
 ```bash
 # one-time setup: install the SDK (includes the native parser module)
-pip install pytest ../nginx-lint-plugin
+pip install pytest
+make -C ../nginx-lint-plugin install
 
 make test        # pytest
 make test-e2e    # componentize + run through the nginx-lint CLI

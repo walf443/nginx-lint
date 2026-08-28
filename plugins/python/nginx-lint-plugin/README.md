@@ -19,34 +19,28 @@ as a native module.
     bundleable into a WASM component)
   - `API_VERSION` — the plugin API version, kept in sync with
     `crates/nginx-lint-plugin`
-- `python/wit_world/`, `python/componentize_py_types.py` — committed
-  componentize-py bindings generated from `wit/nginx-lint-plugin.wit`, shipped
-  as top-level modules so the same imports resolve inside a componentized
-  plugin (the Python analog of the TS SDK's `dist/generated`). Both pytest and
-  the componentized plugin import these, so they must be regenerated whenever
-  the WIT changes; CI enforces it (the `python-plugin` job diffs them against
-  freshly generated bindings). componentize-py refuses to write into an
-  existing directory, so regenerate via a temporary one:
-
-  ```bash
-  # from the repository root
-  rm -rf /tmp/py-bindings && componentize-py -d wit -w plugin bindings /tmp/py-bindings
-  sdk=plugins/python/nginx-lint-plugin/python
-  rm -rf "$sdk/wit_world" && cp -R /tmp/py-bindings/wit_world "$sdk/"
-  cp /tmp/py-bindings/componentize_py_types.py "$sdk/"
-  ```
+- `python/wit_world/`, `python/componentize_py_types.py` — componentize-py
+  bindings generated from `wit/nginx-lint-plugin.wit` by `make bindings`,
+  placed as top-level modules so the same imports resolve inside a
+  componentized plugin (the Python analog of the TS SDK's `dist/generated`).
+  Like the TS SDK's, they are **not committed** — regenerated before every
+  install, so they cannot drift from the WIT. They still ship in the wheel
+  and sdist via `tool.maturin.include`, which applies regardless of
+  `.gitignore`.
 - `Cargo.toml` / `src/lib.rs` — the native parser module (its own cargo
   workspace, excluded from the repository's root workspace; the crate
   version is the wheel version, kept in sync with the repository version)
 
 ## Install
 
-```bash
-# from the repository
-pip install ./plugins/python/nginx-lint-plugin
+Both targets regenerate the bindings first (they are not committed), so
+`componentize-py` must be on `PATH`:
 
-# for SDK development (editable, rebuilds the native module)
-cd plugins/python/nginx-lint-plugin && maturin develop
+```bash
+cd plugins/python/nginx-lint-plugin
+
+make install   # pip install .
+make develop   # editable install for SDK work (maturin develop)
 ```
 
 ## Testing a plugin
