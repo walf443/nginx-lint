@@ -1,0 +1,24 @@
+[package]
+name = "nginx-lint-plugin-py"
+# Keep in sync with the repository version (like the TS SDK's package.json);
+# maturin uses this as the wheel version (pyproject declares version dynamic)
+version = "0.19.1"
+edition = "2021"
+license = "MIT"
+description = "Python SDK for nginx-lint WASM plugins (native parser module)"
+
+# The compiled module is nginx_lint_plugin._native (see pyproject.toml)
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+nginx-lint-parser = { path = "../../../crates/nginx-lint-parser" }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Deliberately not part of the main workspace: building requires a local
+# Python interpreter (via maturin), which the main workspace's CI does not
+# assume.
+[workspace]

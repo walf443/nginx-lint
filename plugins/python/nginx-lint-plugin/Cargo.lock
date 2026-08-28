@@ -78,8 +78,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "nginx-lint-parser-py"
-version = "0.1.0"
+name = "nginx-lint-plugin-py"
+version = "0.19.1"
 dependencies = [
  "nginx-lint-parser",
  "pyo3",

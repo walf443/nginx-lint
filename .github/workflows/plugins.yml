@@ -167,13 +167,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: "python-plugin"
-          workspaces: "crates/nginx-lint-parser-py"
+          workspaces: "plugins/python/nginx-lint-plugin"
       - name: Install Python tooling
-        run: pip install "componentize-py==0.25.0" maturin pytest
-      - name: Build and install native parser module
-        run: |
-          maturin build --manifest-path crates/nginx-lint-parser-py/Cargo.toml --out dist
-          pip install dist/*.whl
+        run: pip install "componentize-py==0.25.0" pytest
+      - name: Install nginx-lint-plugin SDK
+        run: pip install ./plugins/python/nginx-lint-plugin
       - name: Run Python unit tests
         working-directory: plugins/python/server-tokens-enabled-py
         run: make test

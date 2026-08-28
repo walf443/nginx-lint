@@ -4,9 +4,9 @@ Port of the TypeScript SDK's testing entry: provides ``parse_config()``
 to parse real nginx configuration strings into WIT-compatible Config
 objects, and ``PluginTestRunner`` for assertion-based testing.
 
-Parsing uses the ``nginx_lint_parser_py`` native module (built from
-``crates/nginx-lint-parser-py`` with maturin), so tests exercise the
-same Rust parser the production linter uses. Usage:
+Parsing uses the ``nginx_lint_plugin._native`` module (the Rust parser
+compiled into this wheel by maturin), so tests exercise the same parser
+the production linter uses. Usage:
 
     from nginx_lint_plugin.testing import parse_config, PluginTestRunner
 
@@ -17,8 +17,6 @@ same Rust parser the production linter uses. Usage:
 
 import json
 from typing import Callable, List, Optional
-
-import nginx_lint_parser_py
 
 from wit_world.imports import parser_types
 from wit_world.imports.data_types import (
@@ -31,6 +29,7 @@ from wit_world.imports.data_types import (
 from wit_world.imports.parser_types import ParseOutput
 from wit_world.imports.types import LintError, PluginSpec
 
+from . import _native
 from .config_builder import BuiltConfig, build_config_from_parse_output
 
 # ── JSON → generated dataclasses ────────────────────────────────────
@@ -141,7 +140,7 @@ def parse_config(
     Uses the native nginx-lint-parser module for parsing identical to the
     production Rust parser. Raises ValueError on parse errors.
     """
-    raw = nginx_lint_parser_py.parse_config_json(source, include_context or [])
+    raw = _native.parse_config_json(source, include_context or [])
     return build_config_from_parse_output(_parse_output_from_json(json.loads(raw)))
 
 

@@ -1,4 +1,5 @@
-//! Python native extension exposing the nginx-lint parser.
+//! Native half of the nginx-lint-plugin Python SDK, exposed as
+//! `nginx_lint_plugin._native`.
 //!
 //! Exposes `parse_config_json(source, include_context) -> str`, which returns
 //! the same `parse-output` structure the parser WASM component produces (see
@@ -273,7 +274,7 @@ fn parse_config_json(source: &str, include_context: Vec<String>) -> PyResult<Str
 }
 
 #[pymodule]
-fn nginx_lint_parser_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_config_json, m)?)?;
     Ok(())
 }

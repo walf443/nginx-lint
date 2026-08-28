@@ -11,8 +11,8 @@ build:
 bindings:
 	componentize-py -d $(WIT_DIR) -w plugin bindings ./bindings
 
-# Unit tests (plain pytest; requires the nginx_lint_parser_py native module:
-# cd ../../../crates/nginx-lint-parser-py && maturin develop)
+# Unit tests (plain pytest; requires the SDK installed:
+# pip install ../nginx-lint-plugin)
 test:
 	pytest
 
