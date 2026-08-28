@@ -74,6 +74,15 @@ if [ -f "$TS_PLUGIN_README" ]; then
     echo "  Updated plugins/typescript/nginx-lint-plugin/README.md"
 fi
 
+# The Python SDK is a separate cargo workspace, so no root cargo command
+# refreshes its lockfile; without this it keeps the old version and the next
+# build silently rewrites it.
+PY_SDK_MANIFEST="$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
+if [ -f "$PY_SDK_MANIFEST" ]; then
+    cargo update --manifest-path "$PY_SDK_MANIFEST" --workspace --quiet
+    echo "  Updated plugins/python/nginx-lint-plugin/Cargo.lock"
+fi
+
 echo "update Dockerfile image hashes"
 dockerfile-pin run --write
 

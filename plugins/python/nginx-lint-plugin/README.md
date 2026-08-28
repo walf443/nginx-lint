@@ -33,7 +33,7 @@ as a native module.
 
 ## Install
 
-Both targets regenerate the bindings first (they are not committed), so
+Both targets regenerate the bindings and copy the WIT in first, so
 `componentize-py` must be on `PATH`:
 
 ```bash
@@ -42,6 +42,22 @@ cd plugins/python/nginx-lint-plugin
 make install   # pip install .
 make develop   # editable install for SDK work (maturin develop)
 ```
+
+Outside this repository the SDK is a plain dependency — `pip install
+nginx-lint-plugin` is all a plugin author needs, for both testing and
+building. The WIT ships inside the package, so componentize-py has an
+interface definition to build against:
+
+```bash
+componentize-py -d "$(python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')" \
+    -w plugin componentize app -o plugin.wasm --stub-wasi \
+    -p . -p "$(python -c 'import nginx_lint_plugin as p, pathlib; print(pathlib.Path(p.__file__).parent.parent)')"
+```
+
+The second `-p` is only needed for editable installs, whose `.pth` link
+componentize-py does not follow; it is harmless otherwise. See
+`../server-tokens-enabled-py/Makefile` for the same commands in a form you
+can copy.
 
 ## Testing a plugin
 

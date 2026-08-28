@@ -1,8 +1,17 @@
 WIT_DIR := ../../../wit
 PY_DIR := python
+PKG_DIR := $(PY_DIR)/nginx_lint_plugin
 TMP_DIR := .bindings-tmp
 
-.PHONY: bindings install develop test clean
+.PHONY: bindings copy-wit install develop test clean
+
+# Ship the WIT inside the package (like the TS SDK's `files: [..., "wit"]`)
+# so plugin authors who only `pip install nginx-lint-plugin` can still run
+# componentize-py, which requires the interface definition. The copy is
+# generated, not committed; nginx_lint_plugin.wit_dir() resolves it.
+copy-wit:
+	mkdir -p $(PKG_DIR)/wit
+	cp $(WIT_DIR)/nginx-lint-plugin.wit $(PKG_DIR)/wit/
 
 # Generate the componentize-py bindings from the WIT. They are not committed
 # (same convention as the TS SDK, which regenerates on every npm run build),
@@ -16,11 +25,11 @@ bindings:
 	cp $(TMP_DIR)/componentize_py_types.py $(PY_DIR)/
 	rm -rf $(TMP_DIR)
 
-install: bindings
+install: bindings copy-wit
 	python -m pip install .
 
 # Editable install for SDK development (rebuilds the native module)
-develop: bindings
+develop: bindings copy-wit
 	maturin develop
 
 test:
@@ -28,4 +37,4 @@ test:
 
 clean:
 	rm -rf $(TMP_DIR) $(PY_DIR)/wit_world $(PY_DIR)/componentize_py_types.py \
-		target dist __pycache__
+		$(PKG_DIR)/wit target dist __pycache__

@@ -8,3 +8,4 @@ __pycache__/
 python/wit_world/
 python/componentize_py_types.py
 /.bindings-tmp
+python/nginx_lint_plugin/wit/

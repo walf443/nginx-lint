@@ -8,6 +8,11 @@ mirroring the TypeScript example at `plugins/typescript/server-tokens-enabled-ts
 ## Requirements
 
 - Python 3.11+ (the generated bindings use `typing.Self`)
+- The `nginx-lint-plugin` SDK (`pip install nginx-lint-plugin`, or
+  `make -C ../nginx-lint-plugin install` in this repository). Nothing else
+  here depends on the monorepo: the Makefile takes both the WIT and the SDK
+  path from the installed package, so this directory works as a template for
+  a plugin developed outside the repository.
 - componentize-py 0.25+ (`uv tool install componentize-py` or `pip install componentize-py`)
 
 ## Build

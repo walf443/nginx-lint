@@ -1,15 +1,18 @@
-WIT_DIR := ../../../wit
 WASM := server-tokens-enabled-py.wasm
-# The SDK is bundled into the component from its source tree rather than
-# from site-packages: `maturin develop` installs it as a .pth link, which
-# componentize-py does not follow.
-SDK_DIR := ../nginx-lint-plugin/python
+# Both paths come from the installed SDK rather than the repository, so this
+# Makefile works unchanged outside the monorepo — `pip install
+# nginx-lint-plugin` is the only prerequisite.
+WIT_DIR = $(shell python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')
+# componentize-py does not follow the .pth link an editable install leaves in
+# site-packages, so point it at wherever the SDK actually lives (site-packages
+# for a regular install, the source tree for `maturin develop`).
+SDK_DIR = $(shell python -c 'import nginx_lint_plugin as p, pathlib; print(pathlib.Path(p.__file__).parent.parent)')
 
 .PHONY: build test test-e2e clean
 
 build:
-	componentize-py -d $(WIT_DIR) -w plugin componentize app -o $(WASM) --stub-wasi \
-		-p . -p $(SDK_DIR)
+	componentize-py -d "$(WIT_DIR)" -w plugin componentize app -o $(WASM) --stub-wasi \
+		-p . -p "$(SDK_DIR)"
 
 # Unit tests (plain pytest; requires the SDK installed:
 # pip install ../nginx-lint-plugin)

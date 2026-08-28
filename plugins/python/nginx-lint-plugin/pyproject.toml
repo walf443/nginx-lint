@@ -28,4 +28,7 @@ module-name = "nginx_lint_plugin._native"
 include = [
     { path = "python/wit_world/**/*.py", format = ["sdist", "wheel"] },
     { path = "python/componentize_py_types.py", format = ["sdist", "wheel"] },
+    # The WIT itself, so plugin authors can run componentize-py against a
+    # plain `pip install` (see nginx_lint_plugin.wit_dir())
+    { path = "python/nginx_lint_plugin/wit/*.wit", format = ["sdist", "wheel"] },
 ]
