@@ -31,4 +31,7 @@ include = [
     # The WIT itself, so plugin authors can run componentize-py against a
     # plain `pip install` (see nginx_lint_plugin.wit_dir())
     { path = "python/nginx_lint_plugin/wit/*.wit", format = ["sdist", "wheel"] },
+    # PEP 561 markers, so downstream type checkers use the annotations
+    { path = "python/nginx_lint_plugin/py.typed", format = ["sdist", "wheel"] },
+    { path = "python/wit_world/py.typed", format = ["sdist", "wheel"] },
 ]

@@ -15,10 +15,15 @@ Built as a WASM component with componentize-py:
 
 from typing import List
 
-import wit_world
-from nginx_lint_plugin import build_config_from_snapshot
-from wit_world.imports import config_api
-from wit_world.imports.types import LintError, PluginSpec, Severity
+from nginx_lint_plugin import (
+    Config,
+    LintError,
+    Plugin,
+    PluginSpec,
+    build_config_from_snapshot,
+    error_builder,
+    plugin_spec,
+)
 
 RULE_NAME = "server-tokens-enabled-py"
 
@@ -47,15 +52,12 @@ GOOD_EXAMPLE = """http {
 }"""
 
 
-class WitWorld(wit_world.WitWorld):
+class WitWorld(Plugin):
     def spec(self) -> PluginSpec:
-        return PluginSpec(
-            name=RULE_NAME,
-            category="security",
-            description="Detects when server_tokens is enabled (exposes nginx version) [Python]",
-            # Keep in sync with API_VERSION in crates/nginx-lint-plugin
-            # (informational only; nothing compares it at runtime)
-            api_version="1.2",
+        return plugin_spec(
+            RULE_NAME,
+            "security",
+            "Detects when server_tokens is enabled (exposes nginx version) [Python]",
             severity="warning",
             why=(
                 "When server_tokens is 'on' (the default), nginx includes its version "
@@ -68,17 +70,16 @@ class WitWorld(wit_world.WitWorld):
             references=[
                 "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
             ],
-            min_nginx_version=None,
-            max_nginx_version=None,
         )
 
-    def check(self, raw_cfg: config_api.Config, path: str) -> List[LintError]:
+    def check(self, raw_cfg: Config, path: str) -> List[LintError]:
         # Fetch only "http"/"server_tokens" (plus their ancestors) instead of
         # the whole file: raw_cfg.all_directives_with_context() makes one host
         # call per directive in the file, while snapshot_filtered() transfers
         # everything needed in a single call proportional to what's actually
         # relevant.
         cfg = build_config_from_snapshot(raw_cfg.snapshot_filtered(RELEVANT_DIRECTIVES))
+        err = error_builder(self.spec())
 
         errors: List[LintError] = []
         has_server_tokens_off = False
@@ -110,13 +111,9 @@ class WitWorld(wit_world.WitWorld):
                 elif directive.first_arg_is("on"):
                     has_server_tokens_on = True
                     errors.append(
-                        LintError(
-                            rule=RULE_NAME,
-                            category="security",
-                            message="server_tokens should be 'off' to hide nginx version",
-                            severity=Severity.WARNING,
-                            line=directive.line(),
-                            column=directive.column(),
+                        err.warning_at(
+                            "server_tokens should be 'off' to hide nginx version",
+                            directive,
                             fixes=[directive.replace_with("server_tokens off;")],
                         )
                     )
@@ -132,17 +129,11 @@ class WitWorld(wit_world.WitWorld):
             and not has_server_tokens_on
         ):
             errors.append(
-                LintError(
-                    rule=RULE_NAME,
-                    category="security",
-                    message=(
-                        "server_tokens defaults to 'on', consider adding "
-                        "'server_tokens off;' in http context"
-                    ),
-                    severity=Severity.WARNING,
+                err.warning(
+                    "server_tokens defaults to 'on', consider adding "
+                    "'server_tokens off;' in http context",
                     line=http_block_line,
                     column=1,
-                    fixes=[],
                 )
             )
 

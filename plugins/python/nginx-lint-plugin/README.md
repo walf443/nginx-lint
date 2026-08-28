@@ -8,7 +8,15 @@ as a native module.
 
 ## Layout
 
-- `python/nginx_lint_plugin/` — the SDK package
+- `python/nginx_lint_plugin/` — the SDK package. Everything a plugin needs
+  is re-exported from its root (`Plugin`, `Config`, `LintError`, `Fix`,
+  `Severity`, …), so plugin code never imports from the generated bindings
+  directly. It ships a PEP 561 `py.typed` marker, so mypy and pyright use
+  the annotations.
+  - `builders` — `plugin_spec()` and `error_builder()`, mirroring the Rust
+    SDK's `PluginSpec::new()` and `spec().error_builder()`. The generated
+    dataclasses have no defaults, so without these a spec means spelling out
+    all eleven fields and every error repeats the plugin's rule and category.
   - `testing` — `parse_config()` and `PluginTestRunner` for plain-pytest
     unit tests against the real Rust parser
   - `config_builder` — reconstructs method-based `Config`/`Directive`
@@ -16,7 +24,8 @@ as a native module.
     `directive.is_(...)`) from parser output or a host snapshot
   - `_native` — the Rust parser bridge (built by maturin from
     `src/lib.rs`; only `testing` imports it, so the rest of the SDK stays
-    bundleable into a WASM component)
+    bundleable into a WASM component). Built against the stable ABI
+    (`abi3-py311`), so one wheel per platform covers every Python ≥ 3.11.
   - `API_VERSION` — the plugin API version, kept in sync with
     `crates/nginx-lint-plugin`
 - `python/wit_world/`, `python/componentize_py_types.py` — componentize-py
@@ -58,6 +67,27 @@ The second `-p` is only needed for editable installs, whose `.pth` link
 componentize-py does not follow; it is harmless otherwise. See
 `../server-tokens-enabled-py/Makefile` for the same commands in a form you
 can copy.
+
+## Writing a plugin
+
+```python
+from nginx_lint_plugin import Config, LintError, Plugin, plugin_spec, error_builder
+
+
+class WitWorld(Plugin):          # the class must keep this name
+    def spec(self):
+        return plugin_spec("my-rule", "style", "What it checks",
+                           severity="warning")
+
+    def check(self, cfg: Config, path: str) -> list[LintError]:
+        err = error_builder(self.spec())
+        return [
+            err.warning_at("autoindex should be off", ctx.directive,
+                           fixes=[ctx.directive.replace_with("autoindex off;")])
+            for ctx in cfg.all_directives_with_context()
+            if ctx.directive.is_("autoindex") and ctx.directive.first_arg_is("on")
+        ]
+```
 
 ## Testing a plugin
 
