@@ -176,7 +176,9 @@ jobs:
           pip install dist/*.whl
       - name: Run Python unit tests
         working-directory: plugins/python/server-tokens-enabled-py
-        run: pytest -v
+        run: make test
+        env:
+          PYTEST_ADDOPTS: -v
       - name: Build Python plugin
         working-directory: plugins/python/server-tokens-enabled-py
         run: make build
