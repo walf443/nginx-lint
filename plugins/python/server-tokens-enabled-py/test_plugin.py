@@ -2,7 +2,7 @@
 
 Python port of plugins/typescript/server-tokens-enabled-ts/src/plugin.test.ts —
 same cases, same assertions, run with plain pytest against the real Rust
-parser (via the nginx_lint_parser_py native module).
+parser (via the SDK's nginx_lint_plugin._native module).
 """
 
 from pathlib import Path

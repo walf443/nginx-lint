@@ -15,6 +15,22 @@ dynamic = ["version"]
 [project.urls]
 Repository = "https://github.com/walf443/nginx-lint"
 
+# Tools the Makefile targets need. `make install` gets maturin through pip's
+# build isolation, but `make develop` and `make bindings` invoke the maturin
+# and componentize-py CLIs directly. Install with `pip install --group dev`.
+#
+# The componentize-py pin must match the one in
+# ../server-tokens-enabled-py/pyproject.toml: this generates the bindings a
+# plugin is built against, and componentize-py injects its own matching
+# runtime at componentize time, so a mismatch is a silent skew rather than a
+# build error.
+[dependency-groups]
+dev = [
+    "maturin>=1.0,<2.0",
+    "pytest",
+    "componentize-py==0.25.0",
+]
+
 [tool.maturin]
 # Mixed Rust/Python project: pure-Python packages live under python/
 # (nginx_lint_plugin plus the componentize-py bindings wit_world /

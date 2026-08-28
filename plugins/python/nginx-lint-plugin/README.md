@@ -42,14 +42,17 @@ as a native module.
 
 ## Install
 
-Both targets regenerate the bindings and copy the WIT in first, so
-`componentize-py` must be on `PATH`:
+Both targets regenerate the bindings and copy the WIT in first, which needs
+the `componentize-py` CLI; `make develop` also needs `maturin`. Both are in
+the `dev` dependency group:
 
 ```bash
 cd plugins/python/nginx-lint-plugin
+pip install --group dev
 
 make install   # pip install .
 make develop   # editable install for SDK work (maturin develop)
+make test      # pytest
 ```
 
 Outside this repository the SDK is a plain dependency — `pip install

@@ -21,6 +21,9 @@ dependencies = [
 # A dependency group rather than an optional-dependencies extra: extras are
 # resolved by a build backend, which this project deliberately lacks.
 # Install with `pip install --group dev` (pip 25.1+) or `uv sync --group dev`.
+#
+# Keep the componentize-py pin in sync with the SDK's dev group: it must
+# generate the bindings and build the component with the same version.
 [dependency-groups]
 dev = [
     "pytest",
