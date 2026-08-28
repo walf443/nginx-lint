@@ -30,6 +30,10 @@ members = [
     "plugins/builtin/deprecation/listen_http2_deprecated",
     "plugins/builtin/deprecation/ssl_on_deprecated",
 ]
+# nginx-lint-parser-py is its own workspace: it's a Python extension module
+# (built via maturin against a local interpreter), which the main
+# workspace's builds and CI must not depend on.
+exclude = ["crates/nginx-lint-parser-py"]
 resolver = "2"
 
 [package]
