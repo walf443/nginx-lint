@@ -2790,6 +2790,116 @@ fn test_why_command_omits_applies_to_for_unversioned_rule() {
     );
 }
 
+// `why` reads --plugins so externally loaded rules are documented too, not
+// just the builtin ones. These cover the plumbing without needing a built
+// component; that a real plugin's metadata renders is covered end-to-end in
+// CI against the Python example plugin.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_accepts_plugins_after_the_subcommand() {
+    use std::process::Command;
+
+    // --plugins is global, so `why --plugins DIR RULE` parses. Before that
+    // it was only accepted ahead of the subcommand, which is not where
+    // anyone types it.
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "--list", "--plugins"])
+        .arg(dir.path())
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(
+        output.status.success(),
+        "why --list with an empty plugin dir should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("indent"),
+        "native rules must still be listed; got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_reports_plugin_load_failure() {
+    use std::process::Command;
+
+    // An unusable --plugins directory fails the same way `lint` does
+    // (exit 2, same message), and does so regardless of which rule was
+    // asked for. Looking up a native rule never loads plugins, so without
+    // an explicit check the same mistyped path would be reported for one
+    // name and silently ignored for another.
+    for args in [
+        vec!["why", "--plugins", "/nonexistent-plugin-dir", "--list"],
+        vec!["why", "--plugins", "/nonexistent-plugin-dir", "indent"],
+        vec![
+            "why",
+            "--plugins",
+            "/nonexistent-plugin-dir",
+            "some-plugin-rule",
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .args(&args)
+            .output()
+            .expect("Failed to run nginx-lint why");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{:?} should exit 2 like lint does; got {:?}",
+            args,
+            output.status.code()
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Error loading plugins"),
+            "{:?} should report the load failure; got:\n{}",
+            args,
+            stderr
+        );
+    }
+}
+
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_reports_unusable_cache_dir() {
+    use std::process::Command;
+
+    // Same uniformity requirement for --cache-dir: a cache root that cannot
+    // be used must fail whichever rule was asked for, not just the ones that
+    // happen to reach the plugin loader.
+    let dir = tempfile::tempdir().unwrap();
+    let not_a_dir = dir.path().join("cache-root-is-a-file");
+    std::fs::write(&not_a_dir, b"").unwrap();
+    let plugins_dir = dir.path().join("plugins");
+    std::fs::create_dir(&plugins_dir).unwrap();
+
+    for rule in ["--list", "indent", "some-plugin-rule"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .arg("why")
+            .arg("--plugins")
+            .arg(&plugins_dir)
+            .arg("--cache-dir")
+            .arg(&not_a_dir)
+            .arg(rule)
+            .output()
+            .expect("Failed to run nginx-lint why");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{} should exit 2 on an unusable cache dir; got {:?}: {}",
+            rule,
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 // ============================================================================
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================

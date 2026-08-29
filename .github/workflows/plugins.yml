@@ -322,6 +322,21 @@ jobs:
               echo "$output"
               echo "$output" | jq -e '.errors | length == 0' > /dev/null
 
+              # `why` documents externally loaded plugins, and its examples
+              # are the ones in examples/*.conf (app.py reads them at build
+              # time), so the rendered output must contain that file's text.
+              why=$($NGINX_LINT why --plugins target/py-plugins server-tokens-enabled-py 2>&1)
+              echo "$why"
+              echo "$why" | grep -q 'Rule: server-tokens-enabled-py'
+              echo "$why" | grep -q 'hide nginx version\|Server response header'
+              # -F, and a non-empty guard: unanchored regex built from file
+              # content would match anything if that line were ever blank,
+              # leaving this assertion passing vacuously.
+              example_line=$(sed -n 2p plugins/python/server-tokens-enabled-py/examples/bad.conf)
+              test -n "${example_line// /}"
+              grep -qF "$example_line" <<<"$why"
+              $NGINX_LINT why --list --plugins target/py-plugins 2>&1 | grep -q 'server-tokens-enabled-py'
+
   typescript-plugin:
     name: TypeScript Plugin
     runs-on: ubuntu-latest
