@@ -2864,6 +2864,42 @@ fn test_why_reports_plugin_load_failure() {
     }
 }
 
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_reports_unusable_cache_dir() {
+    use std::process::Command;
+
+    // Same uniformity requirement for --cache-dir: a cache root that cannot
+    // be used must fail whichever rule was asked for, not just the ones that
+    // happen to reach the plugin loader.
+    let dir = tempfile::tempdir().unwrap();
+    let not_a_dir = dir.path().join("cache-root-is-a-file");
+    std::fs::write(&not_a_dir, b"").unwrap();
+    let plugins_dir = dir.path().join("plugins");
+    std::fs::create_dir(&plugins_dir).unwrap();
+
+    for rule in ["--list", "indent", "some-plugin-rule"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .arg("why")
+            .arg("--plugins")
+            .arg(&plugins_dir)
+            .arg("--cache-dir")
+            .arg(&not_a_dir)
+            .arg(rule)
+            .output()
+            .expect("Failed to run nginx-lint why");
+
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{} should exit 2 on an unusable cache dir; got {:?}: {}",
+            rule,
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 // ============================================================================
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================

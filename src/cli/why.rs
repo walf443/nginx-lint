@@ -99,18 +99,25 @@ fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
 pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     use colored::Colorize;
 
-    // Validate the directory before anything else: looking a native rule up
-    // never loads plugins, so without this the same mistyped --plugins path
-    // would be reported for one rule name and silently ignored for another.
+    // Validate the plugin options before anything else: looking a native
+    // rule up never loads plugins, so without this the same unusable
+    // --plugins or --cache-dir would be reported for one rule name and
+    // silently ignored for another.
     #[cfg(feature = "plugins")]
-    if let Some(ref dir) = cli.plugins
-        && !dir.is_dir()
-    {
-        eprintln!(
-            "Error loading plugins: Plugin directory not found: {}",
-            dir.display()
-        );
-        return ExitCode::from(2);
+    if let Some(ref dir) = cli.plugins {
+        if !dir.is_dir() {
+            eprintln!(
+                "Error loading plugins: Plugin directory not found: {}",
+                dir.display()
+            );
+            return ExitCode::from(2);
+        }
+        // Building the loader validates the cache configuration; it stops
+        // short of compiling any plugin.
+        if let Err(e) = nginx_lint::plugin::PluginLoader::new_with_cache(cache_config(cli)) {
+            eprintln!("Error loading plugins: {}", e);
+            return ExitCode::from(2);
+        }
     }
 
     // The builtin WASM plugins are compiled through a process-global
