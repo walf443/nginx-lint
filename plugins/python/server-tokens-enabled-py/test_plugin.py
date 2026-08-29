@@ -125,6 +125,17 @@ def test_ignores_file_included_from_stream_context():
     assert len(errors) == 0
 
 
+def test_fixing_bad_conf_produces_good_conf():
+    # The examples are not just illustrative: applying this rule's fix to
+    # bad.conf must yield good.conf byte for byte. That makes the documented
+    # before/after pair an executable claim, and it goes through the same
+    # applier `nginx-lint --fix` uses.
+    runner.assert_fixed(
+        (EXAMPLES_DIR / "bad.conf").read_text(),
+        (EXAMPLES_DIR / "good.conf").read_text(),
+    )
+
+
 def test_examples_bad_good_conf():
     bad_conf = (EXAMPLES_DIR / "bad.conf").read_text()
     good_conf = (EXAMPLES_DIR / "good.conf").read_text()

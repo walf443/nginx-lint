@@ -276,8 +276,34 @@ fn parse_config_json(source: &str, include_context: Vec<String>) -> PyResult<Str
     serde_json::to_string(&output).map_err(|e| PyValueError::new_err(e.to_string()))
 }
 
+/// Apply fixes to a config, returning the result as a JSON string.
+///
+/// `fixes_json` is a list of the WIT `fix` records, whose field names match
+/// `nginx_lint_common::Fix`, so they deserialize into the very struct the
+/// linter applies — the point being that a plugin's fixes are tested
+/// through the production applier rather than a reimplementation of it.
+///
+/// The returned object carries `content`, `applied` and `skipped_invalid`;
+/// a caller that ignores the last one cannot tell a fix that did nothing
+/// from a fix that was silently dropped.
+#[pyfunction]
+fn apply_fixes_json(content: &str, fixes_json: &str) -> PyResult<String> {
+    let fixes: Vec<nginx_lint_common::Fix> =
+        serde_json::from_str(fixes_json).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let refs: Vec<&nginx_lint_common::Fix> = fixes.iter().collect();
+    let result = nginx_lint_common::apply_fixes_to_content_detailed(content, &refs);
+
+    let out = serde_json::json!({
+        "content": result.content,
+        "applied": result.applied,
+        "skipped_invalid": result.skipped_invalid,
+    });
+    serde_json::to_string(&out).map_err(|e| PyValueError::new_err(e.to_string()))
+}
+
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_config_json, m)?)?;
+    m.add_function(wrap_pyfunction!(apply_fixes_json, m)?)?;
     Ok(())
 }
