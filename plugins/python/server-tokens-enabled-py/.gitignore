@@ -1,0 +1,4 @@
+*.wasm
+__pycache__/
+# stale local binding output (bindings now come from the SDK)
+bindings/

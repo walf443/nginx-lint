@@ -1,0 +1,57 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "nginx-lint-plugin"
+description = "Python SDK for writing and testing nginx-lint WASM plugins"
+readme = "README.md"
+# PEP 639: an SPDX expression plus the file itself, so the wheel carries
+# the license text rather than only naming it (`license = { text = ... }`
+# is deprecated)
+license = "MIT"
+license-files = ["LICENSE"]
+# 3.11+: the committed componentize-py bindings use typing.Self
+requires-python = ">=3.11"
+# Version comes from Cargo.toml
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/walf443/nginx-lint"
+
+# Tools the Makefile targets need. `make install` gets maturin through pip's
+# build isolation, but `make develop` and `make bindings` invoke the maturin
+# and componentize-py CLIs directly. Install with `pip install --group dev`.
+#
+# The componentize-py pin must match the one in
+# ../server-tokens-enabled-py/pyproject.toml: this generates the bindings a
+# plugin is built against, and componentize-py injects its own matching
+# runtime at componentize time, so a mismatch is a silent skew rather than a
+# build error.
+[dependency-groups]
+dev = [
+    "maturin>=1.0,<2.0",
+    "pytest",
+    "componentize-py==0.25.0",
+]
+
+[tool.maturin]
+# Mixed Rust/Python project: pure-Python packages live under python/
+# (nginx_lint_plugin plus the componentize-py bindings wit_world /
+# componentize_py_types, which must stay top-level so the same imports
+# resolve inside a componentized plugin), and the Rust parser bridge is
+# compiled into nginx_lint_plugin._native.
+python-source = "python"
+module-name = "nginx_lint_plugin._native"
+# maturin only auto-includes the module-name package from python-source;
+# the componentize-py bindings must ship as additional top-level modules
+include = [
+    { path = "python/wit_world/**/*.py", format = ["sdist", "wheel"] },
+    { path = "python/componentize_py_types.py", format = ["sdist", "wheel"] },
+    # The WIT itself, so plugin authors can run componentize-py against a
+    # plain `pip install` (see nginx_lint_plugin.wit_dir())
+    { path = "python/nginx_lint_plugin/wit/*.wit", format = ["sdist", "wheel"] },
+    # PEP 561 markers, so downstream type checkers use the annotations
+    { path = "python/nginx_lint_plugin/py.typed", format = ["sdist", "wheel"] },
+    { path = "python/wit_world/py.typed", format = ["sdist", "wheel"] },
+]

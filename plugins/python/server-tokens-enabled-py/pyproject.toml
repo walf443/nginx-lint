@@ -1,0 +1,45 @@
+# A plugin is compiled to a WASM component by componentize-py rather than
+# installed as a Python distribution, so there is deliberately no
+# [build-system] here: this file declares what the plugin needs and how to
+# run its tests. The TypeScript example's package.json plays the same role.
+
+[project]
+name = "server-tokens-enabled-py"
+version = "0.1.0"
+description = "Detects when server_tokens is enabled (exposes nginx version)"
+readme = "README.md"
+license = { text = "MIT" }
+# 3.11+: the SDK's generated bindings use typing.Self
+requires-python = ">=3.11"
+dependencies = [
+    # Provides nginx_lint_plugin, the wit_world bindings, and the bundled
+    # WIT. Inside this repository install it from the sibling directory:
+    #   make -C ../nginx-lint-plugin install
+    "nginx-lint-plugin",
+]
+
+# A dependency group rather than an optional-dependencies extra: extras are
+# resolved by a build backend, which this project deliberately lacks.
+# Install with `pip install --group dev` (pip 25.1+) or `uv sync --group dev`.
+#
+# Keep the componentize-py pin in sync with the SDK's dev group: it must
+# generate the bindings and build the component with the same version.
+[dependency-groups]
+dev = [
+    "pytest",
+    "mypy",
+    "componentize-py==0.25.0",
+]
+
+[tool.pytest.ini_options]
+# Make app.py importable from the tests without a sys.path shim
+pythonpath = ["."]
+
+[tool.mypy]
+python_version = "3.11"
+# Check the bodies of unannotated functions too, so plain `def test_x():`
+# still gets type-checked without demanding `-> None` everywhere. The SDK
+# ships a py.typed marker, so its types resolve here.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = true

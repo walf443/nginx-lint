@@ -149,9 +149,75 @@ jobs:
           path: artifacts/
           retention-days: 1
 
+  python-plugin:
+    name: Python Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          # The lowest version the SDK supports, so CI catches anything that
+          # needs a newer one. The abi3 wheel it builds runs on 3.11+.
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: "python-plugin"
+          workspaces: "plugins/python/nginx-lint-plugin"
+      - name: Lint the native module
+        # This crate is its own workspace, so the repository-wide Format and
+        # Clippy jobs do not reach it
+        working-directory: plugins/python/nginx-lint-plugin
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
+      - name: Install Python tooling
+        # From the example plugin's dependency group, so CI and the
+        # documented developer setup install the same versions.
+        # --group needs pip 25.1+, newer than some bundled pips.
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: |
+          python -m pip install --upgrade pip
+          pip install --group dev
+      - name: Install nginx-lint-plugin SDK
+        working-directory: plugins/python/nginx-lint-plugin
+        # `make install` regenerates the bindings from the WIT first: they are
+        # not committed, so everything downstream builds against the current
+        # wit/nginx-lint-plugin.wit by construction.
+        run: make install
+      - name: Type-check the Python plugin
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: make typecheck
+      - name: Run SDK unit tests
+        working-directory: plugins/python/nginx-lint-plugin
+        run: pytest
+        env:
+          PYTEST_ADDOPTS: -v
+      - name: Run Python unit tests
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: make test
+        env:
+          PYTEST_ADDOPTS: -v
+      - name: Build Python plugin
+        working-directory: plugins/python/server-tokens-enabled-py
+        run: make build
+      - name: Upload Python WASM plugin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: py-plugin
+          path: plugins/python/server-tokens-enabled-py/server-tokens-enabled-py.wasm
+          retention-days: 1
+
   wasm-integration:
     name: WASM Integration Test
-    needs: [wasm-build, typescript-plugin, build-host]
+    needs: [wasm-build, typescript-plugin, python-plugin, build-host]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -170,6 +236,10 @@ jobs:
           path: target/ts-plugins
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          name: py-plugin
+          path: target/py-plugins
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
           name: host-binaries
           path: artifacts
       - name: Extract WASM plugins
@@ -179,27 +249,42 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
-      - name: Run WASM integration tests
-        run: |
-          chmod +x artifacts/wasm_plugin_test
-          ./artifacts/wasm_plugin_test
-      - name: Test TypeScript plugin integration
-        run: |
-          chmod +x artifacts/nginx-lint
-          NGINX_LINT=./artifacts/nginx-lint
+          chmod +x artifacts/wasm_plugin_test artifacts/nginx-lint
+      - parallel:
+          - name: Run WASM integration tests
+            run: ./artifacts/wasm_plugin_test
+          - name: Test TypeScript plugin integration
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
 
-          # bad.conf should produce warnings from the TS plugin
-          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf || true)
-          echo "$output"
-          echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
+              # --rule-only makes the exit code meaningful: bad.conf must
+              # fail with this rule's warning, and good.conf must exit 0
+              # (a CLI crash or plugin-load failure fails either leg).
+              if output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-ts"
+                exit 1
+              fi
+              echo "$output"
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
 
-          # good.conf should NOT produce warnings from the TS plugin
-          output=$($NGINX_LINT --plugins target/ts-plugins --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf || true)
-          echo "$output"
-          if echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null 2>&1; then
-            echo "ERROR: good.conf should not produce errors from server-tokens-enabled-ts"
-            exit 1
-          fi
+              output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf)
+              echo "$output"
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+          - name: Test Python plugin integration
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
+
+              # Same shape as the TypeScript step above; keep the two in sync.
+              if output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-py"
+                exit 1
+              fi
+              echo "$output"
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-py")' > /dev/null
+
+              output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/good.conf)
+              echo "$output"
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
 
   typescript-plugin:
     name: TypeScript Plugin
