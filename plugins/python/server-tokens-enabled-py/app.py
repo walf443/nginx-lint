@@ -13,6 +13,7 @@ Built as a WASM component with componentize-py:
   componentize-py -d wit -w plugin componentize app -o server-tokens-enabled-py.wasm --stub-wasi
 """
 
+from pathlib import Path
 from typing import List
 
 from nginx_lint_plugin import (
@@ -37,19 +38,14 @@ RULE_NAME = "server-tokens-enabled-py"
 # Rust port's relevant_directives() for the same reasoning.)
 RELEVANT_DIRECTIVES = ["http", "server_tokens"]
 
-BAD_EXAMPLE = """http {
-  server_tokens on;
-  server {
-    listen 80;
-  }
-}"""
+_EXAMPLES = Path(__file__).parent / "examples"
 
-GOOD_EXAMPLE = """http {
-  server_tokens off;
-  server {
-    listen 80;
-  }
-}"""
+# Read at import time rather than duplicated as literals: componentize-py
+# executes module-level code while building and freezes the result into the
+# component, so the spec carries the same text the tests and `nginx-lint why`
+# use, with no filesystem access at runtime (the component has none).
+BAD_EXAMPLE = (_EXAMPLES / "bad.conf").read_text().rstrip("\n")
+GOOD_EXAMPLE = (_EXAMPLES / "good.conf").read_text().rstrip("\n")
 
 
 class WitWorld(Plugin):
