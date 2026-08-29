@@ -25,8 +25,10 @@ def test_spec_returns_valid_plugin_metadata():
     s = plugin.spec()
     assert s.name == "server-tokens-enabled-py"
     assert s.category == "security"
-    # The plugin declares api_version as a literal; this assertion keeps it
-    # in sync with the SDK
+    # plugin_spec() fills api_version in from the SDK, so this checks that
+    # the plugin took that default rather than declaring its own. Keeping
+    # the SDK's constant aligned with the host's is a separate, Rust-side
+    # check (test_api_version_constants_stay_in_sync in src/plugin/mod.rs).
     assert s.api_version == API_VERSION
     assert s.severity == "warning"
     assert len(s.description) > 0

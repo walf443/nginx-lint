@@ -56,8 +56,21 @@ def wit_dir() -> Path:
 
         componentize-py -d "$(python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')" \\
             -w plugin componentize app -o plugin.wasm --stub-wasi
+
+    Raises FileNotFoundError if the installed package has no bundled WIT,
+    which happens when it was built without the Makefile's `copy-wit` step
+    (the directory is generated, not committed). Failing here names the
+    cause; returning the path would surface it as an opaque componentize-py
+    error about a missing directory.
     """
-    return Path(__file__).parent / "wit"
+    directory = Path(__file__).parent / "wit"
+    if not directory.is_dir():
+        raise FileNotFoundError(
+            f"nginx-lint-plugin was installed without its bundled WIT ({directory} "
+            "does not exist). Reinstall it with `make install` from the SDK "
+            "directory, which copies the WIT in before building."
+        )
+    return directory
 
 
 __all__ = [
