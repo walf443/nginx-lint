@@ -10,33 +10,33 @@ use std::process::ExitCode;
 /// one. Checking native rules first also keeps `why <native-rule>` from
 /// compiling and instantiating every builtin WASM component for a name
 /// they cannot supply.
-fn find_rule_doc(name: &str, cli: &Cli) -> Option<RuleDocOwned> {
+fn find_rule_doc(name: &str, cli: &Cli) -> Result<Option<RuleDocOwned>, ()> {
     if let Some(doc) = nginx_lint::docs::get_rule_doc(name) {
-        return Some(doc.into());
+        return Ok(Some(doc.into()));
     }
 
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     if let Some(doc) = nginx_lint::docs::get_rule_doc_with_plugins(name) {
-        return Some(doc);
+        return Ok(Some(doc));
     }
 
     #[cfg(feature = "plugins")]
-    if let Some(doc) = external_plugin_docs(cli)
+    if let Some(doc) = external_plugin_docs(cli)?
         .into_iter()
         .find(|d| d.name == name)
     {
-        return Some(doc);
+        return Ok(Some(doc));
     }
 
     let _ = cli;
-    None
+    Ok(None)
 }
 
 /// Collect the documentation for every rule this invocation can see.
 ///
 /// Same precedence as [`find_rule_doc`]; used by `--list`, which needs all
 /// of them anyway.
-fn collect_rule_docs(cli: &Cli) -> Vec<RuleDocOwned> {
+fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     // Only the plugin features below extend this
     #[allow(unused_mut)]
     let mut docs: Vec<RuleDocOwned> = nginx_lint::docs::all_rule_docs()
@@ -56,10 +56,10 @@ fn collect_rule_docs(cli: &Cli) -> Vec<RuleDocOwned> {
     }
 
     #[cfg(feature = "plugins")]
-    docs.extend(external_plugin_docs(cli));
+    docs.extend(external_plugin_docs(cli)?);
 
     let _ = cli;
-    docs
+    Ok(docs)
 }
 
 /// Resolve the compilation cache from the CLI flags.
@@ -79,30 +79,39 @@ fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     }
 }
 
+/// Load the docs for a `--plugins` directory, if one was given.
+///
+/// Returns Err after reporting the failure. `lint` exits 2 when a plugin
+/// directory cannot be loaded, and `why` says nothing useful about a rule
+/// it never managed to load, so it fails the same way rather than
+/// pretending the directory contributed nothing.
 #[cfg(feature = "plugins")]
-fn external_plugin_docs(cli: &Cli) -> Vec<RuleDocOwned> {
-    use colored::Colorize;
-
+fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     let Some(ref dir) = cli.plugins else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
 
-    match nginx_lint::docs::external_plugin_docs(dir, cache_config(cli)) {
-        Ok(docs) => docs,
-        Err(e) => {
-            eprintln!(
-                "{} failed to load plugins from {}: {}",
-                "Warning:".yellow().bold(),
-                dir.display(),
-                e
-            );
-            Vec::new()
-        }
-    }
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli)).map_err(|e| {
+        eprintln!("Error loading plugins: {}", e);
+    })
 }
 
 pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     use colored::Colorize;
+
+    // Validate the directory before anything else: looking a native rule up
+    // never loads plugins, so without this the same mistyped --plugins path
+    // would be reported for one rule name and silently ignored for another.
+    #[cfg(feature = "plugins")]
+    if let Some(ref dir) = cli.plugins
+        && !dir.is_dir()
+    {
+        eprintln!(
+            "Error loading plugins: Plugin directory not found: {}",
+            dir.display()
+        );
+        return ExitCode::from(2);
+    }
 
     // The builtin WASM plugins are compiled through a process-global
     // loader, so the cache flags have to reach it before anything loads
@@ -111,7 +120,9 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     nginx_lint::plugin::builtin::configure_builtin_plugin_cache(cache_config(cli));
 
     if list {
-        let docs = collect_rule_docs(cli);
+        let Ok(docs) = collect_rule_docs(cli) else {
+            return ExitCode::from(2);
+        };
         eprintln!("{}", "Available rules:".bold());
         eprintln!();
 
@@ -167,7 +178,12 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         }
     };
 
-    match find_rule_doc(&rule_name, cli) {
+    let found = match find_rule_doc(&rule_name, cli) {
+        Ok(found) => found,
+        Err(()) => return ExitCode::from(2),
+    };
+
+    match found {
         Some(doc) => {
             print_rule_doc(&doc);
             ExitCode::SUCCESS

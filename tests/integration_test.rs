@@ -2827,26 +2827,41 @@ fn test_why_accepts_plugins_after_the_subcommand() {
 fn test_why_reports_plugin_load_failure() {
     use std::process::Command;
 
-    // A directory that cannot be loaded must say so. Reporting nothing and
-    // falling through to "Unknown rule" is what made the missing --plugins
-    // support confusing in the first place.
-    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
-        .args(["why", "--plugins", "/nonexistent-plugin-dir", "some-rule"])
-        .output()
-        .expect("Failed to run nginx-lint why");
+    // An unusable --plugins directory fails the same way `lint` does
+    // (exit 2, same message), and does so regardless of which rule was
+    // asked for. Looking up a native rule never loads plugins, so without
+    // an explicit check the same mistyped path would be reported for one
+    // name and silently ignored for another.
+    for args in [
+        vec!["why", "--plugins", "/nonexistent-plugin-dir", "--list"],
+        vec!["why", "--plugins", "/nonexistent-plugin-dir", "indent"],
+        vec![
+            "why",
+            "--plugins",
+            "/nonexistent-plugin-dir",
+            "some-plugin-rule",
+        ],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .args(&args)
+            .output()
+            .expect("Failed to run nginx-lint why");
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("failed to load plugins from"),
-        "expected a load failure warning; got:\n{}",
-        stderr
-    );
-    assert!(
-        stderr.contains("Unknown rule"),
-        "the lookup should still run after the warning; got:\n{}",
-        stderr
-    );
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{:?} should exit 2 like lint does; got {:?}",
+            args,
+            output.status.code()
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("Error loading plugins"),
+            "{:?} should report the load failure; got:\n{}",
+            args,
+            stderr
+        );
+    }
 }
 
 // ============================================================================
