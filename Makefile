@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins build-with-wasm-plugins build-parser-wasm clean test lint lint-plugin-examples doc help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -63,7 +63,11 @@ build-plugins:
 	@echo "Done building plugins."
 
 # Collect built plugins to target/builtin-plugins/
-collect-plugins: build-plugins
+collect-plugins: build-plugins collect-plugins-only
+
+# The copy half of collect-plugins, without rebuilding. CI restores the
+# components from build artifacts, so it needs the copy on its own.
+collect-plugins-only:
 	@echo "Collecting plugins..."
 	@mkdir -p target/builtin-plugins
 	@for dir in plugins/builtin/*/*/; do \
