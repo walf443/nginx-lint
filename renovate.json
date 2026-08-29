@@ -29,6 +29,16 @@
         "every weekend"
       ],
       "groupName": "rust dependencies"
+    },
+    {
+      "description": "CI runs the Python jobs on the lowest interpreter the SDK supports (requires-python >=3.11, and it publishes an abi3-py311 wheel), so that anything needing a newer one fails in CI rather than in a contributor's checkout. Bumping it is part of raising that floor, not an automated update. Scoped to github-actions so a python dependency elsewhere (a Dockerfile base image, say) is still updated.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "python"
+      ],
+      "enabled": false
     }
   ]
 }
