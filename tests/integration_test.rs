@@ -2790,6 +2790,65 @@ fn test_why_command_omits_applies_to_for_unversioned_rule() {
     );
 }
 
+// `why` reads --plugins so externally loaded rules are documented too, not
+// just the builtin ones. These cover the plumbing without needing a built
+// component; that a real plugin's metadata renders is covered end-to-end in
+// CI against the Python example plugin.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_accepts_plugins_after_the_subcommand() {
+    use std::process::Command;
+
+    // --plugins is global, so `why --plugins DIR RULE` parses. Before that
+    // it was only accepted ahead of the subcommand, which is not where
+    // anyone types it.
+    let dir = tempfile::tempdir().unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "--list", "--plugins"])
+        .arg(dir.path())
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(
+        output.status.success(),
+        "why --list with an empty plugin dir should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("indent"),
+        "native rules must still be listed; got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(feature = "plugins")]
+#[test]
+fn test_why_reports_plugin_load_failure() {
+    use std::process::Command;
+
+    // A directory that cannot be loaded must say so. Reporting nothing and
+    // falling through to "Unknown rule" is what made the missing --plugins
+    // support confusing in the first place.
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "--plugins", "/nonexistent-plugin-dir", "some-rule"])
+        .output()
+        .expect("Failed to run nginx-lint why");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("failed to load plugins from"),
+        "expected a load failure warning; got:\n{}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Unknown rule"),
+        "the lookup should still run after the warning; got:\n{}",
+        stderr
+    );
+}
+
 // ============================================================================
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================

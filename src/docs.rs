@@ -169,6 +169,48 @@ pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
         .find(|d| d.name == name)
 }
 
+/// Build a [`RuleDocOwned`] from a loaded rule.
+///
+/// Shared by the builtin-plugin and external-plugin doc paths so a plugin
+/// documents itself the same way wherever it was loaded from.
+#[cfg(any(
+    feature = "wasm-builtin-plugins",
+    feature = "native-builtin-plugins",
+    feature = "plugins"
+))]
+fn rule_to_doc(rule: &dyn crate::linter::LintRule) -> RuleDocOwned {
+    RuleDocOwned {
+        name: rule.name().to_string(),
+        category: rule.category().to_string(),
+        description: rule.description().to_string(),
+        severity: rule.severity().unwrap_or("warning").to_string(),
+        why: rule.why().unwrap_or("").to_string(),
+        bad_example: rule.bad_example().unwrap_or("").to_string(),
+        good_example: rule.good_example().unwrap_or("").to_string(),
+        references: rule.references().unwrap_or_default(),
+        is_plugin: true,
+        min_nginx_version: rule.min_nginx_version().map(String::from),
+        max_nginx_version: rule.max_nginx_version().map(String::from),
+    }
+}
+
+/// Get documentation for the plugins in an external `--plugins` directory.
+///
+/// Unlike the builtin plugins these are not compiled in, so the caller has
+/// to say where they live and how to cache their compilation.
+#[cfg(feature = "plugins")]
+pub fn external_plugin_docs(
+    dir: &std::path::Path,
+    cache: crate::plugin::CompilationCache,
+) -> Result<Vec<RuleDocOwned>, crate::plugin::PluginError> {
+    let loader = crate::plugin::PluginLoader::new_with_cache(cache)?;
+    Ok(loader
+        .load_plugins(dir)?
+        .iter()
+        .map(|rule| rule_to_doc(rule.as_ref()))
+        .collect())
+}
+
 /// Get documentation from native plugins
 #[cfg(feature = "native-builtin-plugins")]
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
@@ -177,20 +219,8 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
 
     let plugins: Vec<Box<dyn LintRule>> = load_native_builtin_plugins();
     plugins
-        .into_iter()
-        .map(|rule| RuleDocOwned {
-            name: rule.name().to_string(),
-            category: rule.category().to_string(),
-            description: rule.description().to_string(),
-            severity: rule.severity().unwrap_or("warning").to_string(),
-            why: rule.why().unwrap_or("").to_string(),
-            bad_example: rule.bad_example().unwrap_or("").to_string(),
-            good_example: rule.good_example().unwrap_or("").to_string(),
-            references: rule.references().unwrap_or_default(),
-            is_plugin: true,
-            min_nginx_version: rule.min_nginx_version().map(String::from),
-            max_nginx_version: rule.max_nginx_version().map(String::from),
-        })
+        .iter()
+        .map(|rule| rule_to_doc(rule.as_ref()))
         .collect()
 }
 
@@ -207,19 +237,7 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
 
     if let Ok(plugins) = load_builtin_plugins() {
         for plugin in plugins {
-            docs.push(RuleDocOwned {
-                name: plugin.name().to_string(),
-                category: plugin.category().to_string(),
-                description: plugin.description().to_string(),
-                severity: plugin.severity().unwrap_or("warning").to_string(),
-                why: plugin.why().unwrap_or("").to_string(),
-                bad_example: plugin.bad_example().unwrap_or("").to_string(),
-                good_example: plugin.good_example().unwrap_or("").to_string(),
-                references: plugin.references().unwrap_or_default(),
-                is_plugin: true,
-                min_nginx_version: plugin.min_nginx_version().map(String::from),
-                max_nginx_version: plugin.max_nginx_version().map(String::from),
-            });
+            docs.push(rule_to_doc(plugin.as_ref()));
         }
     }
 
