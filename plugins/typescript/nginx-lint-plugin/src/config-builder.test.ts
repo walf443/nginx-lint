@@ -8,7 +8,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig } from "./plugin-test-runner.js";
+import { parseConfig, applyFixes } from "./plugin-test-runner.js";
 import { buildConfigFromSnapshot } from "./config-builder.js";
 import type { ConfigSnapshot } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
 
@@ -209,5 +209,72 @@ describe("Directive fix constructors", () => {
 
     assert.equal(ctx.directive.insertBefore("a 1;").newText, "a 1;\n");
     assert.equal(ctx.directive.insertAfter("a 1;").newText, "\na 1;");
+  });
+});
+
+// ── Applying fixes ──────────────────────────────────────────────────
+//
+// The block above pins the Fix records; these check what they do. That is
+// the distinction that mattered: insertBefore's old record looked
+// plausible and only revealed itself once applied.
+
+describe("applyFixes", () => {
+  it("insertBefore keeps the directive it inserts before", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.insertBefore("add_header X-Test 1;")]);
+
+    assert.equal(result.skippedInvalid, 0);
+    assert.equal(
+      result.content,
+      "http {\n    add_header X-Test 1;\n    server_tokens on;\n}\n",
+    );
+  });
+
+  it("the old line-based shape would have replaced the line", () => {
+    // Why the test above is worth having: this is what insertBefore used to
+    // emit. The applier normalizes it into a whole-line replacement, so the
+    // directive disappears.
+    const result = applyFixes(NESTED, [
+      {
+        line: 2, oldText: undefined, newText: "add_header X-Test 1;",
+        deleteLine: false, insertAfter: false,
+        startOffset: undefined, endOffset: undefined,
+      },
+    ]);
+
+    assert.ok(!result.content.includes("server_tokens on;"));
+    assert.equal(result.content, "http {\nadd_header X-Test 1;\n}\n");
+  });
+
+  it("replaceWith preserves indentation", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.replaceWith("server_tokens off;")]);
+
+    assert.equal(result.applied, 1);
+    assert.equal(result.content, "http {\n    server_tokens off;\n}\n");
+  });
+
+  it("insertAfter indents to the directive", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.insertAfter("add_header X-Test 1;")]);
+
+    assert.equal(
+      result.content,
+      "http {\n    server_tokens on;\n    add_header X-Test 1;\n}\n",
+    );
+  });
+
+  it("reports fixes it could not apply instead of returning the input", () => {
+    const result = applyFixes(NESTED, [
+      {
+        line: 1, oldText: undefined, newText: "x",
+        deleteLine: false, insertAfter: false,
+        startOffset: 10000, endOffset: 10001,
+      },
+    ]);
+
+    assert.equal(result.applied, 0);
+    assert.equal(result.skippedInvalid, 1);
+    assert.equal(result.content, NESTED);
   });
 });

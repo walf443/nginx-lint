@@ -366,8 +366,12 @@ jobs:
           - name: Install shared library dependencies
             working-directory: plugins/typescript/nginx-lint-plugin
             run: npm install
-      - name: Build parser WASM component
-        run: make build-parser-wasm
+      - name: Build parser and fixer WASM components
+        # The fixer carries the fix applier, which the testing entry uses to
+        # check what a plugin's fixes produce
+        run: |
+          make build-parser-wasm
+          make build-fixer-wasm
       - name: Build shared library
         working-directory: plugins/typescript/nginx-lint-plugin
         run: npm run build

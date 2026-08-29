@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm clean test lint lint-plugin-examples doc help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -87,6 +87,23 @@ build-with-wasm-plugins: collect-plugins
 	@echo "Building nginx-lint with embedded WASM builtin plugins..."
 	cargo build --release --no-default-features --features cli,wasm-builtin-plugins
 	@echo "Done."
+
+# Build the fix applier as a WASM Component for TypeScript plugin testing.
+# It lives in nginx-lint-common rather than alongside the parser component
+# because that is where the applier is, and common depends on the parser —
+# the reverse would be a cycle.
+build-fixer-wasm:
+	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
+	cargo build --manifest-path crates/nginx-lint-common/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm
+	wasm-tools component new \
+		target/wasm32-unknown-unknown/release/nginx_lint_common.wasm \
+		-o target/wasm32-unknown-unknown/release/nginx_lint_common.component.wasm
+	cd plugins/typescript/nginx-lint-plugin && \
+		npx jco transpile \
+			../../../target/wasm32-unknown-unknown/release/nginx_lint_common.component.wasm \
+			-o wasm/fixer --name fixer --instantiation async
+	@echo "Fixer component built and transpiled."
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm:
