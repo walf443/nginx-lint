@@ -18,7 +18,9 @@ as a native module.
     dataclasses have no defaults, so without these a spec means spelling out
     all eleven fields and every error repeats the plugin's rule and category.
   - `testing` — `parse_config()` and `PluginTestRunner` for plain-pytest
-    unit tests against the real Rust parser
+    unit tests against the real Rust parser, plus `apply_fixes()` and
+    `PluginTestRunner.assert_fixed()` to check what a rule's fixes actually
+    produce, through the same applier `nginx-lint --fix` uses
   - `config_builder` — reconstructs method-based `Config`/`Directive`
     objects (matching the componentize-py binding surface, e.g.
     `directive.is_(...)`) from parser output or a host snapshot
@@ -110,6 +112,15 @@ def test_detects_server_tokens_on():
 def test_include_context():
     cfg = parse_config("server_tokens on;", include_context=["http"])
     assert len(plugin.check(cfg, "test.conf")) == 1
+
+def test_fix():
+    # Asserting on the applied output, not just the reported findings: a fix
+    # the linter normalizes into a different operation than intended shows up
+    # here rather than in a user's config.
+    runner.assert_fixed(
+        "http {\n    server_tokens on;\n}\n",
+        "http {\n    server_tokens off;\n}\n",
+    )
 ```
 
 The same `WitWorld` class runs unmodified under pytest and inside the WASM

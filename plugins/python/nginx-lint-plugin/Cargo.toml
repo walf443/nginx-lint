@@ -13,6 +13,7 @@ name = "_native"
 crate-type = ["cdylib"]
 
 [dependencies]
+nginx-lint-common = { path = "../../../crates/nginx-lint-common" }
 nginx-lint-parser = { path = "../../../crates/nginx-lint-parser" }
 # abi3-py311: one wheel per platform covers every Python >= 3.11,
 # instead of one per platform x interpreter version. Keep pyo3 new enough

@@ -16,7 +16,8 @@ the production linter uses. Usage:
 """
 
 import json
-from typing import Callable, List, Optional, cast
+from dataclasses import asdict
+from typing import Callable, List, NamedTuple, Optional, cast
 
 from wit_world.imports.config_api import Config
 from wit_world.imports import parser_types
@@ -28,7 +29,7 @@ from wit_world.imports.data_types import (
     DirectiveData,
 )
 from wit_world.imports.parser_types import ParseOutput
-from wit_world.imports.types import LintError, PluginSpec
+from wit_world.imports.types import Fix, LintError, PluginSpec
 
 from . import _native
 from .config_builder import build_config_from_parse_output
@@ -152,6 +153,43 @@ def parse_config(
     return cast(Config, built)
 
 
+# ── Applying fixes ──────────────────────────────────────────────────
+
+
+class FixResult(NamedTuple):
+    """What the linter's fix applier did with a set of fixes."""
+
+    content: str
+    """The config after the fixes were applied."""
+    applied: int
+    """How many fixes were applied."""
+    skipped_invalid: int
+    """How many were dropped as unapplicable — bad offsets, or a line-based
+    fix whose line or ``old_text`` did not match. A fix counted here did
+    nothing, which is easy to mistake for a fix that had nothing to do."""
+
+
+def apply_fixes(content: str, fixes: List[Fix]) -> FixResult:
+    """Apply fixes to a config the way ``nginx-lint --fix`` would.
+
+    Runs the linter's own applier rather than reimplementing it, so a fix
+    that the CLI would normalize into a different operation than intended
+    shows up here as the wrong output instead of passing unnoticed.
+
+    The applier always ends its output with a newline, so a config written
+    without a trailing one comes back with it added — including when no fix
+    applied, where the result is the input plus that newline rather than
+    the input itself.
+    """
+    raw = _native.apply_fixes_json(content, json.dumps([asdict(f) for f in fixes]))
+    result = json.loads(raw)
+    return FixResult(
+        content=result["content"],
+        applied=result["applied"],
+        skipped_invalid=result["skipped_invalid"],
+    )
+
+
 # ── Test runner ─────────────────────────────────────────────────────
 
 SpecFn = Callable[[], PluginSpec]
@@ -199,6 +237,54 @@ class PluginTestRunner:
             raise AssertionError(
                 f'Expected error on line {line} from "{self._spec().name}", '
                 f"got errors on lines: {lines!r}"
+            )
+
+    def fix_string(
+        self, content: str, include_context: Optional[List[str]] = None
+    ) -> FixResult:
+        """Apply every fix this rule reports for `content`.
+
+        All of the rule's fixes go through the applier in one call, as
+        `nginx-lint --fix --rule-only <rule>` does, so overlapping fixes
+        resolve the same way here as in production.
+
+        One difference from the CLI: this calls the plugin's ``check``
+        directly, so findings the linter would have suppressed — an
+        ``# nginx-lint-disable`` comment in `content`, say — still
+        contribute their fixes here.
+        """
+        errors = self.check_string(content, include_context)
+        fixes = [fix for error in errors for fix in error.fixes]
+        return apply_fixes(content, fixes)
+
+    def assert_fixed(
+        self,
+        content: str,
+        expected: str,
+        include_context: Optional[List[str]] = None,
+    ) -> None:
+        """Assert that applying this rule's fixes to `content` yields `expected`.
+
+        Fails if any fix was unapplicable rather than comparing the output
+        of a fix that silently did nothing.
+        """
+        result = self.fix_string(content, include_context)
+        if result.skipped_invalid:
+            raise AssertionError(
+                f'{result.skipped_invalid} fix(es) from "{self._spec().name}" could '
+                f"not be applied (applied {result.applied}); the rule is producing "
+                f"fixes the linter rejects"
+            )
+        if result.content != expected:
+            hint = ""
+            if result.content == expected + "\n":
+                hint = (
+                    "\n(the only difference is the trailing newline the applier "
+                    "always adds; include it in the expected text)"
+                )
+            raise AssertionError(
+                f'Applying {result.applied} fix(es) from "{self._spec().name}" gave:\n'
+                f"{result.content!r}\nexpected:\n{expected!r}{hint}"
             )
 
     def test_examples(self, bad_conf: str, good_conf: str) -> None:

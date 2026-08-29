@@ -10,7 +10,7 @@
 //! - [`Linter`] — collects rules and runs them against a parsed config
 
 use crate::parser::ast::Config;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Display-ordered list of rule categories for UI output.
@@ -48,25 +48,38 @@ impl std::fmt::Display for Severity {
 }
 
 /// Represents a fix that can be applied to resolve a lint error
-#[derive(Debug, Clone, Serialize)]
+///
+/// Deserialize lets a fix cross a language boundary and come back as the
+/// same struct the applier consumes — the Python SDK sends fixes here to
+/// test what they produce. The fields that are skipped when serializing
+/// default when absent, so the round-trip is lossless.
+///
+/// `deny_unknown_fields` keeps that guarantee honest: were the WIT `fix`
+/// record's fields ever renamed, silently dropping the unknown key would
+/// default e.g. `insert_after` to false and turn an insert into a
+/// whole-line replacement — the exact failure this round-trip exists to
+/// catch. Rejecting the input surfaces the drift instead.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fix {
     /// Line number where the fix should be applied (1-indexed)
     pub line: usize,
     /// The original text to replace (if None and new_text is empty, delete the line)
+    #[serde(default)]
     pub old_text: Option<String>,
     /// The new text to insert (empty string with old_text=None means delete)
     pub new_text: String,
     /// Whether to delete the entire line
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub delete_line: bool,
     /// Whether to insert new_text as a new line after the specified line
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub insert_after: bool,
     /// Start byte offset for range-based fix (0-indexed, inclusive)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start_offset: Option<usize>,
     /// End byte offset for range-based fix (0-indexed, exclusive)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end_offset: Option<usize>,
 }
 
