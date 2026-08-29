@@ -230,14 +230,15 @@ fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
     not(feature = "native-builtin-plugins")
 ))]
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
-    use crate::linter::LintRule;
     use crate::plugin::builtin::load_builtin_plugins;
 
     let mut docs = Vec::new();
 
+    // load_builtin_plugins yields concrete ComponentLintRules, not boxed
+    // trait objects, so this coerces rather than calling as_ref()
     if let Ok(plugins) = load_builtin_plugins() {
         for plugin in plugins {
-            docs.push(rule_to_doc(plugin.as_ref()));
+            docs.push(rule_to_doc(&plugin));
         }
     }
 

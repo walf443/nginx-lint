@@ -3,11 +3,39 @@ use nginx_lint::docs::RuleDocOwned;
 use nginx_lint_common::nginx_version::format_range;
 use std::process::ExitCode;
 
-/// Collect the documentation for every rule this invocation can see.
+/// Look up one rule, loading plugins only if the name is not a native rule.
 ///
 /// Native rules first, then builtin plugins, then the plugins in a
-/// `--plugins` directory — the same precedence `get_rule_doc_with_plugins`
-/// uses, so a name defined twice resolves to the earlier one.
+/// `--plugins` directory, so a name defined twice resolves to the earlier
+/// one. Checking native rules first also keeps `why <native-rule>` from
+/// compiling and instantiating every builtin WASM component for a name
+/// they cannot supply.
+fn find_rule_doc(name: &str, cli: &Cli) -> Option<RuleDocOwned> {
+    if let Some(doc) = nginx_lint::docs::get_rule_doc(name) {
+        return Some(doc.into());
+    }
+
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    if let Some(doc) = nginx_lint::docs::get_rule_doc_with_plugins(name) {
+        return Some(doc);
+    }
+
+    #[cfg(feature = "plugins")]
+    if let Some(doc) = external_plugin_docs(cli)
+        .into_iter()
+        .find(|d| d.name == name)
+    {
+        return Some(doc);
+    }
+
+    let _ = cli;
+    None
+}
+
+/// Collect the documentation for every rule this invocation can see.
+///
+/// Same precedence as [`find_rule_doc`]; used by `--list`, which needs all
+/// of them anyway.
 fn collect_rule_docs(cli: &Cli) -> Vec<RuleDocOwned> {
     // Only the plugin features below extend this
     #[allow(unused_mut)]
@@ -34,32 +62,32 @@ fn collect_rule_docs(cli: &Cli) -> Vec<RuleDocOwned> {
     docs
 }
 
-/// Load the docs for a `--plugins` directory, if one was given.
+/// Resolve the compilation cache from the CLI flags.
 ///
-/// A load failure is reported and treated as "no external rules": the user
-/// then sees why the directory did not contribute, rather than an
-/// unexplained "Unknown rule".
+/// Only the flags are honoured; unlike `lint`, `why` does not read
+/// .nginx-lint.toml, so cache_dir from the config file does not apply.
 #[cfg(feature = "plugins")]
-fn external_plugin_docs(cli: &Cli) -> Vec<RuleDocOwned> {
-    use colored::Colorize;
+fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     use nginx_lint::plugin::CompilationCache;
 
-    let Some(ref dir) = cli.plugins else {
-        return Vec::new();
-    };
-
-    // Only the cache flags are honoured here; unlike `lint`, `why` does not
-    // read .nginx-lint.toml, so cache_dir from the config file does not
-    // apply.
-    let cache = if cli.no_cache {
+    if cli.no_cache {
         CompilationCache::Disabled
     } else if let Some(ref cache_dir) = cli.cache_dir {
         CompilationCache::Directory(cache_dir.clone())
     } else {
         CompilationCache::Default
+    }
+}
+
+#[cfg(feature = "plugins")]
+fn external_plugin_docs(cli: &Cli) -> Vec<RuleDocOwned> {
+    use colored::Colorize;
+
+    let Some(ref dir) = cli.plugins else {
+        return Vec::new();
     };
 
-    match nginx_lint::docs::external_plugin_docs(dir, cache) {
+    match nginx_lint::docs::external_plugin_docs(dir, cache_config(cli)) {
         Ok(docs) => docs,
         Err(e) => {
             eprintln!(
@@ -76,9 +104,14 @@ fn external_plugin_docs(cli: &Cli) -> Vec<RuleDocOwned> {
 pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     use colored::Colorize;
 
-    let docs = collect_rule_docs(cli);
+    // The builtin WASM plugins are compiled through a process-global
+    // loader, so the cache flags have to reach it before anything loads
+    // them (mirrors run_lint).
+    #[cfg(all(feature = "wasm-builtin-plugins", feature = "plugins"))]
+    nginx_lint::plugin::builtin::configure_builtin_plugin_cache(cache_config(cli));
 
     if list {
+        let docs = collect_rule_docs(cli);
         eprintln!("{}", "Available rules:".bold());
         eprintln!();
 
@@ -134,9 +167,9 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         }
     };
 
-    match docs.iter().find(|doc| doc.name == rule_name) {
+    match find_rule_doc(&rule_name, cli) {
         Some(doc) => {
-            print_rule_doc(doc);
+            print_rule_doc(&doc);
             ExitCode::SUCCESS
         }
         None => {
