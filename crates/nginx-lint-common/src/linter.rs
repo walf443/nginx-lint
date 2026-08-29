@@ -53,7 +53,14 @@ impl std::fmt::Display for Severity {
 /// same struct the applier consumes — the Python SDK sends fixes here to
 /// test what they produce. The fields that are skipped when serializing
 /// default when absent, so the round-trip is lossless.
+///
+/// `deny_unknown_fields` keeps that guarantee honest: were the WIT `fix`
+/// record's fields ever renamed, silently dropping the unknown key would
+/// default e.g. `insert_after` to false and turn an insert into a
+/// whole-line replacement — the exact failure this round-trip exists to
+/// catch. Rejecting the input surfaces the drift instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Fix {
     /// Line number where the fix should be applied (1-indexed)
     pub line: usize,

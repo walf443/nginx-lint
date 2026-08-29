@@ -164,3 +164,35 @@ def test_apply_fixes_rejects_a_malformed_fix():
         from nginx_lint_plugin.testing import _native
 
         _native.apply_fixes_json(NESTED, '[{"old_text": null}]')
+
+
+# ── Documented edge cases ───────────────────────────────────────────
+
+
+def test_output_always_ends_with_a_newline():
+    # The applier appends one, so a config written without a trailing
+    # newline comes back with it — including when nothing applied, where
+    # the result is the input plus that newline rather than the input.
+    source = "http { server_tokens on; }"
+    d = _directive(source, "server_tokens")
+
+    fixed = apply_fixes(source, [d.replace_with("server_tokens off;")])
+    assert fixed.content == "http { server_tokens off; }\n"
+
+    untouched = apply_fixes(source, [])
+    assert untouched.applied == 0
+    assert untouched.content == source + "\n"
+
+
+def test_a_fix_with_an_unknown_field_is_rejected():
+    # The JSON deserializes into the applier's own Fix struct, and unknown
+    # keys are refused rather than dropped: a renamed WIT field would
+    # otherwise default insert_after to false, turning an insert into a
+    # whole-line replacement while the test kept passing.
+    from nginx_lint_plugin.testing import _native
+
+    with pytest.raises(ValueError):
+        _native.apply_fixes_json(
+            NESTED,
+            '[{"line": 2, "new_text": "x", "insert_after_renamed": true}]',
+        )

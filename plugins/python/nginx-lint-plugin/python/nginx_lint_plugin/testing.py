@@ -175,6 +175,11 @@ def apply_fixes(content: str, fixes: List[Fix]) -> FixResult:
     Runs the linter's own applier rather than reimplementing it, so a fix
     that the CLI would normalize into a different operation than intended
     shows up here as the wrong output instead of passing unnoticed.
+
+    The applier always ends its output with a newline, so a config written
+    without a trailing one comes back with it added — including when no fix
+    applied, where the result is the input plus that newline rather than
+    the input itself.
     """
     raw = _native.apply_fixes_json(content, json.dumps([asdict(f) for f in fixes]))
     result = json.loads(raw)
@@ -242,6 +247,11 @@ class PluginTestRunner:
         All of the rule's fixes go through the applier in one call, as
         `nginx-lint --fix --rule-only <rule>` does, so overlapping fixes
         resolve the same way here as in production.
+
+        One difference from the CLI: this calls the plugin's ``check``
+        directly, so findings the linter would have suppressed — an
+        ``# nginx-lint-disable`` comment in `content`, say — still
+        contribute their fixes here.
         """
         errors = self.check_string(content, include_context)
         fixes = [fix for error in errors for fix in error.fixes]
@@ -266,9 +276,15 @@ class PluginTestRunner:
                 f"fixes the linter rejects"
             )
         if result.content != expected:
+            hint = ""
+            if result.content == expected + "\n":
+                hint = (
+                    "\n(the only difference is the trailing newline the applier "
+                    "always adds; include it in the expected text)"
+                )
             raise AssertionError(
                 f'Applying {result.applied} fix(es) from "{self._spec().name}" gave:\n'
-                f"{result.content!r}\nexpected:\n{expected!r}"
+                f"{result.content!r}\nexpected:\n{expected!r}{hint}"
             )
 
     def test_examples(self, bad_conf: str, good_conf: str) -> None:
