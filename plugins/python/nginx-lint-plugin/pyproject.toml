@@ -6,7 +6,11 @@ build-backend = "maturin"
 name = "nginx-lint-plugin"
 description = "Python SDK for writing and testing nginx-lint WASM plugins"
 readme = "README.md"
-license = { text = "MIT" }
+# PEP 639: an SPDX expression plus the file itself, so the wheel carries
+# the license text rather than only naming it (`license = { text = ... }`
+# is deprecated)
+license = "MIT"
+license-files = ["LICENSE"]
 # 3.11+: the committed componentize-py bindings use typing.Self
 requires-python = ">=3.11"
 # Version comes from Cargo.toml
