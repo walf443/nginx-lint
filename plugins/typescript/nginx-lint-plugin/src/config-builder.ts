@@ -27,6 +27,25 @@ import type {
 
 // ── Wrap DirectiveData with Directive interface ─────────────────────
 
+/** Mirror of the host's `make_range_fix`: a zero-`line` range-based fix. */
+function rangeFix(start: number, end: number, newText: string): Fix {
+  return {
+    line: 0, oldText: undefined, newText,
+    deleteLine: false, insertAfter: false,
+    startOffset: start, endOffset: end,
+  };
+}
+
+/** The indent the host prefixes to each inserted line: `" ".repeat(column - 1)`. */
+function indentOf(data: DirectiveData): string {
+  return " ".repeat(Math.max(data.column - 1, 0));
+}
+
+/** Offset of the start of the directive's line, as the host computes it. */
+function lineStartOffset(data: DirectiveData): number {
+  return Math.max(data.startOffset - (data.column - 1), 0);
+}
+
 function wrapDirective(
   data: DirectiveData,
   resolveBlockItems: () => ConfigItem[],
@@ -54,12 +73,18 @@ function wrapDirective(
     hasBlock() { return data.hasBlock; },
     blockItems(): ConfigItem[] { return resolveBlockItems(); },
     blockIsRaw() { return data.blockIsRaw; },
+    // The fix constructors below must produce byte-identical Fix records to
+    // the host's implementations in src/plugin/component_rule.rs
+    // (replace_with / delete_line_fix / insert_* on DirectiveResource), so a
+    // plugin gets the same --fix result whether its Config came from the
+    // host resource or from a reconstructed snapshot.
     replaceWith(newText: string): Fix {
-      return {
-        line: data.line, oldText: undefined, newText,
-        deleteLine: false, insertAfter: false,
-        startOffset: data.startOffset, endOffset: data.endOffset,
-      };
+      const leading = data.leadingWhitespace;
+      return rangeFix(
+        data.startOffset - leading.length,
+        data.endOffset,
+        leading + newText,
+      );
     },
     deleteLineFix(): Fix {
       return {
@@ -69,32 +94,22 @@ function wrapDirective(
       };
     },
     insertAfter(newText: string): Fix {
-      return {
-        line: data.line, oldText: undefined, newText,
-        deleteLine: false, insertAfter: true,
-        startOffset: undefined, endOffset: undefined,
-      };
+      return rangeFix(data.endOffset, data.endOffset, `\n${indentOf(data)}${newText}`);
     },
     insertBefore(newText: string): Fix {
-      return {
-        line: data.line, oldText: undefined, newText,
-        deleteLine: false, insertAfter: false,
-        startOffset: undefined, endOffset: undefined,
-      };
+      const offset = lineStartOffset(data);
+      return rangeFix(offset, offset, `${indentOf(data)}${newText}\n`);
     },
     insertAfterMany(lines: string[]): Fix {
-      return {
-        line: data.line, oldText: undefined, newText: lines.join("\n"),
-        deleteLine: false, insertAfter: true,
-        startOffset: undefined, endOffset: undefined,
-      };
+      const indent = indentOf(data);
+      const text = lines.map((line) => `\n${indent}${line}`).join("");
+      return rangeFix(data.endOffset, data.endOffset, text);
     },
     insertBeforeMany(lines: string[]): Fix {
-      return {
-        line: data.line, oldText: undefined, newText: lines.join("\n"),
-        deleteLine: false, insertAfter: false,
-        startOffset: undefined, endOffset: undefined,
-      };
+      const indent = indentOf(data);
+      const text = lines.map((line) => `${indent}${line}\n`).join("");
+      const offset = lineStartOffset(data);
+      return rangeFix(offset, offset, text);
     },
   } as Directive;
 }
