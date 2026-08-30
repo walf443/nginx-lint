@@ -8,6 +8,11 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
+# Anchored, and listing the vendored WIT: wit-export is on by default and is
+# what third-party plugins build against, so the interface definition has to
+# be in the package (see crates/nginx-lint-parser for the same treatment).
+include = ["/src/**", "/tests/**", "/wit/*.wit", "/Cargo.toml", "/README.md"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 

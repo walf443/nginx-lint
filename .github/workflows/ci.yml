@@ -65,10 +65,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - run: cargo clippy --workspace --features plugins -- -D clippy::all
-      - name: Check the parser crate's vendored WIT matches the root
-        # It is vendored so the crate's `wasm` feature works from crates.io;
-        # a stale copy would generate bindings for the wrong interface.
-        run: diff wit/nginx-lint-plugin.wit crates/nginx-lint-parser/wit/nginx-lint-plugin.wit
+      - name: Check the vendored WITs match the root
+        # They are vendored so the crates' wit-bindgen features work from
+        # crates.io; a stale copy would generate bindings for the wrong
+        # interface. `make copy-wit` refreshes them.
+        run: |
+          diff wit/nginx-lint-plugin.wit crates/nginx-lint-parser/wit/nginx-lint-plugin.wit
+          diff wit/nginx-lint-plugin.wit crates/nginx-lint-plugin/wit/nginx-lint-plugin.wit
 
   test:
     name: Test

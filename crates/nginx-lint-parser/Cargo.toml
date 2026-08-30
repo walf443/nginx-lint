@@ -7,7 +7,11 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
-include = ["src/**/*", "wit/*.wit", "Cargo.toml", "README.md"]
+# Anchored so these match only at the crate root: unanchored gitignore-style
+# patterns match at any depth, and setting `include` also stops cargo from
+# filtering by .gitignore — together those shipped a stale wasm-pack pkg/.
+# tests/ is listed to keep `cargo test` working from the packaged crate.
+include = ["/src/**", "/tests/**", "/wit/*.wit", "/Cargo.toml", "/README.md"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
