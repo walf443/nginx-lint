@@ -303,6 +303,11 @@ describe("applyFixes", () => {
     ]);
 
     assert.equal(result.applied, 1);
+    // The assertion that makes this test about *overlap*: a fix dropped for
+    // overlapping is not an invalid one. Without this, the test passes
+    // equally if the second fix were rejected as unapplicable, and would
+    // not notice assertFixed starting to throw on conflicting fixes.
+    assert.equal(result.skippedInvalid, 0);
     assert.ok(
       result.content === "http {\n    server_tokens off;\n}\n" ||
         result.content === "http {\n    server_tokens build;\n}\n",
