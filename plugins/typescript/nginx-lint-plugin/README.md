@@ -156,6 +156,14 @@ it("handles included files", () => {
 | `assertErrors(content, count)` | Assert exactly N errors |
 | `assertErrorOnLine(content, line)` | Assert error on a specific line |
 | `testExamples(badConf, goodConf)` | Validate bad config produces errors, good config does not |
+| `fixString(content, opts?)` | Apply every fix this rule reports, returning `{ content, applied, skippedInvalid }` |
+| `assertFixed(content, expected, opts?)` | Assert applying this rule's fixes yields `expected` |
+
+`fixString`/`assertFixed` run the fixes through the linter's own applier, so a
+fix the CLI would normalize into a different operation than intended shows up
+as the wrong output rather than passing unnoticed. `applyFixes(content, fixes)`
+is exported for checking a single fix without a plugin. Note the applier always
+ends its output with a newline.
 
 ### Custom runtimes (Cloudflare Workers / workerd)
 
@@ -169,9 +177,12 @@ instantiated synchronously:
 ```ts
 import { createTesting } from "nginx-lint-plugin/testing/custom";
 import coreModule from "nginx-lint-plugin/wasm/parser/parser.core.wasm";
+// Only needed for fixString()/assertFixed(); omit it and just those throw.
+import fixerCore from "nginx-lint-plugin/wasm/fixer/fixer.core.wasm";
 
 const { parseConfig, PluginTestRunner } = await createTesting({
   getCoreModule: () => coreModule,
+  getFixerCoreModule: () => fixerCore,
   instantiateCore: (module) => new WebAssembly.Instance(module),
 });
 
