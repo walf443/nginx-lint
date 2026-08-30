@@ -130,6 +130,11 @@ def test_overlapping_fixes_skip_rather_than_corrupt():
     )
 
     assert result.applied == 1
+    # What makes this about overlap: a fix dropped for overlapping is not an
+    # invalid one. Without this the test passes equally if the second fix
+    # were rejected as unapplicable, and would not notice assert_fixed
+    # starting to fail on conflicting fixes.
+    assert result.skipped_invalid == 0
     assert result.content in (
         "http {\n    server_tokens off;\n}\n",
         "http {\n    server_tokens build;\n}\n",
