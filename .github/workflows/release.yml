@@ -420,7 +420,7 @@ jobs:
               exit 0
             fi
             echo "attempt $attempt failed"
-            sleep 60
+            [ "$attempt" -lt 3 ] && sleep 60
           done
           exit 1
       - name: Check the sdist-built package works
