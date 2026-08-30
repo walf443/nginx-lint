@@ -112,11 +112,19 @@ build-fixer-wasm:
 # The parser and plugin crates vendor the WIT so their wit-bindgen features
 # work from the published crates too (the macro cannot read a path outside
 # the package). The copies are committed; CI checks them against the root.
+
+# Only copy when the content differs: wit-bindgen tracks the WIT through an
+# include_bytes!, so bumping its mtime alone rebuilds the SDK and every
+# plugin that depends on it — which build-plugins would then do every run.
 copy-wit:
 	@mkdir -p crates/nginx-lint-parser/wit crates/nginx-lint-plugin/wit
-	@cp wit/nginx-lint-plugin.wit crates/nginx-lint-parser/wit/
-	@cp wit/nginx-lint-plugin.wit crates/nginx-lint-plugin/wit/
-	@echo "Copied wit/nginx-lint-plugin.wit into the parser and plugin crates."
+	@for dir in crates/nginx-lint-parser crates/nginx-lint-plugin; do \
+		dest="$$dir/wit/nginx-lint-plugin.wit"; \
+		if ! cmp -s wit/nginx-lint-plugin.wit "$$dest"; then \
+			cp wit/nginx-lint-plugin.wit "$$dest"; \
+			echo "  Refreshed $$dest"; \
+		fi; \
+	done
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm: copy-wit
