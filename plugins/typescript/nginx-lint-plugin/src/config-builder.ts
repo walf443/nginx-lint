@@ -49,13 +49,16 @@ function lineStartOffset(data: DirectiveData): number {
 /**
  * Duck-typed stand-in for the host-backed `config-api.directive` resource.
  *
- * A class rather than an object literal of closures: the methods live on the
- * prototype, so reconstructing a snapshot allocates one object per directive
- * instead of one closure per method per directive. On a 10k-line config that
- * was the difference between ~87µs and a few µs of reconstruction per kept
- * directive. It also matches the shape of the real resource, which jco
- * generates as a class — the literal made `Object.keys()`, spread and
- * destructuring behave differently on the two paths.
+ * A class rather than an object literal of closures, so that it matches the
+ * shape of the real resource: jco generates that as a class, and the literal
+ * made `Object.keys()`, spread and destructured methods behave differently
+ * depending on which path a plugin's Config came from.
+ *
+ * Prototype methods also mean one object per directive instead of one
+ * closure per method per directive, but that is a small effect — measured at
+ * ~6% of per-check time on a 10k-line config (601 kept directives). Guest
+ * side reconstruction still costs ~58µs per directive after this change, so
+ * closure allocation was not what dominated it.
  */
 class BuiltDirective implements Directive {
   readonly #data: DirectiveData;
