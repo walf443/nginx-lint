@@ -5,6 +5,15 @@
 //! extension modules (ngx_headers_more, lua-nginx-module, etc.) are supported
 //! without special configuration.
 //!
+//! # The `wasm` feature
+//!
+//! `wasm` builds this crate as a WASM component exporting the `parser`
+//! world — `parse-config(source, include-context)` returning the AST as a
+//! flat, index-based record tree. The nginx-lint TypeScript SDK uses it to
+//! parse configs in-process; it is published rather than repository-only,
+//! so anything that wants nginx parsing in a component-model host can use
+//! it the same way.
+//!
 //! # Quick Start
 //!
 //! ```

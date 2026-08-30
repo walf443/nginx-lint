@@ -4,6 +4,15 @@
 //! ecosystem: lint rule definitions, error reporting, configuration management,
 //! and ignore comment support.
 //!
+//! # The `wasm` feature
+//!
+//! `wasm` builds this crate as a WASM component for the TypeScript SDK, and
+//! only works inside a repository checkout: the `wit_bindgen::generate!`
+//! invocation reads `wit/nginx-lint-plugin.wit` from the repository root,
+//! which is not part of the published crate. Enabling it on a dependency
+//! from crates.io fails with a missing-file error. Build the component with
+//! `make build-fixer-wasm` instead.
+//!
 //! # Modules
 //!
 //! - [`linter`] — Core lint types: [`LintRule`] trait, [`LintError`], [`Severity`], [`Fix`]

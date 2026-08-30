@@ -5,7 +5,7 @@
 
 // Generate guest-side bindings from the WIT file
 wit_bindgen::generate!({
-    path: "../../wit/nginx-lint-plugin.wit",
+    path: "wit/nginx-lint-plugin.wit",
     world: "plugin",
     pub_export_macro: true,
 });

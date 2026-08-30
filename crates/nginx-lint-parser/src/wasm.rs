@@ -2,7 +2,7 @@ use crate::ast::{Argument, ArgumentValue, Comment, Config, ConfigItem, Directive
 
 // Generate guest-side bindings from the WIT file for the parser world
 wit_bindgen::generate!({
-    path: "../../wit/nginx-lint-plugin.wit",
+    path: "wit/nginx-lint-plugin.wit",
     world: "parser",
     pub_export_macro: true,
 });

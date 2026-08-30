@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -35,7 +35,11 @@ SHARED_PLUGIN_TARGET := target/wasm-plugins
 # Build all WASM builtin plugins as WIT components (requires: wasm-tools)
 # Uses a shared target directory so nginx-lint-plugin and other dependencies
 # are compiled only once instead of per-plugin.
-build-plugins:
+# copy-wit first: these compile the plugin SDK, which reads its vendored WIT,
+# while the host reads the root one — building against a stale copy yields
+# components that fail to instantiate with a component-type mismatch rather
+# than anything that names the cause.
+build-plugins: copy-wit
 	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
 	@echo "Building plugins (shared target: $(SHARED_PLUGIN_TARGET))..."
 	@for dir in $(PLUGIN_DIRS); do \
@@ -105,8 +109,25 @@ build-fixer-wasm:
 			-o wasm/fixer --name fixer --instantiation async
 	@echo "Fixer component built and transpiled."
 
+# The parser and plugin crates vendor the WIT so their wit-bindgen features
+# work from the published crates too (the macro cannot read a path outside
+# the package). The copies are committed; CI checks them against the root.
+
+# Only copy when the content differs: wit-bindgen tracks the WIT through an
+# include_bytes!, so bumping its mtime alone rebuilds the SDK and every
+# plugin that depends on it — which build-plugins would then do every run.
+copy-wit:
+	@mkdir -p crates/nginx-lint-parser/wit crates/nginx-lint-plugin/wit
+	@for dir in crates/nginx-lint-parser crates/nginx-lint-plugin; do \
+		dest="$$dir/wit/nginx-lint-plugin.wit"; \
+		if ! cmp -s wit/nginx-lint-plugin.wit "$$dest"; then \
+			cp wit/nginx-lint-plugin.wit "$$dest"; \
+			echo "  Refreshed $$dest"; \
+		fi; \
+	done
+
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
-build-parser-wasm:
+build-parser-wasm: copy-wit
 	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
 	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
 		--target wasm32-unknown-unknown --release --features wasm
@@ -183,6 +204,7 @@ help:
 	@echo "  make build-plugins      - Build WASM builtin plugins as WIT components"
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-parser-wasm  - Build parser WASM for TypeScript plugin testing"
+	@echo "  make copy-wit           - Refresh the WIT vendored into the parser/plugin crates"
 	@echo "  make build-fixer-wasm   - Build fix-applier WASM for TypeScript plugin testing"
 	@echo "                            (the TypeScript SDK imports both; build them together)"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"

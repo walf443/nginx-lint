@@ -7,11 +7,22 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
+# Anchored so these match only at the crate root: unanchored gitignore-style
+# patterns match at any depth, and setting `include` also stops cargo from
+# filtering by .gitignore — together those shipped a stale wasm-pack pkg/.
+# tests/ is listed to keep `cargo test` working from the packaged crate.
+include = ["/src/**", "/tests/**", "/wit/*.wit", "/Cargo.toml", "/README.md"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+# Builds this crate as a WASM component exporting the `parser` world. The
+# WIT it generates from is vendored into wit/ and shipped in the package
+# (see `include` above), so this works from crates.io as well as in a
+# checkout — keep the copy in sync with the repository root's via
+# `make copy-wit`.
 wasm = ["dep:wit-bindgen"]
 
 [dependencies]
