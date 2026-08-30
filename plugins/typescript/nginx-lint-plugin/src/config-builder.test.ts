@@ -264,6 +264,52 @@ describe("applyFixes", () => {
     );
   });
 
+  it("applies two fixes at different positions", () => {
+    const source = `http {
+    server_tokens on;
+    autoindex on;
+}
+`;
+    const cfg = parseConfig(source);
+    const byName = new Map(
+      cfg.allDirectivesWithContext().map((c) => [c.directive.name(), c.directive]),
+    );
+    const serverTokens = byName.get("server_tokens");
+    const autoindex = byName.get("autoindex");
+    assert.ok(serverTokens && autoindex);
+
+    const result = applyFixes(source, [
+      serverTokens.replaceWith("server_tokens off;"),
+      autoindex.replaceWith("autoindex off;"),
+    ]);
+
+    assert.equal(result.applied, 2);
+    assert.equal(result.skippedInvalid, 0);
+    assert.equal(
+      result.content,
+      "http {\n    server_tokens off;\n    autoindex off;\n}\n",
+    );
+  });
+
+  it("skips an overlapping fix rather than splicing both", () => {
+    // Two fixes over the same range: the applier keeps one and drops the
+    // other. Dropping for overlap is not counted as invalid, matching the
+    // CLI — so a rule emitting conflicting fixes gets one of them applied,
+    // not a corrupted line.
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [
+      d.replaceWith("server_tokens off;"),
+      d.replaceWith("server_tokens build;"),
+    ]);
+
+    assert.equal(result.applied, 1);
+    assert.ok(
+      result.content === "http {\n    server_tokens off;\n}\n" ||
+        result.content === "http {\n    server_tokens build;\n}\n",
+      `unexpected content: ${JSON.stringify(result.content)}`,
+    );
+  });
+
   it("reports fixes it could not apply instead of returning the input", () => {
     const result = applyFixes(NESTED, [
       {
