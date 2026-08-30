@@ -54,11 +54,12 @@ function lineStartOffset(data: DirectiveData): number {
  * made `Object.keys()`, spread and destructured methods behave differently
  * depending on which path a plugin's Config came from.
  *
- * Prototype methods also mean one object per directive instead of one
- * closure per method per directive, but that is a small effect — measured at
- * ~6% of per-check time on a 10k-line config (601 kept directives). Guest
- * side reconstruction still costs ~58µs per directive after this change, so
- * closure allocation was not what dominated it.
+ * Not a performance change, despite the shape suggesting one. Profiling a
+ * 10k-line config found per-check time dominated by the component boundary,
+ * not by guest-side allocation: lowering the returned LintErrors accounted
+ * for over half of it and lifting the snapshot for most of the rest, while
+ * everything this class does — walking the tree, allocating the directive
+ * objects — came to a few milliseconds in total.
  */
 class BuiltDirective implements Directive {
   readonly #data: DirectiveData;
