@@ -146,6 +146,16 @@ server {
     assert.equal(errors.length, 0);
   });
 
+  it("fixing bad.conf produces good.conf", () => {
+    // The examples are not just illustrative: applying this rule's fix to
+    // bad.conf must yield good.conf byte for byte, through the same applier
+    // `nginx-lint --fix` uses.
+    runner.assertFixed(
+      readFileSync(resolve(examplesDir, "bad.conf"), "utf-8"),
+      readFileSync(resolve(examplesDir, "good.conf"), "utf-8"),
+    );
+  });
+
   it("testExamples with bad/good conf", () => {
     const badConf = readFileSync(resolve(examplesDir, "bad.conf"), "utf-8");
     const goodConf = readFileSync(resolve(examplesDir, "good.conf"), "utf-8");

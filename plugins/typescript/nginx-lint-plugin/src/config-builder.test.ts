@@ -8,7 +8,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig } from "./plugin-test-runner.js";
+import { parseConfig, applyFixes } from "./plugin-test-runner.js";
 import { buildConfigFromSnapshot } from "./config-builder.js";
 import type { ConfigSnapshot } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
 
@@ -111,5 +111,170 @@ http {
     const rebuilt = buildConfigFromSnapshot(cfg.snapshot());
     const names = rebuilt.allDirectivesWithContext().map((c) => c.directive.name());
     assert.deepEqual(new Set(names), new Set(["http", "gzip", "server", "listen"]));
+  });
+});
+
+// ── Fix constructors ────────────────────────────────────────────────
+//
+// These pin the exact Fix records the SDK emits against the host's
+// implementations in src/plugin/component_rule.rs (replace_with /
+// delete_line_fix / insert_* on DirectiveResource). They used to differ:
+// insertBefore emitted a line-based shape that the applier normalizes into
+// a whole-line replacement, so it deleted the directive it meant to insert
+// before. Comparing the records catches that; counting findings does not.
+
+const NESTED = `http {
+    server_tokens on;
+}
+`;
+
+function serverTokens() {
+  const cfg = parseConfig(NESTED);
+  const ctx = cfg
+    .allDirectivesWithContext()
+    .find((c) => c.directive.is("server_tokens"));
+  assert.ok(ctx, "expected a server_tokens directive");
+  return ctx.directive;
+}
+
+describe("Directive fix constructors", () => {
+  it("replaceWith spans the leading whitespace and re-adds it", () => {
+    const d = serverTokens();
+    const fix = d.replaceWith("server_tokens off;");
+    const leading = d.leadingWhitespace();
+
+    assert.equal(fix.line, 0);
+    assert.equal(fix.deleteLine, false);
+    assert.equal(fix.insertAfter, false);
+    assert.equal(fix.startOffset, d.startOffset() - leading.length);
+    assert.equal(fix.endOffset, d.endOffset());
+    assert.equal(fix.newText, leading + "server_tokens off;");
+  });
+
+  it("deleteLineFix stays line-based", () => {
+    const d = serverTokens();
+    const fix = d.deleteLineFix();
+
+    assert.equal(fix.line, d.line());
+    assert.equal(fix.deleteLine, true);
+    assert.equal(fix.newText, "");
+    assert.equal(fix.startOffset, undefined);
+    assert.equal(fix.endOffset, undefined);
+  });
+
+  it("insertAfter is a zero-width insert indented to the directive", () => {
+    const d = serverTokens();
+    const fix = d.insertAfter("add_header X-Test 1;");
+
+    assert.equal(fix.startOffset, d.endOffset());
+    assert.equal(fix.endOffset, d.endOffset());
+    assert.equal(fix.newText, "\n    add_header X-Test 1;");
+    assert.equal(fix.line, 0);
+    assert.equal(fix.insertAfter, false);
+  });
+
+  it("insertBefore is a zero-width insert at the line start, not a replacement", () => {
+    const d = serverTokens();
+    const fix = d.insertBefore("add_header X-Test 1;");
+    const lineStart = d.startOffset() - (d.column() - 1);
+
+    // The offsets are what make this an insert: without them the applier
+    // normalizes the record into a whole-line replacement and the directive
+    // is lost.
+    assert.equal(fix.startOffset, lineStart);
+    assert.equal(fix.endOffset, lineStart);
+    assert.equal(fix.newText, "    add_header X-Test 1;\n");
+    assert.equal(fix.line, 0);
+  });
+
+  it("the *Many variants indent every line", () => {
+    const d = serverTokens();
+    const lineStart = d.startOffset() - (d.column() - 1);
+
+    const after = d.insertAfterMany(["a 1;", "b 2;"]);
+    assert.equal(after.startOffset, d.endOffset());
+    assert.equal(after.newText, "\n    a 1;\n    b 2;");
+
+    const before = d.insertBeforeMany(["a 1;", "b 2;"]);
+    assert.equal(before.startOffset, lineStart);
+    assert.equal(before.newText, "    a 1;\n    b 2;\n");
+  });
+
+  it("a top-level directive gets no indent", () => {
+    const cfg = parseConfig("server_tokens on;\n");
+    const ctx = cfg
+      .allDirectivesWithContext()
+      .find((c) => c.directive.is("server_tokens"));
+    assert.ok(ctx);
+
+    assert.equal(ctx.directive.insertBefore("a 1;").newText, "a 1;\n");
+    assert.equal(ctx.directive.insertAfter("a 1;").newText, "\na 1;");
+  });
+});
+
+// ── Applying fixes ──────────────────────────────────────────────────
+//
+// The block above pins the Fix records; these check what they do. That is
+// the distinction that mattered: insertBefore's old record looked
+// plausible and only revealed itself once applied.
+
+describe("applyFixes", () => {
+  it("insertBefore keeps the directive it inserts before", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.insertBefore("add_header X-Test 1;")]);
+
+    assert.equal(result.skippedInvalid, 0);
+    assert.equal(
+      result.content,
+      "http {\n    add_header X-Test 1;\n    server_tokens on;\n}\n",
+    );
+  });
+
+  it("the old line-based shape would have replaced the line", () => {
+    // Why the test above is worth having: this is what insertBefore used to
+    // emit. The applier normalizes it into a whole-line replacement, so the
+    // directive disappears.
+    const result = applyFixes(NESTED, [
+      {
+        line: 2, oldText: undefined, newText: "add_header X-Test 1;",
+        deleteLine: false, insertAfter: false,
+        startOffset: undefined, endOffset: undefined,
+      },
+    ]);
+
+    assert.ok(!result.content.includes("server_tokens on;"));
+    assert.equal(result.content, "http {\nadd_header X-Test 1;\n}\n");
+  });
+
+  it("replaceWith preserves indentation", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.replaceWith("server_tokens off;")]);
+
+    assert.equal(result.applied, 1);
+    assert.equal(result.content, "http {\n    server_tokens off;\n}\n");
+  });
+
+  it("insertAfter indents to the directive", () => {
+    const d = serverTokens();
+    const result = applyFixes(NESTED, [d.insertAfter("add_header X-Test 1;")]);
+
+    assert.equal(
+      result.content,
+      "http {\n    server_tokens on;\n    add_header X-Test 1;\n}\n",
+    );
+  });
+
+  it("reports fixes it could not apply instead of returning the input", () => {
+    const result = applyFixes(NESTED, [
+      {
+        line: 1, oldText: undefined, newText: "x",
+        deleteLine: false, insertAfter: false,
+        startOffset: 10000, endOffset: 10001,
+      },
+    ]);
+
+    assert.equal(result.applied, 0);
+    assert.equal(result.skippedInvalid, 1);
+    assert.equal(result.content, NESTED);
   });
 });

@@ -125,21 +125,30 @@ jobs:
           key: wasm-parser
       - name: Install wasm-tools
         run: cargo install wasm-tools
-      - name: Build parser WASM component
+      - name: Build parser and fixer WASM components
+        # The SDK imports both statically, so a missing fixer fails the whole
+        # package build, not just its fix-testing API
         run: |
           cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
             --target wasm32-unknown-unknown --release --features wasm
           wasm-tools component new \
             target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm \
             -o target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm
+          cargo build --manifest-path crates/nginx-lint-common/Cargo.toml \
+            --target wasm32-unknown-unknown --release --features wasm
+          wasm-tools component new \
+            target/wasm32-unknown-unknown/release/nginx_lint_common.wasm \
+            -o target/wasm32-unknown-unknown/release/nginx_lint_common.component.wasm
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
       - name: Install dependencies
         run: npm install
         working-directory: plugins/typescript/nginx-lint-plugin
-      - name: Transpile parser WASM to JS
-        run: npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm -o wasm/parser --name parser --instantiation async
+      - name: Transpile parser and fixer WASM to JS
+        run: |
+          npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_parser.component.wasm -o wasm/parser --name parser --instantiation async
+          npx jco transpile ../../../target/wasm32-unknown-unknown/release/nginx_lint_common.component.wasm -o wasm/fixer --name fixer --instantiation async
         working-directory: plugins/typescript/nginx-lint-plugin
       - name: Build package
         run: npm run build

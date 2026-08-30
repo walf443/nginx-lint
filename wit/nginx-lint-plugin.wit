@@ -300,6 +300,31 @@ world plugin {
     export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
 }
 
+/// What the fix applier reports back. Kept out of `types` so the `plugin`
+/// world's import surface is unchanged and existing components stay
+/// loadable without recompiling.
+interface fixer-types {
+    record fix-result {
+        /// The config after the fixes were applied
+        content: string,
+        /// How many fixes were applied
+        applied: u32,
+        /// How many were dropped as unapplicable — bad offsets, or a
+        /// line-based fix whose line or old-text did not match. Does not
+        /// include fixes skipped for overlapping an applied one.
+        skipped-invalid: u32,
+    }
+}
+
+/// Applies fixes the way `nginx-lint --fix` does, so an SDK can test what
+/// a plugin's fixes produce rather than what their records say.
+world fixer {
+    use types.{fix};
+    use fixer-types.{fix-result};
+
+    export apply-fixes: func(content: string, fixes: list<fix>) -> fix-result;
+}
+
 world parser {
     use parser-types.{parse-output};
 

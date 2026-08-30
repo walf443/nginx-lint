@@ -50,4 +50,7 @@ pub use linter::{
     normalize_line_fix,
 };
 pub use nginx_lint_parser::{parse_config, parse_string, parse_string_with_errors};
+
+#[cfg(feature = "wasm")]
+mod wasm;
 pub use nginx_version::{NginxVersion, NginxVersionParseError, format_range, is_in_range};

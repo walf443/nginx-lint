@@ -7,8 +7,20 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
+# cdylib so the `wasm` feature can produce a component (same as the parser
+# crate); rlib keeps it usable as a normal dependency
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Exposes the fix applier as a WASM component (the `fixer` world), which the
+# TypeScript SDK instantiates to test what a plugin's fixes produce
+wasm = ["dep:wit-bindgen"]
+
 [dependencies]
 nginx-lint-parser = { version = "0.19.1", path = "../nginx-lint-parser" }
+wit-bindgen = { version = "0.61.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "1.0"

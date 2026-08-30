@@ -15,6 +15,7 @@
  */
 
 import { instantiate } from "../wasm/parser/parser.js";
+import { instantiate as instantiateFixer } from "../wasm/fixer/fixer.js";
 import { makeParseConfig, makePluginTestRunner } from "./testing-core.js";
 
 // When `getCoreModule` is omitted, jco's generated glue falls back to its
@@ -26,6 +27,11 @@ const { parseConfig: parseConfigWasm } = await instantiate(
   undefined as never,
   {} as never,
 );
+
+// The fix applier, instantiated the same way. It is a second component
+// because the applier lives in nginx-lint-common, which depends on
+// nginx-lint-parser — the parser component cannot export it.
+const { applyFixes } = await instantiateFixer(undefined as never, {} as never);
 
 /**
  * Parse an nginx configuration string into a WIT-compatible Config object.
@@ -51,5 +57,11 @@ export const parseConfig = makeParseConfig(parseConfigWasm);
  * runner.assertErrors("http { server_tokens off; }", 0);
  * ```
  */
-export const PluginTestRunner = makePluginTestRunner(parseConfig);
+export const PluginTestRunner = makePluginTestRunner(parseConfig, applyFixes);
+
+/**
+ * Apply fixes to a config the way `nginx-lint --fix` would, using the
+ * linter's own applier rather than a reimplementation of it.
+ */
+export { applyFixes };
 export type PluginTestRunner = InstanceType<typeof PluginTestRunner>;
