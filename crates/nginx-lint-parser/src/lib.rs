@@ -7,12 +7,12 @@
 //!
 //! # The `wasm` feature
 //!
-//! `wasm` builds this crate as a WASM component for the TypeScript SDK, and
-//! only works inside a repository checkout: the `wit_bindgen::generate!`
-//! invocation reads `wit/nginx-lint-plugin.wit` from the repository root,
-//! which is not part of the published crate. Enabling it on a dependency
-//! from crates.io fails with a missing-file error. Build the component with
-//! `make build-parser-wasm` instead.
+//! `wasm` builds this crate as a WASM component exporting the `parser`
+//! world — `parse-config(source, include-context)` returning the AST as a
+//! flat, index-based record tree. The nginx-lint TypeScript SDK uses it to
+//! parse configs in-process; it is published rather than repository-only,
+//! so anything that wants nginx parsing in a component-model host can use
+//! it the same way.
 //!
 //! # Quick Start
 //!

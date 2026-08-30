@@ -7,15 +7,18 @@ license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
 
+include = ["src/**/*", "wit/*.wit", "Cargo.toml", "README.md"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-# Repository-internal: builds this crate as a WASM component for the
-# TypeScript SDK. It cannot be enabled from the published crate — the macro
-# reads ../../wit/nginx-lint-plugin.wit, which lives outside the packaged
-# directory. Use `make build-parser-wasm` in a checkout instead. (#388)
+# Builds this crate as a WASM component exporting the `parser` world. The
+# WIT it generates from is vendored into wit/ and shipped in the package
+# (see `include` above), so this works from crates.io as well as in a
+# checkout — keep the copy in sync with the repository root's via
+# `make copy-parser-wit`.
 wasm = ["dep:wit-bindgen"]
 
 [dependencies]

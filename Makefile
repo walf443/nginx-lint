@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-parser-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -105,8 +105,16 @@ build-fixer-wasm:
 			-o wasm/fixer --name fixer --instantiation async
 	@echo "Fixer component built and transpiled."
 
+# The parser crate vendors the WIT so its `wasm` feature works from the
+# published crate too (the macro cannot read a path outside the package).
+# The copy is committed; CI checks it against the root.
+copy-parser-wit:
+	@mkdir -p crates/nginx-lint-parser/wit
+	@cp wit/nginx-lint-plugin.wit crates/nginx-lint-parser/wit/
+	@echo "Copied wit/nginx-lint-plugin.wit into the parser crate."
+
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
-build-parser-wasm:
+build-parser-wasm: copy-parser-wit
 	@command -v wasm-tools >/dev/null 2>&1 || { echo "Error: wasm-tools not found. Install with: cargo install wasm-tools"; exit 1; }
 	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
 		--target wasm32-unknown-unknown --release --features wasm
