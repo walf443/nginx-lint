@@ -40,7 +40,11 @@ as a native module.
   `.gitignore`.
 - `Cargo.toml` / `src/lib.rs` — the native parser module (its own cargo
   workspace, excluded from the repository's root workspace; the crate
-  version is the wheel version, kept in sync with the repository version)
+  version is the wheel version, kept in sync with the repository version).
+  It depends on `nginx-lint-parser` and `nginx-lint-common` by exact
+  version rather than by path so that the sdist stands alone; inside this
+  repository `../.cargo/config.toml` patches both back to the working tree,
+  and that file explains why.
 
 ## Install
 

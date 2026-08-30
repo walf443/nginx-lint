@@ -1,0 +1,15 @@
+# The SDK depends on nginx-lint-parser / nginx-lint-common by version rather
+# than by path, so that `maturin sdist` produces a standalone source
+# distribution: with path dependencies maturin vendors the two crates and
+# copies the repository's root Cargo.toml alongside them, and that manifest
+# is unusable on its own (it declares the `nginx-lint` package, whose src/ is
+# not shipped), so every source install fails while resolving metadata.
+#
+# In this repository we still want to build against the working tree, so the
+# path override lives here instead. It sits one directory above the crate,
+# because cargo discovers config by walking up from the current directory:
+# that keeps the override out of the sdist, which maturin builds from the
+# crate directory itself.
+[patch.crates-io]
+nginx-lint-common = { path = "../../crates/nginx-lint-common" }
+nginx-lint-parser = { path = "../../crates/nginx-lint-parser" }

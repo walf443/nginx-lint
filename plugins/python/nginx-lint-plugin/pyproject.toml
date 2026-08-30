@@ -16,8 +16,23 @@ requires-python = ">=3.11"
 # Version comes from Cargo.toml
 dynamic = ["version"]
 
+authors = [{ name = "walf443" }]
+keywords = ["nginx", "lint", "linter", "wasm", "plugin", "component-model"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Systems Administration",
+    "Typing :: Typed",
+]
+
 [project.urls]
+Homepage = "https://github.com/walf443/nginx-lint"
 Repository = "https://github.com/walf443/nginx-lint"
+Issues = "https://github.com/walf443/nginx-lint/issues"
+Documentation = "https://github.com/walf443/nginx-lint/blob/main/plugins/python/nginx-lint-plugin/README.md"
 
 # Tools the Makefile targets need. `make install` gets maturin through pip's
 # build isolation, but `make develop` and `make bindings` invoke the maturin

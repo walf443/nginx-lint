@@ -57,6 +57,11 @@ for file in "${CARGO_FILES[@]}"; do
     sed_inplace "s/\(nginx-lint-parser = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     sed_inplace "s/\(nginx-lint-common = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     sed_inplace "s/\(nginx-lint-plugin = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
+    # The Python SDK's crate depends on the two library crates by version
+    # only (see plugins/python/.cargo/config.toml for why), so those lines
+    # have no `{ version = ... }` wrapper to match above
+    sed_inplace "s/^\(nginx-lint-parser = \"=\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
+    sed_inplace "s/^\(nginx-lint-common = \"=\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     echo "  Updated $relative"
 done
 
@@ -79,7 +84,7 @@ fi
 # build silently rewrites it.
 PY_SDK_MANIFEST="$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
 if [ -f "$PY_SDK_MANIFEST" ]; then
-    cargo update --manifest-path "$PY_SDK_MANIFEST" --workspace --quiet
+    (cd "$(dirname "$PY_SDK_MANIFEST")" && cargo update --workspace --quiet)
     echo "  Updated plugins/python/nginx-lint-plugin/Cargo.lock"
 fi
 
