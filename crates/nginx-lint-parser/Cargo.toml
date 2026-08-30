@@ -22,7 +22,7 @@ default = []
 # WIT it generates from is vendored into wit/ and shipped in the package
 # (see `include` above), so this works from crates.io as well as in a
 # checkout — keep the copy in sync with the repository root's via
-# `make copy-parser-wit`.
+# `make copy-wit`.
 wasm = ["dep:wit-bindgen"]
 
 [dependencies]
