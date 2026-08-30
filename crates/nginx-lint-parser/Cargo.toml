@@ -12,6 +12,10 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+# Repository-internal: builds this crate as a WASM component for the
+# TypeScript SDK. It cannot be enabled from the published crate — the macro
+# reads ../../wit/nginx-lint-plugin.wit, which lives outside the packaged
+# directory. Use `make build-parser-wasm` in a checkout instead. (#388)
 wasm = ["dep:wit-bindgen"]
 
 [dependencies]
