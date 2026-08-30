@@ -65,6 +65,11 @@ export interface CreateTestingOptions {
 export interface Testing {
   parseConfig: ParseConfigFn;
   PluginTestRunner: PluginTestRunnerClass;
+  /**
+   * Apply fixes without going through a runner. Throws unless
+   * {@link CreateTestingOptions.getFixerCoreModule} was supplied.
+   */
+  applyFixes: ApplyFixesFn;
 }
 
 /**
@@ -102,5 +107,5 @@ export async function createTesting(
   }
 
   const PluginTestRunner = makePluginTestRunner(parseConfig, applyFixes);
-  return { parseConfig, PluginTestRunner };
+  return { parseConfig, PluginTestRunner, applyFixes };
 }

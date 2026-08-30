@@ -183,6 +183,8 @@ help:
 	@echo "  make build-plugins      - Build WASM builtin plugins as WIT components"
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-parser-wasm  - Build parser WASM for TypeScript plugin testing"
+	@echo "  make build-fixer-wasm   - Build fix-applier WASM for TypeScript plugin testing"
+	@echo "                            (the TypeScript SDK imports both; build them together)"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"
 	@echo "  make build-wasm-with-plugins - Build WASM for web (with plugins)"
 	@echo "  make build-web          - Build web server with embedded WASM (with plugins)"

@@ -340,6 +340,23 @@ import type {
 }
 ```
 
+## Developing this SDK
+
+The package imports two WASM components — the parser and the fix applier —
+so build both before `npm test` or `npm run build` in a fresh checkout.
+They are gitignored, and TypeScript reports them as missing modules if
+either is absent:
+
+```bash
+# from the repository root
+make build-parser-wasm
+make build-fixer-wasm
+```
+
+The applier is a separate component because it lives in
+`nginx-lint-common`, which depends on `nginx-lint-parser` — the parser
+component cannot export it without a dependency cycle.
+
 ## License
 
 MIT
