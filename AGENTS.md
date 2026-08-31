@@ -86,6 +86,20 @@ cd crates/nginx-lint-common && cargo build && cargo test
 cd crates/nginx-lint-plugin && cargo build && cargo test
 ```
 
+The Python SDK's crate (`plugins/python/nginx-lint-plugin`) must be built
+from its own directory, never with `--manifest-path` from elsewhere. It
+depends on `nginx-lint-parser` and `nginx-lint-common` by published version,
+and `plugins/python/.cargo/config.toml` patches them back to the working
+tree; cargo discovers that config by walking up from the current directory,
+so building from anywhere else silently compiles against the released crates
+instead (and fails outright between a version bump and its crates.io
+publish).
+
+For the same reason Renovate is disabled for that manifest (it runs cargo
+from the repository root), so its `pyo3` and `serde` dependencies are bumped
+by hand. `pyo3` in particular has to stay new enough for the newest released
+CPython: an older one hard-errors on a newer interpreter even with abi3.
+
 ### Adding a Native Lint Rule
 
 Native rules are implemented in Rust under `src/rules/`. Use for rules that need access to file system or complex logic.

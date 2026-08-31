@@ -39,6 +39,16 @@
         "python"
       ],
       "enabled": false
+    },
+    {
+      "description": "Renovate runs cargo from the repository root, which does not pick up plugins/python/.cargo/config.toml (cargo finds config by walking up from the current directory). Any update touching this manifest, a pyo3 bump as much as lockFileMaintenance, refreshes its lockfile from there and rewrites nginx-lint-parser and nginx-lint-common as registry entries, permanently at odds with what in-repo builds produce; between a version bump and its crates.io publish it fails outright. Those two pins are owned by scripts/bump-version.sh anyway, and pyo3 and serde here are bumped by hand from the crate's own directory (see AGENTS.md).",
+      "matchManagers": [
+        "cargo"
+      ],
+      "matchFileNames": [
+        "plugins/python/nginx-lint-plugin/Cargo.toml"
+      ],
+      "enabled": false
     }
   ]
 }
