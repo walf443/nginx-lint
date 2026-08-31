@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-common"
-version = "0.19.1"
+version = "0.20.0"
 dependencies = [
  "nginx-lint-parser",
  "schemars",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-parser"
-version = "0.19.1"
+version = "0.20.0"
 dependencies = [
  "rowan",
  "serde",
@@ -104,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "nginx-lint-plugin-py"
-version = "0.19.1"
+version = "0.20.0"
 dependencies = [
  "nginx-lint-common",
  "nginx-lint-parser",
