@@ -18,6 +18,7 @@ involves, and to keep that path building.
 
 ```bash
 make build      # generate the bindings from ../../../wit, then componentize
+make test       # unit tests for the rule (plain `go test`, no wasm)
 make vet
 make test-e2e   # needs ../../../target/debug/nginx-lint
 ```
@@ -37,9 +38,12 @@ what the flag does and does not grant.
 
 ## Layout
 
-- `export_wit_world/plugin.go` — the plugin. The package name and the two
-  function signatures are fixed by the generated bindings; the rest is
-  ordinary Go.
+- `rule/` — what the plugin decides, and its tests. It imports none of the
+  generated bindings, which is what lets `go test` run it on the host (see
+  below).
+- `export_wit_world/plugin.go` — the adapter between the generated bindings
+  and `rule`. The package name and the two function signatures are fixed by
+  those bindings; the rest is ordinary Go.
 - `examples/` — the rule's bad and good configurations, plus a tiny package
   that embeds them so `nginx-lint why` can render them. They live in their
   own package because `go:embed` cannot reach outside its own directory, and
@@ -65,10 +69,24 @@ bindings:
 
 A Go SDK, if this ever grows one, would exist mostly to hide those two.
 
-## No unit tests
+## Testing, in two layers
 
-There is no equivalent of the Rust, TypeScript and Python SDKs'
-`PluginTestRunner` here. The bindings only build for wasm, so the plugin's
-logic cannot be exercised by a plain `go test` on the host, and Go has no
-component-model runtime to run the built component in either. `make test-e2e`
-runs the real thing through the CLI instead.
+The generated bindings only build for wasm — the WIT runtime they use has
+assembly-only functions — so any package that imports them is untestable on
+the host, and Go has no component-model runtime to run the built component in
+either. That rules out an equivalent of the Rust, TypeScript and Python SDKs'
+`PluginTestRunner`, which runs the real parser in-process.
+
+What works instead is keeping the decision away from the bindings:
+
+- `make test` exercises `rule` with a plain `go test`, passing fakes for the
+  four directive methods the rule uses. The real
+  `*nginx_lint_plugin_config_api.Directive` satisfies the same interface, so
+  the code under test is the code that ships.
+- `make test-e2e` runs the built component through the CLI against
+  `examples/`, which covers everything the fakes cannot: the real parser, the
+  bindings, handle ownership, and the host boundary.
+
+The gap between them is that a fake can disagree with the real parser about
+what a directive looks like. Keeping `rule` small, and keeping the end-to-end
+test honest with `--rule-only`, is what holds that closed.

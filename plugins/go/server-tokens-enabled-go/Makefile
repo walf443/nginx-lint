@@ -3,7 +3,7 @@ RULE := server-tokens-enabled-go
 WIT_DIR := ../../../wit
 NGINX_LINT := ../../../target/debug/nginx-lint
 
-.PHONY: bindings build vet test-e2e clean
+.PHONY: bindings build vet test test-e2e clean
 
 # componentize-go is used as an installed binary rather than through a
 # `tool` directive in go.mod: its `bindings` subcommand rewrites go.mod and
@@ -23,11 +23,18 @@ bindings:
 build: bindings
 	$(COMPONENTIZE_GO) -d $(WIT_DIR) -w plugin build -o $(WASM)
 
+# Unit tests for the rule itself. They run on the host, without wasm or a
+# component runtime, because ./rule imports none of the generated bindings —
+# which is the reason it is a separate package.
+test:
+	go test ./rule/
+
 # The WIT runtime this depends on has assembly-only functions that do not
 # build for the host, so vetting has to target wasm; and `./...` would drag
 # in the generated packages, which are not worth vetting.
 vet: bindings
 	GOOS=wasip1 GOARCH=wasm go vet ./export_wit_world/ ./examples/
+	go vet ./rule/
 
 # End to end through the CLI. --allow-wasi-plugins is required: a Go
 # component imports wasi:* even when the plugin itself never uses it.

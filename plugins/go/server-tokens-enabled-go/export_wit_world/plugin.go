@@ -1,6 +1,7 @@
-// Package export_wit_world implements the `plugin` world's exports. The name
-// and the two function signatures are fixed by the bindings componentize-go
-// generates; everything else is ordinary Go.
+// Package export_wit_world implements the `plugin` world's exports. The
+// package name and the two function signatures are fixed by the bindings
+// componentize-go generates; this package is the adapter between them and
+// the rule itself, which lives in ../rule so it can be unit-tested.
 package export_wit_world
 
 import (
@@ -9,19 +10,20 @@ import (
 	"wit_component/examples"
 	"wit_component/nginx_lint_plugin_config_api"
 	"wit_component/nginx_lint_plugin_types"
+	"wit_component/rule"
 
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 )
 
 const (
-	rule     = "server-tokens-enabled-go"
+	name     = "server-tokens-enabled-go"
 	category = "security"
 )
 
 // Spec returns the rule's metadata, which `nginx-lint why` renders.
 func Spec() nginx_lint_plugin_types.PluginSpec {
 	return nginx_lint_plugin_types.PluginSpec{
-		Name:        rule,
+		Name:        name,
 		Category:    category,
 		Description: "Detects when server_tokens is enabled (exposes nginx version)",
 		ApiVersion:  "1.2",
@@ -35,7 +37,8 @@ func Spec() nginx_lint_plugin_types.PluginSpec {
 	}
 }
 
-// Check reports every `server_tokens on` in the configuration.
+// Check hands the configuration's directives to the rule and translates what
+// comes back into the host's error type.
 func Check(cfg *nginx_lint_plugin_config_api.Config, path string) []nginx_lint_plugin_types.LintError {
 	// The config arrives as a `borrow<config>`, and the canonical ABI expects
 	// the guest to release it before the call returns. The generated export
@@ -44,24 +47,25 @@ func Check(cfg *nginx_lint_plugin_config_api.Config, path string) []nginx_lint_p
 	// never touches cfg.
 	defer cfg.Drop()
 
-	errs := []nginx_lint_plugin_types.LintError{}
-	for _, ctx := range cfg.AllDirectivesWithContext() {
-		directive := ctx.Directive
+	contexts := cfg.AllDirectivesWithContext()
+	directives := make([]rule.Directive, 0, len(contexts))
+	for _, ctx := range contexts {
 		// Each directive handle is owned by this call and has to be released
 		// before it returns. The bindings only drop them from a GC finalizer,
 		// which does not run inside a check this short.
-		defer directive.Drop()
+		defer ctx.Directive.Drop()
+		directives = append(directives, ctx.Directive)
+	}
 
-		if !directive.Is("server_tokens") || !directive.FirstArgIs("on") {
-			continue
-		}
+	errs := []nginx_lint_plugin_types.LintError{}
+	for _, finding := range rule.Check(directives) {
 		errs = append(errs, nginx_lint_plugin_types.LintError{
-			Rule:     rule,
+			Rule:     name,
 			Category: category,
-			Message:  "server_tokens is on; the nginx version is exposed",
+			Message:  rule.Message,
 			Severity: nginx_lint_plugin_types.SeverityWarning,
-			Line:     witTypes.Some(directive.Line()),
-			Column:   witTypes.Some(directive.Column()),
+			Line:     witTypes.Some(finding.Line),
+			Column:   witTypes.Some(finding.Column),
 		})
 	}
 	return errs
