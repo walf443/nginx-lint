@@ -41,29 +41,12 @@
       "enabled": false
     },
     {
-      "description": "The Python SDK's crate pins nginx-lint-parser and nginx-lint-common to the repository version, which scripts/bump-version.sh moves at release time. A bump here is always wrong: it would pin the SDK to a different release than the rest of the workspace.",
+      "description": "Renovate runs cargo from the repository root, which does not pick up plugins/python/.cargo/config.toml (cargo finds config by walking up from the current directory). Any update touching this manifest, a pyo3 bump as much as lockFileMaintenance, refreshes its lockfile from there and rewrites nginx-lint-parser and nginx-lint-common as registry entries, permanently at odds with what in-repo builds produce; between a version bump and its crates.io publish it fails outright. Those two pins are owned by scripts/bump-version.sh anyway, and pyo3 and serde here are bumped by hand from the crate's own directory (see AGENTS.md).",
       "matchManagers": [
         "cargo"
       ],
       "matchFileNames": [
         "plugins/python/nginx-lint-plugin/Cargo.toml"
-      ],
-      "matchDepNames": [
-        "nginx-lint-parser",
-        "nginx-lint-common"
-      ],
-      "enabled": false
-    },
-    {
-      "description": "Renovate runs cargo from the repository root, which does not pick up plugins/python/.cargo/config.toml (cargo finds config by walking up from the current directory). Refreshing this lockfile from there would rewrite the two patched crates as registry entries, permanently at odds with what in-repo builds produce, and would fail outright between a version bump and its crates.io publish.",
-      "matchManagers": [
-        "cargo"
-      ],
-      "matchFileNames": [
-        "plugins/python/nginx-lint-plugin/Cargo.toml"
-      ],
-      "matchUpdateTypes": [
-        "lockFileMaintenance"
       ],
       "enabled": false
     }
