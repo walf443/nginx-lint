@@ -209,7 +209,7 @@ The WIT definition file is bundled with this package, so `jco componentize` can 
     "test": "tsc && node --test dist/plugin.test.js"
   },
   "dependencies": {
-    "nginx-lint-plugin": "^0.19.1"
+    "nginx-lint-plugin": "^0.20.0"
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.19",
