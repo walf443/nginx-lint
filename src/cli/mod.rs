@@ -60,6 +60,18 @@ pub struct Cli {
     #[arg(long, value_name = "DIR", global = true)]
     pub plugins: Option<PathBuf>,
 
+    /// Allow plugins that import WASI. Off by default: without it a plugin
+    /// importing wasi:* fails to load. Some toolchains cannot emit a plugin
+    /// without WASI imports (Go, via componentize-go), so writing a plugin in
+    /// those languages needs this. It grants no filesystem, network,
+    /// environment or terminal access, but every plugin loaded does gain a
+    /// clock and randomness, and can block past the execution timeout.
+    // global: `why --plugins` loads the same plugins, so it has to be
+    // accepted after the subcommand as well as before it
+    #[cfg(feature = "plugins")]
+    #[arg(long, global = true)]
+    pub allow_wasi_plugins: bool,
+
     /// Cache directory for nginx-lint (the WASM plugin compilation cache is stored
     /// under "plugins/" beneath it). Defaults to the per-user cache directory
     /// (e.g. ~/.cache/nginx-lint on Linux). Overrides cache_dir in .nginx-lint.toml.

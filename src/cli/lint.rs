@@ -647,7 +647,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;
 
-        match PluginLoader::new_with_cache(compilation_cache) {
+        match PluginLoader::new_with_cache(compilation_cache)
+            .map(|l| l.with_wasi(cli.allow_wasi_plugins))
+        {
             Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {

@@ -91,9 +91,11 @@ fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
         return Ok(Vec::new());
     };
 
-    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli)).map_err(|e| {
-        eprintln!("Error loading plugins: {}", e);
-    })
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), cli.allow_wasi_plugins).map_err(
+        |e| {
+            eprintln!("Error loading plugins: {}", e);
+        },
+    )
 }
 
 pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {

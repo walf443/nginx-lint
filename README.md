@@ -230,6 +230,30 @@ nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 
 Each `.wasm` file in the directory is loaded as a plugin, in file name order. See the `plugins/builtin/` directory for examples of how to write plugins using the `nginx-lint-plugin` SDK.
 
+### The plugin sandbox
+
+Plugins run as WebAssembly components with no WASI: no filesystem, no network,
+no environment, no clock. They see only the configuration the linter hands them,
+and a plugin importing `wasi:*` fails to load. Memory is capped at 256 MB and a
+single check has a 10-second deadline.
+
+Some toolchains cannot produce a plugin without WASI imports at all — Go, via
+componentize-go, adapts a wasip1 module, so its runtime pulls in stdio,
+environment, clocks and randomness even for a plugin that only reads the config
+it is given. `--allow-wasi-plugins` loads those:
+
+```bash
+nginx-lint --plugins ./my-plugins --allow-wasi-plugins /etc/nginx/nginx.conf
+```
+
+It links a subset of WASI backed by an empty context, so it grants no
+filesystem, network, environment or terminal access, and `wasi:sockets/*` is
+never linked at all. What every plugin loaded does gain is a clock and
+randomness — so a plugin can behave differently from one run to the next — and
+the ability to block inside a WASI call past the execution deadline, which
+interrupts wasm execution rather than host calls. Both are reasons to leave the
+flag off unless a plugin needs it.
+
 ## Installation
 
 ### From source

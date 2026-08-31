@@ -68,6 +68,8 @@ pub struct PluginLoader {
     timeout_enabled: bool,
     /// Compilation cache handle, kept for reporting hit/miss statistics
     cache: Option<Cache>,
+    /// Whether plugins may import `wasi:*` (see [`with_wasi`](Self::with_wasi))
+    allow_wasi: bool,
 }
 
 impl PluginLoader {
@@ -125,6 +127,7 @@ impl PluginLoader {
             engine,
             timeout_enabled: enable_timeout,
             cache,
+            allow_wasi: false,
         })
     }
 
@@ -203,6 +206,29 @@ impl PluginLoader {
         self.cache
             .as_ref()
             .map(|c| (c.cache_hits(), c.cache_misses()))
+    }
+
+    /// Allow (or keep denying) plugins that import `wasi:*`.
+    ///
+    /// Off by default. Some toolchains cannot produce a plugin without WASI
+    /// imports at all — componentize-go adapts a wasip1 module, so the Go
+    /// runtime pulls in stdio, environment, clocks and randomness even for a
+    /// plugin that only reads the config it is handed. Enabling this links a
+    /// subset of `wasi:*` backed by an empty context; see `add_wasi_subset`
+    /// in `component_rule.rs` for what that does and does not grant.
+    ///
+    /// It is opt-in because it widens the sandbox for every plugin loaded by
+    /// this loader, not only the ones that need it: a plugin gains a clock
+    /// and randomness, and so can behave differently from one run to the
+    /// next, which the sandbox has not permitted until now.
+    pub fn with_wasi(mut self, allow: bool) -> Self {
+        self.allow_wasi = allow;
+        self
+    }
+
+    /// Whether plugins loaded by this loader may import `wasi:*`
+    pub fn wasi_allowed(&self) -> bool {
+        self.allow_wasi
     }
 
     /// Get the WASM engine
@@ -298,6 +324,7 @@ impl PluginLoader {
             component_bytes,
             self.memory_limit(),
             self.timeout_ticks(),
+            self.allow_wasi,
         )
     }
 }

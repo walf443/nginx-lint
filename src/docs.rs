@@ -202,8 +202,9 @@ fn rule_to_doc(rule: &dyn crate::linter::LintRule) -> RuleDocOwned {
 pub fn external_plugin_docs(
     dir: &std::path::Path,
     cache: crate::plugin::CompilationCache,
+    allow_wasi: bool,
 ) -> Result<Vec<RuleDocOwned>, crate::plugin::PluginError> {
-    let loader = crate::plugin::PluginLoader::new_with_cache(cache)?;
+    let loader = crate::plugin::PluginLoader::new_with_cache(cache)?.with_wasi(allow_wasi);
     Ok(loader
         .load_plugins(dir)?
         .iter()
