@@ -7,4 +7,4 @@ require (
 	go.bytecodealliance.org/pkg v0.2.3
 )
 
-require golang.org/x/sys v0.44.0 // indirect
+require golang.org/x/sys v0.47.0 // indirect
