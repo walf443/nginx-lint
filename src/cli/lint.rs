@@ -602,14 +602,16 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     };
 
-    // WASI precedence: --allow-wasi-plugins or plugins.allow_wasi in
+    // WASI precedence: --allow-wasi-plugins or plugins.allow_wasi_plugins in
     // .nginx-lint.toml, whichever says yes. A project whose plugins need WASI
     // needs it on every run, so there is no way to say no from the command
     // line. The configuration file cannot name a plugins directory, so this
     // only widens what a plugin the command line already asked for is granted.
     #[cfg(feature = "plugins")]
-    let allow_wasi_plugins =
-        cli.allow_wasi_plugins || lint_config.as_ref().is_some_and(|c| c.plugins.allow_wasi);
+    let allow_wasi_plugins = cli.allow_wasi_plugins
+        || lint_config
+            .as_ref()
+            .is_some_and(|c| c.plugins.allow_wasi_plugins);
 
     // In builds without the plugins feature the cache is never used; tell the
     // user instead of silently ignoring their configuration.
@@ -621,9 +623,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     #[cfg(not(feature = "plugins"))]
-    if lint_config.as_ref().is_some_and(|c| c.plugins.allow_wasi) {
+    if lint_config
+        .as_ref()
+        .is_some_and(|c| c.plugins.allow_wasi_plugins)
+    {
         eprintln!(
-            "Warning: plugins.allow_wasi in the configuration file has no effect in this build (compiled without the plugins feature)"
+            "Warning: plugins.allow_wasi_plugins in the configuration file has no effect in this build (compiled without the plugins feature)"
         );
     }
 

@@ -274,7 +274,7 @@ instead:
 
 ```toml
 [plugins]
-allow_wasi = true
+allow_wasi_plugins = true
 ```
 
 The flag and the setting are OR'd, and there is deliberately no way to say no

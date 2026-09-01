@@ -94,7 +94,7 @@ fn allow_wasi(cli: &Cli) -> bool {
         None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
     };
 
-    config.is_some_and(|cfg| cfg.plugins.allow_wasi)
+    config.is_some_and(|cfg| cfg.plugins.allow_wasi_plugins)
 }
 
 /// Resolve the compilation cache from the CLI flags.

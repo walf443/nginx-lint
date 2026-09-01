@@ -28,7 +28,7 @@ pub struct Cli {
     pub fix: bool,
 
     /// Path to configuration file
-    // global: `why` reads plugins.allow_wasi from it, so it has to be
+    // global: `why` reads plugins.allow_wasi_plugins from it, so it has to be
     // accepted after the subcommand as well as before it
     #[arg(short, long, value_name = "FILE", global = true)]
     pub config: Option<PathBuf>,
@@ -69,7 +69,7 @@ pub struct Cli {
     /// environment or terminal access, but every plugin loaded does gain a
     /// clock and randomness, and can block indefinitely inside a WASI call —
     /// the execution timeout interrupts wasm, not host calls. Can also be set
-    /// as plugins.allow_wasi in .nginx-lint.toml.
+    /// as plugins.allow_wasi_plugins in .nginx-lint.toml.
     // global: `why --plugins` loads the same plugins, so it has to be
     // accepted after the subcommand as well as before it
     #[cfg(feature = "plugins")]
