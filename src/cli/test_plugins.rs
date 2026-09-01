@@ -267,10 +267,27 @@ fn check_good_example(plugin: &dyn LintRule) -> Outcome {
     let Some(good) = plugin.good_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no good example".to_string());
     };
-    match findings(plugin, good, "good.conf").found {
-        found if found.is_empty() => Outcome::Passed,
-        found => Outcome::Failed(describe(&found)),
+    clean(findings(plugin, good, "good.conf"))
+}
+
+/// The clean direction of a check: no findings, and no syntax errors either.
+///
+/// Tolerating a malformed configuration is deliberate on the bad side — a
+/// syntax rule's example is malformed on purpose — but a good example is the
+/// configuration the author is recommending. Without this, a dropped brace
+/// mangles the AST, the rule finds nothing in the wreckage, and the check
+/// reads as success.
+fn clean(checked: Checked) -> Outcome {
+    if checked.syntax_errors > 0 {
+        return Outcome::Failed(format!(
+            "it does not parse: {} syntax error(s)",
+            checked.syntax_errors
+        ));
     }
+    if checked.found.is_empty() {
+        return Outcome::Passed;
+    }
+    Outcome::Failed(describe(&checked.found))
 }
 
 /// Apply what the plugin reports on its bad example, and require the rule to
@@ -317,8 +334,9 @@ fn resolve_by_fixing(plugin: &dyn LintRule, source: &str, path: &str) -> Outcome
     let result = apply_fixes_to_content_detailed(source, &fixes);
     if result.applied != fixes.len() {
         return Outcome::Failed(format!(
-            "{} of the {} fix(es) reported were applied — {} had offsets the applier \
-             rejected, the rest overlapped a fix already applied",
+            "{} of the {} fix(es) reported were applied; {} had offsets the applier \
+             rejected, and the rest it dropped for conflicting with a fix it had \
+             already applied",
             result.applied,
             fixes.len(),
             result.skipped_invalid
@@ -448,11 +466,14 @@ fn fixture_case(plugin: &dyn LintRule, path: &Path, expect_findings: bool) -> Op
         Ok(source) => source,
         Err(e) => return Some(Outcome::Failed(format!("{}: {e}", path.display()))),
     };
-    let found = findings(plugin, &source, &path.to_string_lossy()).found;
-    Some(match found {
-        found if found.is_empty() != expect_findings => Outcome::Passed,
-        _ if expect_findings => Outcome::Failed("reported clean".to_string()),
-        found => Outcome::Failed(describe(&found)),
+    let checked = findings(plugin, &source, &path.to_string_lossy());
+    if !expect_findings {
+        return Some(clean(checked));
+    }
+    Some(if checked.found.is_empty() {
+        Outcome::Failed("reported clean".to_string())
+    } else {
+        Outcome::Passed
     })
 }
 
@@ -647,6 +668,36 @@ mod tests {
         };
 
         assert_failed(&check_good_example(&rule));
+    }
+
+    /// A good example is the configuration the author is recommending, so it
+    /// has to parse — otherwise a dropped brace mangles the AST, the rule
+    /// finds nothing in the wreckage, and the check reads as success.
+    #[test]
+    fn a_malformed_good_example_fails() {
+        let rule = Rule {
+            good: "http {\n    server_tokens off;\n",
+            ..Rule::default()
+        };
+
+        assert_failed(&check_good_example(&rule));
+    }
+
+    #[test]
+    fn a_malformed_expected_fixture_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = dir.path().join("001_basic");
+        std::fs::create_dir_all(case.join("expected")).unwrap();
+        std::fs::write(
+            case.join("expected").join("nginx.conf"),
+            "http {\n    server_tokens off;\n",
+        )
+        .unwrap();
+
+        let checks = check_fixtures(&Rule::default(), dir.path());
+
+        assert_eq!(checks.len(), 1);
+        assert_failed(outcome(&checks[0]));
     }
 
     /// A syntax rule's bad example is malformed on purpose. The linter parses
