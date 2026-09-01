@@ -41,6 +41,39 @@
       "enabled": false
     },
     {
+      "description": "Same reasoning for Go: CI runs the Go jobs on the lowest toolchain the SDK supports (both go.mod files declare go 1.25.0, and both READMEs promise Go 1.25+), so that anything needing a newer one fails in CI rather than in a downstream build. The Go SDK is consumed as source, so a 1.26 API used by mistake would compile here and break for whoever imports it. Bumping it means raising that floor, which is go.mod, the READMEs and the workflow comment in one change, not an automated update. Scoped to github-actions so a go dependency elsewhere is still updated.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The Go example plugin requires the SDK through a replace to the working tree, so everything the SDK requires reaches the example as an indirect requirement. Updating one module alone leaves the other's go.mod behind, and `go vet` refuses to run against a stale one — which is what broke #396. Renovate leaves indirect Go dependencies alone by default, so this enables them for both modules rather than one: enabling only the example would fix the direction #396 broke and open the reverse, where a dependency that is indirect in both (golang.org/x/sys today) moves in the example alone and nothing notices, `go vet` being happy with a module that merely requires more than its neighbour. Enabled for both, an update is proposed for each file and they land in one branch, being the same dependency at the same version.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchFileNames": [
+        "plugins/go/nginx-lint-plugin/go.mod",
+        "plugins/go/server-tokens-enabled-go/go.mod"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "enabled": true
+    },
+    {
+      "description": "Tidy after a Go update, so go.mod and go.sum are left as `go mod tidy` would write them rather than as the minimal edit `go get` makes.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "postUpdateOptions": [
+        "gomodTidy"
+      ]
+    },
+    {
       "description": "Renovate runs cargo from the repository root, which does not pick up plugins/python/.cargo/config.toml (cargo finds config by walking up from the current directory). Any update touching this manifest, a pyo3 bump as much as lockFileMaintenance, refreshes its lockfile from there and rewrites nginx-lint-parser and nginx-lint-common as registry entries, permanently at odds with what in-repo builds produce; between a version bump and its crates.io publish it fails outright. Those two pins are owned by scripts/bump-version.sh anyway, and pyo3 and serde here are bumped by hand from the crate's own directory (see AGENTS.md).",
       "matchManagers": [
         "cargo"
