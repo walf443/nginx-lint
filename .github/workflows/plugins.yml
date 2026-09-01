@@ -251,9 +251,64 @@ jobs:
           path: plugins/python/server-tokens-enabled-py/server-tokens-enabled-py.wasm
           retention-days: 1
 
+  go-plugin:
+    name: Go Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # The version both modules declare. componentize-go needs 1.25+.
+          go-version: "1.25"
+          cache-dependency-path: |
+            plugins/go/nginx-lint-plugin/go.sum
+            plugins/go/server-tokens-enabled-go/go.sum
+      - name: Install componentize-go
+        run: go install github.com/bytecodealliance/componentize-go@v0.4.0
+      - name: Check the committed bindings match the WIT
+        # The Go SDK commits its generated bindings, unlike the TypeScript and
+        # Python SDKs which regenerate theirs: a Go module is consumed as
+        # source and cannot run a code generator on the way in. So nothing
+        # else would catch a WIT change that was never regenerated here — the
+        # WIT diff in ci.yml only covers the vendored copy, not what was
+        # generated from it.
+        working-directory: plugins/go/nginx-lint-plugin
+        run: |
+          make bindings
+          git diff --exit-code -- bindings wit
+      - name: Check the formatting
+        # The repository-wide Format job is cargo fmt, which does not reach Go
+        run: |
+          unformatted=$(gofmt -l plugins/go)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would rewrite:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Check the SDK
+        working-directory: plugins/go/nginx-lint-plugin
+        run: make check
+      - name: Check the Go plugin
+        working-directory: plugins/go/server-tokens-enabled-go
+        run: make check
+      - name: Build Go plugin
+        working-directory: plugins/go/server-tokens-enabled-go
+        run: make build
+      - name: Upload Go WASM plugin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: go-plugin
+          path: plugins/go/server-tokens-enabled-go/server-tokens-enabled-go.wasm
+          retention-days: 1
+
   wasm-integration:
     name: WASM Integration Test
-    needs: [wasm-build, typescript-plugin, python-plugin, build-host]
+    needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, build-host]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -274,6 +329,10 @@ jobs:
         with:
           name: py-plugin
           path: target/py-plugins
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: go-plugin
+          path: target/go-plugins
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: host-binaries
@@ -336,6 +395,53 @@ jobs:
               test -n "${example_line// /}"
               grep -qF "$example_line" <<<"$why"
               $NGINX_LINT why --list --plugins target/py-plugins 2>&1 | grep -q 'server-tokens-enabled-py'
+          - name: Test Go plugin integration
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
+              PLUGIN_DIR=target/go-plugins
+              EXAMPLES=plugins/go/server-tokens-enabled-go/examples
+
+              # A Go component imports wasi:* whatever the plugin does, so
+              # without the flag it must not load at all. That is the default
+              # this repository guarantees, and this is the only test that
+              # asserts it against a real Go component rather than a fixture.
+              if $NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go $EXAMPLES/bad.conf; then
+                echo "ERROR: the plugin loaded without --allow-wasi-plugins"
+                exit 1
+              fi
+
+              # Same shape as the TypeScript and Python steps above; keep the
+              # three in sync.
+              if output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-go"
+                exit 1
+              fi
+              echo "$output"
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
+
+              output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/good.conf)
+              echo "$output"
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+
+              # The SDK computes fix offsets in pure Go, reproducing what the
+              # host's directive resource would have returned. Applying one is
+              # what checks that arithmetic against the host's own.
+              tmp=$(mktemp -d)
+              cp $EXAMPLES/bad.conf "$tmp/nginx.conf"
+              $NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --fix "$tmp/nginx.conf"
+              diff $EXAMPLES/good.conf "$tmp/nginx.conf"
+
+              # `why` renders the spec, whose examples are embedded from
+              # examples/*.conf at build time, so the output must contain that
+              # file's text.
+              why=$($NGINX_LINT why --plugins $PLUGIN_DIR --allow-wasi-plugins server-tokens-enabled-go 2>&1)
+              echo "$why"
+              echo "$why" | grep -q 'Rule: server-tokens-enabled-go'
+              # -F, and a non-empty guard: an unanchored regex built from file
+              # content would match anything if that line were ever blank.
+              example_line=$(sed -n 2p $EXAMPLES/bad.conf)
+              test -n "${example_line// /}"
+              grep -qF "$example_line" <<<"$why"
 
   typescript-plugin:
     name: TypeScript Plugin
