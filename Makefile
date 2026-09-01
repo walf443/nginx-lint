@@ -95,14 +95,23 @@ collect-plugins-only:
 # One plugin per invocation, because --fixtures describes one plugin's cases
 # and each builtin keeps its own under tests/fixtures. collect-plugins-only
 # lays out a directory per plugin so each invocation sees exactly one.
+#
+# Every directory with a Cargo.toml has to be reached: silently skipping a
+# plugin whose component did not get built would leave the run green over a
+# subset, and this target is the only thing covering the builtins.
 NGINX_LINT ?= cargo run --quiet --features plugins --
 
 test-builtin-plugins: collect-plugins-only
-	@fail=0; ran=0; \
+	@fail=0; ran=0; expected=0; missing=""; \
 	for dir in plugins/builtin/*/*/; do \
+		[ -f "$$dir/Cargo.toml" ] || continue; \
+		expected=$$((expected+1)); \
 		name=$$(basename "$$dir"); \
 		wasm_dir="target/builtin-plugins/$$name"; \
-		[ -f "$$wasm_dir/$$name.wasm" ] || continue; \
+		if [ ! -f "$$wasm_dir/$$name.wasm" ]; then \
+			missing="$$missing $$name"; \
+			continue; \
+		fi; \
 		if [ -d "$$dir/tests/fixtures" ]; then \
 			fixtures="--fixtures $$dir/tests/fixtures"; \
 		else \
@@ -111,10 +120,11 @@ test-builtin-plugins: collect-plugins-only
 		$(NGINX_LINT) test-plugins --plugins "$$wasm_dir" $$fixtures || fail=$$((fail+1)); \
 		ran=$$((ran+1)); \
 	done; \
-	echo "Checked $$ran builtin plugin(s), $$fail failed."; \
-	if [ $$ran -eq 0 ]; then \
-		echo "Nothing was checked. Run \`make build-plugins\` first, or the component"; \
-		echo "layout collect-plugins-only expects has drifted."; \
+	echo "Checked $$ran of $$expected builtin plugin(s), $$fail failed."; \
+	if [ -n "$$missing" ]; then \
+		echo "No component was built for:$$missing"; \
+		echo "Run \`make build-plugins\` first, or the layout collect-plugins-only"; \
+		echo "expects has drifted."; \
 		exit 1; \
 	fi; \
 	test $$fail -eq 0

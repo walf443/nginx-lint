@@ -14,8 +14,9 @@
 use crate::Cli;
 use colored::Colorize;
 use nginx_lint::plugin::PluginLoader;
+use nginx_lint_common::linter::apply_fixes_to_content_detailed;
 use nginx_lint_common::linter::{LintError, LintRule};
-use nginx_lint_common::{apply_fixes_to_content, parse_string_with_errors};
+use nginx_lint_common::parse_string_with_errors;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -208,42 +209,65 @@ fn test_plugin(plugin: &dyn LintRule, fixtures: Option<&Path>) -> Vec<Check> {
     checks
 }
 
-/// Findings this plugin reported, ignoring any other rule's.
+/// What running the plugin over one configuration produced.
+struct Checked {
+    /// Findings the plugin reported under its own rule name.
+    found: Vec<LintError>,
+    /// How many it reported under some other name. A plugin whose spec and
+    /// findings disagree about the rule name looks silent from here, and
+    /// saying so is the difference between a useful message and a puzzle.
+    under_other_names: usize,
+    syntax_errors: usize,
+}
+
+/// Run the plugin over `source`, keeping the findings that are its own.
 ///
 /// Filtering by name rather than running the plugin alone is what keeps this
 /// independent of whether the rule is enabled anywhere: a rule disabled by
 /// default cannot be reached through `--rule-only` at all.
-fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> (Vec<LintError>, usize) {
+fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Checked {
     // The tolerant parser, because that is the one the linter uses: it builds
     // the AST anyway and lets the rules run. Refusing a configuration that
     // does not parse cleanly would reject every syntax rule's bad example,
     // which is exactly the kind of rule this command should be able to check.
     let (config, syntax_errors) = parse_string_with_errors(source);
-    let found = plugin
-        .check(&config, Path::new(path))
+    let reported = plugin.check(&config, Path::new(path));
+    let total = reported.len();
+    let found: Vec<LintError> = reported
         .into_iter()
         .filter(|error| error.rule == plugin.name())
         .collect();
-    (found, syntax_errors.len())
+    Checked {
+        under_other_names: total - found.len(),
+        found,
+        syntax_errors: syntax_errors.len(),
+    }
 }
 
 fn check_bad_example(plugin: &dyn LintRule) -> Outcome {
     let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no bad example".to_string());
     };
-    match findings(plugin, bad, "bad.conf").0 {
-        found if found.is_empty() => {
-            Outcome::Failed("the bad example was reported clean".to_string())
-        }
-        _ => Outcome::Passed,
+    let checked = findings(plugin, bad, "bad.conf");
+    if !checked.found.is_empty() {
+        return Outcome::Passed;
     }
+    Outcome::Failed(match checked.under_other_names {
+        0 => "the bad example was reported clean".to_string(),
+        other => format!(
+            "the bad example was reported clean under {:?}, though the plugin \
+             reported {other} finding(s) under another rule name — the spec and \
+             the findings have to agree on it",
+            plugin.name()
+        ),
+    })
 }
 
 fn check_good_example(plugin: &dyn LintRule) -> Outcome {
     let Some(good) = plugin.good_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no good example".to_string());
     };
-    match findings(plugin, good, "good.conf").0 {
+    match findings(plugin, good, "good.conf").found {
         found if found.is_empty() => Outcome::Passed,
         found => Outcome::Failed(describe(&found)),
     }
@@ -269,37 +293,56 @@ fn check_fix(plugin: &dyn LintRule) -> Outcome {
 /// fixture may show more than the fix produces, which is why the Rust test
 /// binary this replaces treated an exact match as informational too.
 fn resolve_by_fixing(plugin: &dyn LintRule, source: &str, path: &str) -> Outcome {
-    let (found, syntax_errors) = findings(plugin, source, path);
-    let fixes: Vec<_> = found.iter().flat_map(|error| error.fixes.iter()).collect();
+    let checked = findings(plugin, source, path);
+    let fixes: Vec<_> = checked
+        .found
+        .iter()
+        .flat_map(|error| error.fixes.iter())
+        .collect();
     if fixes.is_empty() {
-        return Outcome::Skipped("the plugin reports no fixes".to_string());
+        // Told apart, because "the rule did not fire here" and "the rule has
+        // no autofix" send an author looking in different places.
+        return Outcome::Skipped(if checked.found.is_empty() {
+            "the plugin reported nothing here, so there is nothing to fix".to_string()
+        } else {
+            "the plugin reports no fixes".to_string()
+        });
     }
 
-    let (fixed, applied) = apply_fixes_to_content(source, &fixes);
-    if applied == 0 {
+    // Every reported fix has to land. The applier drops a fix whose offsets
+    // are out of range or split a character, and drops one that overlaps a
+    // fix already applied without counting it anywhere — and offsets computed
+    // by hand in an SDK are the mistake this command exists to catch, so a
+    // fix that quietly does not apply must not read as success.
+    let result = apply_fixes_to_content_detailed(source, &fixes);
+    if result.applied != fixes.len() {
         return Outcome::Failed(format!(
-            "none of the {} fix(es) reported could be applied",
-            fixes.len()
+            "{} of the {} fix(es) reported were applied — {} had offsets the applier \
+             rejected, the rest overlapped a fix already applied",
+            result.applied,
+            fixes.len(),
+            result.skipped_invalid
         ));
     }
+    let fixed = result.content;
 
-    let (remaining, syntax_errors_after) = findings(plugin, &fixed, path);
+    let after = findings(plugin, &fixed, path);
     // Counted rather than required to be zero: a syntax rule's own example is
     // malformed to begin with, so what makes a fix wrong is introducing
     // errors that were not there.
-    if syntax_errors_after > syntax_errors {
+    if after.syntax_errors > checked.syntax_errors {
         return Outcome::Failed(format!(
             "fixing introduced {} syntax error(s); the fixed configuration was:\n{}",
-            syntax_errors_after - syntax_errors,
+            after.syntax_errors - checked.syntax_errors,
             indent(&fixed)
         ));
     }
-    if remaining.is_empty() {
+    if after.found.is_empty() {
         return Outcome::Passed;
     }
     Outcome::Failed(format!(
         "after fixing, the rule still reports:\n{}\nthe fixed configuration was:\n{}",
-        describe(&remaining),
+        describe(&after.found),
         indent(&fixed)
     ))
 }
@@ -405,7 +448,7 @@ fn fixture_case(plugin: &dyn LintRule, path: &Path, expect_findings: bool) -> Op
         Ok(source) => source,
         Err(e) => return Some(Outcome::Failed(format!("{}: {e}", path.display()))),
     };
-    let found = findings(plugin, &source, &path.to_string_lossy()).0;
+    let found = findings(plugin, &source, &path.to_string_lossy()).found;
     Some(match found {
         found if found.is_empty() != expect_findings => Outcome::Passed,
         _ if expect_findings => Outcome::Failed("reported clean".to_string()),
@@ -663,6 +706,119 @@ mod tests {
         }
 
         assert_failed(&check_fix(&Breaking));
+    }
+
+    /// A fix the applier drops is the mistake this command exists to catch —
+    /// offsets computed by hand in an SDK — so it must not read as success
+    /// just because another fix happened to resolve the finding.
+    #[test]
+    fn a_fix_the_applier_drops_fails() {
+        struct Overlapping;
+        impl LintRule for Overlapping {
+            fn name(&self) -> &'static str {
+                "overlapping"
+            }
+            fn category(&self) -> &'static str {
+                "security"
+            }
+            fn description(&self) -> &'static str {
+                "test rule"
+            }
+            fn bad_example(&self) -> Option<&str> {
+                Some("http {\n    server_tokens on;\n}\n")
+            }
+            fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
+                config
+                    .all_directives()
+                    .filter(|directive| directive.name == "server_tokens")
+                    .map(|directive| LintError {
+                        rule: self.name().to_string(),
+                        category: self.category().to_string(),
+                        message: "server_tokens is on".to_string(),
+                        severity: Severity::Warning,
+                        line: Some(directive.span.start.line),
+                        column: Some(directive.span.start.column),
+                        // Two edits over the same range: the applier takes
+                        // one and drops the other without counting it.
+                        fixes: vec![
+                            Fix::replace_range(
+                                directive.span.start.offset,
+                                directive.span.end.offset,
+                                "server_tokens off;",
+                            ),
+                            Fix::replace_range(
+                                directive.span.start.offset,
+                                directive.span.end.offset,
+                                "server_tokens off;",
+                            ),
+                        ],
+                    })
+                    .collect()
+            }
+        }
+
+        assert_failed(&check_fix(&Overlapping));
+    }
+
+    /// "the rule did not fire here" and "the rule has no autofix" send an
+    /// author looking in different places.
+    #[test]
+    fn a_rule_that_reported_nothing_says_so_rather_than_no_fixes() {
+        let rule = Rule {
+            bad: "http {\n    gzip on;\n}\n",
+            ..Rule::default()
+        };
+
+        match check_fix(&rule) {
+            Outcome::Skipped(why) => assert!(
+                why.contains("reported nothing"),
+                "the skip should say the rule did not fire, got: {why}"
+            ),
+            other => panic!(
+                "expected a skip, got {:?}",
+                matches!(other, Outcome::Passed)
+            ),
+        }
+    }
+
+    /// A plugin whose findings carry a different rule name than its spec looks
+    /// silent from here, and the message has to point at the name.
+    #[test]
+    fn a_rule_name_the_findings_disagree_with_is_named() {
+        struct Mismatched;
+        impl LintRule for Mismatched {
+            fn name(&self) -> &'static str {
+                "declared-name"
+            }
+            fn category(&self) -> &'static str {
+                "security"
+            }
+            fn description(&self) -> &'static str {
+                "test rule"
+            }
+            fn bad_example(&self) -> Option<&str> {
+                Some("http {\n    server_tokens on;\n}\n")
+            }
+            fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+                vec![LintError {
+                    rule: "reported-name".to_string(),
+                    category: "security".to_string(),
+                    message: "server_tokens is on".to_string(),
+                    severity: Severity::Warning,
+                    line: Some(2),
+                    column: Some(5),
+                    fixes: Vec::new(),
+                }]
+            }
+        }
+
+        match check_bad_example(&Mismatched) {
+            Outcome::Failed(detail) => assert!(
+                detail.contains("another rule name"),
+                "the failure should point at the name, got: {detail}"
+            ),
+            _ => panic!("expected a failure"),
+        }
     }
 
     /// A rule without an autofix is ordinary, so the fix check steps aside
