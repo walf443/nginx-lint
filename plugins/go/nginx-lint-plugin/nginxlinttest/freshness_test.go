@@ -102,8 +102,15 @@ func TestCommittedModulesStillMatchTheCrates(t *testing.T) {
 	}
 }
 
-// fixRequest asks for one replacement per directive, built from the parse the
-// committed module produced so both appliers get identical input.
+// fixRequest builds a fix of every kind the applier handles, per directive,
+// from the parse the committed module produced so both appliers get identical
+// input.
+//
+// A range fix alone would leave the applier's line-based half untested: a
+// whole-line delete, a line-anchored insert and an old-text match each take a
+// different path through normalize_line_fix before the overlap check drops
+// most of them. What matters here is not which ones survive but that the two
+// modules decide identically.
 func fixRequest(t *testing.T, source, parsed []byte) []byte {
 	t.Helper()
 
@@ -117,7 +124,23 @@ func fixRequest(t *testing.T, source, parsed []byte) []byte {
 	}
 
 	response.Output.Config("nginx.conf").All(func(directive nginxlint.Directive) {
-		request.Fixes = append(request.Fixes, toJSONFix(directive.ReplaceWith("# replaced")))
+		request.Fixes = append(request.Fixes,
+			toJSONFix(directive.ReplaceWith("# replaced")),
+			toJSONFix(directive.DeleteLine()),
+			// Built by hand rather than through the SDK's builders, which
+			// produce range fixes only: these two shapes exist in the WIT and
+			// the applier normalizes them, so the check has to send them.
+			toJSONFix(nginxlint.Fix{
+				Line:        directive.Line,
+				NewText:     "# inserted",
+				InsertAfter: true,
+			}),
+			toJSONFix(nginxlint.Fix{
+				Line:    directive.Line,
+				OldText: directive.Name,
+				NewText: "renamed",
+			}),
+		)
 	})
 	return encode(t, request)
 }
