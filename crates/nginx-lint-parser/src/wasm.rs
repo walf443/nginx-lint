@@ -261,18 +261,24 @@ mod json {
         context_ptr: *const u8,
         context_len: usize,
     ) -> u64 {
-        let json = parse(read(source_ptr, source_len), read(context_ptr, context_len));
+        let json = match (read(source_ptr, source_len), read(context_ptr, context_len)) {
+            (Some(source), Some(context)) => parse(source, context),
+            // Parsing an empty configuration instead would report a file the
+            // CLI refuses to read as one with nothing in it, so a test
+            // asserting no findings would pass for the wrong reason.
+            _ => error("the argument is not valid UTF-8".to_string()),
+        };
         let bytes = json.into_bytes();
         let (ptr, len) = (bytes.as_ptr() as u64, bytes.len() as u64);
         std::mem::forget(bytes);
         (ptr << 32) | len
     }
 
-    fn read<'a>(ptr: *const u8, len: usize) -> &'a str {
+    fn read<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
         if ptr.is_null() || len == 0 {
-            return "";
+            return Some("");
         }
-        std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).unwrap_or("")
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
     }
 
     fn parse(source: &str, context: &str) -> String {

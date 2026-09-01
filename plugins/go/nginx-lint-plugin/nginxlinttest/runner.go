@@ -137,9 +137,14 @@ func (r *Runner) AssertFixProduces(t testing.TB, source, expected string) {
 	if err != nil {
 		t.Fatalf("applying the fixes: %v", err)
 	}
-	if result.SkippedInvalid > 0 {
-		t.Errorf("the applier dropped %d of %d fixes as invalid or overlapping",
-			result.SkippedInvalid, len(fixes))
+	// Comparing counts rather than reading SkippedInvalid: a fix dropped for
+	// overlapping one already applied is not counted anywhere, so a rule that
+	// reports the same edit twice would otherwise slip through whenever the
+	// surviving fix happens to produce the expected text.
+	if result.Applied != len(fixes) {
+		t.Errorf("the applier used %d of the %d fixes reported (%d were invalid, "+
+			"the rest overlapped one already applied)",
+			result.Applied, len(fixes), result.SkippedInvalid)
 	}
 	// The applier guarantees a trailing newline, so compare on those terms
 	// rather than making every caller remember to add one.

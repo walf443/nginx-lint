@@ -90,6 +90,14 @@ func TestDeleteLineIsALineFixNotARange(t *testing.T) {
 	}
 }
 
+// A hand-built Directive that sets offsets but leaves Column at its zero
+// value must not have its insertion point wrap around to the top of the file.
+func TestInsertBeforeWithNoColumn(t *testing.T) {
+	directive := nginxlint.Directive{Name: "gzip", StartOffset: 24, EndOffset: 32}
+
+	assertRange(t, directive.InsertBefore("# note"), 24, 24, "# note\n")
+}
+
 func TestOffsetsNeverWrapAround(t *testing.T) {
 	// A directive whose recorded column or leading whitespace runs past its
 	// offset would underflow unsigned arithmetic into an enormous offset,

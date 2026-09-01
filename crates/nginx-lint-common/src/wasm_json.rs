@@ -20,9 +20,10 @@ struct ApplyRequest {
 struct ApplyResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
-    /// How many fixes were applied, and how many were dropped as invalid or
-    /// overlapping — a rule whose fixes silently do not apply is exactly what
-    /// a test wants to see.
+    /// How many fixes were applied, and how many were rejected outright. A
+    /// fix dropped for overlapping one already applied is counted by neither,
+    /// so a caller checking that every fix landed compares `applied` against
+    /// how many it submitted.
     applied: u32,
     skipped_invalid: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,18 +47,21 @@ pub extern "C" fn alloc(len: usize) -> *mut u8 {
 /// because a wasm export returns a single value.
 #[unsafe(no_mangle)]
 pub extern "C" fn apply_fixes_json(request_ptr: *const u8, request_len: usize) -> u64 {
-    let json = apply(read(request_ptr, request_len));
+    let json = match read(request_ptr, request_len) {
+        Some(request) => apply(request),
+        None => error("the request is not valid UTF-8".to_string()),
+    };
     let bytes = json.into_bytes();
     let (ptr, len) = (bytes.as_ptr() as u64, bytes.len() as u64);
     std::mem::forget(bytes);
     (ptr << 32) | len
 }
 
-fn read<'a>(ptr: *const u8, len: usize) -> &'a str {
+fn read<'a>(ptr: *const u8, len: usize) -> Option<&'a str> {
     if ptr.is_null() || len == 0 {
-        return "";
+        return Some("");
     }
-    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).unwrap_or("")
+    std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).ok()
 }
 
 fn apply(request: &str) -> String {

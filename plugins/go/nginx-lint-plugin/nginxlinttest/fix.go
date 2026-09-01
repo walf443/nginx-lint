@@ -50,10 +50,14 @@ type applyResponse struct {
 // FixResult is what applying a rule's fixes produced.
 type FixResult struct {
 	Content string
+	// Applied counts the fixes that made it into Content. It is the number to
+	// compare against how many were submitted: a fix can also be dropped for
+	// overlapping one already applied, and the applier does not count those
+	// anywhere.
 	Applied int
-	// SkippedInvalid counts fixes the applier dropped because their range was
-	// out of bounds, split a character, or overlapped one already applied. A
-	// rule whose fixes silently do not apply shows up here.
+	// SkippedInvalid counts fixes the applier rejected outright: a range out
+	// of bounds or splitting a character, or a line-based fix naming a line
+	// that is not there.
 	SkippedInvalid int
 }
 

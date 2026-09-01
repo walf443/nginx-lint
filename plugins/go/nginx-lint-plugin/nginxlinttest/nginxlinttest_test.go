@@ -163,10 +163,13 @@ func TestRunnerAssertExamplesWithFix(t *testing.T) {
 		"http {\n    server_tokens off;\n}\n")
 }
 
-func TestApplyFixesReportsWhatItDropped(t *testing.T) {
-	// Two fixes over the same range: the applier takes the first and drops
-	// the second, which is how a rule finds out its fixes conflict.
+// Two fixes over the same range: the applier takes the first and drops the
+// second without counting it anywhere, which is why AssertFixProduces compares
+// Applied against how many fixes were reported rather than reading
+// SkippedInvalid.
+func TestApplyFixesDoesNotCountOverlaps(t *testing.T) {
 	fix := nginxlint.Directive{Line: 1, Column: 1, StartOffset: 0, EndOffset: 5}.ReplaceWith("gzip")
+
 	result, err := nginxlinttest.ApplyFixes("http {\n}\n", []nginxlint.Fix{fix, fix})
 	if err != nil {
 		t.Fatalf("ApplyFixes: %v", err)
@@ -175,9 +178,35 @@ func TestApplyFixesReportsWhatItDropped(t *testing.T) {
 	if result.Applied != 1 {
 		t.Errorf("Applied = %d, want 1", result.Applied)
 	}
-	if result.SkippedInvalid != 0 && result.Applied+result.SkippedInvalid != 2 {
-		t.Errorf("Applied=%d SkippedInvalid=%d, want them to account for both fixes",
+	if result.SkippedInvalid != 0 {
+		t.Errorf("SkippedInvalid = %d, want 0: the applier does not count an "+
+			"overlapping fix, and the runner relies on that", result.SkippedInvalid)
+	}
+}
+
+func TestApplyFixesCountsAnInvalidRange(t *testing.T) {
+	// A range past the end of the content is rejected outright, which is what
+	// SkippedInvalid does count.
+	fix := nginxlint.Directive{Line: 1, Column: 1, StartOffset: 900, EndOffset: 999}.ReplaceWith("gzip")
+
+	result, err := nginxlinttest.ApplyFixes("http {\n}\n", []nginxlint.Fix{fix})
+	if err != nil {
+		t.Fatalf("ApplyFixes: %v", err)
+	}
+
+	if result.Applied != 0 || result.SkippedInvalid != 1 {
+		t.Errorf("Applied=%d SkippedInvalid=%d, want 0 and 1",
 			result.Applied, result.SkippedInvalid)
+	}
+}
+
+// A configuration the CLI would refuse to read has to fail here too, rather
+// than come back as an empty one that every "no findings" assertion passes on.
+func TestParseRejectsInvalidUTF8(t *testing.T) {
+	source := "http {\n    server_name caf\xe9;\n}\n"
+
+	if _, err := nginxlinttest.Parse("nginx.conf", source); err == nil {
+		t.Error("Parse of non-UTF-8 source returned no error")
 	}
 }
 

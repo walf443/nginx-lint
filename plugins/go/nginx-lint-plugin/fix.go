@@ -36,7 +36,11 @@ func replaceRange(start, end uint32, newText string) Fix {
 // whitespace that would put new text in the same column. Both are derived the
 // way the host derives them, from the 1-based column.
 func (d Directive) lineStartOffset() uint32 {
-	return saturatingSub(d.StartOffset, d.Column-1)
+	// Both subtractions saturate, matching the host. Doing `Column-1` first
+	// would wrap a zero column — which a hand-built Directive can easily have
+	// — around to the maximum, and the outer subtraction would then answer 0,
+	// putting the insertion at the top of the file.
+	return saturatingSub(d.StartOffset, saturatingSub(d.Column, 1))
 }
 
 func (d Directive) indent() string {
