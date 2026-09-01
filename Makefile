@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: test-builtin-plugins testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -80,11 +80,39 @@ collect-plugins-only:
 			component_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
 			if [ -f "$$component_wasm" ]; then \
 				cp "$$component_wasm" "target/builtin-plugins/$${name}.wasm"; \
+				mkdir -p "target/builtin-plugins/$$name"; \
+				cp "$$component_wasm" "target/builtin-plugins/$$name/$$name.wasm"; \
 				echo "  Collected $$name.wasm"; \
 			fi \
 		fi \
 	done
 	@echo "Done collecting plugins."
+
+# Check every built builtin plugin the way an external one is checked: with
+# the CLI's own `test-plugins`, so the builtins and an external plugin are
+# held to one set of assertions rather than two implementations of them.
+#
+# One plugin per invocation, because --fixtures describes one plugin's cases
+# and each builtin keeps its own under tests/fixtures. collect-plugins-only
+# lays out a directory per plugin so each invocation sees exactly one.
+NGINX_LINT ?= cargo run --quiet --features plugins --
+
+test-builtin-plugins: collect-plugins-only
+	@fail=0; ran=0; \
+	for dir in plugins/builtin/*/*/; do \
+		name=$$(basename "$$dir"); \
+		wasm_dir="target/builtin-plugins/$$name"; \
+		[ -f "$$wasm_dir/$$name.wasm" ] || continue; \
+		if [ -d "$$dir/tests/fixtures" ]; then \
+			fixtures="--fixtures $$dir/tests/fixtures"; \
+		else \
+			fixtures=""; \
+		fi; \
+		$(NGINX_LINT) test-plugins --plugins "$$wasm_dir" $$fixtures || fail=$$((fail+1)); \
+		ran=$$((ran+1)); \
+	done; \
+	echo "Checked $$ran builtin plugin(s), $$fail failed."; \
+	test $$fail -eq 0
 
 # Build binary with embedded WASM builtin plugins (instead of native)
 build-with-wasm-plugins: collect-plugins

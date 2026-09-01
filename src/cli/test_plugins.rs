@@ -242,7 +242,17 @@ fn check_fix(plugin: &dyn LintRule) -> Outcome {
     let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no bad example".to_string());
     };
-    let found = match findings(plugin, bad, "bad.conf") {
+    resolve_by_fixing(plugin, bad, "bad.conf")
+}
+
+/// Apply every fix the plugin reports on `source` and require the rule to
+/// stop firing.
+///
+/// The result is not compared with anything: a good example or an `expected/`
+/// fixture may show more than the fix produces, which is why the Rust test
+/// binary this replaces treated an exact match as informational too.
+fn resolve_by_fixing(plugin: &dyn LintRule, source: &str, path: &str) -> Outcome {
+    let found = match findings(plugin, source, path) {
         Ok(found) => found,
         Err(e) => return Outcome::Failed(e),
     };
@@ -251,18 +261,18 @@ fn check_fix(plugin: &dyn LintRule) -> Outcome {
         return Outcome::Skipped("the plugin reports no fixes".to_string());
     }
 
-    let (fixed, applied) = apply_fixes_to_content(bad, &fixes);
+    let (fixed, applied) = apply_fixes_to_content(source, &fixes);
     if applied == 0 {
         return Outcome::Failed(format!(
             "none of the {} fix(es) reported could be applied",
             fixes.len()
         ));
     }
-    match findings(plugin, &fixed, "bad.conf") {
-        Err(e) => Outcome::Failed(format!("the fixed example does not parse: {e}")),
+    match findings(plugin, &fixed, path) {
+        Err(e) => Outcome::Failed(format!("the fixed configuration does not parse: {e}")),
         Ok(remaining) if remaining.is_empty() => Outcome::Passed,
         Ok(remaining) => Outcome::Failed(format!(
-            "after fixing, the rule still reports:\n{}\nthe fixed example was:\n{}",
+            "after fixing, the rule still reports:\n{}\nthe fixed configuration was:\n{}",
             describe(&remaining),
             indent(&fixed)
         )),
@@ -319,6 +329,12 @@ fn check_fixtures(plugin: &dyn LintRule, fixtures: &Path) -> Vec<Check> {
                 outcome,
             });
         }
+        if let Some(outcome) = fixture_fix(plugin, &case.join("error").join("nginx.conf")) {
+            checks.push(Check {
+                name: leak(format!("fixture {name}/error is resolved by fixing it")),
+                outcome,
+            });
+        }
 
         // Neither file means the case exercises nothing, and passing silently
         // is the worst direction for a command whose job is to verify: a
@@ -335,6 +351,23 @@ fn check_fixtures(plugin: &dyn LintRule, fixtures: &Path) -> Vec<Check> {
         }
     }
     checks
+}
+
+/// Apply what the plugin reports on a fixture's `error/nginx.conf` and
+/// require the rule to stop firing, the same way [`check_fix`] does for the
+/// bad example.
+///
+/// `None` when there is no `error/nginx.conf`, so a case that only declares
+/// the clean direction is not asked about fixes.
+fn fixture_fix(plugin: &dyn LintRule, path: &Path) -> Option<Outcome> {
+    if !path.exists() {
+        return None;
+    }
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(e) => return Some(Outcome::Failed(format!("{}: {e}", path.display()))),
+    };
+    Some(resolve_by_fixing(plugin, &source, &path.to_string_lossy()))
 }
 
 /// `None` when the fixture is absent, which is how a case declares that it
@@ -688,10 +721,63 @@ mod tests {
 
         let checks = check_fixtures(&Rule::default(), dir.path());
 
-        assert_eq!(checks.len(), 2);
+        assert_eq!(checks.len(), 3, "error/, expected/, and fixing error/");
         for check in &checks {
             assert_passed(outcome(check));
         }
+    }
+
+    /// A fixture's error/ is held to the same standard as the bad example:
+    /// the fixes it reports have to resolve it.
+    #[test]
+    fn a_fixture_error_that_fixing_does_not_resolve_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let case = dir.path().join("001_basic");
+        std::fs::create_dir_all(case.join("error")).unwrap();
+        std::fs::write(
+            case.join("error").join("nginx.conf"),
+            "http {\n    server_tokens on;\n}\n",
+        )
+        .unwrap();
+
+        // Reports the finding, and offers a fix that changes nothing.
+        struct Unresolving;
+        impl LintRule for Unresolving {
+            fn name(&self) -> &'static str {
+                "unresolving"
+            }
+            fn category(&self) -> &'static str {
+                "security"
+            }
+            fn description(&self) -> &'static str {
+                "test rule"
+            }
+            fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
+                config
+                    .all_directives()
+                    .filter(|directive| directive.name == "server_tokens")
+                    .map(|directive| LintError {
+                        rule: self.name().to_string(),
+                        category: self.category().to_string(),
+                        message: "still here".to_string(),
+                        severity: Severity::Warning,
+                        line: Some(directive.span.start.line),
+                        column: Some(directive.span.start.column),
+                        fixes: vec![Fix::replace_range(
+                            directive.span.start.offset,
+                            directive.span.end.offset,
+                            "server_tokens on;",
+                        )],
+                    })
+                    .collect()
+            }
+        }
+
+        let checks = check_fixtures(&Unresolving, dir.path());
+
+        assert_eq!(checks.len(), 2, "error/ is checked, then its fixes are");
+        assert_passed(outcome(&checks[0]));
+        assert_failed(outcome(&checks[1]));
     }
 
     /// A case with only one of the two directories exercises only that one,
@@ -709,8 +795,14 @@ mod tests {
 
         let checks = check_fixtures(&Rule::default(), dir.path());
 
-        assert_eq!(checks.len(), 1);
-        assert_passed(outcome(&checks[0]));
+        assert_eq!(
+            checks.len(),
+            2,
+            "error/ and fixing it, but nothing about expected/"
+        );
+        for check in &checks {
+            assert_passed(outcome(check));
+        }
     }
 
     /// A case that names neither file exercises nothing, and a verification

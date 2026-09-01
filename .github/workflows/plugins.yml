@@ -170,15 +170,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: "build-host"
-      - name: Build nginx-lint and test binary
-        run: |
-          cargo build --release --no-default-features --features cli,plugins
-          cargo test --test wasm_plugin_test --no-default-features --features cli,plugins --release --no-run
+      - name: Build nginx-lint
+        run: cargo build --release --no-default-features --features cli,plugins
       - name: Package binaries
         run: |
           mkdir -p artifacts
           cp target/release/nginx-lint artifacts/
-          find target/release/deps -name 'wasm_plugin_test-*' -type f -executable | head -1 | xargs -I{} cp {} artifacts/wasm_plugin_test
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-binaries
@@ -363,10 +360,13 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
-          chmod +x artifacts/wasm_plugin_test artifacts/nginx-lint
+          chmod +x artifacts/nginx-lint
       - parallel:
-          - name: Run WASM integration tests
-            run: ./artifacts/wasm_plugin_test
+          - name: Test the builtin plugins
+            # The same checks the language plugins get, over every builtin:
+            # one `test-plugins` invocation each, so each sees its own
+            # tests/fixtures.
+            run: make test-builtin-plugins NGINX_LINT=./artifacts/nginx-lint
           - name: Test TypeScript plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
