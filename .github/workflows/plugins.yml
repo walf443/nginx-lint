@@ -368,16 +368,25 @@ jobs:
           - name: Run WASM integration tests
             run: ./artifacts/wasm_plugin_test
           - name: Test TypeScript plugin integration
-            # The plugin carries its own bad and good examples in its spec,
-            # so `test-plugin` needs nothing but the directory: it requires
-            # the bad one to be reported, the good one to be clean, and the
-            # fixes to resolve the bad one.
-            run: ./artifacts/nginx-lint test-plugin --plugins target/ts-plugins
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
+
+              # The plugin carries its own bad and good examples in its spec,
+              # so `test-plugins` needs nothing but the directory: it requires
+              # the bad one to be reported, the good one to be clean, and the
+              # fixes to resolve the bad one.
+              $NGINX_LINT test-plugins --plugins target/ts-plugins
+
+              # test-plugins judges whatever is in the directory, so on its own
+              # it would not notice the rule being renamed. Naming it here is
+              # what pins that, as the Python and Go steps do below.
+              $NGINX_LINT why --plugins target/ts-plugins server-tokens-enabled-ts 2>&1 \
+                | grep -q 'Rule: server-tokens-enabled-ts'
           - name: Test Python plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
 
-              $NGINX_LINT test-plugin --plugins target/py-plugins
+              $NGINX_LINT test-plugins --plugins target/py-plugins
 
               # `why` documents externally loaded plugins, and its examples
               # are the ones in examples/*.conf (app.py reads them at build
@@ -404,11 +413,11 @@ jobs:
               # this repository guarantees, and this is the only test that
               # asserts it against a real Go component rather than a fixture.
               #
-              # `test-plugin` refuses a directory whose plugins all failed
+              # `test-plugins` refuses a directory whose plugins all failed
               # to load, so its exit status answers this directly. Pin the
               # message too: exit 2 also covers a missing directory.
               set +e
-              denied=$($NGINX_LINT test-plugin --plugins $PLUGIN_DIR 2>&1)
+              denied=$($NGINX_LINT test-plugins --plugins $PLUGIN_DIR 2>&1)
               denied_status=$?
               set -e
               echo "$denied"
@@ -421,16 +430,16 @@ jobs:
               # Bad example reported, good example clean, fixes resolve the
               # bad one — the same three checks as the TypeScript and Python
               # steps above, which is now one command rather than a copy.
-              $NGINX_LINT test-plugin --plugins $PLUGIN_DIR --allow-wasi-plugins
+              $NGINX_LINT test-plugins --plugins $PLUGIN_DIR --allow-wasi-plugins
 
               # plugins.allow_wasi_plugins grants the same thing from the
               # configuration file, which is what a project with a Go plugin
               # sets instead of passing the flag on every run.
               conf=$(mktemp -d)/allow-wasi.toml
               printf '[plugins]\nallow_wasi_plugins = true\n' > "$conf"
-              $NGINX_LINT test-plugin --config "$conf" --plugins $PLUGIN_DIR
+              $NGINX_LINT test-plugins --config "$conf" --plugins $PLUGIN_DIR
 
-              # test-plugin requires the fixes to resolve the finding, not to
+              # test-plugins requires the fixes to resolve the finding, not to
               # produce a particular text. Applying them to a file on disk and
               # diffing is what pins the Go SDK's pure-Go fix offsets to the
               # exact bytes the host writes.

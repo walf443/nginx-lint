@@ -1,4 +1,4 @@
-//! `nginx-lint test-plugin` — run a plugin against its own documentation.
+//! `nginx-lint test-plugins` — run a plugin against its own documentation.
 //!
 //! Every SDK has a way to test a rule in its own language, and the tree has
 //! had a Rust test binary that does the same for the builtin plugins. What
@@ -35,7 +35,7 @@ struct Check {
     outcome: Outcome,
 }
 
-pub fn run_test_plugin(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
+pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     if cli.color {
         colored::control::set_override(true);
     } else if cli.no_color {
@@ -44,8 +44,8 @@ pub fn run_test_plugin(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
 
     let Some(ref dir) = cli.plugins else {
         eprintln!(
-            "Error: test-plugin needs a plugin directory\n\n\
-             Usage: nginx-lint test-plugin --plugins <DIR>"
+            "Error: test-plugins needs a plugin directory\n\n\
+             Usage: nginx-lint test-plugins --plugins <DIR>"
         );
         return ExitCode::from(2);
     };
@@ -95,19 +95,36 @@ pub fn run_test_plugin(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     // The loader warns about a component it cannot instantiate and carries
     // on, which is right for linting — one broken plugin should not stop the
     // run — and wrong here: a plugin that does not load is the first thing a
-    // test command should refuse to pass.
+    // test command should refuse to pass. It exits 2 rather than counting
+    // towards the failed checks: a component that cannot be instantiated is a
+    // build problem, not a rule that behaves wrongly, and reporting it as a
+    // failed check would print "1 failed" with nothing having been checked.
     let found = wasm_files(dir);
-    let mut failed = 0;
     if found > plugins.len() {
         eprintln!(
-            "{} of the {} .wasm file(s) in {} did not load (see the warnings above)",
+            "Error: {} of the {} .wasm file(s) in {} did not load (see the warnings above)",
             found - plugins.len(),
             found,
             dir.display()
         );
-        failed += found - plugins.len();
+        return ExitCode::from(2);
     }
 
+    // A fixture case is written for one rule: `error/nginx.conf` is a
+    // configuration that rule reports. Running the same cases against every
+    // plugin in the directory would fail all the others, so rather than
+    // guessing which plugin a case belongs to, say what is wrong.
+    if fixtures.is_some() && plugins.len() > 1 {
+        eprintln!(
+            "Error: --fixtures describes one plugin's cases, but {} plugins loaded from {}\n\n\
+             Point --plugins at the one plugin whose fixtures these are.",
+            plugins.len(),
+            dir.display()
+        );
+        return ExitCode::from(2);
+    }
+
+    let mut failed = 0;
     let mut passed = 0;
     for plugin in &plugins {
         let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
@@ -286,6 +303,8 @@ fn check_fixtures(plugin: &dyn LintRule, fixtures: &Path) -> Vec<Check> {
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned();
+        let before = checks.len();
+
         if let Some(outcome) = fixture_case(plugin, &case.join("error").join("nginx.conf"), true) {
             checks.push(Check {
                 name: leak(format!("fixture {name}/error is reported")),
@@ -298,6 +317,20 @@ fn check_fixtures(plugin: &dyn LintRule, fixtures: &Path) -> Vec<Check> {
             checks.push(Check {
                 name: leak(format!("fixture {name}/expected is clean")),
                 outcome,
+            });
+        }
+
+        // Neither file means the case exercises nothing, and passing silently
+        // is the worst direction for a command whose job is to verify: a
+        // directory nested one level too deep, or a misspelled `expected/`,
+        // would otherwise read as success.
+        if checks.len() == before {
+            checks.push(Check {
+                name: leak(format!("fixture {name} declares a configuration")),
+                outcome: Outcome::Failed(format!(
+                    "{} has neither error/nginx.conf nor expected/nginx.conf",
+                    case.display()
+                )),
             });
         }
     }
@@ -678,6 +711,23 @@ mod tests {
 
         assert_eq!(checks.len(), 1);
         assert_passed(outcome(&checks[0]));
+    }
+
+    /// A case that names neither file exercises nothing, and a verification
+    /// command must not report that as success.
+    #[test]
+    fn a_fixture_case_with_neither_direction_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        // `erro/` rather than `error/`: the shape a typo or a directory
+        // nested one level too deep leaves behind.
+        let case = dir.path().join("001_basic").join("erro");
+        std::fs::create_dir_all(&case).unwrap();
+        std::fs::write(case.join("nginx.conf"), "http {\n}\n").unwrap();
+
+        let checks = check_fixtures(&Rule::default(), dir.path());
+
+        assert_eq!(checks.len(), 1);
+        assert_failed(outcome(&checks[0]));
     }
 
     #[test]

@@ -147,5 +147,5 @@ spec — the bad one has to be reported, the good one clean, and the fixes
 have to resolve the bad one:
 
 ```bash
-nginx-lint test-plugin --plugins <dir>
+nginx-lint test-plugins --plugins <dir>
 ```

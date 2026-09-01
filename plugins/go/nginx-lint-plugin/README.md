@@ -177,7 +177,7 @@ cfg := nginxlint.Config{Directives: []nginxlint.Directive{{
 The CLI checks a built plugin end to end from those same examples:
 
 ```bash
-nginx-lint test-plugin --plugins <dir> [--fixtures tests/fixtures]
+nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
 ```
 
 The bad example has to be reported, the good one clean, and the fixes

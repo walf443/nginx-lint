@@ -246,18 +246,19 @@ below.
 
 ### Testing a plugin
 
-`test-plugin` runs every plugin in a directory against the examples it carries
+`test-plugins` runs every plugin in a directory against the examples it carries
 in its own spec — the ones `nginx-lint why` renders — so there is nothing to
 point it at but the directory:
 
 ```bash
-nginx-lint test-plugin --plugins ./my-plugins
+nginx-lint test-plugins --plugins ./my-plugins
 ```
 
 For each plugin it requires the bad example to be reported, the good example to
 be clean, and the fixes to resolve the bad example. A rule with no autofix
-skips the last one rather than failing it. It exits 1 if any check fails and 2
-if the plugins could not be loaded at all.
+skips the last one rather than failing it. It exits 1 if any check fails, and 2
+if a plugin could not be loaded — the linter warns and carries on there, which
+is right for linting and wrong for a command asked to check the plugins.
 
 Findings are matched by the plugin's own rule name, so several plugins can
 share a directory, and a rule that is disabled by default or turned off in
@@ -266,11 +267,13 @@ share a directory, and a rule that is disabled by default or turned off in
 If the plugin follows the fixture layout the SDKs document, point at it too:
 
 ```bash
-nginx-lint test-plugin --plugins . --fixtures tests/fixtures
+nginx-lint test-plugins --plugins . --fixtures tests/fixtures
 ```
 
 Each `<case>/error/nginx.conf` has to be reported and each
-`<case>/expected/nginx.conf` has to be clean.
+`<case>/expected/nginx.conf` has to be clean; a case may declare only one of
+the two. Because the cases are written for one rule, `--fixtures` needs the
+directory to hold exactly one plugin.
 
 ### The plugin sandbox
 

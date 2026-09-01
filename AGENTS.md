@@ -186,7 +186,7 @@ Check a built plugin end to end with the CLI, which needs nothing but the
 directory — the examples travel inside the component:
 
 ```bash
-nginx-lint test-plugin --plugins <dir> [--fixtures tests/fixtures]
+nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
 ```
 
 It requires the bad example to be reported, the good example to be clean, and

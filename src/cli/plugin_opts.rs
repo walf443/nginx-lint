@@ -1,4 +1,4 @@
-//! Resolving the plugin-related options that `why` and `test-plugin` share.
+//! Resolving the plugin-related options that `why` and `test-plugins` share.
 //!
 //! `lint` resolves the same things, but does it inline against a
 //! configuration file it has already loaded for the linting itself; these two

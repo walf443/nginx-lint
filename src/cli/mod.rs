@@ -4,7 +4,7 @@ pub mod lint;
 #[cfg(feature = "plugins")]
 pub mod plugin_opts;
 #[cfg(feature = "plugins")]
-pub mod test_plugin;
+pub mod test_plugins;
 pub mod web;
 pub mod why;
 
@@ -130,7 +130,7 @@ pub enum Commands {
     Guide,
     /// Check that the plugins in a --plugins directory work
     #[cfg(feature = "plugins")]
-    TestPlugin {
+    TestPlugins {
         /// Directory of fixture cases, each with error/nginx.conf and/or
         /// expected/nginx.conf (the layout the SDKs document)
         #[arg(long, value_name = "DIR")]
