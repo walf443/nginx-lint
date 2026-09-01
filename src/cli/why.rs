@@ -71,30 +71,30 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
 /// directory. The search starts at the current directory, `why` having no
 /// file to start from.
 #[cfg(feature = "plugins")]
-fn allow_wasi(cli: &Cli) -> bool {
+fn allow_wasi(cli: &Cli) -> Result<bool, ()> {
     use nginx_lint_common::config::LintConfig;
 
     if cli.allow_wasi_plugins {
-        return true;
+        return Ok(true);
     }
 
     let config = match cli.config {
-        // An explicitly passed file that does not parse is reported rather
-        // than treated as absent: falling back to the default would deny WASI
-        // and surface as an unrelated plugin-loading failure, with nothing
+        // An explicitly passed file that does not parse fails the command, as
+        // it does for `lint`: continuing would deny WASI and surface as an
+        // unrelated plugin-loading failure on the next line, with nothing
         // pointing at the config file. A discovered file stays silent, which
         // is what find_and_load does for `lint` too.
         Some(ref path) => match LintConfig::from_file(path) {
             Ok(config) => Some(config),
             Err(e) => {
-                eprintln!("Warning: {}", e);
-                None
+                eprintln!("Error: {}", e);
+                return Err(());
             }
         },
         None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
     };
 
-    config.is_some_and(|cfg| cfg.plugins.allow_wasi_plugins)
+    Ok(config.is_some_and(|cfg| cfg.plugins.allow_wasi_plugins))
 }
 
 /// Resolve the compilation cache from the CLI flags.
@@ -127,7 +127,7 @@ fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
         return Ok(Vec::new());
     };
 
-    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi(cli)).map_err(|e| {
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi(cli)?).map_err(|e| {
         eprintln!("Error loading plugins: {}", e);
     })
 }

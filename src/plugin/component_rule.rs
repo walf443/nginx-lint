@@ -69,10 +69,12 @@ use bindings::{Plugin, PluginPre};
 struct ComponentStoreData {
     limits: StoreLimits,
     table: ResourceTable,
-    /// Backing state for the `wasi:*` interfaces, present whether or not
-    /// they are linked (see [`add_wasi_subset`]). Built empty: no preopened
-    /// directories, no environment, no arguments, no stdio.
-    wasi: wasmtime_wasi::WasiCtx,
+    /// Backing state for the `wasi:*` interfaces, built on first use and
+    /// therefore never when they are not linked (see [`add_wasi_subset`]) —
+    /// a store is created per plugin per file, and the builder seeds a random
+    /// generator from the operating system every time. Built empty: no
+    /// preopened directories, no environment, no arguments, no stdio.
+    wasi: Option<wasmtime_wasi::WasiCtx>,
 }
 
 /// The empty WASI context every plugin store gets.
@@ -89,7 +91,9 @@ fn empty_wasi_ctx() -> wasmtime_wasi::WasiCtx {
 impl wasmtime_wasi::WasiView for ComponentStoreData {
     fn ctx(&mut self) -> wasmtime_wasi::WasiCtxView<'_> {
         wasmtime_wasi::WasiCtxView {
-            ctx: &mut self.wasi,
+            // Only a linked interface reaches this, so the context is built
+            // for the plugins that were granted WASI and for no others.
+            ctx: self.wasi.get_or_insert_with(empty_wasi_ctx),
             table: &mut self.table,
         }
     }
@@ -1045,7 +1049,7 @@ impl ComponentLintRule {
             ComponentStoreData {
                 limits,
                 table: ResourceTable::new(),
-                wasi: empty_wasi_ctx(),
+                wasi: None,
             },
         );
         store.limiter(|data| &mut data.limits);
@@ -1582,7 +1586,7 @@ mod tests {
                 let mut data = ComponentStoreData {
                     limits: StoreLimitsBuilder::new().build(),
                     table: ResourceTable::new(),
-                    wasi: empty_wasi_ctx(),
+                    wasi: None,
                 };
                 let cfg_res = data
                     .table
@@ -2192,7 +2196,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let config = Arc::new(Config {
             items,
@@ -2357,7 +2361,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 1, 10, 20);
         let resource = push_test_directive(&mut data, dir);
@@ -2375,7 +2379,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
         let resource = push_test_directive(&mut data, dir);
@@ -2394,7 +2398,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
         let resource = push_test_directive(&mut data, dir);
@@ -2447,7 +2451,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let dir = make_directive("listen", 1, 1, 0, 10);
         let resource = push_test_directive(&mut data, dir);
@@ -2461,7 +2465,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let mut dir = make_directive("http", 1, 1, 0, 30);
         dir.block = Some(ast::Block {
@@ -2568,7 +2572,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
-            wasi: empty_wasi_ctx(),
+            wasi: None,
         };
         let http_resource = push_test_directive(&mut data, http);
 

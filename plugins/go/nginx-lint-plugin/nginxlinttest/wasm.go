@@ -93,7 +93,19 @@ func invoke(ctx context.Context, compiled wazero.CompiledModule, name string, ar
 	}
 	defer instance.Close(ctx)
 
+	// A module that does not export what is asked for gives a nil function,
+	// and calling that panics rather than failing. The likeliest way to get
+	// here is pointing the freshness check at the wrong artifact — a
+	// component build rather than a wasm-json one — so name the export.
 	alloc := instance.ExportedFunction("alloc")
+	if alloc == nil {
+		return nil, fmt.Errorf("the module does not export alloc")
+	}
+	entry := instance.ExportedFunction(name)
+	if entry == nil {
+		return nil, fmt.Errorf("the module does not export %s", name)
+	}
+
 	params := make([]uint64, 0, len(args)*2)
 	for _, arg := range args {
 		if len(arg) == 0 {
@@ -110,7 +122,7 @@ func invoke(ctx context.Context, compiled wazero.CompiledModule, name string, ar
 		params = append(params, result[0], uint64(len(arg)))
 	}
 
-	result, err := instance.ExportedFunction(name).Call(ctx, params...)
+	result, err := entry.Call(ctx, params...)
 	if err != nil {
 		return nil, fmt.Errorf("calling %s: %w", name, err)
 	}
