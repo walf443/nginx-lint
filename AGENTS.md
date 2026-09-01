@@ -100,6 +100,25 @@ from the repository root), so its `pyo3` and `serde` dependencies are bumped
 by hand. `pyo3` in particular has to stay new enough for the newest released
 CPython: an older one hard-errors on a newer interpreter even with abi3.
 
+The Go SDK (`plugins/go/nginx-lint-plugin`) commits both its generated
+bindings and its copy of the WIT, unlike the TypeScript and Python SDKs which
+regenerate theirs. A Go module is consumed as source and cannot run a code
+generator on the way in, and its `componentize-go.toml` points a consuming
+plugin at the vendored WIT. So after any change to `wit/`, run `make copy-wit`
+at the root and `make bindings` in the SDK, and commit the result — CI diffs
+the WIT copy against the root.
+
+```bash
+# Go SDK
+cd plugins/go/nginx-lint-plugin && make check     # vet + test, on the host
+# Go example plugin
+cd plugins/go/server-tokens-enabled-go && make check test-e2e
+```
+
+Only the SDK's root package builds for the host; everything under `bindings/`
+and `exports/` is wasm-only, so `go test ./...` fails there by design and the
+Makefiles target the packages that do build.
+
 ### Adding a Native Lint Rule
 
 Native rules are implemented in Rust under `src/rules/`. Use for rules that need access to file system or complex logic.

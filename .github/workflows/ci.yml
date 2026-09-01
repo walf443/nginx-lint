@@ -70,10 +70,13 @@ jobs:
         # step — the one that names the cause — would never run. They are
         # vendored so the crates' wit-bindgen features work from
         # crates.io; a stale copy would generate bindings for the wrong
-        # interface. `make copy-wit` refreshes them.
+        # interface. The Go SDK's copy is what componentize-go reads for a
+        # plugin that depends on the published module. `make copy-wit`
+        # refreshes them all.
         run: |
           diff wit/nginx-lint-plugin.wit crates/nginx-lint-parser/wit/nginx-lint-plugin.wit
           diff wit/nginx-lint-plugin.wit crates/nginx-lint-plugin/wit/nginx-lint-plugin.wit
+          diff wit/nginx-lint-plugin.wit plugins/go/nginx-lint-plugin/wit/nginx-lint-plugin.wit
       - run: cargo clippy --workspace --features plugins -- -D clippy::all
 
   test:

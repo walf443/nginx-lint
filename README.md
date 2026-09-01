@@ -228,7 +228,20 @@ Load custom WASM plugins from a directory:
 nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 ```
 
-Each `.wasm` file in the directory is loaded as a plugin, in file name order. See the `plugins/builtin/` directory for examples of how to write plugins using the `nginx-lint-plugin` SDK.
+Each `.wasm` file in the directory is loaded as a plugin, in file name order.
+
+There is an `nginx-lint-plugin` SDK for four languages, each with a worked
+example beside it:
+
+| Language | SDK | Example |
+| --- | --- | --- |
+| Rust | `crates/nginx-lint-plugin` | `plugins/builtin/` |
+| TypeScript | [`nginx-lint-plugin`](https://www.npmjs.com/package/nginx-lint-plugin) (`plugins/typescript/nginx-lint-plugin`) | `plugins/typescript/server-tokens-enabled-ts` |
+| Python | [`nginx-lint-plugin`](https://pypi.org/project/nginx-lint-plugin/) (`plugins/python/nginx-lint-plugin`) | `plugins/python/server-tokens-enabled-py` |
+| Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |
+
+Go plugins additionally need `--allow-wasi-plugins`, for the reason described
+below.
 
 ### The plugin sandbox
 

@@ -1,0 +1,171 @@
+# nginx-lint-plugin (Go)
+
+Go SDK for writing [nginx-lint](https://github.com/walf443/nginx-lint) plugins.
+
+Plugins are compiled to WebAssembly Component Model binaries and loaded by the
+nginx-lint CLI at runtime.
+
+## Install
+
+```bash
+go get github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin
+go install github.com/bytecodealliance/componentize-go@v0.4.0
+```
+
+Requires Go 1.25+. The standard toolchain — TinyGo is not involved.
+
+This is a nested module, so its releases are tagged
+`plugins/go/nginx-lint-plugin/vX.Y.Z`. Until the first such tag, `go get`
+resolves it to a pseudo-version of the default branch, which works the same.
+
+## Quick start
+
+A plugin implements `Spec` and `Check`, registers itself from `init`, and blank
+imports the `export` package so the component's exports get linked.
+
+```go
+package main
+
+import (
+	_ "embed"
+
+	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
+	_ "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/export"
+)
+
+//go:embed examples/bad.conf
+var badExample string
+
+//go:embed examples/good.conf
+var goodExample string
+
+type myRule struct{}
+
+func (myRule) Spec() nginxlint.Spec {
+	return nginxlint.Spec{
+		Name:        "my-rule",
+		Category:    "best-practices",
+		Description: "Describe what this rule checks",
+		Severity:    "warning",
+		BadExample:  badExample,
+		GoodExample: goodExample,
+	}
+}
+
+func (myRule) Check(cfg nginxlint.Config) []nginxlint.LintError {
+	errors := []nginxlint.LintError{}
+	cfg.Named("proxy_pass", func(directive nginxlint.Directive) {
+		if directive.IsInside("location") && !directive.HasBlock {
+			errors = append(errors, nginxlint.Warning(directive, "…").
+				WithFix(directive.InsertAfter("proxy_set_header Host $host;")))
+		}
+	})
+	return errors
+}
+
+func init() { nginxlint.Register(myRule{}) }
+
+// The host calls the exports directly; main never runs.
+func main() {}
+```
+
+Build it:
+
+```bash
+componentize-go build -o my-rule.wasm
+```
+
+No `-d` and no `-w`: this module ships a `componentize-go.toml` naming the WIT
+and the world, and componentize-go finds it by scanning your dependencies.
+
+Then run it. `--allow-wasi-plugins` is required for every Go plugin — see
+[the plugin sandbox](../../../README.md#the-plugin-sandbox) for why, and for
+what the flag does and does not grant:
+
+```bash
+nginx-lint --plugins . --allow-wasi-plugins nginx.conf
+```
+
+## What a check receives
+
+`Config` is plain Go data. The SDK takes one snapshot of the configuration
+when a check starts, so a rule never holds a handle on the host:
+
+```go
+type Config struct {
+	Path           string
+	Directives     []Directive   // top level; each carries its own Block
+	Comments       []Comment     // flat, from the whole file
+	BlankLines     []BlankLine
+	IncludeContext []string
+}
+```
+
+`Config.All(visit)` walks every directive at any depth in source order, and
+`Config.Named(name, visit)` walks the ones with a given name.
+
+Each `Directive` carries its name, arguments, position, byte offsets and the
+surrounding whitespace, plus `Parents` — the blocks enclosing it, outermost
+first. `Parents` starts from the include context, so `directive.IsInside("http")`
+answers the same whether the directive was written inline or pulled in by an
+`include`.
+
+Fixes are built from the directive: `ReplaceWith`, `DeleteLine`, `InsertBefore`,
+`InsertAfter`, `InsertBeforeMany`, `InsertAfterMany`. They compute the same byte
+ranges the host would have, so the rule stays testable without a component
+runtime.
+
+## Testing
+
+Nothing a rule imports reaches the generated bindings, so a plugin's own
+package tests on the host with a plain `go test` and no wasm:
+
+```go
+func TestCheck(t *testing.T) {
+	cfg := nginxlint.Config{Directives: []nginxlint.Directive{{
+		Name: "http",
+		Block: []nginxlint.Directive{{
+			Name:    "server_tokens",
+			Args:    []nginxlint.Argument{{Value: "on"}},
+			Line:    2,
+			Column:  5,
+			Parents: []string{"http"},
+		}},
+	}}}
+
+	if got := len(myRule{}.Check(cfg)); got != 1 {
+		t.Fatalf("got %d findings, want 1", got)
+	}
+}
+```
+
+What this cannot do is run the real parser, the way the Rust, TypeScript and
+Python SDKs' `PluginTestRunner` does: there is no component-model runtime for
+Go, so nothing in-process can produce a `Config` from a configuration file.
+A struct literal can therefore disagree with the parser about what a directive
+looks like. Close that by running the built component through the CLI as well —
+see `test-e2e` in `../server-tokens-enabled-go/Makefile`.
+
+## Layout
+
+- `plugin.go`, `fix.go` — the API a rule uses. Pure Go, no generated bindings,
+  which is what makes rules host-testable.
+- `exports/export_wit_world/` — the adapter between the bindings and a
+  registered plugin. It owns the handle drops and the WIT conversions, so a
+  rule never sees either.
+- `export/` — the blank import that links the exports in. Empty on the host.
+- `bindings/` — generated by `make bindings`, and committed: a Go module is
+  consumed as source and cannot run a code generator on the way in.
+- `wit/` — a copy of the repository's WIT, committed for the same reason and
+  checked against the root in CI.
+
+## Working on the SDK
+
+```bash
+make bindings   # regenerate bindings/ after a WIT change; commit the result
+make check      # vet + test
+```
+
+## License
+
+MIT

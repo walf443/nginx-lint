@@ -1,51 +1,41 @@
 WASM := server-tokens-enabled-go.wasm
 RULE := server-tokens-enabled-go
-WIT_DIR := ../../../wit
 NGINX_LINT := ../../../target/debug/nginx-lint
 
-.PHONY: bindings build vet test test-e2e clean
+.PHONY: build test vet check test-e2e clean
 
-# componentize-go is used as an installed binary rather than through a
-# `tool` directive in go.mod: its `bindings` subcommand rewrites go.mod and
-# drops the directive, so the second invocation would not find itself.
-COMPONENTIZE_GO := componentize-go
-
-# Generate the Go bindings from the WIT. They are not committed (the same
-# convention as the TypeScript and Python SDKs), so this runs before every
-# build from a fresh checkout.
-bindings:
-	@command -v $(COMPONENTIZE_GO) >/dev/null || { \
+# No WIT path and no world: the SDK carries a componentize-go.toml, and
+# componentize-go finds it by scanning this module's dependencies.
+build:
+	@command -v componentize-go >/dev/null || { \
 		echo "componentize-go not found: go install github.com/bytecodealliance/componentize-go@v0.4.0"; \
 		exit 1; \
 	}
-	$(COMPONENTIZE_GO) -d $(WIT_DIR) -w plugin bindings --format
+	componentize-go build -o $(WASM)
 
-build: bindings
-	$(COMPONENTIZE_GO) -d $(WIT_DIR) -w plugin build -o $(WASM)
-
-# Unit tests for the rule itself. They run on the host, without wasm or a
-# component runtime, because ./rule imports none of the generated bindings —
-# which is the reason it is a separate package.
+# Runs on the host, with no wasm and no component runtime: nothing this
+# package imports reaches the generated bindings.
 test:
-	go test ./rule/
+	go test ./...
 
-# The WIT runtime this depends on has assembly-only functions that do not
-# build for the host, so vetting has to target wasm; and `./...` would drag
-# in the generated packages, which are not worth vetting.
-vet: bindings
-	GOOS=wasip1 GOARCH=wasm go vet ./export_wit_world/ ./examples/
-	go vet ./rule/
+vet:
+	go vet ./...
 
-# End to end through the CLI. --allow-wasi-plugins is required: a Go
-# component imports wasi:* even when the plugin itself never uses it.
-# --rule-only makes the exit code meaningful, so a plugin that fails to load
-# fails the test instead of looking like "no findings".
+check: vet test
+
+# Everything the unit tests cannot reach: the real parser, the bindings,
+# handle ownership and the host boundary. --allow-wasi-plugins is required
+# because a Go component imports wasi:* even when the plugin never uses it,
+# and --rule-only makes the exit code meaningful, so a plugin that fails to
+# load fails the test instead of looking like "no findings".
 test-e2e: build
 	$(NGINX_LINT) --plugins . --allow-wasi-plugins --rule-only $(RULE) examples/bad.conf; \
 		test $$? -eq 1
 	$(NGINX_LINT) --plugins . --allow-wasi-plugins --rule-only $(RULE) examples/good.conf
+	@tmp=$$(mktemp -d); cp examples/bad.conf $$tmp/nginx.conf; \
+		$(NGINX_LINT) --plugins . --allow-wasi-plugins --rule-only $(RULE) --fix $$tmp/nginx.conf >/dev/null; \
+		diff examples/good.conf $$tmp/nginx.conf && echo "  --fix produced examples/good.conf"; \
+		status=$$?; rm -rf $$tmp; exit $$status
 
 clean:
-	rm -rf $(WASM) wit_exports.go wit_world nginx_lint_plugin_config_api \
-		nginx_lint_plugin_data_types nginx_lint_plugin_parser_types \
-		nginx_lint_plugin_types
+	rm -f $(WASM)
