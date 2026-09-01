@@ -2035,6 +2035,7 @@ version = "0.20.0"
 dependencies = [
  "rowan",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "wit-bindgen",
 ]

@@ -5,6 +5,11 @@ wit_bindgen::generate!({
     path: "wit/nginx-lint-plugin.wit",
     world: "parser",
     pub_export_macro: true,
+    // So the same parse-output the component returns can also be handed out
+    // as JSON by the `wasm-json` entry point below. The derives cost the
+    // component nothing: with `wasm` alone nothing calls them and the build
+    // is byte-identical.
+    additional_derives: [serde::Serialize],
 });
 
 struct ParserComponent;
@@ -207,5 +212,101 @@ fn collect_directive_contexts(
                 collect_directive_contexts(all_items, &item.child_indices, &child_stack, results);
             }
         }
+    }
+}
+
+// ── A core-module JSON entry point (feature `wasm-json`) ────────────────
+//
+// The component above is only reachable from a component-model runtime, which
+// Go does not have. These exports make the same parse output reachable from
+// any plain wasm runtime: no imports, no canonical ABI, one JSON string out.
+// The Go SDK's test helper runs this build under wazero, which is what lets a
+// plugin's `go test` use the real parser instead of hand-built fixtures.
+#[cfg(feature = "wasm-json")]
+mod json {
+    use super::{build_parse_output, pt};
+    use serde::Serialize;
+
+    /// The result shape, so a parse error is distinguishable from an output
+    /// that happens to be empty.
+    #[derive(Serialize)]
+    struct JsonResult<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output: Option<&'a pt::ParseOutput>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    }
+
+    /// Reserve `len` bytes for the caller to write an argument into. The
+    /// caller does not free it; the module is instantiated per parse and
+    /// thrown away.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn alloc(len: usize) -> *mut u8 {
+        let mut buffer = Vec::with_capacity(len);
+        let ptr = buffer.as_mut_ptr();
+        std::mem::forget(buffer);
+        ptr
+    }
+
+    /// Parse `source`, with `include_context` given as a JSON array of block
+    /// names, and return the result as JSON.
+    ///
+    /// Returns the pointer and length packed into one u64 — `(ptr << 32) |
+    /// len` — because a wasm export returns a single value and this avoids
+    /// making the caller pass an out-parameter.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn parse_config_json(
+        source_ptr: *const u8,
+        source_len: usize,
+        context_ptr: *const u8,
+        context_len: usize,
+    ) -> u64 {
+        let json = parse(read(source_ptr, source_len), read(context_ptr, context_len));
+        let bytes = json.into_bytes();
+        let (ptr, len) = (bytes.as_ptr() as u64, bytes.len() as u64);
+        std::mem::forget(bytes);
+        (ptr << 32) | len
+    }
+
+    fn read<'a>(ptr: *const u8, len: usize) -> &'a str {
+        if ptr.is_null() || len == 0 {
+            return "";
+        }
+        std::str::from_utf8(unsafe { std::slice::from_raw_parts(ptr, len) }).unwrap_or("")
+    }
+
+    fn parse(source: &str, context: &str) -> String {
+        let include_context: Vec<String> = if context.is_empty() {
+            Vec::new()
+        } else {
+            match serde_json::from_str(context) {
+                Ok(context) => context,
+                Err(e) => return error(format!("invalid include context: {e}")),
+            }
+        };
+
+        let mut config = match crate::parse_string(source) {
+            Ok(config) => config,
+            Err(e) => return error(e.to_string()),
+        };
+        config.include_context = include_context;
+
+        let output = build_parse_output(&config);
+        let result = JsonResult {
+            output: Some(&output),
+            error: None,
+        };
+        serde_json::to_string(&result).unwrap_or_else(|e| error(e.to_string()))
+    }
+
+    fn error(message: String) -> String {
+        let result = JsonResult {
+            output: None,
+            error: Some(message),
+        };
+        // A serde_json failure on a struct of two options cannot happen, but
+        // a panic here would surface to the caller as an unhelpful trap.
+        serde_json::to_string(&result)
+            .unwrap_or_else(|_| r#"{"error":"could not encode the error"}"#.to_string())
     }
 }

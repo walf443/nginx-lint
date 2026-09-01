@@ -29,16 +29,20 @@ bindings: copy-wit
 		--pkg-name $(MODULE)/bindings \
 		--export-pkg-name $(MODULE)/exports
 
-# Only the root package: everything else in the module imports the generated
-# bindings, which have assembly-only functions that do not build for the host.
+# The root package and the test helper. Everything else in the module imports
+# the generated bindings, which have assembly-only functions that do not build
+# for the host.
 test:
-	go test .
+	go test . ./internal/... ./nginxlinttest/
 
 vet:
-	go vet .
+	go vet . ./internal/... ./nginxlinttest/
 	GOOS=wasip1 GOARCH=wasm go vet ./export/ ./exports/...
 
 check: vet test
+
+# The wasm modules nginxlinttest runs are built from the repository root,
+# where the Rust crates are: `make build-testkit-wasm`.
 
 clean:
 	rm -rf bindings

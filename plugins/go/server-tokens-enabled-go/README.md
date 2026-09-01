@@ -45,7 +45,7 @@ Three files, one package:
 - `main.go` — the rule. It implements the SDK's `Plugin` interface, registers
   itself from `init`, and blank imports the SDK's `export` package so the
   component's exports get linked.
-- `main_test.go` — the rule's tests, built from struct literals.
+- `main_test.go` — the rule's tests, run against the real parser.
 - `examples/` — the bad and good configurations, embedded with `go:embed` so
   `nginx-lint why` can render them.
 
@@ -53,20 +53,27 @@ There is no generated code here and no WIT path in the Makefile: the SDK
 carries the bindings and a `componentize-go.toml`, so `componentize-go build`
 finds the world by scanning this module's dependencies.
 
-## Testing, in two layers
+## Testing
 
-`make check` runs on the host with no wasm and no component runtime, because
-nothing this package imports reaches the generated bindings — the SDK's
-`export` package is empty off wasm, and everything else a rule touches is
-plain Go data.
+`make check` runs on the host with no wasm toolchain and no component runtime.
+The tests use the SDK's `nginxlinttest`, which runs the **real parser** and the
+**real fix applier** — the same two crates the CLI uses, compiled as core wasm
+modules and run under wazero, which is pure Go:
 
-`make test-e2e` runs the built component through the CLI against `examples/`,
-which covers what struct literals cannot: the real parser, the bindings,
-handle ownership and the host boundary. It also applies `--fix` to
-`examples/bad.conf` and diffs the result against `examples/good.conf`, which
-is what checks the SDK's fix offsets against the ones the host computes.
+```go
+runner().AssertErrorOnLine(t, source, 2)
+runner().AssertFixProduces(t,
+	"http {\n    server_tokens on;\n}\n",
+	"http {\n    server_tokens off;\n}\n")
+runner().AssertExamplesWithFix(t, badExample, goodExample)
+```
 
-The gap between the two layers is that a struct literal can disagree with the
-real parser about what a directive looks like. Go has no component-model
-runtime, so there is no equivalent of the other SDKs' `PluginTestRunner` to
-close it in-process; the end-to-end run is what holds it closed instead.
+So a test that passes is a test against the positions and offsets the linter
+will actually produce, not against a fixture someone typed. One test here
+still builds a `Config` by hand, to show that style works for a shape the
+parser cannot easily produce.
+
+`make test-e2e` covers what remains: the generated bindings, handle ownership,
+the WASI-less default, and the host boundary. It runs the built component
+through the CLI against `examples/`, and applies `--fix` to `examples/bad.conf`
+and diffs the result against `examples/good.conf`.

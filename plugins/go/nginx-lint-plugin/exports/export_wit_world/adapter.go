@@ -13,6 +13,7 @@ import (
 	datatypes "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/bindings/nginx_lint_plugin_data_types"
 	parsertypes "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/bindings/nginx_lint_plugin_parser_types"
 	plugintypes "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/bindings/nginx_lint_plugin_types"
+	"github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/internal/snapshot"
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 )
 
@@ -74,25 +75,10 @@ func Check(cfg *configapi.Config, path string) []plugintypes.LintError {
 	// never touches cfg. Taking one snapshot is also why no directive handle
 	// is ever created, so this is the only drop there is.
 	defer cfg.Drop()
-	snapshot := cfg.Snapshot()
-
-	config := nginxlint.Config{
-		Path:           path,
-		IncludeContext: snapshot.IncludeContext,
-		Directives: directives(
-			snapshot.AllItems,
-			snapshot.TopLevelIndices,
-			// An included fragment is nested inside the blocks it was
-			// included from, so the include context seeds the parent stack.
-			// Without it a rule asking IsInside("http") would be wrong for
-			// every file pulled in by an `include`.
-			snapshot.IncludeContext,
-		),
-	}
-	config.Comments, config.BlankLines = trivia(snapshot.AllItems)
 
 	plugin := registered()
 	spec := plugin.Spec()
+	config := parseOutput(cfg.Snapshot()).Config(path)
 
 	errors := []plugintypes.LintError{}
 	for _, found := range plugin.Check(config) {
@@ -109,93 +95,82 @@ func Check(cfg *configapi.Config, path string) []plugintypes.LintError {
 	return errors
 }
 
-// directives rebuilds the nested shape from the flat snapshot, which reports
-// a block's children as indices into one array.
-func directives(all []parsertypes.ConfigItem, indices []uint32, parents []string) []nginxlint.Directive {
-	converted := []nginxlint.Directive{}
-	for _, index := range indices {
-		if int(index) >= len(all) {
-			continue
-		}
-		item := all[index]
-		if item.Value.Tag() != parsertypes.ConfigItemValueDirectiveItem {
-			continue
-		}
-		directive := directive(item.Value.DirectiveItem(), parents)
-		if len(item.ChildIndices) > 0 {
-			// Copy rather than append in place: several siblings share this
-			// parents slice, and appending to it would let one of them
-			// overwrite another's stack.
-			nested := append(append([]string{}, parents...), directive.Name)
-			directive.Block = directives(all, item.ChildIndices, nested)
-		}
-		converted = append(converted, directive)
+// parseOutput restates the host's snapshot in the shape the SDK converts from,
+// which is the same one the parser's JSON entry point emits. The copy is
+// mechanical on purpose: everything with a decision in it — the nesting, the
+// parent stacks, the include context — lives in one place, so a rule tested
+// against the real parser sees what it will see at run time.
+func parseOutput(from configapi.ConfigSnapshot) snapshot.ParseOutput {
+	items := make([]snapshot.Item, 0, len(from.AllItems))
+	for _, item := range from.AllItems {
+		items = append(items, snapshot.Item{
+			Value:        itemValue(item.Value),
+			ChildIndices: item.ChildIndices,
+		})
 	}
-	return converted
+	return snapshot.ParseOutput{
+		Items:           items,
+		TopLevelIndices: from.TopLevelIndices,
+		IncludeContext:  from.IncludeContext,
+	}
 }
 
-func directive(data datatypes.DirectiveData, parents []string) nginxlint.Directive {
-	args := make([]nginxlint.Argument, 0, len(data.Args))
-	for _, arg := range data.Args {
-		args = append(args, nginxlint.Argument{
+func itemValue(from parsertypes.ConfigItemValue) snapshot.ItemValue {
+	switch from.Tag() {
+	case parsertypes.ConfigItemValueDirectiveItem:
+		return snapshot.ItemValue{Directive: directive(from.DirectiveItem())}
+	case parsertypes.ConfigItemValueCommentItem:
+		found := from.CommentItem()
+		return snapshot.ItemValue{Comment: &snapshot.Comment{
+			Text:               found.Text,
+			Line:               found.Line,
+			Column:             found.Column,
+			LeadingWhitespace:  found.LeadingWhitespace,
+			TrailingWhitespace: found.TrailingWhitespace,
+			StartOffset:        found.StartOffset,
+			EndOffset:          found.EndOffset,
+		}}
+	case parsertypes.ConfigItemValueBlankLineItem:
+		found := from.BlankLineItem()
+		return snapshot.ItemValue{BlankLine: &snapshot.BlankLine{
+			Line:        found.Line,
+			Content:     found.Content,
+			StartOffset: found.StartOffset,
+		}}
+	}
+	return snapshot.ItemValue{}
+}
+
+func directive(from datatypes.DirectiveData) *snapshot.Directive {
+	args := make([]snapshot.Argument, 0, len(from.Args))
+	for _, arg := range from.Args {
+		args = append(args, snapshot.Argument{
 			Value:       arg.Value,
 			Raw:         arg.Raw,
-			Type:        nginxlint.ArgumentType(arg.ArgType),
+			Type:        snapshot.ArgumentType(arg.ArgType),
 			Line:        arg.Line,
 			Column:      arg.Column,
 			StartOffset: arg.StartOffset,
 			EndOffset:   arg.EndOffset,
 		})
 	}
-	return nginxlint.Directive{
-		Name:                  data.Name,
+	return &snapshot.Directive{
+		Name:                  from.Name,
 		Args:                  args,
-		Line:                  data.Line,
-		Column:                data.Column,
-		StartOffset:           data.StartOffset,
-		EndOffset:             data.EndOffset,
-		EndLine:               data.EndLine,
-		EndColumn:             data.EndColumn,
-		LeadingWhitespace:     data.LeadingWhitespace,
-		TrailingWhitespace:    data.TrailingWhitespace,
-		SpaceBeforeTerminator: data.SpaceBeforeTerminator,
-		HasBlock:              data.HasBlock,
-		BlockIsRaw:            data.BlockIsRaw,
-		BlockRawContent:       text(data.BlockRawContent),
-		TrailingComment:       text(data.TrailingCommentText),
-		Parents:               parents,
+		Line:                  from.Line,
+		Column:                from.Column,
+		StartOffset:           from.StartOffset,
+		EndOffset:             from.EndOffset,
+		EndLine:               from.EndLine,
+		EndColumn:             from.EndColumn,
+		LeadingWhitespace:     from.LeadingWhitespace,
+		TrailingWhitespace:    from.TrailingWhitespace,
+		SpaceBeforeTerminator: from.SpaceBeforeTerminator,
+		HasBlock:              from.HasBlock,
+		BlockIsRaw:            from.BlockIsRaw,
+		BlockRawContent:       text(from.BlockRawContent),
+		TrailingComment:       text(from.TrailingCommentText),
 	}
-}
-
-// trivia collects the comments and blank lines from the whole file. They are
-// flat rather than woven into the directive tree, and the snapshot's array is
-// already in source order, so one pass over it is enough.
-func trivia(all []parsertypes.ConfigItem) ([]nginxlint.Comment, []nginxlint.BlankLine) {
-	comments := []nginxlint.Comment{}
-	blankLines := []nginxlint.BlankLine{}
-	for _, item := range all {
-		switch item.Value.Tag() {
-		case parsertypes.ConfigItemValueCommentItem:
-			found := item.Value.CommentItem()
-			comments = append(comments, nginxlint.Comment{
-				Text:               found.Text,
-				Line:               found.Line,
-				Column:             found.Column,
-				LeadingWhitespace:  found.LeadingWhitespace,
-				TrailingWhitespace: found.TrailingWhitespace,
-				StartOffset:        found.StartOffset,
-				EndOffset:          found.EndOffset,
-			})
-		case parsertypes.ConfigItemValueBlankLineItem:
-			found := item.Value.BlankLineItem()
-			blankLines = append(blankLines, nginxlint.BlankLine{
-				Line:        found.Line,
-				Content:     found.Content,
-				StartOffset: found.StartOffset,
-			})
-		}
-	}
-	return comments, blankLines
 }
 
 func fixes(from []nginxlint.Fix) []plugintypes.Fix {

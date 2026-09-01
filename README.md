@@ -240,6 +240,7 @@ example beside it:
 | Python | [`nginx-lint-plugin`](https://pypi.org/project/nginx-lint-plugin/) (`plugins/python/nginx-lint-plugin`) | `plugins/python/server-tokens-enabled-py` |
 | Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |
 
+Every SDK can run a plugin against the real parser from its own test suite.
 Go plugins additionally need `--allow-wasi-plugins`, for the reason described
 below.
 

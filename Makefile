@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: build-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -130,6 +130,21 @@ copy-wit:
 			echo "  Refreshed $$dest"; \
 		fi; \
 	done
+
+# Build the two core wasm modules the Go SDK's test helper runs. They are the
+# same parser and fix applier the CLI uses, exposed through a JSON entry point
+# instead of the component model, which Go has no runtime for. Committed under
+# nginxlinttest/ because a Go module is consumed as source.
+build-testkit-wasm: copy-wit
+	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm-json
+	cargo build --manifest-path crates/nginx-lint-common/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm-json
+	cp target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm \
+		plugins/go/nginx-lint-plugin/nginxlinttest/parser.wasm
+	cp target/wasm32-unknown-unknown/release/nginx_lint_common.wasm \
+		plugins/go/nginx-lint-plugin/nginxlinttest/fixer.wasm
+	@echo "Go test-helper modules rebuilt."
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm: copy-wit
