@@ -155,15 +155,9 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     }
 
     println!();
-    if failed > 0 {
-        println!(
-            "{} plugin(s), {} check(s) passed, {}",
-            plugins.len(),
-            passed,
-            format!("{failed} failed").red().bold()
-        );
-        return ExitCode::from(1);
-    }
+    // Both are reported before returning: they are not exclusive, and holding
+    // the second back until the first is fixed makes a condition that was true
+    // all along read as a new regression on the next run.
     if !unchecked.is_empty() {
         println!(
             "{} for {} — {}",
@@ -171,9 +165,21 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
             unchecked.join(", "),
             "do they declare bad and good examples?".yellow()
         );
+    }
+    if failed > 0 {
+        println!(
+            "{} plugin(s), {} check(s) passed, {}",
+            plugins.len(),
+            passed,
+            format!("{failed} failed").red().bold()
+        );
+    } else {
+        println!("{} plugin(s), {} check(s) passed", plugins.len(), passed);
+    }
+
+    if failed > 0 || !unchecked.is_empty() {
         return ExitCode::from(1);
     }
-    println!("{} plugin(s), {} check(s) passed", plugins.len(), passed);
     ExitCode::SUCCESS
 }
 

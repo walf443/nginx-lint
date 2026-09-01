@@ -225,13 +225,19 @@ test:
 	cargo test
 
 # Run tests including plugin tests
-test-all: test
+# test-all ends with test-builtin-plugins because nothing else here loads a
+# built component: `cargo test` covers the host and each plugin's own crate,
+# and the WIT bridge between them is only exercised by running the components.
+# It builds them first, which is slow but is what "all" has to mean now that
+# the Rust test binary that did this is gone.
+test-all: test build-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			echo "Testing $$(basename $$dir)..."; \
 			(cd "$$dir" && cargo test); \
 		fi \
 	done
+	@$(MAKE) test-builtin-plugins
 
 # Lint plugin example files to ensure they are valid nginx configs
 lint-plugin-examples:
@@ -293,7 +299,7 @@ help:
 	@echo "  make run-web            - Run web server (development)"
 	@echo "  make run-web-embed      - Run web server with embedded WASM"
 	@echo "  make test               - Run tests"
-	@echo "  make test-all           - Run all tests including plugins"
+	@echo "  make test-all           - Run all tests, and check the built plugins"
 	@echo "  make doc                - Build API documentation (opens in browser)"
 	@echo "  make lint               - Run clippy"
 	@echo "  make lint-plugin-examples - Lint plugin example files"
