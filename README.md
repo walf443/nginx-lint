@@ -267,6 +267,20 @@ the ability to block inside a WASI call past the execution deadline, which
 interrupts wasm execution rather than host calls. Both are reasons to leave the
 flag off unless a plugin needs it.
 
+A project whose plugins need it on every run can set it in `.nginx-lint.toml`
+instead:
+
+```toml
+[plugins]
+allow_wasi = true
+```
+
+The flag and the setting are OR'd, and there is deliberately no way to say no
+from the command line. Which plugins to load stays a command line decision —
+`[plugins]` has no directory key, and never will — so a configuration file
+discovered in a checked-out repository cannot cause any WebAssembly to run. It
+can only widen what a plugin you already asked for with `--plugins` is granted.
+
 ## Installation
 
 ### From source

@@ -423,6 +423,17 @@ jobs:
               echo "$output"
               echo "$output" | jq -e '.errors | length == 0' > /dev/null
 
+              # plugins.allow_wasi grants the same thing from the
+              # configuration file, which is what a project with a Go plugin
+              # sets instead of passing the flag on every run.
+              conf=$(mktemp -d)/allow-wasi.toml
+              printf '[plugins]\nallow_wasi = true\n' > "$conf"
+              if output=$($NGINX_LINT --config "$conf" --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
+                echo "ERROR: plugins.allow_wasi did not load the plugin"
+                exit 1
+              fi
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
+
               # The SDK computes fix offsets in pure Go, reproducing what the
               # host's directive resource would have returned. Applying one is
               # what checks that arithmetic against the host's own.

@@ -184,6 +184,16 @@ fn generate_schema_markdown(
         write_properties_table(&mut out, parser, schema);
     }
 
+    // [plugins] section
+    if let Some(plugins) = schema.pointer("/properties/plugins") {
+        out.push_str("## `[plugins]`\n\n");
+        out.push_str(
+            "Settings for plugins loaded with `--plugins`. Which plugins to load is a \
+             command line decision and cannot be set here.\n\n",
+        );
+        write_properties_table(&mut out, plugins, schema);
+    }
+
     // [rules.*] section
     out.push_str("## `[rules.<name>]`\n\n");
     out.push_str(

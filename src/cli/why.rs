@@ -62,10 +62,35 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     Ok(docs)
 }
 
+/// Whether plugins that import WASI may be loaded.
+///
+/// `why` reads .nginx-lint.toml for this one setting, unlike cache_dir just
+/// below, because it decides whether a plugin loads at all rather than where
+/// its artifacts go: a project whose plugins need WASI would otherwise have
+/// `lint` working from the config file and `why` failing on the same
+/// directory. The search starts at the current directory, `why` having no
+/// file to start from.
+#[cfg(feature = "plugins")]
+fn allow_wasi(cli: &Cli) -> bool {
+    use nginx_lint_common::config::LintConfig;
+
+    if cli.allow_wasi_plugins {
+        return true;
+    }
+
+    let config = match cli.config {
+        Some(ref path) => LintConfig::from_file(path).ok(),
+        None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
+    };
+
+    config.is_some_and(|cfg| cfg.plugins.allow_wasi)
+}
+
 /// Resolve the compilation cache from the CLI flags.
 ///
-/// Only the flags are honoured; unlike `lint`, `why` does not read
-/// .nginx-lint.toml, so cache_dir from the config file does not apply.
+/// Only the flags are honoured; `why` does not read cache_dir from
+/// .nginx-lint.toml, so a plugin it compiles may not be the copy `lint`
+/// cached.
 #[cfg(feature = "plugins")]
 fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     use nginx_lint::plugin::CompilationCache;
@@ -91,11 +116,9 @@ fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
         return Ok(Vec::new());
     };
 
-    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), cli.allow_wasi_plugins).map_err(
-        |e| {
-            eprintln!("Error loading plugins: {}", e);
-        },
-    )
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi(cli)).map_err(|e| {
+        eprintln!("Error loading plugins: {}", e);
+    })
 }
 
 pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {

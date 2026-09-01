@@ -157,6 +157,19 @@ warning = "yellow"
 # from = "modules-enabled"
 # to   = "modules-available"
 
+# Settings for plugins loaded with --plugins. Which plugins to load is a
+# command line decision and cannot be set here, so this file can never cause
+# WebAssembly to run on its own.
+# [plugins]
+# Allow plugins that import WASI, the same grant as --allow-wasi-plugins, for
+# projects that would otherwise pass the flag on every run. Go plugins need
+# it: componentize-go adapts a wasip1 module, so the Go runtime imports wasi:*
+# even for a plugin that only reads the config it is handed. It links a subset
+# backed by an empty context — no filesystem, network, environment or terminal
+# — but it does hand every loaded plugin a clock and randomness. See the
+# sandbox section of the README before turning it on.
+# allow_wasi = true
+
 # =============================================================================
 # Style Rules
 # =============================================================================
@@ -326,6 +339,9 @@ pub struct LintConfig {
     /// Include resolution settings (e.g. path mappings for include directives).
     #[serde(default)]
     pub include: IncludeConfig,
+    /// Settings for plugins loaded with `--plugins`.
+    #[serde(default)]
+    pub plugins: PluginsConfig,
     /// Target nginx version (e.g. `"1.31.0"`).
     ///
     /// When set, rules whose declared version range does not include this
@@ -343,6 +359,24 @@ pub struct LintConfig {
     /// config file.
     #[serde(default)]
     pub cache_dir: Option<String>,
+}
+
+/// Plugin configuration.
+///
+/// Only settings *about* plugins live here — never which plugins to load.
+/// The directory is `--plugins` on the command line and nothing else, so a
+/// configuration file discovered in a checked-out repository cannot cause any
+/// WebAssembly to run.
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct PluginsConfig {
+    /// Allow plugins that import WASI, the same grant as `--allow-wasi-plugins`.
+    ///
+    /// It applies only to plugins the command line already asked for, and the
+    /// flag and this setting are OR'd: once either says yes, WASI is linked.
+    /// There is deliberately no way to say no from the command line — a
+    /// project that needs this needs it on every run.
+    #[serde(default)]
+    pub allow_wasi: bool,
 }
 
 /// Parser configuration
@@ -827,6 +861,7 @@ impl LintConfig {
                 "color",
                 "parser",
                 "include",
+                "plugins",
                 "target_nginx_version",
                 "cache_dir",
             ]
@@ -889,6 +924,22 @@ impl LintConfig {
                             path: format!("include.{}", key),
                             line,
                             suggestion: suggest_field(key, &known_include_keys),
+                        });
+                    }
+                }
+            }
+
+            // Validate [plugins] section
+            if let Some(toml::Value::Table(plugins)) = root.get("plugins") {
+                let known_plugins_keys: HashSet<&str> = ["allow_wasi"].into_iter().collect();
+
+                for key in plugins.keys() {
+                    if !known_plugins_keys.contains(key.as_str()) {
+                        let line = find_key_line(content, Some("plugins"), key);
+                        errors.push(ValidationError::UnknownField {
+                            path: format!("plugins.{}", key),
+                            line,
+                            suggestion: suggest_field(key, &known_plugins_keys),
                         });
                     }
                 }
@@ -1270,6 +1321,60 @@ indent_size = "auto"
         let config = LintConfig::from_file(file.path()).unwrap();
         let indent_config = config.get_rule_config("indent").unwrap();
         assert_eq!(indent_config.indent_size, Some(IndentSize::Auto));
+    }
+
+    #[test]
+    fn test_plugins_config_defaults_to_denying_wasi() {
+        // The default has to stay false: it is the sandbox guarantee, and a
+        // config file with no [plugins] section must not weaken it.
+        assert!(!LintConfig::default().plugins.allow_wasi);
+
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "[color]\nui = \"auto\"\n").unwrap();
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert!(!config.plugins.allow_wasi);
+    }
+
+    #[test]
+    fn test_plugins_allow_wasi() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "[plugins]\nallow_wasi = true\n").unwrap();
+
+        let config = LintConfig::from_file(file.path()).unwrap();
+        assert!(config.plugins.allow_wasi);
+    }
+
+    #[test]
+    fn test_validate_accepts_the_plugins_section() {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "[plugins]\nallow_wasi = true\n").unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_validate_rejects_unknown_plugins_key() {
+        // `--allow-wasi-plugins` is the flag's name, so it is the likely typo
+        // for the key, and the suggestion is what makes the error useful.
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "[plugins]\nallow_wasi_plugins = true\n").unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert_eq!(
+            errors.len(),
+            1,
+            "expected exactly one error, got: {errors:?}"
+        );
+        match &errors[0] {
+            ValidationError::UnknownField {
+                path, suggestion, ..
+            } => {
+                assert_eq!(path, "plugins.allow_wasi_plugins");
+                assert_eq!(suggestion.as_deref(), Some("allow_wasi"));
+            }
+            other => panic!("expected UnknownField, got: {other:?}"),
+        }
     }
 
     #[test]
