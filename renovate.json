@@ -41,6 +41,38 @@
       "enabled": false
     },
     {
+      "description": "Same reasoning for Go: CI runs the Go jobs on the lowest toolchain the SDK supports (both go.mod files declare go 1.25.0, and both READMEs promise Go 1.25+), so that anything needing a newer one fails in CI rather than in a downstream build. The Go SDK is consumed as source, so a 1.26 API used by mistake would compile here and break for whoever imports it. Bumping it means raising that floor, which is go.mod, the READMEs and the workflow comment in one change, not an automated update. Scoped to github-actions so a go dependency elsewhere is still updated.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchDepNames": [
+        "go"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The Go example plugin requires the SDK through a replace to the working tree, so the SDK's own requirements reach it as indirect ones. Updating only the SDK leaves the example's go.mod stale, and `go vet` there refuses to run until it is tidied — which is what broke #396. Renovate leaves indirect Go dependencies alone by default; enabling them for that one module makes it propose both files together, and they land in one branch because it is the same dependency at the same version.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchFileNames": [
+        "plugins/go/server-tokens-enabled-go/go.mod"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "enabled": true
+    },
+    {
+      "description": "Tidy after a Go update, so go.mod and go.sum are left as `go mod tidy` would write them rather than as the minimal edit `go get` makes.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "postUpdateOptions": [
+        "gomodTidy"
+      ]
+    },
+    {
       "description": "Renovate runs cargo from the repository root, which does not pick up plugins/python/.cargo/config.toml (cargo finds config by walking up from the current directory). Any update touching this manifest, a pyo3 bump as much as lockFileMaintenance, refreshes its lockfile from there and rewrites nginx-lint-parser and nginx-lint-common as registry entries, permanently at odds with what in-repo builds produce; between a version bump and its crates.io publish it fails outright. Those two pins are owned by scripts/bump-version.sh anyway, and pyo3 and serde here are bumped by hand from the crate's own directory (see AGENTS.md).",
       "matchManagers": [
         "cargo"
