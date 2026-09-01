@@ -15,8 +15,15 @@ go install github.com/bytecodealliance/componentize-go@v0.4.0
 Requires Go 1.25+. The standard toolchain — TinyGo is not involved.
 
 This is a nested module, so its releases are tagged
-`plugins/go/nginx-lint-plugin/vX.Y.Z`. Until the first such tag, `go get`
-resolves it to a pseudo-version of the default branch, which works the same.
+`plugins/go/nginx-lint-plugin/vX.Y.Z` — the repository's own `vX.Y.Z` tag does
+not version it. The release workflow creates that tag alongside each release;
+until the first one, `go get` resolves to a pseudo-version of the default
+branch, which works the same.
+
+The version tracks nginx-lint's, so an SDK release always matches the WIT and
+the host it was built against. One consequence to know before nginx-lint
+reaches 2.0.0: Go requires a major version from v2 on to appear in the module
+path itself, so the import path will have to gain a `/v2` at that point.
 
 ## Quick start
 
