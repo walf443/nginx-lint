@@ -69,6 +69,97 @@ use bindings::{Plugin, PluginPre};
 struct ComponentStoreData {
     limits: StoreLimits,
     table: ResourceTable,
+    /// Backing state for the `wasi:*` interfaces, built on first use and
+    /// therefore never when they are not linked (see [`add_wasi_subset`]) —
+    /// a store is created per plugin per file, and the builder seeds a random
+    /// generator from the operating system every time. Built empty: no
+    /// preopened directories, no environment, no arguments, no stdio.
+    wasi: Option<wasmtime_wasi::WasiCtx>,
+}
+
+/// The empty WASI context every plugin store gets.
+///
+/// `WasiCtxBuilder` is deny-by-default, so this grants nothing beyond what
+/// the linked interfaces imply: the clocks and randomness. Notably stdio
+/// stays disconnected. Inheriting stderr would let a plugin write straight to
+/// the user's terminal, around the control-character sanitizing that
+/// `sanitize_text` does at the WIT boundary.
+fn empty_wasi_ctx() -> wasmtime_wasi::WasiCtx {
+    wasmtime_wasi::WasiCtxBuilder::new().build()
+}
+
+impl wasmtime_wasi::WasiView for ComponentStoreData {
+    fn ctx(&mut self) -> wasmtime_wasi::WasiCtxView<'_> {
+        wasmtime_wasi::WasiCtxView {
+            // Only a linked interface reaches this, so the context is built
+            // for the plugins that were granted WASI and for no others.
+            ctx: self.wasi.get_or_insert_with(empty_wasi_ctx),
+            table: &mut self.table,
+        }
+    }
+}
+
+/// `HasData` marker for the `wasi:io` interfaces, which are backed by the
+/// resource table alone. `wasmtime-wasi` keeps its own equivalent private, so
+/// linking those interfaces individually means declaring one here.
+struct HasIo;
+
+impl wasmtime::component::HasData for HasIo {
+    type Data<'a> = &'a mut ResourceTable;
+}
+
+/// Link the `wasi:*` interfaces a plugin may import.
+///
+/// A deliberate subset rather than `wasmtime_wasi::p2::add_to_linker_sync`,
+/// which also links `wasi:sockets/*`. No plugin has any use for sockets, and
+/// leaving them out means they are absent from the linker rather than merely
+/// denied at runtime by an empty context.
+///
+/// The subset is what a Go plugin imports: componentize-go adapts a wasip1
+/// module, so the Go runtime pulls in stdio, environment, clocks, preopens and
+/// randomness even for a plugin that only walks the config it is handed.
+/// Backed by [`empty_wasi_ctx`], the capabilities that actually result are the
+/// two clocks and randomness.
+///
+/// Note that linking these gives up part of the execution timeout: epoch
+/// interruption traps at instruction boundaries, so a plugin blocked inside a
+/// host call (`wasi:io/poll` on a timer, say) runs past its deadline until the
+/// call returns.
+fn add_wasi_subset(
+    linker: &mut wasmtime::component::Linker<ComponentStoreData>,
+) -> wasmtime::Result<()> {
+    // The view traits are blanket-implemented for every `WasiView` and supply
+    // the per-interface accessors the linkers take
+    use wasmtime_wasi::cli::{WasiCli, WasiCliView};
+    use wasmtime_wasi::clocks::{WasiClocks, WasiClocksView};
+    use wasmtime_wasi::filesystem::{WasiFilesystem, WasiFilesystemView};
+    use wasmtime_wasi::p2::bindings::{cli, clocks, filesystem, random, sync};
+    use wasmtime_wasi::random::{WasiRandom, WasiRandomView};
+
+    type T = ComponentStoreData;
+    let l = linker;
+
+    clocks::wall_clock::add_to_linker::<T, WasiClocks>(l, T::clocks)?;
+    clocks::monotonic_clock::add_to_linker::<T, WasiClocks>(l, T::clocks)?;
+    random::random::add_to_linker::<T, WasiRandom>(l, T::random)?;
+    cli::exit::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::environment::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::stdin::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::stdout::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::stderr::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::terminal_input::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::terminal_output::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::terminal_stdin::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::terminal_stdout::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    cli::terminal_stderr::add_to_linker::<T, WasiCli>(l, T::cli)?;
+    filesystem::preopens::add_to_linker::<T, WasiFilesystem>(l, T::filesystem)?;
+    sync::filesystem::types::add_to_linker::<T, WasiFilesystem>(l, T::filesystem)?;
+    wasmtime_wasi::p2::bindings::io::error::add_to_linker::<T, HasIo>(l, |t| {
+        wasmtime_wasi::WasiView::ctx(t).table
+    })?;
+    sync::io::poll::add_to_linker::<T, HasIo>(l, |t| wasmtime_wasi::WasiView::ctx(t).table)?;
+    sync::io::streams::add_to_linker::<T, HasIo>(l, |t| wasmtime_wasi::WasiView::ctx(t).table)?;
+    Ok(())
 }
 
 impl wasmtime::component::HasData for ComponentStoreData {
@@ -891,6 +982,7 @@ impl ComponentLintRule {
         component_bytes: &[u8],
         memory_limit: u64,
         timeout_ticks: Option<u64>,
+        allow_wasi: bool,
     ) -> Result<Self, PluginError> {
         // Compile the component
         let component = wasmtime::component::Component::new(engine, component_bytes)
@@ -903,6 +995,17 @@ impl ComponentLintRule {
             .map_err(|e| {
             PluginError::instantiate_error(&path, format!("Failed to add imports to linker: {}", e))
         })?;
+        // Off unless asked for: a plugin that imports `wasi:*` fails to
+        // instantiate instead, which is the guarantee every plugin has had
+        // until now (see add_wasi_subset for what enabling it grants).
+        if allow_wasi {
+            add_wasi_subset(&mut linker).map_err(|e| {
+                PluginError::instantiate_error(
+                    &path,
+                    format!("Failed to add WASI imports to linker: {}", e),
+                )
+            })?;
+        }
         let instance_pre = linker
             .instantiate_pre(&component)
             .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
@@ -946,6 +1049,7 @@ impl ComponentLintRule {
             ComponentStoreData {
                 limits,
                 table: ResourceTable::new(),
+                wasi: None,
             },
         );
         store.limiter(|data| &mut data.limits);
@@ -1482,6 +1586,7 @@ mod tests {
                 let mut data = ComponentStoreData {
                     limits: StoreLimitsBuilder::new().build(),
                     table: ResourceTable::new(),
+                    wasi: None,
                 };
                 let cfg_res = data
                     .table
@@ -2076,6 +2181,7 @@ http {
             b"not a wasm component",
             256 * 1024 * 1024,
             Some(100),
+            false,
         );
         assert!(matches!(result, Err(PluginError::CompileError { .. })));
     }
@@ -2090,6 +2196,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let config = Arc::new(Config {
             items,
@@ -2254,6 +2361,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 1, 10, 20);
         let resource = push_test_directive(&mut data, dir);
@@ -2271,6 +2379,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
         let resource = push_test_directive(&mut data, dir);
@@ -2289,6 +2398,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let dir = make_directive("listen", 2, 5, 15, 25);
         let resource = push_test_directive(&mut data, dir);
@@ -2341,6 +2451,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let dir = make_directive("listen", 1, 1, 0, 10);
         let resource = push_test_directive(&mut data, dir);
@@ -2354,6 +2465,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let mut dir = make_directive("http", 1, 1, 0, 30);
         dir.block = Some(ast::Block {
@@ -2460,6 +2572,7 @@ http {
         let mut data = ComponentStoreData {
             limits: StoreLimitsBuilder::new().build(),
             table: ResourceTable::new(),
+            wasi: None,
         };
         let http_resource = push_test_directive(&mut data, http);
 
@@ -2472,5 +2585,80 @@ http {
             config_api::HostDirective::name(&mut data, alias_directive_handle(server_resource)),
             "server"
         );
+    }
+
+    /// A component whose only import is `wasi:cli/environment`. The signature
+    /// has to match the real interface, otherwise the linker rejects it on
+    /// types rather than on the interface being absent.
+    const IMPORTS_WASI_ENVIRONMENT: &str = r#"(component
+        (import "wasi:cli/environment@0.2.12" (instance
+            (export "get-environment" (func (result (list (tuple string string)))))
+        ))
+    )"#;
+
+    /// Resolve a component's imports against a linker built the way
+    /// [`ComponentLintRule::new`] builds one, with or without the WASI subset.
+    fn instantiates_with_wasi(wat: &str, allow_wasi: bool) -> Result<(), String> {
+        let engine = wasmtime::Engine::default();
+        let component =
+            wasmtime::component::Component::new(&engine, wat).expect("component should compile");
+        let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(&engine);
+        if allow_wasi {
+            add_wasi_subset(&mut linker).expect("WASI subset should link");
+        }
+        linker
+            .instantiate_pre(&component)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Whether the WASI subset puts `interface` in the linker, probed by
+    /// defining a name inside it: wasmtime refuses a duplicate definition, so
+    /// a conflict means the interface is already there.
+    fn wasi_subset_links(interface: &str, func: &str) -> bool {
+        let engine = wasmtime::Engine::default();
+        let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(&engine);
+        add_wasi_subset(&mut linker).expect("WASI subset should link");
+        linker
+            .instance(interface)
+            .expect("linker instance")
+            .func_wrap(
+                func,
+                |_: wasmtime::StoreContextMut<'_, ComponentStoreData>, (): ()| Ok(()),
+            )
+            .is_err()
+    }
+
+    #[test]
+    fn wasi_import_is_rejected_unless_allowed() {
+        // The guarantee every plugin has had until now: a component that
+        // wants WASI does not load at all.
+        let err = instantiates_with_wasi(IMPORTS_WASI_ENVIRONMENT, false).unwrap_err();
+        assert!(
+            err.contains("wasi:cli/environment"),
+            "unexpected error: {err}"
+        );
+        instantiates_with_wasi(IMPORTS_WASI_ENVIRONMENT, true)
+            .expect("should resolve once WASI is allowed");
+    }
+
+    #[test]
+    fn sockets_are_never_linked() {
+        // The reason add_wasi_subset lists interfaces instead of calling
+        // add_to_linker_sync: no plugin has any use for sockets, so they stay
+        // absent from the linker rather than merely denied by an empty
+        // context.
+        assert!(
+            wasi_subset_links("wasi:cli/environment@0.2.12", "get-environment"),
+            "the probe should detect an interface the subset does link"
+        );
+        assert!(!wasi_subset_links(
+            "wasi:sockets/instance-network@0.2.12",
+            "instance-network"
+        ));
+        assert!(!wasi_subset_links(
+            "wasi:sockets/tcp@0.2.12",
+            "[method]tcp-socket.start-bind"
+        ));
     }
 }

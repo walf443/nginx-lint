@@ -228,7 +228,60 @@ Load custom WASM plugins from a directory:
 nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 ```
 
-Each `.wasm` file in the directory is loaded as a plugin, in file name order. See the `plugins/builtin/` directory for examples of how to write plugins using the `nginx-lint-plugin` SDK.
+Each `.wasm` file in the directory is loaded as a plugin, in file name order.
+
+There is an `nginx-lint-plugin` SDK for four languages, each with a worked
+example beside it:
+
+| Language | SDK | Example |
+| --- | --- | --- |
+| Rust | `crates/nginx-lint-plugin` | `plugins/builtin/` |
+| TypeScript | [`nginx-lint-plugin`](https://www.npmjs.com/package/nginx-lint-plugin) (`plugins/typescript/nginx-lint-plugin`) | `plugins/typescript/server-tokens-enabled-ts` |
+| Python | [`nginx-lint-plugin`](https://pypi.org/project/nginx-lint-plugin/) (`plugins/python/nginx-lint-plugin`) | `plugins/python/server-tokens-enabled-py` |
+| Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |
+
+Every SDK can run a plugin against the real parser from its own test suite.
+Go plugins additionally need `--allow-wasi-plugins`, for the reason described
+below.
+
+### The plugin sandbox
+
+Plugins run as WebAssembly components with no WASI: no filesystem, no network,
+no environment, no clock. They see only the configuration the linter hands them,
+and a plugin importing `wasi:*` fails to load. Memory is capped at 256 MB and a
+single check has a 10-second deadline.
+
+Some toolchains cannot produce a plugin without WASI imports at all — Go, via
+componentize-go, adapts a wasip1 module, so its runtime pulls in stdio,
+environment, clocks and randomness even for a plugin that only reads the config
+it is given. `--allow-wasi-plugins` loads those:
+
+```bash
+nginx-lint --plugins ./my-plugins --allow-wasi-plugins /etc/nginx/nginx.conf
+```
+
+It links a subset of WASI backed by an empty context, so it grants no
+filesystem, network, environment or terminal access, and `wasi:sockets/*` is
+never linked at all. What every plugin loaded does gain is a clock and
+randomness — so a plugin can behave differently from one run to the next — and
+the ability to block indefinitely inside a WASI call: the 10-second deadline
+interrupts wasm execution, not host calls, so a plugin that subscribes to a
+duration it chooses holds the thread for exactly that long. Both are reasons to
+leave the flag off unless a plugin needs it.
+
+A project whose plugins need it on every run can set it in `.nginx-lint.toml`
+instead:
+
+```toml
+[plugins]
+allow_wasi_plugins = true
+```
+
+The flag and the setting are OR'd, and there is deliberately no way to say no
+from the command line. Which plugins to load stays a command line decision —
+`[plugins]` has no directory key, and never will — so a configuration file
+discovered in a checked-out repository cannot cause any WebAssembly to run. It
+can only widen what a plugin you already asked for with `--plugins` is granted.
 
 ## Installation
 

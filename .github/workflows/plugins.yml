@@ -251,9 +251,83 @@ jobs:
           path: plugins/python/server-tokens-enabled-py/server-tokens-enabled-py.wasm
           retention-days: 1
 
+  go-plugin:
+    name: Go Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # The version both modules declare. componentize-go needs 1.25+.
+          go-version: "1.25"
+          cache-dependency-path: |
+            plugins/go/nginx-lint-plugin/go.sum
+            plugins/go/server-tokens-enabled-go/go.sum
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: "go-plugin"
+      - name: Install componentize-go
+        run: go install github.com/bytecodealliance/componentize-go@v0.4.0
+      - name: Check the committed test-helper modules against the crates
+        # nginxlinttest embeds the parser and the fix applier as core wasm
+        # modules so a plugin's `go test` can use the real ones, which go
+        # stale the moment either crate changes without being rebuilt. This
+        # builds fresh copies without overwriting the committed ones and
+        # requires the two to agree on every configuration in the tree — a
+        # byte diff cannot do it, because rustc does not produce the same wasm
+        # across toolchains.
+        run: make check-testkit-wasm
+      - name: Check the committed bindings match the WIT
+        # The Go SDK commits its generated bindings, unlike the TypeScript and
+        # Python SDKs which regenerate theirs: a Go module is consumed as
+        # source and cannot run a code generator on the way in. So nothing
+        # else would catch a WIT change that was never regenerated here — the
+        # WIT diff in ci.yml only covers the vendored copy, not what was
+        # generated from it.
+        working-directory: plugins/go/nginx-lint-plugin
+        run: |
+          make bindings
+          # Intent-to-add first: `make bindings` removes and regenerates the
+          # directory, so a WIT change that introduces a new generated package
+          # leaves an untracked path, which git diff alone reports nothing for.
+          git add --intent-to-add -- bindings wit
+          git diff --exit-code -- bindings wit
+      - name: Check the formatting
+        # The repository-wide Format job is cargo fmt, which does not reach Go
+        run: |
+          unformatted=$(gofmt -l plugins/go)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would rewrite:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: Check the SDK
+        working-directory: plugins/go/nginx-lint-plugin
+        run: make check
+      - name: Check the Go plugin
+        working-directory: plugins/go/server-tokens-enabled-go
+        run: make check
+      - name: Build Go plugin
+        working-directory: plugins/go/server-tokens-enabled-go
+        run: make build
+      - name: Upload Go WASM plugin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: go-plugin
+          path: plugins/go/server-tokens-enabled-go/server-tokens-enabled-go.wasm
+          retention-days: 1
+
   wasm-integration:
     name: WASM Integration Test
-    needs: [wasm-build, typescript-plugin, python-plugin, build-host]
+    needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, build-host]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -274,6 +348,10 @@ jobs:
         with:
           name: py-plugin
           path: target/py-plugins
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: go-plugin
+          path: target/go-plugins
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: host-binaries
@@ -336,6 +414,75 @@ jobs:
               test -n "${example_line// /}"
               grep -qF "$example_line" <<<"$why"
               $NGINX_LINT why --list --plugins target/py-plugins 2>&1 | grep -q 'server-tokens-enabled-py'
+          - name: Test Go plugin integration
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
+              PLUGIN_DIR=target/go-plugins
+              EXAMPLES=plugins/go/server-tokens-enabled-go/examples
+
+              # A Go component imports wasi:* whatever the plugin does, so
+              # without the flag it must not load at all. That is the default
+              # this repository guarantees, and this is the only test that
+              # asserts it against a real Go component rather than a fixture.
+              #
+              # Both outcomes exit nonzero — a refused load makes --rule-only
+              # an unknown rule name and exits 2, a successful one reports the
+              # finding in bad.conf and exits 1 — so the status alone would
+              # pass either way. Pin the status and the message.
+              set +e
+              denied=$($NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go $EXAMPLES/bad.conf 2>&1)
+              denied_status=$?
+              set -e
+              echo "$denied"
+              if [ "$denied_status" -ne 2 ]; then
+                echo "ERROR: expected exit 2 without --allow-wasi-plugins, got $denied_status"
+                exit 1
+              fi
+              grep -q 'Failed to load plugin' <<<"$denied"
+
+              # Same shape as the TypeScript and Python steps above; keep the
+              # three in sync.
+              if output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
+                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-go"
+                exit 1
+              fi
+              echo "$output"
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
+
+              output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/good.conf)
+              echo "$output"
+              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+
+              # plugins.allow_wasi_plugins grants the same thing from the
+              # configuration file, which is what a project with a Go plugin
+              # sets instead of passing the flag on every run.
+              conf=$(mktemp -d)/allow-wasi.toml
+              printf '[plugins]\nallow_wasi_plugins = true\n' > "$conf"
+              if output=$($NGINX_LINT --config "$conf" --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
+                echo "ERROR: plugins.allow_wasi_plugins did not load the plugin"
+                exit 1
+              fi
+              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
+
+              # The SDK computes fix offsets in pure Go, reproducing what the
+              # host's directive resource would have returned. Applying one is
+              # what checks that arithmetic against the host's own.
+              tmp=$(mktemp -d)
+              cp $EXAMPLES/bad.conf "$tmp/nginx.conf"
+              $NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --fix "$tmp/nginx.conf"
+              diff $EXAMPLES/good.conf "$tmp/nginx.conf"
+
+              # `why` renders the spec, whose examples are embedded from
+              # examples/*.conf at build time, so the output must contain that
+              # file's text.
+              why=$($NGINX_LINT why --plugins $PLUGIN_DIR --allow-wasi-plugins server-tokens-enabled-go 2>&1)
+              echo "$why"
+              echo "$why" | grep -q 'Rule: server-tokens-enabled-go'
+              # -F, and a non-empty guard: an unanchored regex built from file
+              # content would match anything if that line were ever blank.
+              example_line=$(sed -n 2p $EXAMPLES/bad.conf)
+              test -n "${example_line// /}"
+              grep -qF "$example_line" <<<"$why"
 
   typescript-plugin:
     name: TypeScript Plugin

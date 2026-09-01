@@ -74,6 +74,36 @@ jobs:
           generate_release_notes: true
           files: nginx-lint-*.tar.gz
 
+  tag-go-module:
+    name: Tag the Go SDK module
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # A Go module in a subdirectory is versioned by a tag prefixed with that
+      # subdirectory, so the repository's own v* tag does not version
+      # plugins/go/nginx-lint-plugin: without this, `go get` on it can only
+      # resolve to a pseudo-version of the default branch. The prefixed tag
+      # does not match this workflow's `v*` trigger, so it does not re-enter
+      # here.
+      - name: Create the Go module tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="plugins/go/nginx-lint-plugin/${GITHUB_REF_NAME}"
+          # Re-running a release must not fail here; the tag is created
+          # against the same commit either way.
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag ${tag} already exists"
+            exit 0
+          fi
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${tag}" \
+            -f sha="${GITHUB_SHA}"
+          echo "Created tag ${tag}"
+
   publish-crates:
     name: Publish to crates.io
     needs: docker

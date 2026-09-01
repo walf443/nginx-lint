@@ -1,0 +1,5 @@
+# Lets a plugin that depends on this module build with a bare
+# `componentize-go build`: componentize-go scans the module's dependencies for
+# this file and picks up the world and the WIT from it.
+worlds = ["nginx-lint:plugin/plugin@4.0.0"]
+wit_paths = ["wit"]

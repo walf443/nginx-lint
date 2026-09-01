@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -111,20 +111,57 @@ build-fixer-wasm:
 
 # The parser and plugin crates vendor the WIT so their wit-bindgen features
 # work from the published crates too (the macro cannot read a path outside
-# the package). The copies are committed; CI checks them against the root.
+# the package). The Go SDK vendors it for the same reason: its
+# componentize-go.toml points a consuming plugin at that copy, and someone
+# who `go get`s the module has no other one. All the copies are committed;
+# CI checks them against the root.
 
 # Only copy when the content differs: wit-bindgen tracks the WIT through an
 # include_bytes!, so bumping its mtime alone rebuilds the SDK and every
 # plugin that depends on it — which build-plugins would then do every run.
 copy-wit:
-	@mkdir -p crates/nginx-lint-parser/wit crates/nginx-lint-plugin/wit
-	@for dir in crates/nginx-lint-parser crates/nginx-lint-plugin; do \
+	@mkdir -p crates/nginx-lint-parser/wit crates/nginx-lint-plugin/wit \
+		plugins/go/nginx-lint-plugin/wit
+	@for dir in crates/nginx-lint-parser crates/nginx-lint-plugin \
+			plugins/go/nginx-lint-plugin; do \
 		dest="$$dir/wit/nginx-lint-plugin.wit"; \
 		if ! cmp -s wit/nginx-lint-plugin.wit "$$dest"; then \
 			cp wit/nginx-lint-plugin.wit "$$dest"; \
 			echo "  Refreshed $$dest"; \
 		fi; \
 	done
+
+# The two core wasm modules the Go SDK's test helper runs: the same parser and
+# fix applier the CLI uses, exposed through a JSON entry point instead of the
+# component model, which Go has no runtime for.
+GO_SDK := plugins/go/nginx-lint-plugin
+TESTKIT_PARSER := target/wasm32-unknown-unknown/release/nginx_lint_parser.wasm
+TESTKIT_FIXER := target/wasm32-unknown-unknown/release/nginx_lint_common.wasm
+
+testkit-wasm: copy-wit
+	cargo build --manifest-path crates/nginx-lint-parser/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm-json
+	cargo build --manifest-path crates/nginx-lint-common/Cargo.toml \
+		--target wasm32-unknown-unknown --release --features wasm-json
+
+# Refresh the committed copies. Run this after changing either crate.
+build-testkit-wasm: testkit-wasm
+	cp $(TESTKIT_PARSER) $(GO_SDK)/nginxlinttest/parser.wasm
+	cp $(TESTKIT_FIXER) $(GO_SDK)/nginxlinttest/fixer.wasm
+	@echo "Go test-helper modules rebuilt."
+
+# Check the committed copies against a fresh build without overwriting them,
+# which is what catches a change to either crate that was never rebuilt. A
+# byte comparison cannot do this — rustc does not produce the same wasm across
+# toolchains — so the test runs both over every configuration in the tree and
+# requires them to agree on the output. -count=1 because the modules are read
+# at run time, which Go's test cache does not track: without it a rebuild is
+# compared against a cached pass.
+check-testkit-wasm: testkit-wasm
+	cd $(GO_SDK) && \
+		NGINX_LINT_FRESH_PARSER_WASM=$(CURDIR)/$(TESTKIT_PARSER) \
+		NGINX_LINT_FRESH_FIXER_WASM=$(CURDIR)/$(TESTKIT_FIXER) \
+		go test ./nginxlinttest/ -run TestCommittedModulesStillMatchTheCrates -count=1 -v
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm: copy-wit

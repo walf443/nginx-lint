@@ -100,6 +100,37 @@ from the repository root), so its `pyo3` and `serde` dependencies are bumped
 by hand. `pyo3` in particular has to stay new enough for the newest released
 CPython: an older one hard-errors on a newer interpreter even with abi3.
 
+The Go SDK (`plugins/go/nginx-lint-plugin`) commits both its generated
+bindings and its copy of the WIT, unlike the TypeScript and Python SDKs which
+regenerate theirs. A Go module is consumed as source and cannot run a code
+generator on the way in, and its `componentize-go.toml` points a consuming
+plugin at the vendored WIT. So after any change to `wit/`, run `make copy-wit`
+at the root and `make bindings` in the SDK, and commit the result — CI diffs
+the WIT copy against the root.
+
+```bash
+# Go SDK
+cd plugins/go/nginx-lint-plugin && make check     # vet + test, on the host
+# Go example plugin
+cd plugins/go/server-tokens-enabled-go && make check test-e2e
+```
+
+The Go SDK's `nginxlinttest` package runs the real parser and the real fix
+applier from a plain `go test`, by embedding them as core wasm modules built
+from `nginx-lint-parser --features wasm-json` and `nginx-lint-common --features
+wasm-json` and running them under wazero (Go has no component-model runtime).
+Those modules are committed. After changing either crate, rebuild and commit
+them with `make build-testkit-wasm` at the root. `make check-testkit-wasm`
+answers whether the committed copies are still current: it builds fresh ones
+without overwriting them and requires the two to agree on every configuration
+in the tree, which is how a forgotten rebuild is caught — a byte diff cannot
+do it, because rustc does not produce the same wasm across toolchains. CI runs
+that check, not the rebuild.
+
+Only the SDK's root package builds for the host; everything under `bindings/`
+and `exports/` is wasm-only, so `go test ./...` fails there by design and the
+Makefiles target the packages that do build.
+
 ### Adding a Native Lint Rule
 
 Native rules are implemented in Rust under `src/rules/`. Use for rules that need access to file system or complex logic.

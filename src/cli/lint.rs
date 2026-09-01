@@ -602,12 +602,33 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         }
     };
 
+    // WASI precedence: --allow-wasi-plugins or plugins.allow_wasi_plugins in
+    // .nginx-lint.toml, whichever says yes. A project whose plugins need WASI
+    // needs it on every run, so there is no way to say no from the command
+    // line. The configuration file cannot name a plugins directory, so this
+    // only widens what a plugin the command line already asked for is granted.
+    #[cfg(feature = "plugins")]
+    let allow_wasi_plugins = cli.allow_wasi_plugins
+        || lint_config
+            .as_ref()
+            .is_some_and(|c| c.plugins.allow_wasi_plugins);
+
     // In builds without the plugins feature the cache is never used; tell the
     // user instead of silently ignoring their configuration.
     #[cfg(not(feature = "plugins"))]
     if lint_config.as_ref().and_then(|c| c.cache_dir()).is_some() {
         eprintln!(
             "Warning: cache_dir in the configuration file has no effect in this build (compiled without the plugins feature)"
+        );
+    }
+
+    #[cfg(not(feature = "plugins"))]
+    if lint_config
+        .as_ref()
+        .is_some_and(|c| c.plugins.allow_wasi_plugins)
+    {
+        eprintln!(
+            "Warning: plugins.allow_wasi_plugins in the configuration file has no effect in this build (compiled without the plugins feature)"
         );
     }
 
@@ -647,7 +668,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;
 
-        match PluginLoader::new_with_cache(compilation_cache) {
+        match PluginLoader::new_with_cache(compilation_cache)
+            .map(|loader| loader.with_wasi(allow_wasi_plugins))
+        {
             Ok(loader) => match loader.load_plugins(plugins_dir) {
                 Ok(plugins) => {
                     if cli.verbose {
