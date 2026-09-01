@@ -264,7 +264,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # The version both modules declare. componentize-go needs 1.25+.
-          go-version: "1.25"
+          go-version: "1.27"
           cache-dependency-path: |
             plugins/go/nginx-lint-plugin/go.sum
             plugins/go/server-tokens-enabled-go/go.sum
