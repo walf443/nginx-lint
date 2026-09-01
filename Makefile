@@ -112,6 +112,11 @@ test-builtin-plugins: collect-plugins-only
 		ran=$$((ran+1)); \
 	done; \
 	echo "Checked $$ran builtin plugin(s), $$fail failed."; \
+	if [ $$ran -eq 0 ]; then \
+		echo "Nothing was checked. Run \`make build-plugins\` first, or the component"; \
+		echo "layout collect-plugins-only expects has drifted."; \
+		exit 1; \
+	fi; \
 	test $$fail -eq 0
 
 # Build binary with embedded WASM builtin plugins (instead of native)

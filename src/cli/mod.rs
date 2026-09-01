@@ -38,11 +38,13 @@ pub struct Cli {
     pub config: Option<PathBuf>,
 
     /// Force colored output
-    #[arg(long, conflicts_with = "no_color")]
+    // global: `test-plugins` prints its own report, so these have to be
+    // accepted after the subcommand as well as before it
+    #[arg(long, conflicts_with = "no_color", global = true)]
     pub color: bool,
 
     /// Disable colored output
-    #[arg(long)]
+    #[arg(long, global = true)]
     pub no_color: bool,
 
     /// Show verbose output

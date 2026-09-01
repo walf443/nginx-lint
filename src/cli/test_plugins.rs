@@ -15,7 +15,7 @@ use crate::Cli;
 use colored::Colorize;
 use nginx_lint::plugin::PluginLoader;
 use nginx_lint_common::linter::{LintError, LintRule};
-use nginx_lint_common::{apply_fixes_to_content, parse_string};
+use nginx_lint_common::{apply_fixes_to_content, parse_string_with_errors};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -126,15 +126,30 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
 
     let mut failed = 0;
     let mut passed = 0;
+    let mut unchecked = Vec::new();
     for plugin in &plugins {
         let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
         report(plugin.name(), &checks);
+
+        let mut checked = 0;
         for check in &checks {
             match check.outcome {
-                Outcome::Passed => passed += 1,
-                Outcome::Failed(_) => failed += 1,
+                Outcome::Passed => {
+                    passed += 1;
+                    checked += 1;
+                }
+                Outcome::Failed(_) => {
+                    failed += 1;
+                    checked += 1;
+                }
                 Outcome::Skipped(_) => {}
             }
+        }
+        // Per plugin rather than over the run: a plugin that declares no
+        // examples has been loaded and nothing else, and a working plugin
+        // beside it must not report success on its behalf.
+        if checked == 0 {
+            unchecked.push(plugin.name());
         }
     }
 
@@ -148,13 +163,12 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         );
         return ExitCode::from(1);
     }
-    // Every check skipping is not success: a plugin with no examples has been
-    // loaded and nothing else, and saying "passed" would hide that.
-    if passed == 0 {
+    if !unchecked.is_empty() {
         println!(
-            "{} plugin(s) loaded, but {}",
-            plugins.len(),
-            "nothing could be checked — do they declare bad and good examples?".yellow()
+            "{} for {} — {}",
+            "nothing could be checked".yellow(),
+            unchecked.join(", "),
+            "do they declare bad and good examples?".yellow()
         );
         return ExitCode::from(1);
     }
@@ -199,25 +213,29 @@ fn test_plugin(plugin: &dyn LintRule, fixtures: Option<&Path>) -> Vec<Check> {
 /// Filtering by name rather than running the plugin alone is what keeps this
 /// independent of whether the rule is enabled anywhere: a rule disabled by
 /// default cannot be reached through `--rule-only` at all.
-fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Result<Vec<LintError>, String> {
-    let config = parse_string(source).map_err(|e| format!("the example does not parse: {e}"))?;
-    Ok(plugin
+fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> (Vec<LintError>, usize) {
+    // The tolerant parser, because that is the one the linter uses: it builds
+    // the AST anyway and lets the rules run. Refusing a configuration that
+    // does not parse cleanly would reject every syntax rule's bad example,
+    // which is exactly the kind of rule this command should be able to check.
+    let (config, syntax_errors) = parse_string_with_errors(source);
+    let found = plugin
         .check(&config, Path::new(path))
         .into_iter()
         .filter(|error| error.rule == plugin.name())
-        .collect())
+        .collect();
+    (found, syntax_errors.len())
 }
 
 fn check_bad_example(plugin: &dyn LintRule) -> Outcome {
     let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no bad example".to_string());
     };
-    match findings(plugin, bad, "bad.conf") {
-        Err(e) => Outcome::Failed(e),
-        Ok(found) if found.is_empty() => {
+    match findings(plugin, bad, "bad.conf").0 {
+        found if found.is_empty() => {
             Outcome::Failed("the bad example was reported clean".to_string())
         }
-        Ok(_) => Outcome::Passed,
+        _ => Outcome::Passed,
     }
 }
 
@@ -225,10 +243,9 @@ fn check_good_example(plugin: &dyn LintRule) -> Outcome {
     let Some(good) = plugin.good_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no good example".to_string());
     };
-    match findings(plugin, good, "good.conf") {
-        Err(e) => Outcome::Failed(e),
-        Ok(found) if found.is_empty() => Outcome::Passed,
-        Ok(found) => Outcome::Failed(describe(&found)),
+    match findings(plugin, good, "good.conf").0 {
+        found if found.is_empty() => Outcome::Passed,
+        found => Outcome::Failed(describe(&found)),
     }
 }
 
@@ -252,10 +269,7 @@ fn check_fix(plugin: &dyn LintRule) -> Outcome {
 /// fixture may show more than the fix produces, which is why the Rust test
 /// binary this replaces treated an exact match as informational too.
 fn resolve_by_fixing(plugin: &dyn LintRule, source: &str, path: &str) -> Outcome {
-    let found = match findings(plugin, source, path) {
-        Ok(found) => found,
-        Err(e) => return Outcome::Failed(e),
-    };
+    let (found, syntax_errors) = findings(plugin, source, path);
     let fixes: Vec<_> = found.iter().flat_map(|error| error.fixes.iter()).collect();
     if fixes.is_empty() {
         return Outcome::Skipped("the plugin reports no fixes".to_string());
@@ -268,15 +282,26 @@ fn resolve_by_fixing(plugin: &dyn LintRule, source: &str, path: &str) -> Outcome
             fixes.len()
         ));
     }
-    match findings(plugin, &fixed, path) {
-        Err(e) => Outcome::Failed(format!("the fixed configuration does not parse: {e}")),
-        Ok(remaining) if remaining.is_empty() => Outcome::Passed,
-        Ok(remaining) => Outcome::Failed(format!(
-            "after fixing, the rule still reports:\n{}\nthe fixed configuration was:\n{}",
-            describe(&remaining),
+
+    let (remaining, syntax_errors_after) = findings(plugin, &fixed, path);
+    // Counted rather than required to be zero: a syntax rule's own example is
+    // malformed to begin with, so what makes a fix wrong is introducing
+    // errors that were not there.
+    if syntax_errors_after > syntax_errors {
+        return Outcome::Failed(format!(
+            "fixing introduced {} syntax error(s); the fixed configuration was:\n{}",
+            syntax_errors_after - syntax_errors,
             indent(&fixed)
-        )),
+        ));
     }
+    if remaining.is_empty() {
+        return Outcome::Passed;
+    }
+    Outcome::Failed(format!(
+        "after fixing, the rule still reports:\n{}\nthe fixed configuration was:\n{}",
+        describe(&remaining),
+        indent(&fixed)
+    ))
 }
 
 /// Run the `<case>/error/nginx.conf` and `<case>/expected/nginx.conf`
@@ -380,11 +405,11 @@ fn fixture_case(plugin: &dyn LintRule, path: &Path, expect_findings: bool) -> Op
         Ok(source) => source,
         Err(e) => return Some(Outcome::Failed(format!("{}: {e}", path.display()))),
     };
-    Some(match findings(plugin, &source, &path.to_string_lossy()) {
-        Err(e) => Outcome::Failed(e),
-        Ok(found) if found.is_empty() != expect_findings => Outcome::Passed,
-        Ok(_) if expect_findings => Outcome::Failed("reported clean".to_string()),
-        Ok(found) => Outcome::Failed(describe(&found)),
+    let found = findings(plugin, &source, &path.to_string_lossy()).0;
+    Some(match found {
+        found if found.is_empty() != expect_findings => Outcome::Passed,
+        _ if expect_findings => Outcome::Failed("reported clean".to_string()),
+        found => Outcome::Failed(describe(&found)),
     })
 }
 
@@ -581,14 +606,63 @@ mod tests {
         assert_failed(&check_good_example(&rule));
     }
 
+    /// A syntax rule's bad example is malformed on purpose. The linter parses
+    /// it anyway and runs the rules, so this has to as well.
     #[test]
-    fn an_example_that_does_not_parse_fails() {
+    fn a_malformed_bad_example_is_still_checked() {
         let rule = Rule {
-            bad: "http {\n",
+            // Recoverable: the parser reports an error and still produces the
+            // server_tokens directive the rule is looking for.
+            bad: "http {\n    server_tokens on;\n    listen\n}\n",
             ..Rule::default()
         };
 
-        assert_failed(&check_bad_example(&rule));
+        assert_passed(&check_bad_example(&rule));
+    }
+
+    /// What makes a fix wrong is leaving the configuration more broken than it
+    /// found it, which is why the syntax errors are counted rather than
+    /// required to be zero.
+    #[test]
+    fn a_fix_that_introduces_syntax_errors_fails() {
+        struct Breaking;
+        impl LintRule for Breaking {
+            fn name(&self) -> &'static str {
+                "breaking"
+            }
+            fn category(&self) -> &'static str {
+                "security"
+            }
+            fn description(&self) -> &'static str {
+                "test rule"
+            }
+            fn bad_example(&self) -> Option<&str> {
+                Some("http {\n    server_tokens on;\n}\n")
+            }
+            fn check(&self, config: &Config, _path: &Path) -> Vec<LintError> {
+                config
+                    .all_directives()
+                    .filter(|directive| directive.name == "server_tokens")
+                    .map(|directive| LintError {
+                        rule: self.name().to_string(),
+                        category: self.category().to_string(),
+                        message: "server_tokens is on".to_string(),
+                        severity: Severity::Warning,
+                        line: Some(directive.span.start.line),
+                        column: Some(directive.span.start.column),
+                        // Drops the terminator, so the configuration that
+                        // comes out no longer parses cleanly.
+                        fixes: vec![Fix::replace_range(
+                            directive.span.start.offset,
+                            directive.span.end.offset,
+                            "server_tokens off",
+                        )],
+                    })
+                    .collect()
+            }
+        }
+
+        assert_failed(&check_fix(&Breaking));
     }
 
     /// A rule without an autofix is ordinary, so the fix check steps aside
@@ -643,6 +717,36 @@ mod tests {
         }
 
         assert_failed(&check_fix(&Unresolving));
+    }
+
+    /// A plugin nothing could be checked on has been loaded and no more, so a
+    /// working plugin beside it must not carry the run to success.
+    #[test]
+    fn a_plugin_with_no_examples_is_reported_by_name() {
+        struct NoExamples;
+        impl LintRule for NoExamples {
+            fn name(&self) -> &'static str {
+                "no-examples"
+            }
+            fn category(&self) -> &'static str {
+                "security"
+            }
+            fn description(&self) -> &'static str {
+                "test rule"
+            }
+            fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+                Vec::new()
+            }
+        }
+
+        let checks = test_plugin(&NoExamples, None);
+
+        assert!(
+            checks
+                .iter()
+                .all(|check| matches!(check.outcome, Outcome::Skipped(_))),
+            "every check should have stepped aside, leaving nothing verified"
+        );
     }
 
     #[test]
