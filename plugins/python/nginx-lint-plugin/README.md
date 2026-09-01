@@ -139,3 +139,13 @@ removed its `bindgen` support — so this SDK compiles the parser natively
 via pyo3 instead. Same parser code, same output shape. If wasmtime-py
 regrows component support, the WASM path can return without changing the
 test-writing API.
+
+## Checking the built plugin
+
+The CLI can check a built plugin end to end from the examples in its
+spec — the bad one has to be reported, the good one clean, and the fixes
+have to resolve the bad one:
+
+```bash
+nginx-lint test-plugin --plugins <dir>
+```

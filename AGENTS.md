@@ -182,6 +182,19 @@ nginx_lint_plugin::export_component_plugin!(MyPlugin);
 5. Build with `cargo build --target wasm32-unknown-unknown --release`
 6. Register in `src/plugin/builtin.rs`
 
+Check a built plugin end to end with the CLI, which needs nothing but the
+directory — the examples travel inside the component:
+
+```bash
+nginx-lint test-plugin --plugins <dir> [--fixtures tests/fixtures]
+```
+
+It requires the bad example to be reported, the good example to be clean, and
+the fixes to resolve the bad example, matching findings by the plugin's own
+rule name. This is what the language plugins' `make test-e2e` and the CI
+integration job run; do not reach for `--rule-only`, which cannot select a
+rule that is disabled by default.
+
 ### Severity Levels
 
 - `Error`: Configuration will not work, or critical security issue

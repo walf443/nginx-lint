@@ -244,6 +244,34 @@ Every SDK can run a plugin against the real parser from its own test suite.
 Go plugins additionally need `--allow-wasi-plugins`, for the reason described
 below.
 
+### Testing a plugin
+
+`test-plugin` runs every plugin in a directory against the examples it carries
+in its own spec — the ones `nginx-lint why` renders — so there is nothing to
+point it at but the directory:
+
+```bash
+nginx-lint test-plugin --plugins ./my-plugins
+```
+
+For each plugin it requires the bad example to be reported, the good example to
+be clean, and the fixes to resolve the bad example. A rule with no autofix
+skips the last one rather than failing it. It exits 1 if any check fails and 2
+if the plugins could not be loaded at all.
+
+Findings are matched by the plugin's own rule name, so several plugins can
+share a directory, and a rule that is disabled by default or turned off in
+`.nginx-lint.toml` is still testable — which `--rule-only` cannot do.
+
+If the plugin follows the fixture layout the SDKs document, point at it too:
+
+```bash
+nginx-lint test-plugin --plugins . --fixtures tests/fixtures
+```
+
+Each `<case>/error/nginx.conf` has to be reported and each
+`<case>/expected/nginx.conf` has to be clean.
+
 ### The plugin sandbox
 
 Plugins run as WebAssembly components with no WASI: no filesystem, no network,

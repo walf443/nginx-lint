@@ -174,6 +174,16 @@ cfg := nginxlint.Config{Directives: []nginxlint.Directive{{
 }}}
 ```
 
+The CLI checks a built plugin end to end from those same examples:
+
+```bash
+nginx-lint test-plugin --plugins <dir> [--fixtures tests/fixtures]
+```
+
+The bad example has to be reported, the good one clean, and the fixes
+have to resolve the bad one. It needs nothing but the directory, because
+the examples travel inside the component.
+
 ## Layout
 
 - `plugin.go`, `fix.go` — the API a rule uses. Pure Go, no generated bindings,

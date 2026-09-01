@@ -62,59 +62,6 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     Ok(docs)
 }
 
-/// Whether plugins that import WASI may be loaded.
-///
-/// `why` reads .nginx-lint.toml for this one setting, unlike cache_dir just
-/// below, because it decides whether a plugin loads at all rather than where
-/// its artifacts go: a project whose plugins need WASI would otherwise have
-/// `lint` working from the config file and `why` failing on the same
-/// directory. The search starts at the current directory, `why` having no
-/// file to start from.
-#[cfg(feature = "plugins")]
-fn allow_wasi(cli: &Cli) -> Result<bool, ()> {
-    use nginx_lint_common::config::LintConfig;
-
-    if cli.allow_wasi_plugins {
-        return Ok(true);
-    }
-
-    let config = match cli.config {
-        // An explicitly passed file that does not parse fails the command, as
-        // it does for `lint`: continuing would deny WASI and surface as an
-        // unrelated plugin-loading failure on the next line, with nothing
-        // pointing at the config file. A discovered file stays silent, which
-        // is what find_and_load does for `lint` too.
-        Some(ref path) => match LintConfig::from_file(path) {
-            Ok(config) => Some(config),
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                return Err(());
-            }
-        },
-        None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
-    };
-
-    Ok(config.is_some_and(|cfg| cfg.plugins.allow_wasi_plugins))
-}
-
-/// Resolve the compilation cache from the CLI flags.
-///
-/// Only the flags are honoured; `why` does not read cache_dir from
-/// .nginx-lint.toml, so a plugin it compiles may not be the copy `lint`
-/// cached.
-#[cfg(feature = "plugins")]
-fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
-    use nginx_lint::plugin::CompilationCache;
-
-    if cli.no_cache {
-        CompilationCache::Disabled
-    } else if let Some(ref cache_dir) = cli.cache_dir {
-        CompilationCache::Directory(cache_dir.clone())
-    } else {
-        CompilationCache::Default
-    }
-}
-
 /// Load the docs for a `--plugins` directory, if one was given.
 ///
 /// Returns Err after reporting the failure. `lint` exits 2 when a plugin
@@ -123,6 +70,8 @@ fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
 /// pretending the directory contributed nothing.
 #[cfg(feature = "plugins")]
 fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
+    use super::plugin_opts::{allow_wasi, cache_config};
+
     let Some(ref dir) = cli.plugins else {
         return Ok(Vec::new());
     };
@@ -150,7 +99,9 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         }
         // Building the loader validates the cache configuration; it stops
         // short of compiling any plugin.
-        if let Err(e) = nginx_lint::plugin::PluginLoader::new_with_cache(cache_config(cli)) {
+        if let Err(e) =
+            nginx_lint::plugin::PluginLoader::new_with_cache(super::plugin_opts::cache_config(cli))
+        {
             eprintln!("Error loading plugins: {}", e);
             return ExitCode::from(2);
         }
@@ -160,7 +111,9 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     // loader, so the cache flags have to reach it before anything loads
     // them (mirrors run_lint).
     #[cfg(all(feature = "wasm-builtin-plugins", feature = "plugins"))]
-    nginx_lint::plugin::builtin::configure_builtin_plugin_cache(cache_config(cli));
+    nginx_lint::plugin::builtin::configure_builtin_plugin_cache(super::plugin_opts::cache_config(
+        cli,
+    ));
 
     if list {
         let Ok(docs) = collect_rule_docs(cli) else {

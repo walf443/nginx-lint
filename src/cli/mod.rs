@@ -1,6 +1,10 @@
 pub mod config;
 pub mod guide;
 pub mod lint;
+#[cfg(feature = "plugins")]
+pub mod plugin_opts;
+#[cfg(feature = "plugins")]
+pub mod test_plugin;
 pub mod web;
 pub mod why;
 
@@ -124,6 +128,14 @@ pub enum Commands {
     },
     /// Show getting started guide (installation, usage, configuration)
     Guide,
+    /// Check that the plugins in a --plugins directory work
+    #[cfg(feature = "plugins")]
+    TestPlugin {
+        /// Directory of fixture cases, each with error/nginx.conf and/or
+        /// expected/nginx.conf (the layout the SDKs document)
+        #[arg(long, value_name = "DIR")]
+        fixtures: Option<PathBuf>,
+    },
     /// Show detailed documentation for a rule
     Why {
         /// Rule name (e.g., "server-tokens-enabled")
