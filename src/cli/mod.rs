@@ -28,7 +28,9 @@ pub struct Cli {
     pub fix: bool,
 
     /// Path to configuration file
-    #[arg(short, long, value_name = "FILE")]
+    // global: `why` reads plugins.allow_wasi from it, so it has to be
+    // accepted after the subcommand as well as before it
+    #[arg(short, long, value_name = "FILE", global = true)]
     pub config: Option<PathBuf>,
 
     /// Force colored output
@@ -65,7 +67,9 @@ pub struct Cli {
     /// without WASI imports (Go, via componentize-go), so writing a plugin in
     /// those languages needs this. It grants no filesystem, network,
     /// environment or terminal access, but every plugin loaded does gain a
-    /// clock and randomness, and can block past the execution timeout.
+    /// clock and randomness, and can block indefinitely inside a WASI call —
+    /// the execution timeout interrupts wasm, not host calls. Can also be set
+    /// as plugins.allow_wasi in .nginx-lint.toml.
     // global: `why --plugins` loads the same plugins, so it has to be
     // accepted after the subcommand as well as before it
     #[cfg(feature = "plugins")]

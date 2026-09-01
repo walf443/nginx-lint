@@ -24,6 +24,11 @@
 // touched them could only be tested inside a component runtime.
 package nginxlint
 
+// APIVersion is the plugin API this SDK build speaks. The SDK fills it into
+// the spec it hands the host, so a plugin never declares it; it is exported so
+// a plugin's tests can assert against it.
+const APIVersion = "1.2"
+
 // Severity is how serious a finding is. The host has two levels.
 type Severity uint8
 
@@ -260,7 +265,8 @@ type Spec struct {
 	// Why explains the reasoning behind the rule.
 	Why string
 	// BadExample and GoodExample are configuration snippets, usually embedded
-	// with go:embed and passed through Trim.
+	// with go:embed. Surrounding blank lines are trimmed when they are
+	// rendered, so the file can end in a newline.
 	BadExample  string
 	GoodExample string
 	References  []string

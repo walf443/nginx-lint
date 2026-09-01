@@ -280,6 +280,10 @@ jobs:
         working-directory: plugins/go/nginx-lint-plugin
         run: |
           make bindings
+          # Intent-to-add first: `make bindings` removes and regenerates the
+          # directory, so a WIT change that introduces a new generated package
+          # leaves an untracked path, which git diff alone reports nothing for.
+          git add --intent-to-add -- bindings wit
           git diff --exit-code -- bindings wit
       - name: Check the formatting
         # The repository-wide Format job is cargo fmt, which does not reach Go
@@ -405,10 +409,21 @@ jobs:
               # without the flag it must not load at all. That is the default
               # this repository guarantees, and this is the only test that
               # asserts it against a real Go component rather than a fixture.
-              if $NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go $EXAMPLES/bad.conf; then
-                echo "ERROR: the plugin loaded without --allow-wasi-plugins"
+              #
+              # Both outcomes exit nonzero — a refused load makes --rule-only
+              # an unknown rule name and exits 2, a successful one reports the
+              # finding in bad.conf and exits 1 — so the status alone would
+              # pass either way. Pin the status and the message.
+              set +e
+              denied=$($NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go $EXAMPLES/bad.conf 2>&1)
+              denied_status=$?
+              set -e
+              echo "$denied"
+              if [ "$denied_status" -ne 2 ]; then
+                echo "ERROR: expected exit 2 without --allow-wasi-plugins, got $denied_status"
                 exit 1
               fi
+              grep -q 'Failed to load plugin' <<<"$denied"
 
               # Same shape as the TypeScript and Python steps above; keep the
               # three in sync.

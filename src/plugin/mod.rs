@@ -74,19 +74,20 @@ mod tests {
     use super::API_VERSION;
 
     /// Extract the value of an `API_VERSION = "..."` declaration from source
-    /// code, tolerating Rust, TypeScript, and Python syntax.
+    /// code, tolerating Rust, TypeScript, Python, and Go syntax. Go spells the
+    /// name `APIVersion`, which is why both spellings are accepted.
     fn extract_api_version(source: &str) -> Option<String> {
-        let line = source
-            .lines()
-            .find(|line| line.contains("API_VERSION") && line.contains("= \""))?;
+        let line = source.lines().find(|line| {
+            (line.contains("API_VERSION") || line.contains("APIVersion")) && line.contains("= \"")
+        })?;
         let start = line.find("= \"")? + 3;
         let end = line[start..].find('"')? + start;
         Some(line[start..end].to_string())
     }
 
-    /// The plugin API version is declared in four places (this host
-    /// constant, the Rust SDK, the TypeScript SDK, and the Python SDK) that
-    /// have already drifted apart once. Enforce that they stay identical.
+    /// The plugin API version is declared in five places (this host constant
+    /// and the Rust, TypeScript, Python, and Go SDKs) that have already
+    /// drifted apart once. Enforce that they stay identical.
     /// The SDK files are read from the workspace, so this only runs on a
     /// repo checkout.
     #[test]
@@ -105,6 +106,10 @@ mod tests {
                 "Python SDK (plugins/python/nginx-lint-plugin/python/nginx_lint_plugin/__init__.py)",
                 workspace_root
                     .join("plugins/python/nginx-lint-plugin/python/nginx_lint_plugin/__init__.py"),
+            ),
+            (
+                "Go SDK (plugins/go/nginx-lint-plugin/plugin.go)",
+                workspace_root.join("plugins/go/nginx-lint-plugin/plugin.go"),
             ),
         ];
 

@@ -16,10 +16,6 @@ import (
 	witTypes "go.bytecodealliance.org/pkg/wit/types"
 )
 
-// apiVersion is the plugin API this SDK build speaks. Keeping it here rather
-// than in every plugin's spec is why a plugin never has to know it changed.
-const apiVersion = "1.2"
-
 // registered fails loudly when a plugin forgot to call
 // [nginxlint.Register], which the old hand-written export layout could not
 // get wrong. A nil interface would otherwise panic somewhere inside the
@@ -55,7 +51,7 @@ func Spec() plugintypes.PluginSpec {
 		Name:            spec.Name,
 		Category:        spec.Category,
 		Description:     spec.Description,
-		ApiVersion:      apiVersion,
+		ApiVersion:      nginxlint.APIVersion,
 		Severity:        optional(spec.Severity),
 		Why:             optional(spec.Why),
 		BadExample:      optional(spec.BadExample),

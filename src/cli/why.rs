@@ -79,7 +79,18 @@ fn allow_wasi(cli: &Cli) -> bool {
     }
 
     let config = match cli.config {
-        Some(ref path) => LintConfig::from_file(path).ok(),
+        // An explicitly passed file that does not parse is reported rather
+        // than treated as absent: falling back to the default would deny WASI
+        // and surface as an unrelated plugin-loading failure, with nothing
+        // pointing at the config file. A discovered file stays silent, which
+        // is what find_and_load does for `lint` too.
+        Some(ref path) => match LintConfig::from_file(path) {
+            Ok(config) => Some(config),
+            Err(e) => {
+                eprintln!("Warning: {}", e);
+                None
+            }
+        },
         None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
     };
 

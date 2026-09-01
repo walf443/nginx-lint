@@ -263,9 +263,10 @@ It links a subset of WASI backed by an empty context, so it grants no
 filesystem, network, environment or terminal access, and `wasi:sockets/*` is
 never linked at all. What every plugin loaded does gain is a clock and
 randomness — so a plugin can behave differently from one run to the next — and
-the ability to block inside a WASI call past the execution deadline, which
-interrupts wasm execution rather than host calls. Both are reasons to leave the
-flag off unless a plugin needs it.
+the ability to block indefinitely inside a WASI call: the 10-second deadline
+interrupts wasm execution, not host calls, so a plugin that subscribes to a
+duration it chooses holds the thread for exactly that long. Both are reasons to
+leave the flag off unless a plugin needs it.
 
 A project whose plugins need it on every run can set it in `.nginx-lint.toml`
 instead:
