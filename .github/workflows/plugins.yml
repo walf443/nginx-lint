@@ -170,15 +170,12 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: "build-host"
-      - name: Build nginx-lint and test binary
-        run: |
-          cargo build --release --no-default-features --features cli,plugins
-          cargo test --test wasm_plugin_test --no-default-features --features cli,plugins --release --no-run
+      - name: Build nginx-lint
+        run: cargo build --release --no-default-features --features cli,plugins
       - name: Package binaries
         run: |
           mkdir -p artifacts
           cp target/release/nginx-lint artifacts/
-          find target/release/deps -name 'wasm_plugin_test-*' -type f -executable | head -1 | xargs -I{} cp {} artifacts/wasm_plugin_test
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: host-binaries
@@ -363,42 +360,33 @@ jobs:
           done
           echo "Discovered WASM plugins:"
           find plugins/builtin -name "*.wasm.component.wasm" | sort
-          chmod +x artifacts/wasm_plugin_test artifacts/nginx-lint
+          chmod +x artifacts/nginx-lint
       - parallel:
-          - name: Run WASM integration tests
-            run: ./artifacts/wasm_plugin_test
+          - name: Test the builtin plugins
+            # The same checks the language plugins get, over every builtin:
+            # one `test-plugins` invocation each, so each sees its own
+            # tests/fixtures.
+            run: make test-builtin-plugins NGINX_LINT=./artifacts/nginx-lint
           - name: Test TypeScript plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
 
-              # --rule-only makes the exit code meaningful: bad.conf must
-              # fail with this rule's warning, and good.conf must exit 0
-              # (a CLI crash or plugin-load failure fails either leg).
-              if output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/bad.conf); then
-                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-ts"
-                exit 1
-              fi
-              echo "$output"
-              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-ts")' > /dev/null
+              # The plugin carries its own bad and good examples in its spec,
+              # so `test-plugins` needs nothing but the directory: it requires
+              # the bad one to be reported, the good one to be clean, and the
+              # fixes to resolve the bad one.
+              $NGINX_LINT test-plugins --plugins target/ts-plugins
 
-              output=$($NGINX_LINT --plugins target/ts-plugins --rule-only server-tokens-enabled-ts --format json plugins/typescript/server-tokens-enabled-ts/examples/good.conf)
-              echo "$output"
-              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+              # test-plugins judges whatever is in the directory, so on its own
+              # it would not notice the rule being renamed. Naming it here is
+              # what pins that, as the Python and Go steps do below.
+              $NGINX_LINT why --plugins target/ts-plugins server-tokens-enabled-ts 2>&1 \
+                | grep -q 'Rule: server-tokens-enabled-ts'
           - name: Test Python plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
 
-              # Same shape as the TypeScript step above; keep the two in sync.
-              if output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/bad.conf); then
-                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-py"
-                exit 1
-              fi
-              echo "$output"
-              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-py")' > /dev/null
-
-              output=$($NGINX_LINT --plugins target/py-plugins --rule-only server-tokens-enabled-py --format json plugins/python/server-tokens-enabled-py/examples/good.conf)
-              echo "$output"
-              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+              $NGINX_LINT test-plugins --plugins target/py-plugins
 
               # `why` documents externally loaded plugins, and its examples
               # are the ones in examples/*.conf (app.py reads them at build
@@ -425,12 +413,11 @@ jobs:
               # this repository guarantees, and this is the only test that
               # asserts it against a real Go component rather than a fixture.
               #
-              # Both outcomes exit nonzero — a refused load makes --rule-only
-              # an unknown rule name and exits 2, a successful one reports the
-              # finding in bad.conf and exits 1 — so the status alone would
-              # pass either way. Pin the status and the message.
+              # `test-plugins` refuses a directory whose plugins all failed
+              # to load, so its exit status answers this directly. Pin the
+              # message too: exit 2 also covers a missing directory.
               set +e
-              denied=$($NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go $EXAMPLES/bad.conf 2>&1)
+              denied=$($NGINX_LINT test-plugins --plugins $PLUGIN_DIR 2>&1)
               denied_status=$?
               set -e
               echo "$denied"
@@ -440,33 +427,22 @@ jobs:
               fi
               grep -q 'Failed to load plugin' <<<"$denied"
 
-              # Same shape as the TypeScript and Python steps above; keep the
-              # three in sync.
-              if output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
-                echo "ERROR: bad.conf should produce errors from server-tokens-enabled-go"
-                exit 1
-              fi
-              echo "$output"
-              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
-
-              output=$($NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --format json $EXAMPLES/good.conf)
-              echo "$output"
-              echo "$output" | jq -e '.errors | length == 0' > /dev/null
+              # Bad example reported, good example clean, fixes resolve the
+              # bad one — the same three checks as the TypeScript and Python
+              # steps above, which is now one command rather than a copy.
+              $NGINX_LINT test-plugins --plugins $PLUGIN_DIR --allow-wasi-plugins
 
               # plugins.allow_wasi_plugins grants the same thing from the
               # configuration file, which is what a project with a Go plugin
               # sets instead of passing the flag on every run.
               conf=$(mktemp -d)/allow-wasi.toml
               printf '[plugins]\nallow_wasi_plugins = true\n' > "$conf"
-              if output=$($NGINX_LINT --config "$conf" --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-go --format json $EXAMPLES/bad.conf); then
-                echo "ERROR: plugins.allow_wasi_plugins did not load the plugin"
-                exit 1
-              fi
-              echo "$output" | jq -e '.errors[] | select(.rule == "server-tokens-enabled-go")' > /dev/null
+              $NGINX_LINT test-plugins --config "$conf" --plugins $PLUGIN_DIR
 
-              # The SDK computes fix offsets in pure Go, reproducing what the
-              # host's directive resource would have returned. Applying one is
-              # what checks that arithmetic against the host's own.
+              # test-plugins requires the fixes to resolve the finding, not to
+              # produce a particular text. Applying them to a file on disk and
+              # diffing is what pins the Go SDK's pure-Go fix offsets to the
+              # exact bytes the host writes.
               tmp=$(mktemp -d)
               cp $EXAMPLES/bad.conf "$tmp/nginx.conf"
               $NGINX_LINT --plugins $PLUGIN_DIR --allow-wasi-plugins --rule-only server-tokens-enabled-go --fix "$tmp/nginx.conf"

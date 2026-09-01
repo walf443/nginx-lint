@@ -182,6 +182,23 @@ nginx_lint_plugin::export_component_plugin!(MyPlugin);
 5. Build with `cargo build --target wasm32-unknown-unknown --release`
 6. Register in `src/plugin/builtin.rs`
 
+Check a built plugin end to end with the CLI, which needs nothing but the
+directory — the examples travel inside the component:
+
+```bash
+nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
+```
+
+It requires the bad example to be reported, the good example to be clean, and
+the fixes to resolve the bad example, matching findings by the plugin's own
+rule name. With `--fixtures` it also runs each case's `error/` and `expected/`,
+and requires the fixes to resolve the `error/` one.
+
+`make test-builtin-plugins` runs it over every builtin, one plugin per
+invocation so each sees its own `tests/fixtures`; the language plugins'
+`make test-e2e` and the CI integration job run the same command. Do not reach
+for `--rule-only`, which cannot select a rule that is disabled by default.
+
 ### Severity Levels
 
 - `Error`: Configuration will not work, or critical security issue

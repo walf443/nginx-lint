@@ -24,19 +24,13 @@ typecheck:
 	mypy app.py test_plugin.py
 
 # End-to-end test through the nginx-lint CLI (requires the plugin built).
-# --rule-only makes the exit code meaningful: bad.conf must fail with this
-# rule's warning, and good.conf must exit 0 (so a CLI crash or plugin-load
-# failure fails the test instead of masquerading as "no findings").
+# The plugin carries its own bad and good examples in its spec, so
+# test-plugins needs nothing but the directory: it requires the bad one to be
+# reported, the good one to be clean, and the fixes to resolve the bad one.
 test-e2e: build
 	cd ../../.. && \
-	cargo run --features plugins -- --plugins plugins/python/server-tokens-enabled-py \
-		--rule-only server-tokens-enabled-py \
-		plugins/python/server-tokens-enabled-py/examples/bad.conf \
-		| grep -q 'security/server-tokens-enabled-py' && \
-	cargo run --features plugins -- --plugins plugins/python/server-tokens-enabled-py \
-		--rule-only server-tokens-enabled-py \
-		plugins/python/server-tokens-enabled-py/examples/good.conf && \
-	echo "OK"
+	cargo run --features plugins -- test-plugins \
+		--plugins plugins/python/server-tokens-enabled-py
 
 clean:
 	rm -rf $(WASM) __pycache__

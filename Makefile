@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: test-builtin-plugins testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -80,11 +80,54 @@ collect-plugins-only:
 			component_wasm="$$dir/target/wasm32-unknown-unknown/release/$$(echo $$name | tr '-' '_')_plugin.wasm.component.wasm"; \
 			if [ -f "$$component_wasm" ]; then \
 				cp "$$component_wasm" "target/builtin-plugins/$${name}.wasm"; \
+				mkdir -p "target/builtin-plugins/$$name"; \
+				cp "$$component_wasm" "target/builtin-plugins/$$name/$$name.wasm"; \
 				echo "  Collected $$name.wasm"; \
 			fi \
 		fi \
 	done
 	@echo "Done collecting plugins."
+
+# Check every built builtin plugin the way an external one is checked: with
+# the CLI's own `test-plugins`, so the builtins and an external plugin are
+# held to one set of assertions rather than two implementations of them.
+#
+# One plugin per invocation, because --fixtures describes one plugin's cases
+# and each builtin keeps its own under tests/fixtures. collect-plugins-only
+# lays out a directory per plugin so each invocation sees exactly one.
+#
+# Every directory with a Cargo.toml has to be reached: silently skipping a
+# plugin whose component did not get built would leave the run green over a
+# subset, and this target is the only thing covering the builtins.
+NGINX_LINT ?= cargo run --quiet --features plugins --
+
+test-builtin-plugins: collect-plugins-only
+	@fail=0; ran=0; expected=0; missing=""; \
+	for dir in plugins/builtin/*/*/; do \
+		[ -f "$$dir/Cargo.toml" ] || continue; \
+		expected=$$((expected+1)); \
+		name=$$(basename "$$dir"); \
+		wasm_dir="target/builtin-plugins/$$name"; \
+		if [ ! -f "$$wasm_dir/$$name.wasm" ]; then \
+			missing="$$missing $$name"; \
+			continue; \
+		fi; \
+		if [ -d "$$dir/tests/fixtures" ]; then \
+			fixtures="--fixtures $$dir/tests/fixtures"; \
+		else \
+			fixtures=""; \
+		fi; \
+		$(NGINX_LINT) test-plugins --plugins "$$wasm_dir" $$fixtures || fail=$$((fail+1)); \
+		ran=$$((ran+1)); \
+	done; \
+	echo "Checked $$ran of $$expected builtin plugin(s), $$fail failed."; \
+	if [ -n "$$missing" ]; then \
+		echo "No component was built for:$$missing"; \
+		echo "Run \`make build-plugins\` first, or the layout collect-plugins-only"; \
+		echo "expects has drifted."; \
+		exit 1; \
+	fi; \
+	test $$fail -eq 0
 
 # Build binary with embedded WASM builtin plugins (instead of native)
 build-with-wasm-plugins: collect-plugins
@@ -182,13 +225,19 @@ test:
 	cargo test
 
 # Run tests including plugin tests
-test-all: test
+# test-all ends with test-builtin-plugins because nothing else here loads a
+# built component: `cargo test` covers the host and each plugin's own crate,
+# and the WIT bridge between them is only exercised by running the components.
+# It builds them first, which is slow but is what "all" has to mean now that
+# the Rust test binary that did this is gone.
+test-all: test build-plugins
 	@for dir in plugins/builtin/*/*/; do \
 		if [ -f "$$dir/Cargo.toml" ]; then \
 			echo "Testing $$(basename $$dir)..."; \
 			(cd "$$dir" && cargo test); \
 		fi \
 	done
+	@$(MAKE) test-builtin-plugins
 
 # Lint plugin example files to ensure they are valid nginx configs
 lint-plugin-examples:
@@ -250,7 +299,7 @@ help:
 	@echo "  make run-web            - Run web server (development)"
 	@echo "  make run-web-embed      - Run web server with embedded WASM"
 	@echo "  make test               - Run tests"
-	@echo "  make test-all           - Run all tests including plugins"
+	@echo "  make test-all           - Run all tests, and check the built plugins"
 	@echo "  make doc                - Build API documentation (opens in browser)"
 	@echo "  make lint               - Run clippy"
 	@echo "  make lint-plugin-examples - Lint plugin example files"
