@@ -278,14 +278,13 @@ jobs:
         run: go install github.com/bytecodealliance/componentize-go@v0.4.0
       - name: Check the committed test-helper modules against the crates
         # nginxlinttest embeds the parser and the fix applier as core wasm
-        # modules so a plugin's `go test` can use the real ones. A rustc-built
-        # wasm is not byte-reproducible across toolchains, so this rebuilds
-        # them and runs the tests against the result rather than diffing:
-        # what has to hold is that the committed modules still behave like the
-        # crates, not that they are the same bytes.
-        run: |
-          make build-testkit-wasm
-          cd plugins/go/nginx-lint-plugin && go test ./nginxlinttest/
+        # modules so a plugin's `go test` can use the real ones, which go
+        # stale the moment either crate changes without being rebuilt. This
+        # builds fresh copies without overwriting the committed ones and
+        # requires the two to agree on every configuration in the tree — a
+        # byte diff cannot do it, because rustc does not produce the same wasm
+        # across toolchains.
+        run: make check-testkit-wasm
       - name: Check the committed bindings match the WIT
         # The Go SDK commits its generated bindings, unlike the TypeScript and
         # Python SDKs which regenerate theirs: a Go module is consumed as

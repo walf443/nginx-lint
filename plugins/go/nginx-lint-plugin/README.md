@@ -199,10 +199,18 @@ make check      # vet + test
 ```
 
 The wasm modules under `nginxlinttest/` are built from the repository root,
-where the Rust crates are, with `make build-testkit-wasm`. Rebuild and commit
-them after a change to the parser or the fix applier; CI rebuilds them and
-runs the tests against the result rather than diffing the bytes, which a
-rustc-built wasm does not reproduce across toolchains.
+where the Rust crates are:
+
+```bash
+make build-testkit-wasm   # refresh the committed copies after changing a crate
+make check-testkit-wasm   # are the committed copies still current?
+```
+
+`check-testkit-wasm` is what catches a crate change that was never rebuilt. It
+builds fresh copies without overwriting the committed ones and requires the
+two to agree on every configuration in the repository — a byte diff cannot do
+it, because a rustc-built wasm is not reproducible across toolchains. CI runs
+it on every change to `plugins/`, `crates/`, `src/` or `wit/`.
 
 ## License
 

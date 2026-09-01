@@ -18,6 +18,23 @@ type jsonFix struct {
 	EndOffset   *uint32 `json:"end_offset,omitempty"`
 }
 
+func toJSONFix(fix nginxlint.Fix) jsonFix {
+	converted := jsonFix{
+		Line:        fix.Line,
+		NewText:     fix.NewText,
+		DeleteLine:  fix.DeleteLine,
+		InsertAfter: fix.InsertAfter,
+	}
+	if fix.OldText != "" {
+		converted.OldText = &fix.OldText
+	}
+	if fix.HasRange {
+		start, end := fix.StartOffset, fix.EndOffset
+		converted.StartOffset, converted.EndOffset = &start, &end
+	}
+	return converted
+}
+
 type applyRequest struct {
 	Content string    `json:"content"`
 	Fixes   []jsonFix `json:"fixes"`
@@ -45,20 +62,7 @@ type FixResult struct {
 func ApplyFixes(content string, fixes []nginxlint.Fix) (FixResult, error) {
 	request := applyRequest{Content: content, Fixes: make([]jsonFix, 0, len(fixes))}
 	for _, fix := range fixes {
-		converted := jsonFix{
-			Line:        fix.Line,
-			NewText:     fix.NewText,
-			DeleteLine:  fix.DeleteLine,
-			InsertAfter: fix.InsertAfter,
-		}
-		if fix.OldText != "" {
-			converted.OldText = &fix.OldText
-		}
-		if fix.HasRange {
-			start, end := fix.StartOffset, fix.EndOffset
-			converted.StartOffset, converted.EndOffset = &start, &end
-		}
-		request.Fixes = append(request.Fixes, converted)
+		request.Fixes = append(request.Fixes, toJSONFix(fix))
 	}
 
 	encoded, err := json.Marshal(request)

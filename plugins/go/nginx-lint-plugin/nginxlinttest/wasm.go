@@ -58,8 +58,7 @@ func compile(ctx context.Context) error {
 	return compileErr
 }
 
-// call runs one JSON entry point: it writes each argument into the module's
-// memory and reads back the single JSON string the export returns.
+// call runs one JSON entry point on one of the embedded modules.
 func call(which module, name string, args ...[]byte) ([]byte, error) {
 	ctx := context.Background()
 	if err := compile(ctx); err != nil {
@@ -70,7 +69,22 @@ func call(which module, name string, args ...[]byte) ([]byte, error) {
 	if which == fixerModule {
 		compiled = fixer
 	}
+	return invoke(ctx, compiled, name, args...)
+}
 
+// compileBytes compiles a module that is not one of the embedded pair. It
+// exists for the test that checks the committed modules against a fresh build
+// of the crates.
+func compileBytes(ctx context.Context, wasm []byte) (wazero.CompiledModule, error) {
+	if err := compile(ctx); err != nil {
+		return nil, err
+	}
+	return runtime.CompileModule(ctx, wasm)
+}
+
+// invoke runs one JSON entry point: it writes each argument into the module's
+// memory and reads back the single JSON string the export returns.
+func invoke(ctx context.Context, compiled wazero.CompiledModule, name string, args ...[]byte) ([]byte, error) {
 	// A fresh instance per call, so one parse cannot see what a previous one
 	// left in the module's memory.
 	instance, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(""))
