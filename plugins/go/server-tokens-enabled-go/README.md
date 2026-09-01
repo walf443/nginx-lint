@@ -69,9 +69,7 @@ runner().AssertExamplesWithFix(t, badExample, goodExample)
 ```
 
 So a test that passes is a test against the positions and offsets the linter
-will actually produce, not against a fixture someone typed. One test here
-still builds a `Config` by hand, to show that style works for a shape the
-parser cannot easily produce.
+will actually produce, not against a fixture someone typed.
 
 `make test-e2e` covers what remains: the generated bindings, handle ownership,
 the WASI-less default, and the host boundary. It runs the built component

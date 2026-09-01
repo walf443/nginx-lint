@@ -17,6 +17,14 @@ func TestReportsServerTokensOn(t *testing.T) {
 	runner().AssertErrors(t, source, 1)
 	runner().AssertErrorOnLine(t, source, 2)
 	runner().AssertMessageContains(t, source, message)
+
+	errors, err := runner().Check(source)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if errors[0].Severity != nginxlint.SeverityWarning {
+		t.Errorf("Severity = %d, want %d", errors[0].Severity, nginxlint.SeverityWarning)
+	}
 }
 
 func TestIgnoresServerTokensOff(t *testing.T) {
@@ -63,29 +71,5 @@ func TestSpec(t *testing.T) {
 	}
 	if spec.BadExample == "" || spec.GoodExample == "" {
 		t.Error("Spec() left an example empty; go:embed did not run")
-	}
-}
-
-// The parser is not the only way to build a configuration: a rule that needs
-// a shape the parser cannot easily produce can still be handed struct
-// literals, and the same Check runs over them.
-func TestAgainstAHandBuiltConfig(t *testing.T) {
-	cfg := nginxlint.Config{Path: "nginx.conf", Directives: []nginxlint.Directive{{
-		Name: "http",
-		Block: []nginxlint.Directive{{
-			Name:    "server_tokens",
-			Args:    []nginxlint.Argument{{Value: "on"}},
-			Line:    2,
-			Column:  5,
-			Parents: []string{"http"},
-		}},
-	}}}
-
-	errors := serverTokensEnabled{}.Check(cfg)
-	if len(errors) != 1 {
-		t.Fatalf("got %d findings, want 1", len(errors))
-	}
-	if errors[0].Severity != nginxlint.SeverityWarning {
-		t.Errorf("Severity = %d, want %d", errors[0].Severity, nginxlint.SeverityWarning)
 	}
 }
