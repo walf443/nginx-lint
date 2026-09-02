@@ -75,6 +75,16 @@
       "overridePackageName": "github.com/wazero/wazero"
     },
     {
+      "description": "The Go example plugin requires the SDK at the placeholder v0.0.0 and replaces it with the working tree, so there is no released version for Renovate to find — the SDK is a nested module and the repository's tags (v0.20.0 and friends) are the root crate's, not `plugins/go/nginx-lint-plugin/v0.20.0`. The Go proxy answers its version list with nothing, which reaches the dependency dashboard as a `no-result` lookup failure and keeps the warning banner up over the real ones. Nothing here is updatable while the replace stands, so skip the lookup. Drop this rule if the SDK is ever tagged as its own module and the example starts requiring a published version.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Tidy after a Go update, so go.mod and go.sum are left as `go mod tidy` would write them rather than as the minimal edit `go get` makes.",
       "matchManagers": [
         "gomod"
