@@ -65,6 +65,16 @@
       "enabled": true
     },
     {
+      "description": "wazero moved out of the tetratelabs org into its own: github.com/tetratelabs/wazero now 301s to github.com/wazero/wazero. Its go.mod still declares `module github.com/tetratelabs/wazero`, on main as much as on v1.12.0, so the requirement here cannot follow the repository — `go get github.com/wazero/wazero` refuses with \"module declares its path as: github.com/tetratelabs/wazero\". Renovate's lookup does follow the repository, and gets nothing back for the redirected old name, which is the `no-result` on the dependency dashboard. So point the lookup at the new name while the module path stays the declared one. Both Go modules need it: wazero is a direct requirement of the SDK and an indirect one of the example. Drop this rule once upstream renames the module path — at which point the import paths move too, and this becomes a real migration.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepNames": [
+        "github.com/tetratelabs/wazero"
+      ],
+      "overridePackageName": "github.com/wazero/wazero"
+    },
+    {
       "description": "Tidy after a Go update, so go.mod and go.sum are left as `go mod tidy` would write them rather than as the minimal edit `go get` makes.",
       "matchManagers": [
         "gomod"
