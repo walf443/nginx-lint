@@ -10,7 +10,7 @@ through a `replace` to the working tree.
 
 ## Prerequisites
 
-- Go 1.25+ (the standard toolchain; TinyGo is not involved)
+- Go 1.26+ (the standard toolchain; TinyGo is not involved)
 - [componentize-go](https://github.com/bytecodealliance/componentize-go) 0.4.0:
 
   ```bash

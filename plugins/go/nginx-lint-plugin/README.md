@@ -12,7 +12,7 @@ go get github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin
 go install github.com/bytecodealliance/componentize-go@v0.4.0
 ```
 
-Requires Go 1.25+. The standard toolchain — TinyGo is not involved.
+Requires Go 1.26+. The standard toolchain — TinyGo is not involved.
 
 This is a nested module, so its releases are tagged
 `plugins/go/nginx-lint-plugin/vX.Y.Z` — the repository's own `vX.Y.Z` tag does

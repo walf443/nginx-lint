@@ -1,6 +1,6 @@
 module github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/tetratelabs/wazero v1.12.0
