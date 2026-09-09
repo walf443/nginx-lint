@@ -41,7 +41,7 @@
       "enabled": false
     },
     {
-      "description": "Same reasoning for Go: CI runs the Go jobs on the lowest toolchain the SDK supports (both go.mod files declare go 1.25.0, and both READMEs promise Go 1.25+), so that anything needing a newer one fails in CI rather than in a downstream build. The Go SDK is consumed as source, so a 1.26 API used by mistake would compile here and break for whoever imports it. Bumping it means raising that floor, which is go.mod, the READMEs and the workflow comment in one change, not an automated update. Scoped to github-actions so a go dependency elsewhere is still updated.",
+      "description": "Same reasoning for Go: CI runs the Go jobs on the lowest toolchain the SDK supports (both go.mod files declare go 1.26.0, and both READMEs promise Go 1.26+), so that anything needing a newer one fails in CI rather than in a downstream build. The Go SDK is consumed as source, so a 1.27 API used by mistake would compile here and break for whoever imports it. That floor is the oldest Go release upstream still supports, which is where golang.org/x pins its own go directive too, so a dependency update drags it forward roughly every six months as a release falls out of support: `go mod tidy` rewrites the go directive to the highest any dependency requires, whether or not we meant to move. Bumping it means raising that floor deliberately, which is go.mod, the READMEs, the workflow comment and this description in one change, not an automated update. Scoped to github-actions so a go dependency elsewhere is still updated.",
       "matchManagers": [
         "github-actions"
       ],

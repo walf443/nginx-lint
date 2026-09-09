@@ -260,8 +260,12 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # The version both modules declare. componentize-go needs 1.25+.
-          go-version: "1.25"
+          # The version both modules declare: the oldest Go release upstream
+          # still supports. golang.org/x pins its own go directive to that
+          # same release, so the dependencies drag this floor forward roughly
+          # every six months — see the `go` rule in renovate.json.
+          # componentize-go needs 1.25+, so it is not the binding constraint.
+          go-version: "1.26"
           cache-dependency-path: |
             plugins/go/nginx-lint-plugin/go.sum
             plugins/go/server-tokens-enabled-go/go.sum
