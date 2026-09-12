@@ -47,7 +47,7 @@ Documentation = "https://github.com/walf443/nginx-lint/blob/main/plugins/python/
 dev = [
     "maturin>=1.0,<2.0",
     "pytest",
-    "componentize-py==0.25.0",
+    "componentize-py==0.25.1",
 ]
 
 [tool.maturin]
