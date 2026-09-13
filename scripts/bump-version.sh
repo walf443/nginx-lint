@@ -21,6 +21,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# The Go SDK's test-helper modules are rebuilt at the end, which needs the
+# wasm32 target; check before touching anything so a missing target does not
+# leave a half-applied bump.
+if ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then
+    echo "Error: the wasm32-unknown-unknown target is not installed (rustup target add wasm32-unknown-unknown)"
+    exit 1
+fi
+
 # Find all Cargo.toml files in the project
 CARGO_FILES=(
     "$ROOT_DIR/Cargo.toml"
