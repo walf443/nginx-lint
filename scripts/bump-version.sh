@@ -88,6 +88,14 @@ if [ -f "$PY_SDK_MANIFEST" ]; then
     echo "  Updated plugins/python/nginx-lint-plugin/Cargo.lock"
 fi
 
+# The Go SDK's test helper embeds a committed build of nginx-lint-parser and
+# nginx-lint-common, and that build carries the crate version: after a bump
+# `make check-testkit-wasm` (and CI) fails until the modules are rebuilt from
+# the bumped crates. Needs the wasm32-unknown-unknown target. This also
+# refreshes the root Cargo.lock, which nothing above did.
+echo "rebuild the Go SDK's test-helper wasm modules"
+(cd "$ROOT_DIR" && make build-testkit-wasm)
+
 echo "update Dockerfile image hashes"
 dockerfile-pin run --write
 

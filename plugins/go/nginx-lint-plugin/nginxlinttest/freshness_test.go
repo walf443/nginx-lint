@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tetratelabs/wazero"
 	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
 )
 
@@ -25,6 +26,14 @@ import (
 // the two environment variables point at a fresh build, so an ordinary
 // `go test` needs no Rust toolchain; `make check-testkit-wasm` at the
 // repository root builds them and runs it.
+//
+// Behaviour alone has no upper bound on how old the committed modules can
+// get: a dependency update or a toolchain change that leaves the output
+// untouched never trips it. So the modules also embed the crate version, and
+// the two builds have to agree on that as well. A release bumps the version,
+// which makes the release PR fail here until the modules are rebuilt — that
+// is what guarantees the committed copies are never older than the last
+// release.
 const (
 	freshParserEnv = "NGINX_LINT_FRESH_PARSER_WASM"
 	freshFixerEnv  = "NGINX_LINT_FRESH_FIXER_WASM"
@@ -60,6 +69,11 @@ func TestCommittedModulesStillMatchTheCrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compiling the fresh fix applier: %v", err)
 	}
+
+	// The version first, so a release PR that only bumped the crates gets a
+	// message about the bump rather than a clean pass through the corpus.
+	requireSameVersion(t, ctx, "parser", "nginx-lint-parser", committedParser, rebuiltParser)
+	requireSameVersion(t, ctx, "fix applier", "nginx-lint-common", committedFixer, rebuiltFixer)
 
 	for _, path := range corpus {
 		source, err := os.ReadFile(path)
@@ -100,6 +114,30 @@ func TestCommittedModulesStillMatchTheCrates(t *testing.T) {
 				path, excerpt(committed, rebuilt), excerpt(rebuilt, committed))
 		}
 	}
+}
+
+// requireSameVersion fails unless the committed module and the fresh build
+// report the same crate version. The mismatch is worded for the person who
+// hits it next — whoever opens a release PR — so it does not read as a
+// parser regression.
+func requireSameVersion(t *testing.T, ctx context.Context, what, crate string, committed, rebuilt wazero.CompiledModule) {
+	t.Helper()
+
+	committedVersion, err := invoke(ctx, committed, "version")
+	if err != nil {
+		t.Fatalf("reading the committed %s's version: %v", what, err)
+	}
+	rebuiltVersion, err := invoke(ctx, rebuilt, "version")
+	if err != nil {
+		t.Fatalf("reading the fresh %s's version: %v", what, err)
+	}
+	if !bytes.Equal(committedVersion, rebuiltVersion) {
+		t.Fatalf("the committed %s was built from %s %s but the crate is now %s — "+
+			"a version bump alone requires the modules to be rebuilt and committed, "+
+			"even when nothing else changed: `make build-testkit-wasm`",
+			what, crate, committedVersion, rebuiltVersion)
+	}
+	t.Logf("the committed %s was built from %s %s", what, crate, committedVersion)
 }
 
 // fixRequest builds a fix of every kind the applier handles, per directive,
