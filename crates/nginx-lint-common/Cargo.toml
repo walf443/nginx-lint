@@ -1,6 +1,6 @@
 [package]
 name = "nginx-lint-common"
-version = "0.20.0"
+version = "0.21.0"
 edition = "2024"
 description = "Common types and parser for nginx-lint"
 license = "MIT"
@@ -28,7 +28,7 @@ wasm = ["dep:wit-bindgen"]
 wasm-json = []
 
 [dependencies]
-nginx-lint-parser = { version = "0.20.0", path = "../nginx-lint-parser" }
+nginx-lint-parser = { version = "0.21.0", path = "../nginx-lint-parser" }
 wit-bindgen = { version = "0.62.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
