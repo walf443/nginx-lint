@@ -119,13 +119,16 @@ The Go SDK's `nginxlinttest` package runs the real parser and the real fix
 applier from a plain `go test`, by embedding them as core wasm modules built
 from `nginx-lint-parser --features wasm-json` and `nginx-lint-common --features
 wasm-json` and running them under wazero (Go has no component-model runtime).
-Those modules are committed. After changing either crate, rebuild and commit
-them with `make build-testkit-wasm` at the root. `make check-testkit-wasm`
-answers whether the committed copies are still current: it builds fresh ones
-without overwriting them and requires the two to agree on every configuration
-in the tree, which is how a forgotten rebuild is caught — a byte diff cannot
-do it, because rustc does not produce the same wasm across toolchains. CI runs
-that check, not the rebuild.
+Those modules are committed. After changing either crate, and after every
+version bump, rebuild and commit them with `make build-testkit-wasm` at the
+root. `make check-testkit-wasm` answers whether the committed copies are still
+current: it builds fresh ones without overwriting them and requires the two to
+agree on every configuration in the tree, which is how a forgotten rebuild is
+caught — a byte diff cannot do it, because rustc does not produce the same
+wasm across toolchains. The modules also embed the crate version and the check
+requires that to match, so a release PR fails it until the modules are rebuilt;
+that is what keeps the committed copies from outliving a release. CI runs that
+check, not the rebuild.
 
 Only the SDK's root package builds for the host; everything under `bindings/`
 and `exports/` is wasm-only, so `go test ./...` fails there by design and the

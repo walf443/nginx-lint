@@ -248,6 +248,19 @@ mod json {
         ptr
     }
 
+    /// The version of the crate this module was built from, as plain text.
+    ///
+    /// The Go SDK commits a build of this module, and its freshness check
+    /// compares this against a fresh build: a version bump alone then
+    /// requires a rebuild, so the committed copy can never be older than the
+    /// last release even when nothing in the crate changed. The string is
+    /// `'static`, so unlike the other exports nothing is leaked here.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn version() -> u64 {
+        let version = env!("CARGO_PKG_VERSION").as_bytes();
+        ((version.as_ptr() as u64) << 32) | version.len() as u64
+    }
+
     /// Parse `source`, with `include_context` given as a JSON array of block
     /// names, and return the result as JSON.
     ///

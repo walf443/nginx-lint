@@ -13,7 +13,10 @@ import (
 // The parser and the fix applier, compiled from the same crates the linter
 // itself uses, as core wasm modules with no imports and a JSON entry point.
 // They are committed because a Go module is consumed as source; `make
-// build-testkit-wasm` at the repository root regenerates them.
+// build-testkit-wasm` at the repository root regenerates them, and has to be
+// run after a change to either crate and after every version bump — the
+// modules embed the crate version, and the freshness test requires it to
+// match a fresh build.
 //
 //go:embed parser.wasm
 var parserWasm []byte
