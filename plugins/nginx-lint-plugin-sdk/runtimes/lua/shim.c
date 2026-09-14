@@ -307,8 +307,10 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
     if (lua_istable(L, -1)) {
         size_t n = lua_rawlen(L, -1);
         ret->references.is_some = true;
-        ret->references.val.len = n;
+        /* ptr before len, here and below: checked_alloc raises on failure,
+         * and the cleanup that follows walks len entries through ptr. */
         ret->references.val.ptr = checked_alloc(L, n * sizeof(plugin_string_t));
+        ret->references.val.len = n;
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
             size_t len = 0;
@@ -361,8 +363,8 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
         if (is_lone_record(L, -1)) {
             luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
         }
-        e->fixes.len = n;
         e->fixes.ptr = checked_alloc(L, n * sizeof(nginx_lint_plugin_types_fix_t));
+        e->fixes.len = n;
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
             if (!lua_istable(L, -1)) {
@@ -389,8 +391,8 @@ static int convert_findings(lua_State *L) {
     if (is_lone_record(L, 2)) {
         return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
     }
-    ret->len = n;
     ret->ptr = checked_alloc(L, n * sizeof(plugin_lint_error_t));
+    ret->len = n;
     for (size_t i = 0; i < n; i++) {
         lua_rawgeti(L, 2, (lua_Integer)i + 1);
         if (!lua_istable(L, -1)) {
