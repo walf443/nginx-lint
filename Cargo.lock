@@ -2052,6 +2052,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nginx-lint-lua"
+version = "0.21.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "nginx-lint-plugin",
+ "sha2",
+ "wasm-encoder 0.259.0",
+ "wasmparser 0.259.0",
+ "wit-component 0.259.0",
+]
+
+[[package]]
 name = "nginx-lint-parser"
 version = "0.21.0"
 dependencies = [
@@ -3897,6 +3910,7 @@ dependencies = [
  "hashbrown 0.17.1",
  "indexmap 2.14.2",
  "semver",
+ "serde",
 ]
 
 [[package]]

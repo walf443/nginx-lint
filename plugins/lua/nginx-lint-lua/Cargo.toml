@@ -1,0 +1,24 @@
+[package]
+name = "nginx-lint-lua"
+version = "0.21.0"
+edition = "2024"
+description = "Builds nginx-lint plugins from Lua scripts"
+license = "MIT"
+repository = "https://github.com/walf443/nginx-lint"
+authors = ["walf443"]
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+# The three share types across their APIs (the reencoder takes wasmparser
+# values), so they are pinned to one minor together.
+wasm-encoder = "=0.259.0"
+wasmparser = "=0.259.0"
+wit-component = "=0.259.0"
+
+[dev-dependencies]
+# The runtime stamps the plugin API version it was built for; the tests
+# hold it to the crate's.
+nginx-lint-plugin = { path = "../../../crates/nginx-lint-plugin" }
+sha2 = "0.10"

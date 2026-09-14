@@ -326,9 +326,46 @@ jobs:
           path: plugins/go/server-tokens-enabled-go/server-tokens-enabled-go.wasm
           retention-days: 1
 
+  lua-plugin:
+    name: Lua Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: "lua-plugin"
+      - name: Check the committed runtime against the tree
+        # The Lua runtime is C built with wasi-sdk and committed as
+        # runtime.core.wasm. It stamps a hash of its inputs, so this needs no
+        # C toolchain: the crate's tests recompute the hash from the tree,
+        # hold the stamped plugin API version to the SDK crate's, and require
+        # the module to import nothing from wasi:*. A change under runtime/
+        # or to the WIT without a rebuild fails here.
+        run: make check-lua-runtime
+      - name: Build the host
+        run: cargo build --features plugins
+      - name: Build and test the Lua plugin
+        # The builder needs nothing installed: it carries the runtime and
+        # wraps the script into a component itself. test-plugins then runs
+        # it under the default sandbox, without --allow-wasi-plugins.
+        working-directory: plugins/lua/server-tokens-enabled-lua
+        run: make test-e2e
+      - name: Upload Lua WASM plugin
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lua-plugin
+          path: plugins/lua/server-tokens-enabled-lua/server-tokens-enabled-lua.wasm
+          retention-days: 1
+
   wasm-integration:
     name: WASM Integration Test
-    needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, build-host]
+    needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, lua-plugin, build-host]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -353,6 +390,10 @@ jobs:
         with:
           name: go-plugin
           path: target/go-plugins
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lua-plugin
+          path: target/lua-plugins
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: host-binaries
@@ -463,6 +504,24 @@ jobs:
               example_line=$(sed -n 2p $EXAMPLES/bad.conf)
               test -n "${example_line// /}"
               grep -qF "$example_line" <<<"$why"
+
+          - name: Test Lua plugin integration
+            run: |
+              NGINX_LINT=./artifacts/nginx-lint
+              PLUGIN_DIR=target/lua-plugins
+
+              # No --allow-wasi-plugins: unlike a Go component, the Lua
+              # runtime imports nothing from wasi:*, and this is the run that
+              # holds a plugin it built to that under the release host.
+              $NGINX_LINT test-plugins --plugins $PLUGIN_DIR
+
+              # Naming the rule pins it against a rename, as the other
+              # language steps do; the example text comes from the strings
+              # in plugin.lua, which `why` renders from the spec.
+              why=$($NGINX_LINT why --plugins $PLUGIN_DIR server-tokens-enabled-lua 2>&1)
+              echo "$why"
+              echo "$why" | grep -q 'Rule: server-tokens-enabled-lua'
+              echo "$why" | grep -q 'server_tokens on;'
 
   typescript-plugin:
     name: TypeScript Plugin

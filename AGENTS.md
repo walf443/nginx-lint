@@ -115,6 +115,18 @@ cd plugins/go/nginx-lint-plugin && make check     # vet + test, on the host
 cd plugins/go/server-tokens-enabled-go && make check test-e2e
 ```
 
+The Lua plugin builder (`plugins/lua/nginx-lint-lua`) embeds a prebuilt Lua
+runtime, `runtime/runtime.core.wasm`: PUC Lua plus a C shim implementing the
+plugin world, compiled with wasi-sdk and committed. Rebuild it with
+`make build-lua-runtime` at the root (which fetches the pinned wasi-sdk and
+Lua sources) after changing anything under `runtime/` or the WIT, and commit
+the result. The runtime stamps a hash of its inputs and the plugin API
+version into its producers section, and `make check-lua-runtime` — a plain
+`cargo test -p nginx-lint-lua`, no C toolchain — fails on a stale module,
+an API version behind the SDK crate's, or any `wasi:*` import. CI runs the
+check, not the rebuild. The example plugin's `make test-e2e` builds it with
+the tool and runs `nginx-lint test-plugins` on it.
+
 The Go SDK's `nginxlinttest` package runs the real parser and the real fix
 applier from a plain `go test`, by embedding them as core wasm modules built
 from `nginx-lint-parser --features wasm-json` and `nginx-lint-common --features
