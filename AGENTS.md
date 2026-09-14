@@ -125,7 +125,11 @@ version into its producers section, and `make check-lua-runtime` — a plain
 `cargo test -p nginx-lint-plugin-sdk`, no C toolchain — fails on a stale module,
 an API version behind the SDK crate's, or any `wasi:*` import. CI runs the
 check, not the rebuild. The example plugin's `make test-e2e` builds it with
-the tool and runs `nginx-lint test-plugins` on it.
+the tool, runs `nginx-lint test-plugins` on it and diffs `--fix` output
+against `examples/good.conf`; `make -C plugins/nginx-lint-plugin-sdk
+test-e2e` does the same for `tests/fix-kinds`, which uses every fix builder
+in `nginx_lint.lua` once — the Lua fix arithmetic is a reimplementation of
+the host's, so change both together.
 
 The Go SDK's `nginxlinttest` package runs the real parser and the real fix
 applier from a plain `go test`, by embedding them as core wasm modules built

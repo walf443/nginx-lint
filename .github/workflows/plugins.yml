@@ -353,8 +353,16 @@ jobs:
       - name: Build and test the Lua plugin
         # The builder needs nothing installed: it carries the runtime and
         # wraps the script into a component itself. test-plugins then runs
-        # it under the default sandbox, without --allow-wasi-plugins.
+        # it under the default sandbox, without --allow-wasi-plugins, and
+        # --fix output is diffed against examples/good.conf.
         working-directory: plugins/lua/server-tokens-enabled-lua
+        run: make test-e2e
+      - name: Pin every fix builder to the host's bytes
+        # tests/fix-kinds uses replace_with, delete_line, insert_after and
+        # insert_before once each; the Lua fix arithmetic is a
+        # reimplementation of the host's, and this diff is what would catch
+        # it drifting.
+        working-directory: plugins/nginx-lint-plugin-sdk
         run: make test-e2e
       - name: Upload Lua WASM plugin
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -509,11 +517,19 @@ jobs:
             run: |
               NGINX_LINT=./artifacts/nginx-lint
               PLUGIN_DIR=target/lua-plugins
+              EXAMPLES=plugins/lua/server-tokens-enabled-lua/examples
 
               # No --allow-wasi-plugins: unlike a Go component, the Lua
               # runtime imports nothing from wasi:*, and this is the run that
               # holds a plugin it built to that under the release host.
               $NGINX_LINT test-plugins --plugins $PLUGIN_DIR
+
+              # As for Go: test-plugins requires the fixes to resolve the
+              # finding, the diff requires the exact bytes.
+              tmp=$(mktemp -d)
+              cp $EXAMPLES/bad.conf "$tmp/nginx.conf"
+              $NGINX_LINT --plugins $PLUGIN_DIR --rule-only server-tokens-enabled-lua --fix "$tmp/nginx.conf"
+              diff $EXAMPLES/good.conf "$tmp/nginx.conf"
 
               # Naming the rule pins it against a rename, as the other
               # language steps do; the example text comes from the strings

@@ -180,6 +180,20 @@ mod tests {
         validate("plugin.lua", EXAMPLE).unwrap();
     }
 
+    /// The example's Makefile diffs `--fix` output against examples/good.conf,
+    /// while the plugin's spec carries the same text inline (a script cannot
+    /// embed a file); this keeps the two from drifting apart.
+    #[test]
+    fn example_plugin_embeds_its_example_files() {
+        let source = std::str::from_utf8(EXAMPLE).unwrap();
+        for file in [
+            include_str!("../../lua/server-tokens-enabled-lua/examples/bad.conf"),
+            include_str!("../../lua/server-tokens-enabled-lua/examples/good.conf"),
+        ] {
+            assert!(source.contains(file), "plugin.lua does not embed:\n{file}");
+        }
+    }
+
     #[test]
     fn reports_syntax_errors_with_the_script_name_and_line() {
         let err = validate(
