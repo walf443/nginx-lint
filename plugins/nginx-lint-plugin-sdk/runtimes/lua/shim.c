@@ -16,7 +16,7 @@
 #error "API_VERSION must be defined (see the Makefile)"
 #endif
 
-/* The plugin script is not compiled in: nginx-lint-lua writes it into this
+/* The plugin script is not compiled in: nginx-lint-plugin-sdk writes it into this
  * buffer after the fact, as one more data segment of the finished module.
  * The buffer is zero-initialized, so it costs the runtime no bytes on disk,
  * only initial memory. Both symbols are exported by the linker (see the
@@ -82,7 +82,7 @@ static const char *load_plugin(lua_State *L) {
     uint32_t name_len = read_u32(slot + 4);
     if (script_len == 0 || name_len > SCRIPT_SLOT_MAX - 8
         || script_len > SCRIPT_SLOT_MAX - 8 - name_len) {
-        lua_pushstring(L, "no plugin script embedded: build this plugin with nginx-lint-lua");
+        lua_pushstring(L, "no plugin script embedded: build this plugin with nginx-lint-plugin-sdk");
         return lua_tostring(L, -1);
     }
     /* A chunk name starting with '@' is a file name to Lua's error messages */

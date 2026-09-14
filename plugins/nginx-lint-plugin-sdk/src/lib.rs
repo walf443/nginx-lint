@@ -1,6 +1,6 @@
 //! Turns a Lua script into an nginx-lint plugin component.
 //!
-//! The heavy lifting was done once, when `runtime/runtime.core.wasm` was
+//! The heavy lifting was done once, when `runtimes/lua/runtime.core.wasm` was
 //! built: it is the Lua interpreter plus the glue that implements the
 //! `plugin` world by calling into a script. What is left to do per plugin
 //! is to put the script where the runtime expects it and wrap the result
@@ -22,8 +22,8 @@ use wasm_encoder::reencode::{Reencode, RoundtripReencoder};
 use wasm_encoder::{ConstExpr, DataCountSection, DataSection, Module, RawSection};
 use wasmparser::{ExternalKind, KnownCustom, Operator, Parser, Payload};
 
-/// The Lua runtime, built by `runtime/Makefile` and committed.
-pub const RUNTIME: &[u8] = include_bytes!("../runtime/runtime.core.wasm");
+/// The Lua runtime, built by `runtimes/lua/Makefile` and committed.
+pub const RUNTIME: &[u8] = include_bytes!("../runtimes/lua/runtime.core.wasm");
 
 const SLOT_EXPORT: &str = "nginx_lint_lua_script_slot";
 const SLOT_MAX_EXPORT: &str = "nginx_lint_lua_script_slot_max";
@@ -246,15 +246,15 @@ mod tests {
     use sha2::{Digest, Sha256};
     use std::path::Path;
 
-    /// The files the runtime is built from, in the order `runtime/Makefile`
+    /// The files the runtime is built from, in the order `runtimes/lua/Makefile`
     /// hashes them (STAMP_INPUTS); the toolchain is pinned in the Makefile,
     /// so a toolchain change is an input change too.
     const STAMP_INPUTS: &[&str] = &[
-        "runtime/shim.c",
-        "runtime/stubs.c",
-        "runtime/nginx_lint.lua",
-        "runtime/Makefile",
-        "../../../wit/nginx-lint-plugin.wit",
+        "runtimes/lua/shim.c",
+        "runtimes/lua/stubs.c",
+        "runtimes/lua/nginx_lint.lua",
+        "runtimes/lua/Makefile",
+        "../../wit/nginx-lint-plugin.wit",
     ];
 
     fn expected_stamp() -> String {
@@ -268,8 +268,8 @@ mod tests {
     }
 
     /// The committed runtime was built from the tree as it is now. When
-    /// this fails, something under runtime/ or the WIT changed without
-    /// `make -C plugins/lua/nginx-lint-lua/runtime` being rerun and the
+    /// this fails, something under runtimes/lua/ or the WIT changed without
+    /// `make -C plugins/nginx-lint-plugin-sdk/runtimes/lua` being rerun and the
     /// result committed.
     #[test]
     fn committed_runtime_is_built_from_the_current_inputs() {
@@ -278,7 +278,7 @@ mod tests {
             sdks.get("nginx-lint-lua-runtime-inputs")
                 .map(String::as_str),
             Some(expected_stamp().as_str()),
-            "runtime.core.wasm is stale: rebuild it with `make -C runtime` and commit the result"
+            "runtime.core.wasm is stale: rebuild it with `make build-lua-runtime` and commit the result"
         );
     }
 

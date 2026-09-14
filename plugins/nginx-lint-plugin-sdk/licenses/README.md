@@ -1,8 +1,8 @@
 # Third-party notices
 
-Verbatim license texts of the code compiled into `runtime/runtime.core.wasm`,
-which is embedded in the `nginx-lint-lua` binary and in every plugin it
-builds. `nginx-lint-lua license` prints them. Sources:
+Verbatim license texts of the code compiled into `runtimes/lua/runtime.core.wasm`,
+which is embedded in the `nginx-lint-plugin-sdk` binary and in every plugin it
+builds. `nginx-lint-plugin-sdk license` prints them. Sources:
 
 | Directory | Project | Revision |
 |---|---|---|
@@ -12,6 +12,6 @@ builds. `nginx-lint-lua license` prints them. Sources:
 
 wasi-libc is multi-licensed; it is used here under its MIT option, so only
 that text is included alongside the overview `LICENSE`. Its dlmalloc is
-CC0 and carries no notice. Refresh these when `runtime/Makefile` moves to a
+CC0 and carries no notice. Refresh these when `runtimes/lua/Makefile` moves to a
 new wasi-sdk or Lua release (the revisions are in the wasi-sdk `VERSION`
 file).

@@ -1,11 +1,11 @@
 # Builds the Lua plugin runtime: a core wasm module implementing the
 # nginx-lint `plugin` world by delegating to a Lua script that is not part
-# of the module. `nginx-lint-lua build` writes the script into the finished
+# of the module. `nginx-lint-plugin-sdk build` writes the script into the finished
 # module (see the slot in shim.c), so this build happens once, here, and
 # plugin authors never need the toolchain below.
 #
 # The result, runtime.core.wasm, is committed and embedded into the
-# nginx-lint-lua binary. `make toolchain` fetches the pinned wasi-sdk and
+# nginx-lint-plugin-sdk binary. `make toolchain` fetches the pinned wasi-sdk and
 # Lua sources into .toolchain/; wit-bindgen and wasm-tools are expected on
 # PATH. Run `make` after changing anything under this directory or the WIT,
 # then commit the result: the crate's tests compare the module's stamp (a

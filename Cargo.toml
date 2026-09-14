@@ -29,7 +29,7 @@ members = [
     "plugins/builtin/best_practices/upstream_server_no_resolve",
     "plugins/builtin/deprecation/listen_http2_deprecated",
     "plugins/builtin/deprecation/ssl_on_deprecated",
-    "plugins/lua/nginx-lint-lua",
+    "plugins/nginx-lint-plugin-sdk",
 ]
 # The Python SDK's native module is its own workspace: it's a Python
 # extension module (built via maturin against a local interpreter), which
