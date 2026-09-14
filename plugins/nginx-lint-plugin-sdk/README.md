@@ -23,6 +23,11 @@ does with a config is only exercised by `nginx-lint test-plugins`; a
 finding or fix of the wrong shape is reported there as an error finding,
 not as a crash.
 
+That first run is native, not sandboxed: the script has no file system,
+network or process access, and cannot load bytecode, but nothing bounds
+its time or memory. Build your own scripts with it; treat a `.lua` from
+someone you do not trust the way you would any other code you run.
+
 ## Writing a plugin
 
 A script returns a table with a `spec` (the same fields the other SDKs
