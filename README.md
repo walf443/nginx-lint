@@ -231,7 +231,7 @@ nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 Each `.wasm` file in the directory is loaded as a plugin, in file name order.
 
 There is an `nginx-lint-plugin` SDK for four languages, each with a worked
-example beside it:
+example beside it, and a builder for Lua scripts:
 
 | Language | SDK | Example |
 | --- | --- | --- |
@@ -239,10 +239,17 @@ example beside it:
 | TypeScript | [`nginx-lint-plugin`](https://www.npmjs.com/package/nginx-lint-plugin) (`plugins/typescript/nginx-lint-plugin`) | `plugins/typescript/server-tokens-enabled-ts` |
 | Python | [`nginx-lint-plugin`](https://pypi.org/project/nginx-lint-plugin/) (`plugins/python/nginx-lint-plugin`) | `plugins/python/server-tokens-enabled-py` |
 | Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |
+| Lua | `nginx-lint-plugin-sdk` binary (`plugins/nginx-lint-plugin-sdk`) | `plugins/lua/server-tokens-enabled-lua` |
 
-Every SDK can run a plugin against the real parser from its own test suite.
-Go plugins additionally need `--allow-wasi-plugins`, for the reason described
+Every library SDK can run a plugin against the real parser from its own test
+suite; a Lua plugin's `check` runs only under `nginx-lint test-plugins`. Go
+plugins additionally need `--allow-wasi-plugins`, for the reason described
 below.
+
+Lua needs no toolchain at all: `nginx-lint-plugin-sdk build my_rule.lua` turns a
+script into a plugin by writing it into a prebuilt Lua runtime that the binary
+carries, and the result runs under the default sandbox. See
+`plugins/nginx-lint-plugin-sdk/README.md` for the script API.
 
 ### Testing a plugin
 

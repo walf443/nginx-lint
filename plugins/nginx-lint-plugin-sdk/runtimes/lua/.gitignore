@@ -1,0 +1,5 @@
+build/
+bindings/
+out/
+.toolchain/
+nginx_lint_lua.h
