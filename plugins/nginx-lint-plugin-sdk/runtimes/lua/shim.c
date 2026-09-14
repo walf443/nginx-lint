@@ -152,11 +152,69 @@ static lua_State *get_state(void) {
 
 /* --- Lua -> C conversions ------------------------------------------------ */
 
+/* Length of the well-formed UTF-8 sequence starting at s (n bytes left), or
+ * 0 if there is none: Unicode's Table 3-7, which excludes overlong forms,
+ * surrogates and anything past U+10FFFF, the same rules the host applies. */
+static size_t utf8_sequence_len(const unsigned char *s, size_t n) {
+    unsigned char c = s[0];
+    if (c < 0x80) return 1;
+    size_t len;
+    unsigned char lo = 0x80, hi = 0xBF;
+    if (c >= 0xC2 && c <= 0xDF) len = 2;
+    else if (c == 0xE0) { len = 3; lo = 0xA0; }
+    else if (c >= 0xE1 && c <= 0xEC) len = 3;
+    else if (c == 0xED) { len = 3; hi = 0x9F; }
+    else if (c == 0xEE || c == 0xEF) len = 3;
+    else if (c == 0xF0) { len = 4; lo = 0x90; }
+    else if (c >= 0xF1 && c <= 0xF3) len = 4;
+    else if (c == 0xF4) { len = 4; hi = 0x8F; }
+    else return 0;
+    if (n < len || s[1] < lo || s[1] > hi) return 0;
+    for (size_t i = 2; i < len; i++) {
+        if (s[i] < 0x80 || s[i] > 0xBF) return 0;
+    }
+    return len;
+}
+
+/* Copies a Lua string into a WIT string. Lua strings are bytes and WIT
+ * strings are UTF-8, and the host rejects the whole spec() or check()
+ * result over one bad byte; a message built with string.sub on multibyte
+ * text is the usual way to get one. Each ill-formed byte becomes U+FFFD
+ * instead, so the finding survives and says almost what it meant. */
+static void dup_utf8(plugin_string_t *out, const char *s, size_t len) {
+    const unsigned char *bytes = (const unsigned char *)s;
+    size_t i = 0, out_len = 0;
+    while (i < len) {
+        size_t n = utf8_sequence_len(bytes + i, len - i);
+        if (n == 0) { out_len += 3; i += 1; }
+        else { out_len += n; i += n; }
+    }
+    if (out_len == len) {
+        plugin_string_dup_n(out, s, len);
+        return;
+    }
+    unsigned char *buf = malloc(out_len ? out_len : 1);
+    size_t o = 0;
+    for (i = 0; i < len;) {
+        size_t n = utf8_sequence_len(bytes + i, len - i);
+        if (n == 0) {
+            buf[o++] = 0xEF; buf[o++] = 0xBF; buf[o++] = 0xBD;
+            i += 1;
+        } else {
+            memcpy(buf + o, bytes + i, n);
+            o += n;
+            i += n;
+        }
+    }
+    out->ptr = buf;
+    out->len = out_len;
+}
+
 static void string_field(lua_State *L, int index, const char *key, plugin_string_t *out) {
     lua_getfield(L, index, key);
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
-    plugin_string_dup_n(out, s ? s : "", s ? len : 0);
+    dup_utf8(out, s ? s : "", s ? len : 0);
     lua_pop(L, 1);
 }
 
@@ -165,7 +223,7 @@ static void option_string_field(lua_State *L, int index, const char *key, plugin
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
     out->is_some = s != NULL;
-    if (s) plugin_string_dup_n(&out->val, s, len);
+    if (s) dup_utf8(&out->val, s, len);
     lua_pop(L, 1);
 }
 
@@ -212,7 +270,7 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
             size_t len = 0;
             const char *s = lua_tolstring(L, -1, &len);
-            plugin_string_dup_n(&ret->references.val.ptr[i], s ? s : "", s ? len : 0);
+            dup_utf8(&ret->references.val.ptr[i], s ? s : "", s ? len : 0);
             lua_pop(L, 1);
         }
     }
@@ -307,7 +365,7 @@ static void runtime_failure(lua_State *L, const char *message, plugin_list_lint_
     }
     if (!e->rule.ptr) plugin_string_dup(&e->rule, "lua-plugin");
     if (!e->category.ptr) plugin_string_dup(&e->category, "plugin");
-    plugin_string_dup(&e->message, message);
+    dup_utf8(&e->message, message, strlen(message));
     e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR;
     ret->ptr = e;
     ret->len = 1;
@@ -476,7 +534,7 @@ void exports_plugin_spec(plugin_plugin_spec_t *ret) {
         memset(ret, 0, sizeof(*ret));
         plugin_string_dup(&ret->name, "lua-plugin");
         plugin_string_dup(&ret->category, "plugin");
-        plugin_string_dup(&ret->description, load_error);
+        dup_utf8(&ret->description, load_error, strlen(load_error));
         plugin_string_dup(&ret->api_version, API_VERSION);
         return;
     }

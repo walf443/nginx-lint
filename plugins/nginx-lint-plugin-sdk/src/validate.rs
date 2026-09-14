@@ -23,7 +23,9 @@ const NGINX_LINT_LUA: &str = include_str!("../runtimes/lua/nginx_lint.lua");
 /// has nowhere to go there.
 const PRELUDE: &str = r#"
 local raw_load = load
-load = function(chunk, name, _mode, env) return raw_load(chunk, name, "t", env) end
+-- Varargs, not a named env: load() tells an omitted env from an explicit
+-- nil, and a nil env would leave the chunk with no _ENV at all.
+load = function(chunk, name, _mode, ...) return raw_load(chunk, name, "t", ...) end
 loadfile = function() return nil, "no file system in the plugin sandbox" end
 dofile = function() error("no file system in the plugin sandbox") end
 print = function() end
@@ -79,9 +81,19 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
             other.type_name()
         ),
     };
+    // WIT strings are UTF-8, and Lua strings are bytes: a script saved in
+    // another encoding builds fine and then fails to load, so the bytes are
+    // checked here while the file name is at hand.
+    let utf8 = |field: &str, value: &mlua::LuaString| -> Result<()> {
+        ensure!(
+            std::str::from_utf8(&value.as_bytes()).is_ok(),
+            "{name}: spec.{field} is not valid UTF-8"
+        );
+        Ok(())
+    };
     for field in ["name", "category", "description"] {
         match spec.get::<Value>(field)? {
-            Value::String(value) if !value.as_bytes().is_empty() => {}
+            Value::String(value) if !value.as_bytes().is_empty() => utf8(field, &value)?,
             Value::String(_) => bail!("{name}: spec.{field} is empty"),
             Value::Nil => bail!("{name}: spec.{field} is missing"),
             other => bail!(
@@ -99,7 +111,8 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
         "max_nginx_version",
     ] {
         match spec.get::<Value>(field)? {
-            Value::Nil | Value::String(_) => {}
+            Value::Nil => {}
+            Value::String(value) => utf8(field, &value)?,
             other => bail!(
                 "{name}: spec.{field} must be a string, not a {}",
                 other.type_name()
@@ -118,12 +131,13 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
         Value::Nil => {}
         Value::Table(references) => {
             for entry in references.sequence_values::<Value>() {
-                let entry = entry?;
-                ensure!(
-                    matches!(entry, Value::String(_)),
-                    "{name}: spec.references must hold strings, not a {}",
-                    entry.type_name()
-                );
+                match entry? {
+                    Value::String(value) => utf8("references", &value)?,
+                    other => bail!(
+                        "{name}: spec.references must hold strings, not a {}",
+                        other.type_name()
+                    ),
+                }
             }
         }
         other => bail!(
@@ -200,6 +214,35 @@ mod tests {
             let err = validate("rule.lua", script).unwrap_err();
             assert!(err.to_string().contains(expected), "{expected}: {err}");
         }
+    }
+
+    #[test]
+    fn rejects_spec_strings_that_are_not_utf8() {
+        let script = b"return { spec = { name = 'x', category = 'c', description = 'caf\xe9' }, check = function() end }";
+        let err = validate("rule.lua", script).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("spec.description is not valid UTF-8"),
+            "{err}"
+        );
+        let script = b"return { spec = { name = 'x', category = 'c', description = 'd', references = { '\xff' } }, check = function() end }";
+        let err = validate("rule.lua", script).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("spec.references is not valid UTF-8"),
+            "{err}"
+        );
+    }
+
+    /// load() with an omitted env must behave as in the runtime: the chunk
+    /// sees the globals.
+    #[test]
+    fn load_keeps_the_global_environment() {
+        validate(
+            "rule.lua",
+            b"local f = assert(load('return math.pi')); assert(f() > 3)\nreturn { spec = { name = 'x', category = 'c', description = 'd' }, check = function() end }",
+        )
+        .unwrap();
     }
 
     #[test]
