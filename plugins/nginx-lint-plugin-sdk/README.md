@@ -15,6 +15,14 @@ The result is an ordinary plugin component, and it runs under the default
 sandbox: the Lua runtime imports nothing from `wasi:*`, so no
 `--allow-wasi-plugins` is needed.
 
+`build` runs the script's top level first, on a native Lua with the same
+libraries the runtime has, so a syntax error, a script that throws while
+loading, a missing `check` or a malformed `spec` fails the build with Lua's
+own message (`my_rule.lua:3: unexpected symbol near '='`). What `check`
+does with a config is only exercised by `nginx-lint test-plugins`; a
+finding or fix of the wrong shape is reported there as an error finding,
+not as a crash.
+
 ## Writing a plugin
 
 A script returns a table with a `spec` (the same fields the other SDKs

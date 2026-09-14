@@ -14,6 +14,7 @@
 //! module the same way `wasm-tools component new` would.
 
 pub mod licenses;
+pub mod validate;
 
 use std::collections::BTreeMap;
 
@@ -229,13 +230,31 @@ pub fn componentize(module: &[u8]) -> Result<Vec<u8>> {
         .context("failed to encode the component")
 }
 
+/// What `luaL_loadfile` would have done for a file and `luaL_loadbuffer`,
+/// which the runtime uses, does not: drop a UTF-8 byte-order mark, and
+/// blank out a first line starting with `#` (a shebang) while keeping its
+/// newline so line numbers still match the file.
+pub fn normalize_script(script: &[u8]) -> Vec<u8> {
+    let script = script.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(script);
+    if script.first() == Some(&b'#') {
+        let rest = script
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(&b""[..], |i| &script[i..]);
+        return rest.to_vec();
+    }
+    script.to_vec()
+}
+
 /// Builds a plugin component from a script. `name` is the file name the
 /// script's errors are reported under.
 pub fn build_plugin(name: &str, script: &[u8]) -> Result<Vec<u8>> {
     if name.is_empty() {
         bail!("the script name is empty");
     }
-    let module = inject_script(RUNTIME, name, script)?;
+    let script = normalize_script(script);
+    validate::validate(name, &script)?;
+    let module = inject_script(RUNTIME, name, &script)?;
     componentize(&module)
 }
 
@@ -382,5 +401,23 @@ mod tests {
     #[test]
     fn refuses_an_empty_script() {
         assert!(inject_script(RUNTIME, "rule.lua", b"").is_err());
+    }
+
+    #[test]
+    fn normalizes_a_bom_and_a_shebang_without_moving_lines() {
+        assert_eq!(normalize_script(b"\xEF\xBB\xBFreturn 1"), b"return 1");
+        assert_eq!(normalize_script(b"#!/usr/bin/lua\nreturn 1"), b"\nreturn 1");
+        assert_eq!(
+            normalize_script(b"\xEF\xBB\xBF#!/usr/bin/lua\nreturn 1"),
+            b"\nreturn 1"
+        );
+        assert_eq!(normalize_script(b"#no newline"), b"");
+        assert_eq!(normalize_script(b"return 1"), b"return 1");
+    }
+
+    #[test]
+    fn build_rejects_a_script_that_would_fail_at_lint_time() {
+        let err = build_plugin("rule.lua", b"return { spec = 1 }").unwrap_err();
+        assert!(err.to_string().contains("`spec` must be"), "{err}");
     }
 }
