@@ -1,5 +1,7 @@
 local nginx_lint = require("nginx_lint")
 
+-- The same text as examples/bad.conf and examples/good.conf, which the
+-- Makefile's --fix check reads; a Lua script has no way to embed a file.
 local BAD = [[
 http {
     server_tokens on;
