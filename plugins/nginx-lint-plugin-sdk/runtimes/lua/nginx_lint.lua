@@ -161,7 +161,10 @@ function M._build_config(items, top, include_context, path)
     for _, index in ipairs(indices) do
       local item = items[index]
       if item.kind == "directive" then
-        item.parents = parents
+        -- Each directive gets its own copy: siblings sharing one table
+        -- would see each other's edits to `parents`.
+        item.parents = {}
+        for i, name in ipairs(parents) do item.parents[i] = name end
         local child_parents = {}
         for i, name in ipairs(parents) do child_parents[i] = name end
         child_parents[#child_parents + 1] = item.name
