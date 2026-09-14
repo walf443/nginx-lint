@@ -3,7 +3,7 @@ PLUGIN_DIRS := $(wildcard plugins/builtin/*/*/)
 PLUGIN_NAMES := $(foreach dir,$(PLUGIN_DIRS),$(notdir $(patsubst %/,%,$(dir))))
 PLUGIN_WASMS := $(foreach name,$(PLUGIN_NAMES),target/builtin-plugins/$(name).wasm)
 
-.PHONY: test-builtin-plugins testkit-wasm build-testkit-wasm check-testkit-wasm build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
+.PHONY: test-builtin-plugins testkit-wasm build-testkit-wasm check-testkit-wasm build-lua-runtime check-lua-runtime build build-wasm build-wasm-with-plugins build-web build-plugins collect-plugins collect-plugins-only build-with-wasm-plugins build-parser-wasm copy-wit build-fixer-wasm clean test lint lint-plugin-examples doc help
 
 # Build CLI with native plugins (release, default)
 build:
@@ -205,6 +205,20 @@ check-testkit-wasm: testkit-wasm
 		NGINX_LINT_FRESH_PARSER_WASM=$(CURDIR)/$(TESTKIT_PARSER) \
 		NGINX_LINT_FRESH_FIXER_WASM=$(CURDIR)/$(TESTKIT_FIXER) \
 		go test ./nginxlinttest/ -run TestCommittedModulesStillMatchTheCrates -count=1 -v
+
+# The Lua plugin runtime (plugins/lua/nginx-lint-lua/runtime) is C compiled
+# with wasi-sdk, committed as runtime.core.wasm and embedded into the
+# nginx-lint-lua binary. Rebuild it after changing anything under runtime/
+# or the WIT; the Makefile there fetches its pinned toolchain.
+build-lua-runtime:
+	$(MAKE) -C plugins/lua/nginx-lint-lua/runtime toolchain all
+
+# The runtime carries a hash of its inputs in its producers section, so the
+# check is a plain cargo test and needs no C toolchain: it recomputes the
+# hash from the tree, holds the stamped plugin API version to the SDK
+# crate's, and requires the module to import nothing from wasi:*.
+check-lua-runtime:
+	cargo test -p nginx-lint-lua
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm: copy-wit

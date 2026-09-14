@@ -38,6 +38,8 @@ CARGO_FILES=(
     # The Python SDK's crate version is the wheel version (pyproject
     # declares version dynamic), so it bumps with everything else
     "$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
+    # The Lua plugin builder is released as a binary next to nginx-lint
+    "$ROOT_DIR/plugins/lua/nginx-lint-lua/Cargo.toml"
 )
 
 # Add all plugin Cargo.toml files

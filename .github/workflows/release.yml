@@ -42,18 +42,30 @@ jobs:
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
 
-      - name: Archive binary
+      # The Lua plugin builder ships as its own archive: it is only for
+      # people writing Lua plugins, and it embeds the Lua runtime, which the
+      # linter itself has no use for.
+      - name: Build nginx-lint-lua
+        run: cargo build --release -p nginx-lint-lua
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.target }}
+
+      - name: Archive binaries
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/nginx-lint dist/
+          cp target/${{ matrix.target }}/release/nginx-lint-lua dist/
           cd dist
           tar czf ../nginx-lint-${{ matrix.target }}.tar.gz nginx-lint
+          tar czf ../nginx-lint-lua-${{ matrix.target }}.tar.gz nginx-lint-lua
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: nginx-lint-${{ matrix.target }}
-          path: nginx-lint-${{ matrix.target }}.tar.gz
+          path: |
+            nginx-lint-${{ matrix.target }}.tar.gz
+            nginx-lint-lua-${{ matrix.target }}.tar.gz
 
   release:
     name: Release
