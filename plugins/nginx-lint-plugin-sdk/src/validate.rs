@@ -17,10 +17,11 @@ const NGINX_LINT_LUA: &str = include_str!("../runtimes/lua/nginx_lint.lua");
 /// Brings the base library in line with the runtime's, which matters twice
 /// over here: a script must not pass validation by doing something the
 /// runtime refuses, and this Lua is native, so it must not be handed
-/// anything the sandboxed one would not run either. Lua does not verify
-/// bytecode, so `load` is held to text, as the runtime holds the script
-/// itself; the file functions have no file system in the runtime; print
-/// has nowhere to go there.
+/// anything the sandboxed one would not run either. The file functions
+/// have no file system in the runtime, and print has nowhere to go there.
+/// `load` is stricter than the runtime's stock one: Lua does not verify
+/// bytecode, and what that can do is contained by the wasm sandbox there
+/// and by nothing here, so it is held to text.
 const PRELUDE: &str = r#"
 local raw_load = load
 -- Varargs, not a named env: load() tells an omitted env from an explicit
@@ -254,9 +255,13 @@ mod tests {
         .unwrap();
     }
 
-    /// What the runtime refuses, validation refuses too — and never runs.
+    /// Bytecode never runs on this native Lua. The runtime refuses the
+    /// script itself in bytecode form too; its own `load` is stock and would
+    /// accept a bytecode string, so this side is deliberately the stricter
+    /// one — the wasm sandbox contains what unverified bytecode can do, and
+    /// nothing here does.
     #[test]
-    fn refuses_bytecode_as_the_runtime_does() {
+    fn never_runs_bytecode_natively() {
         let err = validate("rule.lua", b"\x1bLua\x54\x00").unwrap_err();
         assert!(err.to_string().contains("binary chunk"), "{err}");
         let err = validate("rule.lua", b"local _, err = load('\\27Lua'); error(err)").unwrap_err();

@@ -337,6 +337,16 @@ static int convert_findings(lua_State *L) {
         return luaL_error(L, "check() must return a list of findings, not a %s", luaL_typename(L, 2));
     }
     size_t n = lua_rawlen(L, 2);
+    if (n == 0) {
+        /* `return found` where `return { found }` was meant: a single
+         * finding has no array part, and would otherwise read as none. */
+        lua_getfield(L, 2, "message");
+        int is_finding = !lua_isnil(L, -1);
+        lua_pop(L, 1);
+        if (is_finding) {
+            return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
+        }
+    }
     ret->len = n;
     ret->ptr = calloc(n ? n : 1, sizeof(plugin_lint_error_t));
     for (size_t i = 0; i < n; i++) {
