@@ -241,8 +241,9 @@ example beside it, and a builder for Lua scripts:
 | Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |
 | Lua | `nginx-lint-plugin-sdk` binary (`plugins/nginx-lint-plugin-sdk`) | `plugins/lua/server-tokens-enabled-lua` |
 
-Every SDK can run a plugin against the real parser from its own test suite.
-Go plugins additionally need `--allow-wasi-plugins`, for the reason described
+Every library SDK can run a plugin against the real parser from its own test
+suite; a Lua plugin's `check` runs only under `nginx-lint test-plugins`. Go
+plugins additionally need `--allow-wasi-plugins`, for the reason described
 below.
 
 Lua needs no toolchain at all: `nginx-lint-plugin-sdk build my_rule.lua` turns a

@@ -64,18 +64,38 @@ static const luaL_Reg libs[] = {
 /* Replaces the error object on top of the stack with a message string and
  * returns it. error() accepts any value, and lua_tostring gives NULL for a
  * table or nil; a NULL here would read as success in load_plugin and as an
- * empty message in runtime_failure. The callers are outside any pcall; the
- * one allocation here, a short string for a non-string error object, is
- * not reached for the error Lua itself raises when memory runs out, which
- * is a preallocated string. */
+ * empty message in runtime_failure. An object with a __tostring is rendered
+ * through it, as the lua interpreter does, but under pcall: the callers are
+ * outside any, and the metamethod is script code. The one allocation on the
+ * fallback path, a short string, is not reached for the error Lua itself
+ * raises when memory runs out, which is a preallocated string. */
 static const char *error_message(lua_State *L) {
     if (lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER) {
         return lua_tostring(L, -1);
+    }
+    if (luaL_getmetafield(L, -1, "__tostring") != LUA_TNIL) {
+        lua_pushvalue(L, -2);
+        if (lua_pcall(L, 1, 1, 0) == LUA_OK && lua_type(L, -1) == LUA_TSTRING) {
+            lua_remove(L, -2);
+            return lua_tostring(L, -1);
+        }
+        lua_pop(L, 1);  /* the failed call's error, or a non-string result */
     }
     const char *type = luaL_typename(L, -1);
     lua_pop(L, 1);
     lua_pushfstring(L, "(error object is a %s value)", type);
     return lua_tostring(L, -1);
+}
+
+/* Whether the table at index has no array part but does have fields: a
+ * single record handed over where a list of them was expected. */
+static int is_lone_record(lua_State *L, int index) {
+    index = lua_absindex(L, index);
+    if (lua_rawlen(L, index) != 0) return 0;
+    lua_pushnil(L);
+    if (lua_next(L, index) == 0) return 0;
+    lua_pop(L, 2);
+    return 1;
 }
 
 /* Runs the plugin script, keeping its table in the registry. Returns NULL on
@@ -319,14 +339,9 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
     lua_getfield(L, index, "fixes");
     if (lua_istable(L, -1)) {
         size_t n = lua_rawlen(L, -1);
-        if (n == 0) {
-            /* `fixes = d:replace_with(...)` where `:with_fix(...)` was meant */
-            lua_getfield(L, -1, "new_text");
-            int is_fix = !lua_isnil(L, -1);
-            lua_pop(L, 1);
-            if (is_fix) {
-                luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
-            }
+        /* `fixes = d:replace_with(...)` where `:with_fix(...)` was meant */
+        if (is_lone_record(L, -1)) {
+            luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
         }
         e->fixes.len = n;
         e->fixes.ptr = calloc(n ? n : 1, sizeof(nginx_lint_plugin_types_fix_t));
@@ -351,15 +366,10 @@ static int convert_findings(lua_State *L) {
         return luaL_error(L, "check() must return a list of findings, not a %s", luaL_typename(L, 2));
     }
     size_t n = lua_rawlen(L, 2);
-    if (n == 0) {
-        /* `return found` where `return { found }` was meant: a single
-         * finding has no array part, and would otherwise read as none. */
-        lua_getfield(L, 2, "message");
-        int is_finding = !lua_isnil(L, -1);
-        lua_pop(L, 1);
-        if (is_finding) {
-            return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
-        }
+    /* `return found` where `return { found }` was meant: a single finding
+     * has no array part, and would otherwise read as none. */
+    if (is_lone_record(L, 2)) {
+        return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
     }
     ret->len = n;
     ret->ptr = calloc(n ? n : 1, sizeof(plugin_lint_error_t));
