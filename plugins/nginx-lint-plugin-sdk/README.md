@@ -68,6 +68,9 @@ The sandbox has no file system, clock or environment: `io`, `os`,
 `package` and `debug` are absent, `require` knows only `nginx_lint`, and
 `print` goes nowhere. Errors thrown by the script are reported as findings
 against the file being linted, with the script's file name and line.
+Strings cross to the host as UTF-8: a message holding bytes that are not
+(a multibyte argument cut with `string.sub`, say) has each such byte
+replaced with U+FFFD rather than failing the check.
 
 ## How it works
 
