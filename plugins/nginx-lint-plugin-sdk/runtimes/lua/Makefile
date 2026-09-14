@@ -36,6 +36,9 @@ WASI_SDK ?= .toolchain/$(WASI_SDK_DIR)
 LUA_SRC  ?= .toolchain/lua-$(LUA_VERSION)/src
 
 CC := $(WASI_SDK)/bin/clang
+# What the compile rules wait for (order-only), so that under `make -j` on
+# a fresh checkout nothing compiles before the download has finished.
+TOOLCHAIN := $(WASI_SDK)/bin/clang $(LUA_SRC)/lua.h
 
 # The plugin API version the runtime declares, read from the SDK crate so
 # the two cannot drift silently: the crate's tests check the stamped value
@@ -86,7 +89,7 @@ all: runtime.core.wasm
 
 # The pinned toolchain, fetched once. wasi-sdk publishes per-platform
 # tarballs of one LLVM and one wasi-libc revision (see its VERSION file).
-toolchain: $(WASI_SDK)/bin/clang $(LUA_SRC)/lua.h
+toolchain: $(TOOLCHAIN)
 
 .toolchain/$(WASI_SDK_DIR)/bin/clang:
 	mkdir -p .toolchain
@@ -97,28 +100,33 @@ toolchain: $(WASI_SDK)/bin/clang $(LUA_SRC)/lua.h
 	mkdir -p .toolchain
 	curl -sSfL "https://www.lua.org/ftp/lua-$(LUA_VERSION).tar.gz" | tar xz -C .toolchain
 
-bindings/plugin.h bindings/plugin.c bindings/plugin_component_type.o: $(WIT)
+# One rule produces all three files: with a target per file, `make -j`
+# would run wit-bindgen once for each into the same directory.
+bindings/.generated: $(WIT)
 	mkdir -p bindings
 	wit-bindgen c --world plugin --out-dir bindings $(dir $(WIT))
+	touch $@
 
-bindings: bindings/plugin.h
+bindings/plugin.h bindings/plugin.c bindings/plugin_component_type.o: bindings/.generated
+
+bindings: bindings/.generated
 
 build:
 	mkdir -p build
 
-build/%.o: $(LUA_SRC)/%.c | build
+build/%.o: $(LUA_SRC)/%.c | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # luaL_loadfilex is the one function in lauxlib.c that touches the file
 # system. Renaming its definition lets stubs.c define the real name; the
 # renamed original is unreachable and dropped by --gc-sections.
-build/lauxlib.o: $(LUA_SRC)/lauxlib.c | build
+build/lauxlib.o: $(LUA_SRC)/lauxlib.c | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -DluaL_loadfilex=luaL_loadfilex_unused -c $< -o $@
 
-build/%.o: %.c bindings/plugin.h | build
+build/%.o: %.c bindings/plugin.h | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/plugin.o: bindings/plugin.c | build
+build/plugin.o: bindings/plugin.c | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 nginx_lint_lua.h: nginx_lint.lua

@@ -64,8 +64,10 @@ static const luaL_Reg libs[] = {
 /* Replaces the error object on top of the stack with a message string and
  * returns it. error() accepts any value, and lua_tostring gives NULL for a
  * table or nil; a NULL here would read as success in load_plugin and as an
- * empty message in runtime_failure. Nothing is called that could raise,
- * since the callers are outside any pcall. */
+ * empty message in runtime_failure. The callers are outside any pcall; the
+ * one allocation here, a short string for a non-string error object, is
+ * not reached for the error Lua itself raises when memory runs out, which
+ * is a preallocated string. */
 static const char *error_message(lua_State *L) {
     if (lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER) {
         return lua_tostring(L, -1);
@@ -133,8 +135,11 @@ static const char *load_plugin(lua_State *L) {
 
 static const char *load_error;
 
+/* A failed load stays failed: every spec()/check() call would otherwise run
+ * the script's top level again and leak another copy of the message. */
 static lua_State *get_state(void) {
     if (state) return state;
+    if (load_error) return NULL;
     state = luaL_newstate();
     if (!state) {
         load_error = "cannot create Lua state";
@@ -314,6 +319,15 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
     lua_getfield(L, index, "fixes");
     if (lua_istable(L, -1)) {
         size_t n = lua_rawlen(L, -1);
+        if (n == 0) {
+            /* `fixes = d:replace_with(...)` where `:with_fix(...)` was meant */
+            lua_getfield(L, -1, "new_text");
+            int is_fix = !lua_isnil(L, -1);
+            lua_pop(L, 1);
+            if (is_fix) {
+                luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
+            }
+        }
         e->fixes.len = n;
         e->fixes.ptr = calloc(n ? n : 1, sizeof(nginx_lint_plugin_types_fix_t));
         for (size_t i = 0; i < n; i++) {
@@ -495,9 +509,11 @@ static void push_blank_line(lua_State *L, const nginx_lint_plugin_data_types_bla
 }
 
 /* Pushes the config table built by nginx_lint._build_config from the host's
- * snapshot. Indices are converted to 1-based on the way in. */
-static int push_config(lua_State *L, const nginx_lint_plugin_config_api_config_snapshot_t *snap,
-                       const plugin_string_t *path) {
+ * snapshot. Indices are converted to 1-based on the way in. Raises on a
+ * failure, including running out of memory on a large config; the caller
+ * is protected. */
+static void push_config(lua_State *L, const nginx_lint_plugin_config_api_config_snapshot_t *snap,
+                        const plugin_string_t *path) {
     lua_rawgetp(L, LUA_REGISTRYINDEX, &LIB_KEY);
     lua_getfield(L, -1, "_build_config");
     lua_remove(L, -2);
@@ -532,25 +548,75 @@ static int push_config(lua_State *L, const nginx_lint_plugin_config_api_config_s
     }
 
     push_string(L, path);
-    return lua_pcall(L, 4, 1, 0);
+    lua_call(L, 4, 1);
 }
 
 /* --- exports -------------------------------------------------------------- */
 
-void exports_plugin_spec(plugin_plugin_spec_t *ret) {
-    lua_State *L = get_state();
-    if (!L) {
-        /* Surface the load error through the spec so the host shows it */
-        memset(ret, 0, sizeof(*ret));
-        plugin_string_dup(&ret->name, "lua-plugin");
-        plugin_string_dup(&ret->category, "plugin");
-        dup_utf8(&ret->description, load_error, strlen(load_error));
-        plugin_string_dup(&ret->api_version, API_VERSION);
-        return;
-    }
+/* Everything an export does on the Lua side runs under one lua_pcall, in
+ * these two functions. Any Lua API call that allocates can raise when
+ * memory runs out — building the config table for a large file is the
+ * likely place — and outside a pcall that is the panic handler, abort()
+ * and a wasm trap, where inside it is a finding that says "not enough
+ * memory". Arguments are light userdata. */
+
+/* (spec-out) */
+static int protected_spec(lua_State *L) {
+    plugin_plugin_spec_t *ret = lua_touserdata(L, 1);
     lua_rawgetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
     spec_from_lua(L, -1, ret);
-    lua_pop(L, 1);
+    return 0;
+}
+
+/* (snapshot, path, findings-out): builds the config, calls check() and
+ * converts what it returns. Shape errors are luaL_error, so a finding or
+ * fix that is not a table reads as a message rather than a trap. */
+static int protected_check(lua_State *L) {
+    const nginx_lint_plugin_config_api_config_snapshot_t *snap = lua_touserdata(L, 1);
+    const plugin_string_t *path = lua_touserdata(L, 2);
+    plugin_list_lint_error_t *ret = lua_touserdata(L, 3);
+
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
+    lua_getfield(L, -1, "check");
+    lua_remove(L, -2);
+    push_config(L, snap, path);
+    push_string(L, path);
+    lua_call(L, 2, 1);
+
+    lua_pushcfunction(L, convert_findings);
+    lua_pushlightuserdata(L, ret);
+    lua_pushvalue(L, -3);
+    lua_call(L, 2, 0);
+    return 0;
+}
+
+void exports_plugin_spec(plugin_plugin_spec_t *ret) {
+    memset(ret, 0, sizeof(*ret));
+    lua_State *L = get_state();
+    const char *failure = load_error;
+    if (L) {
+        int top = lua_gettop(L);
+        lua_pushcfunction(L, protected_spec);
+        lua_pushlightuserdata(L, ret);
+        if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+            plugin_plugin_spec_free(ret);
+            memset(ret, 0, sizeof(*ret));
+            failure = error_message(L);
+        }
+        if (!failure) {
+            lua_settop(L, top);
+            return;
+        }
+        /* The message is owned by the stack; copy it before unwinding */
+        dup_utf8(&ret->description, failure, strlen(failure));
+        lua_settop(L, top);
+    } else {
+        dup_utf8(&ret->description, failure, strlen(failure));
+    }
+    /* Surface the failure through the spec so the host shows it */
+    plugin_string_dup(&ret->name, "lua-plugin");
+    plugin_string_dup(&ret->category, "plugin");
+    plugin_string_dup(&ret->api_version, API_VERSION);
 }
 
 void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plugin_list_lint_error_t *ret) {
@@ -568,33 +634,13 @@ void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plu
     nginx_lint_plugin_config_api_method_config_snapshot(cfg, &snap);
     nginx_lint_plugin_config_api_config_drop_borrow(cfg);
 
-    int status = push_config(L, &snap, path);
+    lua_pushcfunction(L, protected_check);
+    lua_pushlightuserdata(L, &snap);
+    lua_pushlightuserdata(L, path);
+    lua_pushlightuserdata(L, ret);
+    int status = lua_pcall(L, 3, 0, 0);
     nginx_lint_plugin_config_api_config_snapshot_free(&snap);
     if (status != LUA_OK) {
-        runtime_failure(L, error_message(L), ret);
-        lua_settop(L, top);
-        return;
-    }
-
-    lua_rawgetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
-    lua_getfield(L, -1, "check");
-    lua_remove(L, -2);
-    lua_pushvalue(L, -2);   /* config */
-    push_string(L, path);
-    lua_remove(L, -4);      /* the config below check */
-    if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
-        runtime_failure(L, error_message(L), ret);
-        lua_settop(L, top);
-        return;
-    }
-
-    /* The conversion runs protected too: a finding or fix that is not a
-     * table would otherwise raise out of lua_getfield with no pcall to
-     * catch it, and take the whole plugin down with a trap. */
-    lua_pushcfunction(L, convert_findings);
-    lua_pushlightuserdata(L, ret);
-    lua_pushvalue(L, -3);
-    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
         plugin_list_lint_error_free(ret);
         runtime_failure(L, error_message(L), ret);
     }
