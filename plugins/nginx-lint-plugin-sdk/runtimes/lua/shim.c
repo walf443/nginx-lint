@@ -168,6 +168,7 @@ static lua_State *get_state(void) {
     const char *err = load_plugin(state);
     if (err) {
         load_error = strdup(err);
+        if (!load_error) load_error = "not enough memory";
         lua_close(state);
         state = NULL;
         return NULL;
@@ -201,12 +202,27 @@ static size_t utf8_sequence_len(const unsigned char *s, size_t n) {
     return len;
 }
 
+/* Zeroed heap memory for the WIT values handed back to the host, or the
+ * "not enough memory" error Lua itself raises when it runs out: a finding
+ * under the exports' pcall, and outside one (runtime_failure, or a state
+ * that never loaded) the panic handler and a trap, there being nothing
+ * left to report with. The generated cabi_realloc aborts outright, which
+ * is why the shim allocates for itself. */
+static void *checked_alloc(lua_State *L, size_t size) {
+    void *p = calloc(1, size ? size : 1);
+    if (!p) {
+        if (L) luaL_error(L, "not enough memory");
+        abort();
+    }
+    return p;
+}
+
 /* Copies a Lua string into a WIT string. Lua strings are bytes and WIT
  * strings are UTF-8, and the host rejects the whole spec() or check()
  * result over one bad byte; a message built with string.sub on multibyte
  * text is the usual way to get one. Each ill-formed byte becomes U+FFFD
  * instead, so the finding survives and says almost what it meant. */
-static void dup_utf8(plugin_string_t *out, const char *s, size_t len) {
+static void dup_utf8(lua_State *L, plugin_string_t *out, const char *s, size_t len) {
     const unsigned char *bytes = (const unsigned char *)s;
     size_t i = 0, out_len = 0;
     while (i < len) {
@@ -214,11 +230,13 @@ static void dup_utf8(plugin_string_t *out, const char *s, size_t len) {
         if (n == 0) { out_len += 3; i += 1; }
         else { out_len += n; i += n; }
     }
+    unsigned char *buf = checked_alloc(L, out_len);
     if (out_len == len) {
-        plugin_string_dup_n(out, s, len);
+        memcpy(buf, s, len);
+        out->ptr = buf;
+        out->len = len;
         return;
     }
-    unsigned char *buf = malloc(out_len ? out_len : 1);
     size_t o = 0;
     for (i = 0; i < len;) {
         size_t n = utf8_sequence_len(bytes + i, len - i);
@@ -239,7 +257,7 @@ static void string_field(lua_State *L, int index, const char *key, plugin_string
     lua_getfield(L, index, key);
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
-    dup_utf8(out, s ? s : "", s ? len : 0);
+    dup_utf8(L, out, s ? s : "", s ? len : 0);
     lua_pop(L, 1);
 }
 
@@ -248,7 +266,7 @@ static void option_string_field(lua_State *L, int index, const char *key, plugin
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
     out->is_some = s != NULL;
-    if (s) dup_utf8(&out->val, s, len);
+    if (s) dup_utf8(L, &out->val, s, len);
     lua_pop(L, 1);
 }
 
@@ -290,12 +308,12 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
         size_t n = lua_rawlen(L, -1);
         ret->references.is_some = true;
         ret->references.val.len = n;
-        ret->references.val.ptr = calloc(n ? n : 1, sizeof(plugin_string_t));
+        ret->references.val.ptr = checked_alloc(L, n * sizeof(plugin_string_t));
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
             size_t len = 0;
             const char *s = lua_tolstring(L, -1, &len);
-            dup_utf8(&ret->references.val.ptr[i], s ? s : "", s ? len : 0);
+            dup_utf8(L, &ret->references.val.ptr[i], s ? s : "", s ? len : 0);
             lua_pop(L, 1);
         }
     }
@@ -344,7 +362,7 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
             luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
         }
         e->fixes.len = n;
-        e->fixes.ptr = calloc(n ? n : 1, sizeof(nginx_lint_plugin_types_fix_t));
+        e->fixes.ptr = checked_alloc(L, n * sizeof(nginx_lint_plugin_types_fix_t));
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
             if (!lua_istable(L, -1)) {
@@ -372,7 +390,7 @@ static int convert_findings(lua_State *L) {
         return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
     }
     ret->len = n;
-    ret->ptr = calloc(n ? n : 1, sizeof(plugin_lint_error_t));
+    ret->ptr = checked_alloc(L, n * sizeof(plugin_lint_error_t));
     for (size_t i = 0; i < n; i++) {
         lua_rawgeti(L, 2, (lua_Integer)i + 1);
         if (!lua_istable(L, -1)) {
@@ -388,7 +406,7 @@ static int convert_findings(lua_State *L) {
 /* A single error-severity finding carrying `message`, for failures of the
  * runtime itself (a script that does not load, or throws). */
 static void runtime_failure(lua_State *L, const char *message, plugin_list_lint_error_t *ret) {
-    plugin_lint_error_t *e = calloc(1, sizeof(*e));
+    plugin_lint_error_t *e = checked_alloc(L, sizeof(*e));
     if (L) {
         lua_rawgetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
         if (lua_istable(L, -1)) {
@@ -399,7 +417,7 @@ static void runtime_failure(lua_State *L, const char *message, plugin_list_lint_
     }
     if (!e->rule.ptr) plugin_string_dup(&e->rule, "lua-plugin");
     if (!e->category.ptr) plugin_string_dup(&e->category, "plugin");
-    dup_utf8(&e->message, message, strlen(message));
+    dup_utf8(L, &e->message, message, strlen(message));
     e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR;
     ret->ptr = e;
     ret->len = 1;
@@ -566,8 +584,9 @@ static void push_config(lua_State *L, const nginx_lint_plugin_config_api_config_
 /* Everything an export does on the Lua side runs under one lua_pcall, in
  * these two functions. Any Lua API call that allocates can raise when
  * memory runs out — building the config table for a large file is the
- * likely place — and outside a pcall that is the panic handler, abort()
- * and a wasm trap, where inside it is a finding that says "not enough
+ * likely place — and the shim's own allocations raise the same way (see
+ * checked_alloc). Outside a pcall that is the panic handler, abort() and
+ * a wasm trap, where inside it is a finding that says "not enough
  * memory". Arguments are light userdata. */
 
 /* (spec-out) */
@@ -618,10 +637,10 @@ void exports_plugin_spec(plugin_plugin_spec_t *ret) {
             return;
         }
         /* The message is owned by the stack; copy it before unwinding */
-        dup_utf8(&ret->description, failure, strlen(failure));
+        dup_utf8(L, &ret->description, failure, strlen(failure));
         lua_settop(L, top);
     } else {
-        dup_utf8(&ret->description, failure, strlen(failure));
+        dup_utf8(NULL, &ret->description, failure, strlen(failure));
     }
     /* Surface the failure through the spec so the host shows it */
     plugin_string_dup(&ret->name, "lua-plugin");
