@@ -10,6 +10,10 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+# A native Lua 5.4, for checking a script at build time: it runs the
+# script's top level under the same library the runtime embeds, so syntax
+# errors and a malformed spec surface here instead of at lint time.
+mlua = { version = "0.12", default-features = false, features = ["lua54", "vendored", "send"] }
 clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 # The three share types across their APIs (the reencoder takes wasmparser
 # values), so they are pinned to one minor together.

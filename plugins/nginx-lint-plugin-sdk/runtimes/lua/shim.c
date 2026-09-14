@@ -61,6 +61,21 @@ static const luaL_Reg libs[] = {
     {NULL, NULL},
 };
 
+/* Replaces the error object on top of the stack with a message string and
+ * returns it. error() accepts any value, and lua_tostring gives NULL for a
+ * table or nil; a NULL here would read as success in load_plugin and as an
+ * empty message in runtime_failure. Nothing is called that could raise,
+ * since the callers are outside any pcall. */
+static const char *error_message(lua_State *L) {
+    if (lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER) {
+        return lua_tostring(L, -1);
+    }
+    const char *type = luaL_typename(L, -1);
+    lua_pop(L, 1);
+    lua_pushfstring(L, "(error object is a %s value)", type);
+    return lua_tostring(L, -1);
+}
+
 /* Runs the plugin script, keeping its table in the registry. Returns NULL on
  * success, or the error message (owned by the Lua stack). */
 static const char *load_plugin(lua_State *L) {
@@ -73,7 +88,7 @@ static const char *load_plugin(lua_State *L) {
 
     if (luaL_loadbufferx(L, (const char *)nginx_lint_lua, nginx_lint_lua_len, "=nginx_lint", "t") != LUA_OK
         || lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        return lua_tostring(L, -1);
+        return error_message(L);
     }
     lua_rawsetp(L, LUA_REGISTRYINDEX, &LIB_KEY);
 
@@ -93,7 +108,7 @@ static const char *load_plugin(lua_State *L) {
     chunkname[1 + n] = '\0';
     if (luaL_loadbufferx(L, slot + 8 + name_len, script_len, chunkname, "t") != LUA_OK
         || lua_pcall(L, 0, 1, 0) != LUA_OK) {
-        return lua_tostring(L, -1);
+        return error_message(L);
     }
     if (!lua_istable(L, -1)) {
         lua_pushstring(L, "plugin script must return a table with `spec` and `check`");
@@ -105,7 +120,7 @@ static const char *load_plugin(lua_State *L) {
     lua_rawgetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
     lua_getfield(L, -1, "spec");
     if (lua_isfunction(L, -1)) {
-        if (lua_pcall(L, 0, 1, 0) != LUA_OK) return lua_tostring(L, -1);
+        if (lua_pcall(L, 0, 1, 0) != LUA_OK) return error_message(L);
     }
     if (!lua_istable(L, -1)) {
         lua_pushstring(L, "plugin `spec` must be a table or a function returning one");
@@ -240,11 +255,37 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
         e->fixes.ptr = calloc(n ? n : 1, sizeof(nginx_lint_plugin_types_fix_t));
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
+            if (!lua_istable(L, -1)) {
+                luaL_error(L, "fix %d of a finding is a %s, not a table", (int)i + 1, luaL_typename(L, -1));
+            }
             fix_from_lua(L, -1, &e->fixes.ptr[i]);
             lua_pop(L, 1);
         }
     }
     lua_pop(L, 1);
+}
+
+/* Fills the list at argument 1 (a light userdata) from the findings table
+ * at argument 2. Runs under lua_pcall, so the shape checks are luaL_error. */
+static int convert_findings(lua_State *L) {
+    plugin_list_lint_error_t *ret = lua_touserdata(L, 1);
+    if (lua_isnoneornil(L, 2)) return 0;
+    if (!lua_istable(L, 2)) {
+        return luaL_error(L, "check() must return a list of findings, not a %s", luaL_typename(L, 2));
+    }
+    size_t n = lua_rawlen(L, 2);
+    ret->len = n;
+    ret->ptr = calloc(n ? n : 1, sizeof(plugin_lint_error_t));
+    for (size_t i = 0; i < n; i++) {
+        lua_rawgeti(L, 2, (lua_Integer)i + 1);
+        if (!lua_istable(L, -1)) {
+            return luaL_error(L, "finding %d returned by check() is a %s, not a table",
+                              (int)i + 1, luaL_typename(L, -1));
+        }
+        error_from_lua(L, -1, &ret->ptr[i]);
+        lua_pop(L, 1);
+    }
+    return 0;
 }
 
 /* A single error-severity finding carrying `message`, for failures of the
@@ -457,7 +498,7 @@ void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plu
     int status = push_config(L, &snap, path);
     nginx_lint_plugin_config_api_config_snapshot_free(&snap);
     if (status != LUA_OK) {
-        runtime_failure(L, lua_tostring(L, -1), ret);
+        runtime_failure(L, error_message(L), ret);
         lua_settop(L, top);
         return;
     }
@@ -469,20 +510,20 @@ void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plu
     push_string(L, path);
     lua_remove(L, -4);      /* the config below check */
     if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
-        runtime_failure(L, lua_tostring(L, -1), ret);
+        runtime_failure(L, error_message(L), ret);
         lua_settop(L, top);
         return;
     }
 
-    if (lua_istable(L, -1)) {
-        size_t n = lua_rawlen(L, -1);
-        ret->len = n;
-        ret->ptr = calloc(n ? n : 1, sizeof(plugin_lint_error_t));
-        for (size_t i = 0; i < n; i++) {
-            lua_rawgeti(L, -1, (lua_Integer)i + 1);
-            error_from_lua(L, -1, &ret->ptr[i]);
-            lua_pop(L, 1);
-        }
+    /* The conversion runs protected too: a finding or fix that is not a
+     * table would otherwise raise out of lua_getfield with no pcall to
+     * catch it, and take the whole plugin down with a trap. */
+    lua_pushcfunction(L, convert_findings);
+    lua_pushlightuserdata(L, ret);
+    lua_pushvalue(L, -3);
+    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+        plugin_list_lint_error_free(ret);
+        runtime_failure(L, error_message(L), ret);
     }
     lua_settop(L, top);
 }

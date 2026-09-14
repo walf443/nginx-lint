@@ -14,7 +14,8 @@ pub struct Notice {
 pub const NOTICES: &[Notice] = &[
     Notice {
         component: "Lua 5.4",
-        scope: "the interpreter and its base, coroutine, table, string, math and utf8 libraries",
+        scope: "the interpreter and its base, coroutine, table, string, math and utf8 libraries, \
+                in the runtime and, for checking scripts at build time, in this binary itself",
         text: include_str!("../licenses/lua/COPYRIGHT"),
     },
     Notice {
