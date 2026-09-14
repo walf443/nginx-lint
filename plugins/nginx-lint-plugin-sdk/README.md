@@ -1,10 +1,12 @@
-# nginx-lint-lua
+# nginx-lint-plugin-sdk
 
-Builds [nginx-lint](https://github.com/walf443/nginx-lint) plugins from Lua
-scripts. A plugin author needs this binary and a `.lua` file, nothing else:
+The plugin SDK for languages that have no library SDK: a single binary that
+carries the runtimes and tooling a plugin needs, the way `wasi-sdk` bundles
+a toolchain. Today it builds plugins from Lua scripts; a plugin author needs
+this binary and a `.lua` file, nothing else:
 
 ```bash
-nginx-lint-lua build my_rule.lua            # writes my_rule.wasm
+nginx-lint-plugin-sdk build my_rule.lua     # writes my_rule.wasm
 nginx-lint test-plugins --plugins .         # checks it the way CI does
 nginx-lint --plugins . nginx.conf
 ```
@@ -61,7 +63,7 @@ against the file being linted, with the script's file name and line.
 
 ## How it works
 
-`runtime/` holds a C shim and PUC Lua 5.4, built once with wasi-sdk into
+`runtimes/lua/` holds a C shim and PUC Lua 5.4, built once with wasi-sdk into
 `runtime.core.wasm`, which is committed and embedded into this binary.
 The runtime reserves a 1 MiB buffer for the script and exports its
 address; `build` appends a data segment that fills the buffer, then wraps
@@ -72,4 +74,4 @@ after changing the shim, the Lua-side library or the WIT, and commit the
 result. The module records a hash of those inputs and the plugin API
 version in its producers section (`wasm-tools metadata show` prints them),
 and this crate's tests check them against the tree, so a forgotten rebuild
-fails `cargo test -p nginx-lint-lua` — with no C toolchain needed.
+fails `cargo test -p nginx-lint-plugin-sdk` — with no C toolchain needed.

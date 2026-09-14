@@ -48,7 +48,7 @@ pub const NOTICES: &[Notice] = &[
 /// Renders every notice, each under a heading naming the component.
 pub fn render() -> String {
     let mut out = String::from(
-        "nginx-lint-lua embeds a Lua runtime, compiled to WebAssembly, in this \
+        "nginx-lint-plugin-sdk embeds a Lua runtime, compiled to WebAssembly, in this \
          binary and in every plugin it builds. The runtime contains the \
          following third-party code.\n",
     );

@@ -1,8 +1,8 @@
 [package]
-name = "nginx-lint-lua"
+name = "nginx-lint-plugin-sdk"
 version = "0.21.0"
 edition = "2024"
-description = "Builds nginx-lint plugins from Lua scripts"
+description = "Plugin SDK binary for nginx-lint: builds plugins from Lua scripts"
 license = "MIT"
 repository = "https://github.com/walf443/nginx-lint"
 authors = ["walf443"]
@@ -20,5 +20,5 @@ wit-component = "=0.259.0"
 [dev-dependencies]
 # The runtime stamps the plugin API version it was built for; the tests
 # hold it to the crate's.
-nginx-lint-plugin = { path = "../../../crates/nginx-lint-plugin" }
+nginx-lint-plugin = { path = "../../crates/nginx-lint-plugin" }
 sha2 = "0.10"

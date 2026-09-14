@@ -6,7 +6,7 @@ NGINX_LINT := ../../../target/debug/nginx-lint
 # Nothing but the builder: it carries the Lua runtime and wraps the script
 # into a component itself.
 build:
-	cargo run -q -p nginx-lint-lua -- build plugin.lua -o $(WASM)
+	cargo run -q -p nginx-lint-plugin-sdk -- build plugin.lua -o $(WASM)
 
 # No --allow-wasi-plugins: the Lua runtime imports nothing from wasi:*, so
 # the plugin runs under the default sandbox.

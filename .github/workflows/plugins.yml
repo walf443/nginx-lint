@@ -345,7 +345,7 @@ jobs:
         # runtime.core.wasm. It stamps a hash of its inputs, so this needs no
         # C toolchain: the crate's tests recompute the hash from the tree,
         # hold the stamped plugin API version to the SDK crate's, and require
-        # the module to import nothing from wasi:*. A change under runtime/
+        # the module to import nothing from wasi:*. A change under runtimes/lua/
         # or to the WIT without a rebuild fails here.
         run: make check-lua-runtime
       - name: Build the host

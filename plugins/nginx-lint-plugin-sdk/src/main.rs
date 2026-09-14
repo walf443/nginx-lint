@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "nginx-lint-lua",
+    name = "nginx-lint-plugin-sdk",
     version,
     about = "Builds nginx-lint plugins from Lua scripts"
 )]
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .with_context(|| format!("{} has no usable file name", script.display()))?;
-            let component = nginx_lint_lua::build_plugin(name, &source)?;
+            let component = nginx_lint_plugin_sdk::build_plugin(name, &source)?;
             let output = output.unwrap_or_else(|| script.with_extension("wasm"));
             std::fs::write(&output, component)
                 .with_context(|| format!("failed to write {}", output.display()))?;
@@ -45,7 +45,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::License => {
-            print!("{}", nginx_lint_lua::licenses::render());
+            print!("{}", nginx_lint_plugin_sdk::licenses::render());
             Ok(())
         }
     }
