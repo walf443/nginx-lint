@@ -169,10 +169,15 @@ static void option_string_field(lua_State *L, int index, const char *key, plugin
     lua_pop(L, 1);
 }
 
+/* Any number with an integral value counts: `/` yields floats in Lua, so an
+ * offset computed as (a + b) / 2 is 3.0, and dropping it would silently turn
+ * a range fix into a whole-line one. */
 static void option_u32_field(lua_State *L, int index, const char *key, plugin_option_u32_t *out) {
     lua_getfield(L, index, key);
-    out->is_some = lua_isinteger(L, -1);
-    if (out->is_some) out->val = (uint32_t)lua_tointeger(L, -1);
+    int isnum = 0;
+    lua_Integer v = lua_tointegerx(L, -1, &isnum);
+    out->is_some = isnum && v >= 0 && v <= UINT32_MAX;
+    if (out->is_some) out->val = (uint32_t)v;
     lua_pop(L, 1);
 }
 
@@ -217,9 +222,9 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
 static void fix_from_lua(lua_State *L, int index, nginx_lint_plugin_types_fix_t *fix) {
     memset(fix, 0, sizeof(*fix));
     index = lua_absindex(L, index);
-    lua_getfield(L, index, "line");
-    fix->line = (uint32_t)lua_tointeger(L, -1);
-    lua_pop(L, 1);
+    plugin_option_u32_t line;
+    option_u32_field(L, index, "line", &line);
+    fix->line = line.is_some ? line.val : 0;
     option_string_field(L, index, "old_text", &fix->old_text);
     string_field(L, index, "new_text", &fix->new_text);
     fix->delete_line = bool_field(L, index, "delete_line");

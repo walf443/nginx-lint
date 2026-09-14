@@ -8,10 +8,26 @@
 //! `nginx-lint test-plugins` provides.
 
 use anyhow::{Result, anyhow, bail, ensure};
+use mlua::chunk::ChunkMode;
 use mlua::{Lua, LuaOptions, StdLib, Table, Value};
 
 /// The Lua half of the runtime, shared with it verbatim.
 const NGINX_LINT_LUA: &str = include_str!("../runtimes/lua/nginx_lint.lua");
+
+/// Brings the base library in line with the runtime's, which matters twice
+/// over here: a script must not pass validation by doing something the
+/// runtime refuses, and this Lua is native, so it must not be handed
+/// anything the sandboxed one would not run either. Lua does not verify
+/// bytecode, so `load` is held to text, as the runtime holds the script
+/// itself; the file functions have no file system in the runtime; print
+/// has nowhere to go there.
+const PRELUDE: &str = r#"
+local raw_load = load
+load = function(chunk, name, _mode, env) return raw_load(chunk, name, "t", env) end
+loadfile = function() return nil, "no file system in the plugin sandbox" end
+dofile = function() error("no file system in the plugin sandbox") end
+print = function() end
+"#;
 
 /// Loads `script` under `name` and checks that it returns a plugin table:
 /// `spec` a table (or a function returning one) with the required fields,
@@ -20,6 +36,7 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     // The same libraries as the runtime's shim: no io, os, package or debug.
     let libs = StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8;
     let lua = Lua::new_with(libs, LuaOptions::default())?;
+    lua.load(PRELUDE).set_name("=prelude").exec()?;
 
     let library: Table = lua.load(NGINX_LINT_LUA).set_name("=nginx_lint").eval()?;
     let require = lua.create_function(move |_, module: String| {
@@ -33,9 +50,12 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     })?;
     lua.globals().set("require", require)?;
 
+    // Text only, as the runtime loads it: bytecode would run here natively
+    // and then be refused there.
     let plugin: Value = lua
         .load(script)
         .set_name(format!("@{name}"))
+        .set_mode(ChunkMode::Text)
         .eval()
         .map_err(lua_message)?;
     let Value::Table(plugin) = plugin else {
@@ -189,6 +209,27 @@ mod tests {
             b"return { spec = function() return { name = 'x', category = 'c', description = 'd' } end, check = function() end }",
         )
         .unwrap();
+    }
+
+    /// What the runtime refuses, validation refuses too — and never runs.
+    #[test]
+    fn refuses_bytecode_as_the_runtime_does() {
+        let err = validate("rule.lua", b"\x1bLua\x54\x00").unwrap_err();
+        assert!(err.to_string().contains("binary chunk"), "{err}");
+        let err = validate("rule.lua", b"local _, err = load('\\27Lua'); error(err)").unwrap_err();
+        assert!(err.to_string().contains("binary chunk"), "{err}");
+    }
+
+    #[test]
+    fn has_no_file_system_like_the_runtime() {
+        let err = validate("rule.lua", b"dofile('/etc/passwd')").unwrap_err();
+        assert!(err.to_string().contains("no file system"), "{err}");
+        let err = validate(
+            "rule.lua",
+            b"local f, err = loadfile('/etc/passwd'); error(err)",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("no file system"), "{err}");
     }
 
     #[test]
