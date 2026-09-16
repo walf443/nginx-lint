@@ -25,4 +25,4 @@ wit-component = "=0.259.0"
 # The runtime stamps the plugin API version it was built for; the tests
 # hold it to the crate's.
 nginx-lint-plugin = { path = "../../crates/nginx-lint-plugin" }
-sha2 = "0.10"
+sha2 = "0.11"
