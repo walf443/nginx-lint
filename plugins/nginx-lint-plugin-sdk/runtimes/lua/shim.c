@@ -349,11 +349,21 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
     lua_pop(L, 1);
 
     string_field(L, index, "message", &e->message);
+    /* Omitted means warning; anything but the two names is a shape error,
+     * as `spec.severity` is to the validator, rather than a silent
+     * downgrade: check() is not run at build time, so this is the only
+     * place a hand-built finding's `severity = "Error"` can be caught. */
     lua_getfield(L, index, "severity");
-    const char *severity = lua_tostring(L, -1);
-    e->severity = (severity && strcmp(severity, "error") == 0)
-        ? NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR
-        : NGINX_LINT_PLUGIN_TYPES_SEVERITY_WARNING;
+    const char *severity = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : NULL;
+    if (lua_isnil(L, -1) || (severity && strcmp(severity, "warning") == 0)) {
+        e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_WARNING;
+    } else if (severity && strcmp(severity, "error") == 0) {
+        e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR;
+    } else if (severity) {
+        luaL_error(L, "a finding's `severity` must be \"error\" or \"warning\", not \"%s\"", severity);
+    } else {
+        luaL_error(L, "a finding's `severity` must be \"error\" or \"warning\", not a %s", luaL_typename(L, -1));
+    }
     lua_pop(L, 1);
     option_u32_field(L, index, "line", &e->line);
     option_u32_field(L, index, "column", &e->column);
