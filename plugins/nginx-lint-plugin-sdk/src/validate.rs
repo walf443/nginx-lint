@@ -41,7 +41,7 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     let lua = Lua::new_with(libs, LuaOptions::default())?;
     lua.load(PRELUDE).set_name("=prelude").exec()?;
 
-    let library: Table = lua.load(NGINX_LINT_LUA).set_name("=nginx_lint").eval()?;
+    let library: Table = lua.load(NGINX_LINT_LUA).set_name("=nginx_lint").call(())?;
     let require = lua.create_function(move |_, module: String| {
         if module == "nginx_lint" {
             Ok(library.clone())
@@ -54,12 +54,15 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     lua.globals().set("require", require)?;
 
     // Text only, as the runtime loads it: bytecode would run here natively
-    // and then be refused there.
+    // and then be refused there. Loaded as a chunk and called, not
+    // `eval`ed: eval first tries the script as an expression, so a bare
+    // `{ spec = ..., check = ... }` missing its `return` would pass here and
+    // then fail to parse in the runtime, which only knows chunks.
     let plugin: Value = lua
         .load(script)
         .set_name(format!("@{name}"))
         .set_mode(ChunkMode::Text)
-        .eval()
+        .call(())
         .map_err(lua_message)?;
     let Value::Table(plugin) = plugin else {
         bail!(
@@ -203,6 +206,29 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().starts_with("rule.lua:2:"), "{err}");
         assert!(err.to_string().contains("unexpected symbol"), "{err}");
+    }
+
+    /// A script that is a single expression, such as the plugin table with
+    /// its `return` forgotten, is a syntax error to the runtime; it must be
+    /// one here too, not silently evaluated as an expression.
+    #[test]
+    fn rejects_a_script_that_is_only_an_expression() {
+        let err = validate(
+            "rule.lua",
+            b"{\n  spec = { name = 'x', category = 'c', description = 'd' },\n  check = function() end,\n}\n",
+        )
+        .unwrap_err();
+        assert!(err.to_string().starts_with("rule.lua:1:"), "{err}");
+        assert!(
+            err.to_string().contains("unexpected symbol near '{'"),
+            "{err}"
+        );
+        let err = validate(
+            "rule.lua",
+            b"(function() return { check = function() end } end)()",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must return a table"), "{err}");
     }
 
     #[test]
