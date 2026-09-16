@@ -87,15 +87,17 @@ static const char *error_message(lua_State *L) {
     return lua_tostring(L, -1);
 }
 
-/* Whether the table at index has no array part but does have fields: a
- * single record handed over where a list of them was expected. */
-static int is_lone_record(lua_State *L, int index) {
+/* Whether the table at index has no array part but does carry `key`, a
+ * field every record of the expected kind has: a single record handed over
+ * where a list of them was expected. Keyed on purpose rather than "has any
+ * field at all": an empty list with bookkeeping fields, such as the
+ * `{ n = 0 }` of table.pack(), is a legitimate empty list. */
+static int is_lone_record(lua_State *L, int index, const char *key) {
     index = lua_absindex(L, index);
     if (lua_rawlen(L, index) != 0) return 0;
-    lua_pushnil(L);
-    if (lua_next(L, index) == 0) return 0;
-    lua_pop(L, 2);
-    return 1;
+    int found = lua_getfield(L, index, key) != LUA_TNIL;
+    lua_pop(L, 1);
+    return found;
 }
 
 /* Runs the plugin script, keeping its table in the registry. Returns NULL on
@@ -360,7 +362,7 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
     if (lua_istable(L, -1)) {
         size_t n = lua_rawlen(L, -1);
         /* `fixes = d:replace_with(...)` where `:with_fix(...)` was meant */
-        if (is_lone_record(L, -1)) {
+        if (is_lone_record(L, -1, "new_text")) {
             luaL_error(L, "a finding's `fixes` must be a list of fixes; got a single fix (use :with_fix or wrap it in { })");
         }
         e->fixes.ptr = checked_alloc(L, n * sizeof(nginx_lint_plugin_types_fix_t));
@@ -388,7 +390,7 @@ static int convert_findings(lua_State *L) {
     size_t n = lua_rawlen(L, 2);
     /* `return found` where `return { found }` was meant: a single finding
      * has no array part, and would otherwise read as none. */
-    if (is_lone_record(L, 2)) {
+    if (is_lone_record(L, 2, "message")) {
         return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
     }
     ret->ptr = checked_alloc(L, n * sizeof(plugin_lint_error_t));

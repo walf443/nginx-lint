@@ -64,6 +64,9 @@ return {
         end
       end
     end)
-    return errors
+    -- Returned through table.pack so that on good.conf, where nothing is
+    -- found, the list is `{ n = 0 }`: a bookkeeping field on an empty list,
+    -- which the runtime must read as no findings rather than as one.
+    return table.pack(table.unpack(errors))
   end,
 }
