@@ -1,0 +1,7 @@
+# Inputs to the Lua runtime's stamp (see plugins/nginx-lint-plugin-sdk/src/lib.rs):
+# the committed runtime.core.wasm records a hash of their bytes, so an
+# autocrlf checkout would report it stale without any change.
+plugins/nginx-lint-plugin-sdk/runtimes/lua/* text eol=lf
+wit/*.wit text eol=lf
+# The runtime itself is binary; the pattern above must not normalize it.
+plugins/nginx-lint-plugin-sdk/runtimes/lua/*.wasm binary
