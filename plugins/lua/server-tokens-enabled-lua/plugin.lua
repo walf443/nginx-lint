@@ -19,7 +19,7 @@ return {
     name = "server-tokens-enabled-lua",
     category = "security",
     description = "Detects when server_tokens is enabled (exposes nginx version)",
-    severity = "warning",
+    severity = nginx_lint.SEVERITY_WARNING,
     why = "Server response headers reveal the exact nginx version, which tells an attacker which published vulnerabilities to try.",
     bad_example = BAD,
     good_example = GOOD,

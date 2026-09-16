@@ -3,6 +3,12 @@
 -- `require("nginx_lint")`.
 local M = {}
 
+-- The two severities the host knows, for `spec.severity` and for a finding
+-- built by hand rather than through M.warning / M.error. The runtime
+-- rejects any other value for either.
+M.SEVERITY_ERROR = "error"
+M.SEVERITY_WARNING = "warning"
+
 local Directive = {}
 Directive.__index = Directive
 
@@ -128,8 +134,8 @@ local function new_error(severity, directive, message)
   }, LintError)
 end
 
-function M.warning(directive, message) return new_error("warning", directive, message) end
-function M.error(directive, message) return new_error("error", directive, message) end
+function M.warning(directive, message) return new_error(M.SEVERITY_WARNING, directive, message) end
+function M.error(directive, message) return new_error(M.SEVERITY_ERROR, directive, message) end
 
 function LintError:with_fix(fix)
   self.fixes[#self.fixes + 1] = fix

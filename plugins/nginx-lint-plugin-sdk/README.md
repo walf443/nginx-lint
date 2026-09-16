@@ -41,7 +41,7 @@ return {
     name = "server-tokens-enabled-lua",
     category = "security",
     description = "Detects when server_tokens is enabled",
-    severity = "warning",
+    severity = nginx_lint.SEVERITY_WARNING,
     bad_example = "http {\n    server_tokens on;\n}\n",
     good_example = "http {\n    server_tokens off;\n}\n",
   },
@@ -67,7 +67,10 @@ ones with that name. A directive has `name`, `args` (each with `value`,
 `arg_count`, `arg_values`, `is_inside`, `parent`, and the fix builders
 `replace_with`, `delete_line`, `insert_after`, `insert_before`. Findings
 come from `nginx_lint.warning(directive, message)` and
-`nginx_lint.error(...)`, with `:with_fix(fix)` to attach a fix.
+`nginx_lint.error(...)`, with `:with_fix(fix)` to attach a fix. The two
+severities are `nginx_lint.SEVERITY_ERROR` and `nginx_lint.SEVERITY_WARNING`,
+for `spec.severity` and for a finding built without those constructors;
+the runtime rejects any other value.
 
 The sandbox has no file system, clock or environment: `io`, `os`,
 `package` and `debug` are absent, `require` knows only `nginx_lint`, and
