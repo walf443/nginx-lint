@@ -283,7 +283,14 @@ mod tests {
             let bytes = std::fs::read(root.join(input)).unwrap_or_else(|e| panic!("{input}: {e}"));
             hasher.update(bytes);
         }
-        format!("{:x}", hasher.finalize())
+        // Lowercase, zero-padded, the way sha256sum prints it (see the
+        // runtime Makefile). Spelled out because the digest array no
+        // longer implements LowerHex as of sha2 0.11.
+        hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
     }
 
     /// The committed runtime was built from the tree as it is now. When
