@@ -185,6 +185,24 @@ The host then sends a config pruned to just those directives (plus the ancestor 
 
 Don't declare this if `check()` reads comments or blank lines (`ConfigItem::Comment`/`ConfigItem::BlankLine`): the pruned config never includes them, regardless of `relevant_directives()`.
 
+## Several Rules in One Component
+
+`export_component_plugin!` makes a component that is one rule. To ship several
+rules as one `.wasm`, implement each as its own `Plugin` and list them in
+`export_component_plugins!`:
+
+```rust
+nginx_lint_plugin::export_component_plugins!(NoAutoindexPlugin, NoServerTokensPlugin);
+```
+
+The host loads the component as one rule per plugin, each with its own name,
+`why` text and examples, and each enabled, disabled and ignored on its own.
+The config is reconstructed once per `check` and shared by the rules the host
+asked for; `relevant_directives()` still applies, pruning to the union of the
+asked rules' names when every one of them declares it.
+
+`plugins/rust/security-bundle` is a two-rule example.
+
 ## Testing
 
 The SDK provides `PluginTestRunner` and `TestCase` for testing plugins:
