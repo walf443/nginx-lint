@@ -3233,6 +3233,23 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
         "the duplicate file must be reported by name\nstderr:\n{stderr}"
     );
 
+    // `test-plugins` refuses the directory: b.wasm would never run
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["test-plugins", "--plugins"])
+        .arg(&plugins)
+        .output()
+        .expect("Failed to run nginx-lint test-plugins");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "test-plugins must refuse a directory with a duplicate rule\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("1 of the 2 .wasm file(s)") && stderr.contains("skipped"),
+        "stderr:\n{stderr}"
+    );
+
     // `why --list` shows the name once as well
     let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
         .args(["why", "--list", "--plugins"])

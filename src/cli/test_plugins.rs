@@ -93,17 +93,19 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // The loader warns about a component it cannot instantiate and carries
-    // on, which is right for linting — one broken plugin should not stop the
-    // run — and wrong here: a plugin that does not load is the first thing a
-    // test command should refuse to pass. It exits 2 rather than counting
-    // towards the failed checks: a component that cannot be instantiated is a
-    // build problem, not a rule that behaves wrongly, and reporting it as a
-    // failed check would print "1 failed" with nothing having been checked.
+    // The loader warns about a component it cannot instantiate, or whose
+    // rule name an earlier file already provides, and carries on, which is
+    // right for linting — one broken plugin should not stop the run — and
+    // wrong here: a plugin that does not load, or that would never run, is
+    // the first thing a test command should refuse to pass. It exits 2
+    // rather than counting towards the failed checks: a component that
+    // cannot be instantiated is a build problem, not a rule that behaves
+    // wrongly, and reporting it as a failed check would print "1 failed"
+    // with nothing having been checked.
     let found = wasm_files(dir);
     if found > plugins.len() {
         eprintln!(
-            "Error: {} of the {} .wasm file(s) in {} did not load (see the warnings above)",
+            "Error: {} of the {} .wasm file(s) in {} did not load or were skipped (see the warnings above)",
             found - plugins.len(),
             found,
             dir.display()
