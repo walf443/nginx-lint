@@ -157,9 +157,12 @@ jobs:
         run: cargo check --no-default-features --features cli,wasm-builtin-plugins
       - name: Run the tests that need a built component
         # These skip themselves when target/builtin-plugins is empty, which
-        # is the case in the plain test job; here the components are present.
-        # Same feature set as the check above, so the dependency build is
-        # shared with it.
+        # is the case in the plain test job; here the components are present,
+        # and the variable turns a missing one into a failure instead of a
+        # skip. Same feature set as the check above, so the dependency build
+        # is shared with it.
+        env:
+          NGINX_LINT_REQUIRE_BUILTIN_COMPONENTS: "1"
         run: cargo test --no-default-features --features cli,wasm-builtin-plugins --test integration_test test_duplicate_plugin_rule_name_is_skipped
 
   build-host:
