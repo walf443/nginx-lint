@@ -109,9 +109,10 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 }
             }
             Err(e) => {
-                // A Go plugin run without --allow-wasi-plugins is the common
-                // case here, so the loader's own message is shown in full
-                eprintln!("Error: {} did not load: {}", file.path.display(), e);
+                // The loader's own message, in full: a Go plugin run without
+                // --allow-wasi-plugins is the common case here. Worded as the
+                // loader's warning is, which the CI integration test greps.
+                eprintln!("Error: Failed to load plugin {:?}: {}", file.path, e);
                 unusable += 1;
             }
         }
