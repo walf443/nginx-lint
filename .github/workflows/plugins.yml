@@ -415,9 +415,11 @@ jobs:
         working-directory: plugins/rust/security-bundle
         run: make test-e2e
       - name: Run the host's bundle tests
-        # The unit tests in src/plugin/component_rule.rs that load the
-        # bundle skip themselves when it is not built; here it is.
-        run: cargo test --features plugins --lib plugin::component_rule::tests::bundle
+        # The tests that load the bundle skip themselves when it is not
+        # built; here it is.
+        run: |
+          cargo test --features plugins --lib plugin::component_rule::tests::bundle
+          cargo test --features plugins --test integration_test bundle
 
   wasm-integration:
     name: WASM Integration Test

@@ -3276,3 +3276,75 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
         "why --list must list a name once:\n{listing}"
     );
 }
+
+/// `[rules.<name>] enabled = false` silences an external rule, and one rule
+/// of a bundle in particular: a bundle has no file to delete, so the config
+/// is the only way to run some of its rules and not others. Needs the
+/// example bundle built (`make -C plugins/rust/security-bundle build`);
+/// skips otherwise, as the host's own bundle tests do.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_config_disables_one_rule_of_a_bundle() {
+    use std::process::Command;
+
+    let bundle_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-bundle");
+    if !bundle_dir.join("security-bundle.wasm").exists() {
+        eprintln!("SKIP: run `make -C plugins/rust/security-bundle build` first");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("nginx.conf");
+    fs::write(
+        &conf,
+        "http {\n    server_tokens on;\n    server {\n        location / {\n            autoindex on;\n        }\n    }\n}\n",
+    )
+    .unwrap();
+    let config = dir.path().join("nginx-lint.toml");
+    fs::write(
+        &config,
+        "[rules.autoindex-enabled-bundle]\nenabled = false\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--plugins")
+        .arg(&bundle_dir)
+        .args([
+            "--rule-only",
+            "server-tokens-enabled-bundle,autoindex-enabled-bundle",
+        ])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Asking for the disabled rule by name is reported the way a disabled
+    // builtin is, rather than as a rule that does not exist
+    assert!(
+        stderr.contains("not loaded in this build") && stderr.contains("autoindex-enabled-bundle"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--plugins")
+        .arg(&bundle_dir)
+        .args(["--rule-only", "server-tokens-enabled-bundle"])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("server-tokens-enabled-bundle"),
+        "the enabled rule of the bundle must still run:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("autoindex-enabled-bundle"),
+        "the disabled rule of the bundle must not run:\n{stdout}"
+    );
+}
