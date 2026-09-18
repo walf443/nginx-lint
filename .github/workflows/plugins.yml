@@ -405,6 +405,8 @@ jobs:
             | tar xz --strip-components=1 --wildcards "*/wasm-tools"
           mv wasm-tools /usr/local/bin/
           wasm-tools --version
+      - name: Run the bundle's unit tests
+        run: cargo test -p security-bundle-plugin
       - name: Build the host
         run: cargo build --features plugins
       - name: Build and test the bundle
