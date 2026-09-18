@@ -303,7 +303,7 @@ impl PluginLoader {
             let name = rule.name();
             if reserved.contains(&name) {
                 eprintln!(
-                    "Warning: skipping rule '{}' from {}: a builtin rule has that name",
+                    "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
                     name,
                     file.path.display()
                 );

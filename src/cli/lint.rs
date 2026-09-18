@@ -82,8 +82,11 @@ enum FileResult {
 fn reserved_rule_names(linter: &Linter) -> Vec<String> {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     let builtin: &[&str] = nginx_lint::plugin::BUILTIN_PLUGIN_NAMES;
+    // The one builtin a build without them still ships, natively. Listed
+    // here rather than found on the linter because a disabled rule is not
+    // registered, and its name is reserved all the same.
     #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
-    let builtin: &[&str] = &[];
+    let builtin: &[&str] = &["invalid-directive-context"];
 
     let mut names: Vec<String> = LintConfig::NATIVE_RULE_NAMES
         .iter()

@@ -3233,7 +3233,7 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     for file in ["a.wasm", "b.wasm"] {
         assert!(
-            stderr.contains(&format!("{file}: a builtin rule has that name")),
+            stderr.contains(&format!("{file}: the host ships a rule of that name")),
             "{file} must be skipped for the builtin's name\nstderr:\n{stderr}"
         );
     }
