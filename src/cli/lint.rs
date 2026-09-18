@@ -690,9 +690,25 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             );
                         }
                     }
+                    // A rule name is registered once. Every consumer of a
+                    // name — findings, `[rules.<name>]`, ignore comments,
+                    // `why` — assumes one rule behind it, and two rules
+                    // sharing one would report every finding twice with no
+                    // way to configure them apart. The first registration
+                    // wins: builtins, then plugins in file-name order.
+                    let mut registered = linter.rule_names();
                     for plugin in plugins {
+                        let name = plugin.name();
+                        if !registered.insert(name.to_string()) {
+                            eprintln!(
+                                "Warning: skipping rule '{}' from {}: a rule with that name is already registered",
+                                name,
+                                plugins_dir.display()
+                            );
+                            continue;
+                        }
                         if cli.verbose {
-                            eprintln!("  - {} ({})", plugin.name(), plugin.description());
+                            eprintln!("  - {} ({})", name, plugin.description());
                         }
                         linter.add_rule(plugin);
                     }

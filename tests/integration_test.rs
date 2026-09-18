@@ -3177,3 +3177,57 @@ fn test_fix_reports_positions_of_fixed_file() {
         "--fix must report exactly what a plain lint of the fixed file reports"
     );
 }
+
+/// Two rules with one name are not both registered: the first wins and the
+/// second is skipped with a warning, so a finding is reported once whether
+/// the name collides with a builtin or with another plugin file. Needs a
+/// built builtin component (`make build-plugins`); skips otherwise.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_duplicate_plugin_rule_name_is_skipped() {
+    use std::process::Command;
+
+    let wasm =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("target/builtin-plugins/autoindex_enabled.wasm");
+    if !wasm.exists() {
+        eprintln!("SKIP: run `make build-plugins` first");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let plugins = dir.path().join("plugins");
+    fs::create_dir(&plugins).unwrap();
+    // The same rule twice: a.wasm registers (or collides with the builtin of
+    // the same name, depending on the build), b.wasm always collides
+    fs::copy(&wasm, plugins.join("a.wasm")).unwrap();
+    fs::copy(&wasm, plugins.join("b.wasm")).unwrap();
+    let conf = dir.path().join("nginx.conf");
+    fs::write(
+        &conf,
+        "http {\n    server {\n        location / {\n            autoindex on;\n        }\n    }\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--plugins")
+        .arg(&plugins)
+        .args(["--rule-only", "autoindex-enabled"])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        stdout
+            .matches("warning[security/autoindex-enabled]")
+            .count(),
+        1,
+        "the finding must be reported once\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("skipping rule 'autoindex-enabled'")
+            && stderr.contains("already registered"),
+        "the duplicate must be reported\nstderr:\n{stderr}"
+    );
+}

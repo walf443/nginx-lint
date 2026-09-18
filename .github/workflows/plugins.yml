@@ -155,6 +155,10 @@ jobs:
         # behind the wasm-builtin-plugins cfg could break unnoticed —
         # `cargo check` catches that without paying for a release build.
         run: cargo check --no-default-features --features cli,wasm-builtin-plugins
+      - name: Run the tests that need a built component
+        # These skip themselves when target/builtin-plugins is empty, which
+        # is the case in the plain test job; here the components are present.
+        run: cargo test --features plugins --test integration_test test_duplicate_plugin_rule_name_is_skipped
 
   build-host:
     name: Build Host Binaries
