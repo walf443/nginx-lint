@@ -104,6 +104,7 @@ pub mod regex_scan;
 
 pub mod prelude {
     pub use super::export_component_plugin;
+    pub use super::export_component_plugins;
     pub use super::helpers;
     pub use super::types::API_VERSION;
     pub use super::types::*;
@@ -172,6 +173,126 @@ macro_rules! export_component_plugin {
             }
 
     $crate::wit_guest::export!(ComponentExport with_types_in $crate::wit_guest);
+        };
+    };
+}
+
+/// Macro to export several plugins as one WIT component
+///
+/// The component targets the `plugin-bundle` world: it carries every rule
+/// listed, and the host loads each as its own rule. Rules are listed in
+/// the order they are given; the config is reconstructed once per `check`
+/// and shared by the rules the host asked for.
+///
+/// `relevant_directives` still applies: when every rule the host asked for
+/// declares one, the snapshot is pruned to the union of their names.
+/// One rule without a declaration means the whole config is fetched.
+///
+/// # Example
+///
+/// ```ignore
+/// use nginx_lint_plugin::prelude::*;
+///
+/// #[derive(Default)]
+/// struct ServerTokens;
+/// #[derive(Default)]
+/// struct Autoindex;
+///
+/// impl Plugin for ServerTokens { /* ... */ }
+/// impl Plugin for Autoindex { /* ... */ }
+///
+/// export_component_plugins!(ServerTokens, Autoindex);
+/// ```
+#[macro_export]
+macro_rules! export_component_plugins {
+    ($($plugin_type:ty),+ $(,)?) => {
+        #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
+        const _: () = {
+            use $crate::wit_guest::bundle::Guest;
+
+            /// One rule of the bundle, behind a uniform signature so the
+            /// export can loop over rules of different types
+            struct Rule {
+                name: String,
+                relevant_directives: Option<&'static [&'static str]>,
+                spec: fn() -> $crate::PluginSpec,
+                check: fn(&$crate::Config, &str) -> Vec<$crate::LintError>,
+            }
+
+            static RULES: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
+
+            fn rules() -> &'static [Rule] {
+                RULES.get_or_init(|| {
+                    vec![
+                        $(
+                            {
+                                static PLUGIN: std::sync::OnceLock<$plugin_type> =
+                                    std::sync::OnceLock::new();
+                                fn plugin() -> &'static $plugin_type {
+                                    PLUGIN.get_or_init(|| <$plugin_type>::default())
+                                }
+                                Rule {
+                                    name: $crate::Plugin::spec(plugin()).name,
+                                    relevant_directives: $crate::Plugin::relevant_directives(plugin()),
+                                    spec: || $crate::Plugin::spec(plugin()),
+                                    check: |config, path| $crate::Plugin::check(plugin(), config, path),
+                                }
+                            },
+                        )+
+                    ]
+                })
+            }
+
+            struct ComponentExport;
+
+            impl Guest for ComponentExport {
+                fn specs() -> Vec<$crate::wit_guest::nginx_lint::plugin::types::PluginSpec> {
+                    rules()
+                        .iter()
+                        .map(|rule| $crate::wit_guest::convert_spec((rule.spec)()))
+                        .collect()
+                }
+
+                fn check(
+                    config: &$crate::wit_guest::nginx_lint::plugin::config_api::Config,
+                    path: String,
+                    names: Vec<String>,
+                ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
+                    let asked: Vec<&Rule> = rules()
+                        .iter()
+                        .filter(|rule| names.iter().any(|name| *name == rule.name))
+                        .collect();
+                    if asked.is_empty() {
+                        return Vec::new();
+                    }
+
+                    // Prune the snapshot only when every asked rule can
+                    // live with a pruned one
+                    let mut relevant: Vec<&str> = Vec::new();
+                    let all_declare = asked.iter().all(|rule| match rule.relevant_directives {
+                        Some(names) => {
+                            relevant.extend_from_slice(names);
+                            true
+                        }
+                        None => false,
+                    });
+                    let config = if all_declare {
+                        relevant.sort_unstable();
+                        relevant.dedup();
+                        $crate::wit_guest::reconstruct_config_filtered(config, &relevant)
+                    } else {
+                        $crate::wit_guest::reconstruct_config(config)
+                    };
+
+                    asked
+                        .iter()
+                        .flat_map(|rule| (rule.check)(&config, &path))
+                        .map($crate::wit_guest::convert_lint_error)
+                        .collect()
+                }
+            }
+
+            $crate::wit_guest::bundle::export_bundle!(ComponentExport with_types_in $crate::wit_guest::bundle);
         };
     };
 }

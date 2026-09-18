@@ -382,6 +382,41 @@ jobs:
           path: plugins/lua/server-tokens-enabled-lua/server-tokens-enabled-lua.wasm
           retention-days: 1
 
+  rust-bundle-plugin:
+    name: Rust Bundle Plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: "rust-bundle-plugin"
+      - name: Install wasm-tools
+        run: |
+          WASM_TOOLS_VERSION=1.245.1
+          curl -sSfL "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/wasm-tools-${WASM_TOOLS_VERSION}-x86_64-linux.tar.gz" \
+            | tar xz --strip-components=1 --wildcards "*/wasm-tools"
+          mv wasm-tools /usr/local/bin/
+          wasm-tools --version
+      - name: Build the host
+        run: cargo build --features plugins
+      - name: Build and test the bundle
+        # A plugin-bundle component: two rules in one .wasm. test-plugins
+        # loads it as two rules and checks each against its own examples.
+        working-directory: plugins/rust/security-bundle
+        run: make test-e2e
+      - name: Run the host's bundle tests
+        # The unit tests in src/plugin/component_rule.rs that load the
+        # bundle skip themselves when it is not built; here it is.
+        run: cargo test --features plugins --lib plugin::component_rule::tests::bundle
+
   wasm-integration:
     name: WASM Integration Test
     needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, lua-plugin, build-host]

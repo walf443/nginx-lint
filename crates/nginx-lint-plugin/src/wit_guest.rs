@@ -10,6 +10,26 @@ wit_bindgen::generate!({
     pub_export_macro: true,
 });
 
+/// Bindings for the `plugin-bundle` world (see
+/// [`export_component_plugins!`](crate::export_component_plugins)). It
+/// imports the same interfaces as `plugin`, which are mapped onto the
+/// modules generated above so the conversions in this module serve both
+/// worlds; only the world's own `Guest` trait and export macro are new.
+pub mod bundle {
+    wit_bindgen::generate!({
+        path: "wit/nginx-lint-plugin.wit",
+        world: "plugin-bundle",
+        pub_export_macro: true,
+        export_macro_name: "export_bundle",
+        with: {
+            "nginx-lint:plugin/types@4.0.0": super::nginx_lint::plugin::types,
+            "nginx-lint:plugin/data-types@4.0.0": super::nginx_lint::plugin::data_types,
+            "nginx-lint:plugin/parser-types@4.0.0": super::nginx_lint::plugin::parser_types,
+            "nginx-lint:plugin/config-api@4.0.0": super::nginx_lint::plugin::config_api,
+        },
+    });
+}
+
 /// Convert SDK PluginSpec to WIT PluginSpec
 pub fn convert_spec(sdk_spec: super::PluginSpec) -> nginx_lint::plugin::types::PluginSpec {
     nginx_lint::plugin::types::PluginSpec {
