@@ -3178,10 +3178,11 @@ fn test_fix_reports_positions_of_fixed_file() {
     );
 }
 
-/// Two rules with one name are not both registered: the first wins and the
-/// second is skipped with a warning, so a finding is reported once whether
-/// the name collides with a builtin or with another plugin file. Needs a
-/// built builtin component (`make build-plugins`); skips otherwise.
+/// A rule name runs once: a plugin named after a builtin this build ships
+/// is skipped, and so is a second file providing a name an earlier file
+/// already does, each with a warning naming the file. So a finding is
+/// reported once. Needs a built builtin component (`make build-plugins`);
+/// skips otherwise.
 #[cfg(feature = "plugins")]
 #[test]
 fn test_duplicate_plugin_rule_name_is_skipped() {
@@ -3225,12 +3226,19 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
         1,
         "the finding must be reported once\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    // b.wasm always loses to a.wasm, whatever the build's builtins
+    // Which file is skipped for which reason depends on whether this build
+    // ships the builtin of that name; either way both files are named
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    for file in ["a.wasm", "b.wasm"] {
+        assert!(
+            stderr.contains(&format!("{file}: a builtin rule has that name")),
+            "{file} must be skipped for the builtin's name\nstderr:\n{stderr}"
+        );
+    }
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
     assert!(
-        stderr.contains("skipping rule 'autoindex-enabled'")
-            && stderr.contains("b.wasm: already provided by")
-            && stderr.contains("a.wasm"),
-        "the duplicate file must be reported by name\nstderr:\n{stderr}"
+        stderr.contains("b.wasm: already provided by") && stderr.contains("a.wasm"),
+        "b.wasm must be skipped in favour of a.wasm\nstderr:\n{stderr}"
     );
 
     // `test-plugins` refuses the directory: b.wasm would never run

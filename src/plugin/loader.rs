@@ -66,6 +66,12 @@ pub struct PluginFile {
     pub loaded: Result<Box<dyn LintRule>, PluginError>,
 }
 
+/// A rule that loaded and will run, with the file it came from
+pub struct LoadedPlugin {
+    pub path: PathBuf,
+    pub rule: Box<dyn LintRule>,
+}
+
 /// Plugin loader that discovers and loads WASM plugins from a directory
 pub struct PluginLoader {
     engine: Engine,
@@ -258,37 +264,65 @@ impl PluginLoader {
         self.timeout_enabled
     }
 
-    /// Load all WASM plugins from a directory.
+    /// Load all WASM plugins from a directory, keeping only the rules. See
+    /// [`load_plugins_reserving`](Self::load_plugins_reserving).
+    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        Ok(self
+            .load_plugins_reserving(dir, &[])?
+            .into_iter()
+            .map(|plugin| plugin.rule)
+            .collect())
+    }
+
+    /// Load all WASM plugins from a directory for a lint run.
     ///
     /// A file that fails to load is reported as a warning and left out: one
     /// broken plugin should not stop a lint run. A rule name is provided
     /// once: everything keyed by name (findings, configuration, ignore
-    /// comments) assumes one rule behind it, so when two files provide the
-    /// same rule the earlier one wins and the later is reported as a warning
-    /// naming both files. Results are ordered by file name.
-    ///
-    /// [`load_plugin_files`](Self::load_plugin_files) is the same load
-    /// without the reporting, for a caller that wants to judge failures
-    /// and duplicates itself.
-    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
-        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
+    /// comments, `why`) assumes one rule behind it. A rule whose name is in
+    /// `reserved` — the names of the rules the host itself ships — is
+    /// skipped, and so is a rule an earlier file already provides; each is
+    /// reported as a warning naming the file. Results are ordered by file
+    /// name.
+    pub fn load_plugins_reserving(
+        &self,
+        dir: &Path,
+        reserved: &[&str],
+    ) -> Result<Vec<LoadedPlugin>, PluginError> {
+        let mut plugins: Vec<LoadedPlugin> = Vec::new();
         let mut provided_by: std::collections::HashMap<String, PathBuf> =
             std::collections::HashMap::new();
         for file in self.load_plugin_files(dir)? {
-            match file.loaded {
-                Ok(plugin) => match provided_by.entry(plugin.name().to_string()) {
-                    std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
-                        "Warning: skipping rule '{}' from {}: already provided by {}",
-                        plugin.name(),
-                        file.path.display(),
-                        earlier.get().display()
-                    ),
-                    std::collections::hash_map::Entry::Vacant(slot) => {
-                        slot.insert(file.path);
-                        plugins.push(plugin);
-                    }
-                },
-                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e),
+            let rule = match file.loaded {
+                Ok(rule) => rule,
+                Err(e) => {
+                    eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e);
+                    continue;
+                }
+            };
+            let name = rule.name();
+            if reserved.contains(&name) {
+                eprintln!(
+                    "Warning: skipping rule '{}' from {}: a builtin rule has that name",
+                    name,
+                    file.path.display()
+                );
+                continue;
+            }
+            match provided_by.entry(name.to_string()) {
+                std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
+                    "Warning: skipping rule '{}' from {}: already provided by {}",
+                    name,
+                    file.path.display(),
+                    earlier.get().display()
+                ),
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(file.path.clone());
+                    plugins.push(LoadedPlugin {
+                        path: file.path,
+                        rule,
+                    });
+                }
             }
         }
 

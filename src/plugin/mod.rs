@@ -18,7 +18,7 @@ pub use component_rule::ComponentLintRule;
 #[cfg(feature = "plugins")]
 pub use error::PluginError;
 #[cfg(feature = "plugins")]
-pub use loader::{CompilationCache, PluginFile, PluginLoader};
+pub use loader::{CompilationCache, LoadedPlugin, PluginFile, PluginLoader};
 
 /// Current API version for the plugin interface.
 ///

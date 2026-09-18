@@ -73,6 +73,20 @@ enum FileResult {
 /// Check whether a rule name corresponds to a known builtin rule, regardless
 /// of whether it is currently registered on the linter. Used by `--rule-only`
 /// validation to distinguish "disabled in config" from "no such rule".
+/// The names of the rules this build ships: the native rules, plus the
+/// builtin plugins when they are compiled in. A plugin cannot take one of
+/// these, whether or not the rule is enabled: `[rules.<name>]`, ignore
+/// comments, `why` and the version gate all address the builtin by that
+/// name. A build without builtins reserves only the native names, so the
+/// builtin components can still be loaded through --plugins there.
+#[cfg(feature = "plugins")]
+fn builtin_rule_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = LintConfig::NATIVE_RULE_NAMES.to_vec();
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    names.extend_from_slice(nginx_lint::plugin::BUILTIN_PLUGIN_NAMES);
+    names
+}
+
 fn rule_exists_in_catalog(name: &str) -> bool {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     {
@@ -671,7 +685,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         match PluginLoader::new_with_cache(compilation_cache)
             .map(|loader| loader.with_wasi(allow_wasi_plugins))
         {
-            Ok(loader) => match loader.load_plugins(plugins_dir) {
+            Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &builtin_rule_names()) {
                 Ok(plugins) => {
                     if cli.verbose {
                         eprintln!(
@@ -690,28 +704,18 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             );
                         }
                     }
-                    // A rule name is registered once. Every consumer of a
-                    // name — findings, `[rules.<name>]`, ignore comments,
-                    // `why` — assumes one rule behind it, and two rules
-                    // sharing one would report every finding twice with no
-                    // way to configure them apart. The loader has already
-                    // kept one rule per name within the directory, so what
-                    // is left to collide with is a builtin.
-                    let registered = linter.rule_names();
+                    // One rule per name, and none named after a builtin:
+                    // the loader has already skipped the others, by file
                     for plugin in plugins {
-                        let name = plugin.name();
-                        if registered.contains(name) {
-                            eprintln!(
-                                "Warning: skipping rule '{}' from {}: a builtin rule of that name is registered",
-                                name,
-                                plugins_dir.display()
-                            );
-                            continue;
-                        }
                         if cli.verbose {
-                            eprintln!("  - {} ({})", name, plugin.description());
+                            eprintln!(
+                                "  - {} ({}) [{}]",
+                                plugin.rule.name(),
+                                plugin.rule.description(),
+                                plugin.path.display()
+                            );
                         }
-                        linter.add_rule(plugin);
+                        linter.add_rule(plugin.rule);
                     }
                 }
                 Err(e) => {
