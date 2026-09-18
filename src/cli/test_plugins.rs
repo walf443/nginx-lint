@@ -68,49 +68,66 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let plugins = match loader.load_plugins(dir) {
-        Ok(plugins) => plugins,
+    let files = match loader.load_plugin_files(dir) {
+        Ok(files) => files,
         Err(e) => {
             eprintln!("Error loading plugins: {}", e);
             return ExitCode::from(2);
         }
     };
-
-    if plugins.is_empty() {
-        // The loader warns about each component it could not instantiate and
-        // carries on, so an empty result means either an empty directory or a
-        // directory where everything failed — a Go plugin run without
-        // --allow-wasi-plugins is the common second case, and saying "no
-        // plugins found" about a directory full of them is unhelpful.
-        match wasm_files(dir) {
-            0 => eprintln!("Error: no .wasm files in {}", dir.display()),
-            found => eprintln!(
-                "Error: none of the {} .wasm file(s) in {} could be loaded (see the warnings above)",
-                found,
-                dir.display()
-            ),
-        }
+    if files.is_empty() {
+        eprintln!("Error: no .wasm files in {}", dir.display());
         return ExitCode::from(2);
     }
 
-    // The loader warns about a component it cannot instantiate, or whose
-    // rule name an earlier file already provides, and carries on, which is
-    // right for linting — one broken plugin should not stop the run — and
-    // wrong here: a plugin that does not load, or that would never run, is
-    // the first thing a test command should refuse to pass. It exits 2
-    // rather than counting towards the failed checks: a component that
-    // cannot be instantiated is a build problem, not a rule that behaves
-    // wrongly, and reporting it as a failed check would print "1 failed"
-    // with nothing having been checked.
-    let found = wasm_files(dir);
-    if found > plugins.len() {
+    // `lint` warns about a component it cannot instantiate, or whose rule
+    // name an earlier file already provides, and carries on, which is right
+    // for linting — one broken plugin should not stop the run — and wrong
+    // here: a plugin that does not load, or that would never run, is the
+    // first thing a test command should refuse to pass. Each is reported
+    // as its own error, and the run exits 2 rather than counting them
+    // towards the failed checks: a component that cannot be instantiated,
+    // or two that claim one name, is a build problem, not a rule that
+    // behaves wrongly, and reporting it as a failed check would print
+    // "1 failed" with nothing having been checked.
+    let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
+    let mut provided_by: std::collections::HashMap<&str, &Path> = std::collections::HashMap::new();
+    let mut unusable = 0;
+    for (path, result) in &files {
+        match result {
+            Ok(plugin) => {
+                if let Some(earlier) = provided_by.get(plugin.name()) {
+                    eprintln!(
+                        "Error: rule '{}' is provided by both {} and {}",
+                        plugin.name(),
+                        earlier.display(),
+                        path.display()
+                    );
+                    unusable += 1;
+                } else {
+                    provided_by.insert(plugin.name(), path);
+                }
+            }
+            Err(e) => {
+                // A Go plugin run without --allow-wasi-plugins is the common
+                // case here, so the loader's own message is shown in full
+                eprintln!("Error: {} did not load: {}", path.display(), e);
+                unusable += 1;
+            }
+        }
+    }
+    if unusable > 0 {
         eprintln!(
-            "Error: {} of the {} .wasm file(s) in {} did not load or were skipped (see the warnings above)",
-            found - plugins.len(),
-            found,
+            "Error: {} of the {} .wasm file(s) in {} cannot be tested",
+            unusable,
+            files.len(),
             dir.display()
         );
         return ExitCode::from(2);
+    }
+    for (_, result) in files {
+        // Every file loaded, and every rule name is provided once
+        plugins.extend(result.ok());
     }
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
@@ -183,17 +200,6 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         return ExitCode::from(1);
     }
     ExitCode::SUCCESS
-}
-
-fn wasm_files(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(Result::ok)
-                .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "wasm"))
-                .count()
-        })
-        .unwrap_or(0)
 }
 
 fn test_plugin(plugin: &dyn LintRule, fixtures: Option<&Path>) -> Vec<Check> {

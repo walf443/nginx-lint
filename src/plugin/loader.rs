@@ -254,12 +254,54 @@ impl PluginLoader {
 
     /// Load all WASM plugins from a directory.
     ///
+    /// A file that fails to load is reported as a warning and left out: one
+    /// broken plugin should not stop a lint run. A rule name is provided
+    /// once: everything keyed by name (findings, configuration, ignore
+    /// comments) assumes one rule behind it, so when two files provide the
+    /// same rule the earlier one wins and the later is reported as a warning
+    /// naming both files. Results are ordered by file name.
+    ///
+    /// [`load_plugin_files`](Self::load_plugin_files) is the same load
+    /// without the reporting, for a caller that wants to judge failures
+    /// and duplicates itself.
+    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
+        let mut provided_by: std::collections::HashMap<String, PathBuf> =
+            std::collections::HashMap::new();
+        for (path, result) in self.load_plugin_files(dir)? {
+            match result {
+                Ok(plugin) => match provided_by.entry(plugin.name().to_string()) {
+                    std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
+                        "Warning: skipping rule '{}' from {}: already provided by {}",
+                        plugin.name(),
+                        path.display(),
+                        earlier.get().display()
+                    ),
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(path);
+                        plugins.push(plugin);
+                    }
+                },
+                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
+            }
+        }
+
+        Ok(plugins)
+    }
+
+    /// Load every `.wasm` file in a directory, returning each file's result
+    /// as it is: nothing is reported, and a rule name provided by two files
+    /// is returned twice. Results are ordered by file name.
+    ///
     /// Plugins are loaded in parallel: wasmtime already parallelizes code
     /// generation within one component, but the serial phases (parsing,
     /// validation, instantiation for `spec()`) overlap across plugins,
     /// which speeds up cache-miss/first runs.
-    /// Results are ordered by file name so the rule order is deterministic.
-    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+    #[allow(clippy::type_complexity)]
+    pub fn load_plugin_files(
+        &self,
+        dir: &Path,
+    ) -> Result<Vec<(PathBuf, Result<Box<dyn LintRule>, PluginError>)>, PluginError> {
         use rayon::prelude::*;
 
         if !dir.exists() || !dir.is_dir() {
@@ -282,34 +324,7 @@ impl PluginLoader {
             .map(|path| self.load_plugin(path))
             .collect();
 
-        // Report failures serially so the warnings appear in path order
-        // regardless of which worker finished first
-        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
-        // A rule name is provided once per directory: everything keyed by
-        // name (findings, configuration, ignore comments) assumes one rule
-        // behind it. The earlier file wins, and the later one is reported
-        // by name so the user can tell which file is dead.
-        let mut provided_by: std::collections::HashMap<String, &PathBuf> =
-            std::collections::HashMap::new();
-        for (path, result) in paths.iter().zip(results) {
-            match result {
-                Ok(plugin) => match provided_by.entry(plugin.name().to_string()) {
-                    std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
-                        "Warning: skipping rule '{}' from {}: already provided by {}",
-                        plugin.name(),
-                        path.display(),
-                        earlier.get().display()
-                    ),
-                    std::collections::hash_map::Entry::Vacant(slot) => {
-                        slot.insert(path);
-                        plugins.push(plugin);
-                    }
-                },
-                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
-            }
-        }
-
-        Ok(plugins)
+        Ok(paths.into_iter().zip(results).collect())
     }
 
     /// Load a single WASM plugin from a file
