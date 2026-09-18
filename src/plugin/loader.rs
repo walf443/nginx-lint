@@ -60,6 +60,12 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
     }
 }
 
+/// One `.wasm` file of a plugin directory and what loading it produced
+pub struct PluginFile {
+    pub path: PathBuf,
+    pub loaded: Result<Box<dyn LintRule>, PluginError>,
+}
+
 /// Plugin loader that discovers and loads WASM plugins from a directory
 pub struct PluginLoader {
     engine: Engine,
@@ -268,21 +274,21 @@ impl PluginLoader {
         let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
         let mut provided_by: std::collections::HashMap<String, PathBuf> =
             std::collections::HashMap::new();
-        for (path, result) in self.load_plugin_files(dir)? {
-            match result {
+        for file in self.load_plugin_files(dir)? {
+            match file.loaded {
                 Ok(plugin) => match provided_by.entry(plugin.name().to_string()) {
                     std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
                         "Warning: skipping rule '{}' from {}: already provided by {}",
                         plugin.name(),
-                        path.display(),
+                        file.path.display(),
                         earlier.get().display()
                     ),
                     std::collections::hash_map::Entry::Vacant(slot) => {
-                        slot.insert(path);
+                        slot.insert(file.path);
                         plugins.push(plugin);
                     }
                 },
-                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
+                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e),
             }
         }
 
@@ -297,11 +303,7 @@ impl PluginLoader {
     /// generation within one component, but the serial phases (parsing,
     /// validation, instantiation for `spec()`) overlap across plugins,
     /// which speeds up cache-miss/first runs.
-    #[allow(clippy::type_complexity)]
-    pub fn load_plugin_files(
-        &self,
-        dir: &Path,
-    ) -> Result<Vec<(PathBuf, Result<Box<dyn LintRule>, PluginError>)>, PluginError> {
+    pub fn load_plugin_files(&self, dir: &Path) -> Result<Vec<PluginFile>, PluginError> {
         use rayon::prelude::*;
 
         if !dir.exists() || !dir.is_dir() {
@@ -324,7 +326,11 @@ impl PluginLoader {
             .map(|path| self.load_plugin(path))
             .collect();
 
-        Ok(paths.into_iter().zip(results).collect())
+        Ok(paths
+            .into_iter()
+            .zip(results)
+            .map(|(path, loaded)| PluginFile { path, loaded })
+            .collect())
     }
 
     /// Load a single WASM plugin from a file

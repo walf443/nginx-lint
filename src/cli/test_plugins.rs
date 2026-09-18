@@ -93,25 +93,25 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
     let mut provided_by: std::collections::HashMap<&str, &Path> = std::collections::HashMap::new();
     let mut unusable = 0;
-    for (path, result) in &files {
-        match result {
+    for file in &files {
+        match &file.loaded {
             Ok(plugin) => {
                 if let Some(earlier) = provided_by.get(plugin.name()) {
                     eprintln!(
                         "Error: rule '{}' is provided by both {} and {}",
                         plugin.name(),
                         earlier.display(),
-                        path.display()
+                        file.path.display()
                     );
                     unusable += 1;
                 } else {
-                    provided_by.insert(plugin.name(), path);
+                    provided_by.insert(plugin.name(), &file.path);
                 }
             }
             Err(e) => {
                 // A Go plugin run without --allow-wasi-plugins is the common
                 // case here, so the loader's own message is shown in full
-                eprintln!("Error: {} did not load: {}", path.display(), e);
+                eprintln!("Error: {} did not load: {}", file.path.display(), e);
                 unusable += 1;
             }
         }
@@ -125,9 +125,9 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         );
         return ExitCode::from(2);
     }
-    for (_, result) in files {
+    for file in files {
         // Every file loaded, and every rule name is provided once
-        plugins.extend(result.ok());
+        plugins.extend(file.loaded.ok());
     }
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
