@@ -284,10 +284,27 @@ impl PluginLoader {
 
         // Report failures serially so the warnings appear in path order
         // regardless of which worker finished first
-        let mut plugins = Vec::new();
+        let mut plugins: Vec<Box<dyn LintRule>> = Vec::new();
+        // A rule name is provided once per directory: everything keyed by
+        // name (findings, configuration, ignore comments) assumes one rule
+        // behind it. The earlier file wins, and the later one is reported
+        // by name so the user can tell which file is dead.
+        let mut provided_by: std::collections::HashMap<String, &PathBuf> =
+            std::collections::HashMap::new();
         for (path, result) in paths.iter().zip(results) {
             match result {
-                Ok(plugin) => plugins.push(plugin),
+                Ok(plugin) => match provided_by.entry(plugin.name().to_string()) {
+                    std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
+                        "Warning: skipping rule '{}' from {}: already provided by {}",
+                        plugin.name(),
+                        path.display(),
+                        earlier.get().display()
+                    ),
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(path);
+                        plugins.push(plugin);
+                    }
+                },
                 Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
             }
         }

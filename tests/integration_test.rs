@@ -3225,9 +3225,24 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
         1,
         "the finding must be reported once\nstdout:\n{stdout}\nstderr:\n{stderr}"
     );
+    // b.wasm always loses to a.wasm, whatever the build's builtins
     assert!(
         stderr.contains("skipping rule 'autoindex-enabled'")
-            && stderr.contains("already registered"),
-        "the duplicate must be reported\nstderr:\n{stderr}"
+            && stderr.contains("b.wasm: already provided by")
+            && stderr.contains("a.wasm"),
+        "the duplicate file must be reported by name\nstderr:\n{stderr}"
+    );
+
+    // `why --list` shows the name once as well
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "--list", "--plugins"])
+        .arg(&plugins)
+        .output()
+        .expect("Failed to run nginx-lint why");
+    let listing = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        listing.matches("autoindex-enabled - ").count(),
+        1,
+        "why --list must list a name once:\n{listing}"
     );
 }

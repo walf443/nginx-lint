@@ -694,14 +694,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     // name — findings, `[rules.<name>]`, ignore comments,
                     // `why` — assumes one rule behind it, and two rules
                     // sharing one would report every finding twice with no
-                    // way to configure them apart. The first registration
-                    // wins: builtins, then plugins in file-name order.
-                    let mut registered = linter.rule_names();
+                    // way to configure them apart. The loader has already
+                    // kept one rule per name within the directory, so what
+                    // is left to collide with is a builtin.
+                    let registered = linter.rule_names();
                     for plugin in plugins {
                         let name = plugin.name();
-                        if !registered.insert(name.to_string()) {
+                        if registered.contains(name) {
                             eprintln!(
-                                "Warning: skipping rule '{}' from {}: a rule with that name is already registered",
+                                "Warning: skipping rule '{}' from {}: a builtin rule of that name is registered",
                                 name,
                                 plugins_dir.display()
                             );
