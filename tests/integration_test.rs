@@ -3191,6 +3191,14 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
     let wasm =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("target/builtin-plugins/autoindex_enabled.wasm");
     if !wasm.exists() {
+        // The CI job that runs this test restores the components first, so
+        // there a missing one is a broken job, not a developer who has not
+        // built them yet
+        assert!(
+            std::env::var_os("CI").is_none(),
+            "{} is missing in CI",
+            wasm.display()
+        );
         eprintln!("SKIP: run `make build-plugins` first");
         return;
     }

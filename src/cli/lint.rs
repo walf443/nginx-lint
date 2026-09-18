@@ -70,23 +70,35 @@ enum FileResult {
     },
 }
 
-/// Check whether a rule name corresponds to a known builtin rule, regardless
-/// of whether it is currently registered on the linter. Used by `--rule-only`
-/// validation to distinguish "disabled in config" from "no such rule".
-/// The names of the rules this build ships: the native rules, plus the
-/// builtin plugins when they are compiled in. A plugin cannot take one of
-/// these, whether or not the rule is enabled: `[rules.<name>]`, ignore
-/// comments, `why` and the version gate all address the builtin by that
-/// name. A build without builtins reserves only the native names, so the
-/// builtin components can still be loaded through --plugins there.
+/// The rule names a plugin cannot take: the rules this build ships, whether
+/// or not they are enabled — `[rules.<name>]`, ignore comments, `why` and
+/// the version gate all address the host's rule by that name — plus
+/// whatever the linter has registered so far, which at plugin-loading time
+/// is only host rules (a build without builtins registers a native
+/// `invalid-directive-context`, say). A build without builtins does not
+/// reserve their names, so the builtin components can still be loaded
+/// through --plugins there.
 #[cfg(feature = "plugins")]
-fn builtin_rule_names() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = LintConfig::NATIVE_RULE_NAMES.to_vec();
+fn reserved_rule_names(linter: &Linter) -> Vec<String> {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
-    names.extend_from_slice(nginx_lint::plugin::BUILTIN_PLUGIN_NAMES);
+    let builtin: &[&str] = nginx_lint::plugin::BUILTIN_PLUGIN_NAMES;
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
+    let builtin: &[&str] = &[];
+
+    let mut names: Vec<String> = LintConfig::NATIVE_RULE_NAMES
+        .iter()
+        .chain(builtin)
+        .map(|name| name.to_string())
+        .collect();
+    names.extend(linter.rule_names());
+    names.sort();
+    names.dedup();
     names
 }
 
+/// Check whether a rule name corresponds to a known builtin rule, regardless
+/// of whether it is currently registered on the linter. Used by `--rule-only`
+/// validation to distinguish "disabled in config" from "no such rule".
 fn rule_exists_in_catalog(name: &str) -> bool {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     {
@@ -682,10 +694,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;
 
+        let reserved = reserved_rule_names(&linter);
+        let reserved: Vec<&str> = reserved.iter().map(String::as_str).collect();
         match PluginLoader::new_with_cache(compilation_cache)
             .map(|loader| loader.with_wasi(allow_wasi_plugins))
         {
-            Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &builtin_rule_names()) {
+            Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &reserved) {
                 Ok(plugins) => {
                     if cli.verbose {
                         eprintln!(
