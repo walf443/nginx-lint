@@ -209,8 +209,18 @@ pub fn load_builtin_plugins_filtered(
         let results: Vec<(&'static str, Result<ComponentLintRule, PluginError>)> = missing
             .par_iter()
             .map(|(name, bytes)| {
-                let result = loader
-                    .load_component_from_bytes(&PathBuf::from(format!("builtin:{}", name)), bytes);
+                let path = PathBuf::from(format!("builtin:{}", name));
+                // Builtins carry one rule each: the table above is keyed by
+                // rule name, and the enabled-set filter operates on it.
+                let result = loader.load_component_from_bytes(&path, bytes).and_then(
+                    |mut rules| match rules.len() {
+                        1 => Ok(rules.pop().expect("one rule")),
+                        n => Err(PluginError::invalid_plugin_spec(
+                            &path,
+                            format!("builtin plugins carry one rule each, this one has {}", n),
+                        )),
+                    },
+                );
                 (*name, result)
             })
             .collect();

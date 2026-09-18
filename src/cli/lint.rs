@@ -685,9 +685,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &reserved) {
                 Ok(plugins) => {
                     if cli.verbose {
+                        let files: HashSet<&Path> =
+                            plugins.iter().map(|plugin| plugin.path.as_path()).collect();
                         eprintln!(
-                            "Loaded {} plugin(s) from {}",
+                            "Loaded {} rule(s) from {} plugin(s) in {}",
                             plugins.len(),
+                            files.len(),
                             plugins_dir.display()
                         );
                         if let (Some(cache_dir), Some((hits, misses))) =

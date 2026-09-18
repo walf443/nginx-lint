@@ -141,7 +141,9 @@ fn main() {
         .expect("Failed to create PluginLoader");
     let wasm_rule = loader
         .load_plugin(&wasm_path)
-        .expect("Failed to load WASM plugin");
+        .expect("Failed to load WASM plugin")
+        .pop()
+        .expect("the builtin carries one rule");
     let wasm_cold = cold_start.elapsed();
 
     // Create native plugin

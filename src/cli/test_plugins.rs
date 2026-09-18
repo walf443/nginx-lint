@@ -95,17 +95,26 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     let mut unusable = 0;
     for file in &files {
         match &file.loaded {
-            Ok(plugin) => {
-                if let Some(earlier) = provided_by.get(plugin.name()) {
-                    eprintln!(
-                        "Error: rule '{}' from {} is already provided by {}",
-                        plugin.name(),
-                        file.path.display(),
-                        earlier.display()
-                    );
+            Ok(rules) => {
+                // A file counts once however many of its rules collide:
+                // names are unique within a bundle, so a collision is with
+                // an earlier file
+                let mut collides = false;
+                for rule in rules {
+                    if let Some(earlier) = provided_by.get(rule.name()) {
+                        eprintln!(
+                            "Error: rule '{}' from {} is already provided by {}",
+                            rule.name(),
+                            file.path.display(),
+                            earlier.display()
+                        );
+                        collides = true;
+                    } else {
+                        provided_by.insert(rule.name(), &file.path);
+                    }
+                }
+                if collides {
                     unusable += 1;
-                } else {
-                    provided_by.insert(plugin.name(), &file.path);
                 }
             }
             Err(e) => {
@@ -128,7 +137,7 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     }
     for file in files {
         // Every file loaded, and every rule name is provided once
-        plugins.extend(file.loaded.ok());
+        plugins.extend(file.loaded.into_iter().flatten());
     }
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
@@ -137,8 +146,8 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     // guessing which plugin a case belongs to, say what is wrong.
     if fixtures.is_some() && plugins.len() > 1 {
         eprintln!(
-            "Error: --fixtures describes one plugin's cases, but {} plugins loaded from {}\n\n\
-             Point --plugins at the one plugin whose fixtures these are.",
+            "Error: --fixtures describes one rule's cases, but {} rules loaded from {}\n\n\
+             Point --plugins at a directory with the one rule whose fixtures these are.",
             plugins.len(),
             dir.display()
         );
@@ -188,13 +197,13 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     }
     if failed > 0 {
         println!(
-            "{} plugin(s), {} check(s) passed, {}",
+            "{} rule(s), {} check(s) passed, {}",
             plugins.len(),
             passed,
             format!("{failed} failed").red().bold()
         );
     } else {
-        println!("{} plugin(s), {} check(s) passed", plugins.len(), passed);
+        println!("{} rule(s), {} check(s) passed", plugins.len(), passed);
     }
 
     if failed > 0 || !unchecked.is_empty() {

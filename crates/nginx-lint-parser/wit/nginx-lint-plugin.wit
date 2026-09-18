@@ -300,6 +300,29 @@ world plugin {
     export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
 }
 
+/// A component carrying several rules. One rule per component means one
+/// copy of the language runtime per rule for an SDK that bundles one
+/// (Python, TypeScript, Lua), so an SDK targets this world instead and puts
+/// every rule of a plugin into one component. A single rule is a bundle of
+/// one. The host keeps loading the `plugin` world as well, so components
+/// built before this world existed stay loadable.
+world plugin-bundle {
+    use types.{plugin-spec, lint-error};
+    use config-api.{config};
+    import config-api;
+
+    /// Return the metadata of every rule in the bundle. Names must be
+    /// non-empty and unique within the bundle; the host rejects the
+    /// component otherwise.
+    export specs: func() -> list<plugin-spec>;
+
+    /// Check config with the named rules and return their lint errors. The
+    /// host asks only for rules that are enabled, and each returned
+    /// lint-error names its rule in `rule`; the host drops findings for
+    /// rules it did not ask for.
+    export check: func(cfg: borrow<config>, path: string, rules: list<string>) -> list<lint-error>;
+}
+
 /// What the fix applier reports back. Kept out of `types` so the `plugin`
 /// world's import surface is unchanged and existing components stay
 /// loadable without recompiling.
