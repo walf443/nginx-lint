@@ -5,19 +5,14 @@
  * by `jco types` during the build step.
  *
  * Usage:
- *   import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
+ *   import { defineRules } from "nginx-lint-plugin";
+ *   import type { Rule, LintError } from "nginx-lint-plugin";
+ *
+ *   const serverTokens: Rule = { spec: { ... }, check(cfg, path) { ... } };
+ *   export const { specs, check } = defineRules(serverTokens);
  */
 
-/**
- * Current API version of the plugin interface.
- *
- * Use this for `PluginSpec.apiVersion` so plugins track the SDK version
- * automatically. Informational only: compatibility is enforced structurally
- * by WIT import resolution (a plugin built against a newer SDK fails to
- * instantiate on an older host). Kept in sync with the Rust SDK's
- * `API_VERSION` in crates/nginx-lint-plugin/src/types.rs.
- */
-export const API_VERSION = "1.2";
+export { API_VERSION } from "./api-version.js";
 
 // --- types interface (severity, fix, lint-error, plugin-spec) ---
 export type {
@@ -79,3 +74,7 @@ export type {
  */
 export { buildConfigFromSnapshot } from "./config-builder.js";
 export type { ReconstructedConfig } from "./config-builder.js";
+
+// --- the plugin-rules world: a component of one or more rules ---
+export { defineRules } from "./rules.js";
+export type { Rule, RuleSpec, RulesExports } from "./rules.js";

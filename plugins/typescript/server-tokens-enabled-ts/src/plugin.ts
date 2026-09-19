@@ -11,8 +11,8 @@
  *   plugins/builtin/security/server_tokens_enabled/
  */
 
-import { buildConfigFromSnapshot } from "nginx-lint-plugin";
-import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
+import { defineRules } from "nginx-lint-plugin";
+import type { LintError, ReconstructedConfig, Rule } from "nginx-lint-plugin";
 
 /**
  * Directive names this plugin reads. "http" must be included alongside
@@ -26,20 +26,29 @@ import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
  */
 const RELEVANT_DIRECTIVES = ["http", "server_tokens"];
 
+const BAD_EXAMPLE = `http {
+  server_tokens on;
+  server {
+    listen 80;
+  }
+}`;
+
+const GOOD_EXAMPLE = `http {
+  server_tokens off;
+  server {
+    listen 80;
+  }
+}`;
+
 /**
- * Return plugin metadata.
- * Exported as `spec` per the WIT world definition.
+ * The rule: metadata, the directives it reads, and the check.
  */
-export function spec(): PluginSpec {
-  return {
+export const serverTokensEnabled: Rule = {
+  spec: {
     name: "server-tokens-enabled-ts",
     category: "security",
     description:
       "Detects when server_tokens is enabled (exposes nginx version) [TypeScript]",
-    // Keep in sync with API_VERSION from nginx-lint-plugin (enforced by a
-    // test; a runtime import would break jco componentize, which cannot
-    // resolve bare module specifiers)
-    apiVersion: "1.2",
     severity: "warning",
     why: "When server_tokens is 'on' (the default), nginx includes its version number in " +
       "the Server response header and on default error pages. This information can help " +
@@ -49,20 +58,16 @@ export function spec(): PluginSpec {
     references: [
       "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
     ],
-  };
-}
+  },
+  relevantDirectives: RELEVANT_DIRECTIVES,
+  check: checkServerTokens,
+};
 
 /**
- * Check the nginx config and return lint errors.
- * Exported as `check` per the WIT world definition.
+ * Check the nginx config and return lint errors. The config arrives
+ * already pruned to RELEVANT_DIRECTIVES (plus their ancestors).
  */
-export function check(rawCfg: Config, path: string): LintError[] {
-  // Fetch only "http"/"server_tokens" (plus their ancestors) instead of the
-  // whole file: cfg.allDirectivesWithContext() makes one host call per
-  // directive in the file, while snapshotFiltered() transfers everything
-  // needed in a single call proportional to what's actually relevant.
-  const cfg = buildConfigFromSnapshot(rawCfg.snapshotFiltered(RELEVANT_DIRECTIVES));
-
+function checkServerTokens(cfg: ReconstructedConfig, _path: string): LintError[] {
   const errors: LintError[] = [];
   let hasServerTokensOff = false;
   let hasServerTokensOn = false;
@@ -144,16 +149,8 @@ export function check(rawCfg: Config, path: string): LintError[] {
   return errors;
 }
 
-const BAD_EXAMPLE = `http {
-  server_tokens on;
-  server {
-    listen 80;
-  }
-}`;
-
-const GOOD_EXAMPLE = `http {
-  server_tokens off;
-  server {
-    listen 80;
-  }
-}`;
+/**
+ * The component's exports: the `plugin-rules` world, carrying this one
+ * rule. A plugin with several rules lists them all here.
+ */
+export const { specs, check } = defineRules(serverTokensEnabled);
