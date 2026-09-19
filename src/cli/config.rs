@@ -83,7 +83,7 @@ fn run_validate(config_path: PathBuf, cli: &Cli) -> ExitCode {
     // that carries several; those names are only known once the plugins
     // are loaded, so `config validate` loads them when the directory is
     // given, the way `lint` does.
-    let Ok(external_rules) = external_rule_names(cli) else {
+    let Ok(external_rules) = external_rule_names(cli, &config_path) else {
         return ExitCode::from(2);
     };
 
@@ -108,17 +108,24 @@ fn run_validate(config_path: PathBuf, cli: &Cli) -> ExitCode {
     }
 }
 
-/// The rule names of the `--plugins` directory, if one was given. Returns
-/// `Err` after reporting the failure, so the caller exits 2, as `lint` and
-/// `why` do for a directory that cannot be loaded.
+/// The rule names of the `--plugins` directory, if one was given. Whether
+/// WASI-importing plugins load is read from the file being validated —
+/// the subcommand's own `--config`, not the global one — so a file that
+/// grants it can configure the rules it makes loadable. Returns `Err`
+/// after reporting the failure, so the caller exits 2, as `lint` and `why`
+/// do for a directory that cannot be loaded.
 #[cfg(feature = "plugins")]
-fn external_rule_names(cli: &Cli) -> Result<std::collections::HashSet<String>, ()> {
-    use super::plugin_opts::{allow_wasi, cache_config};
+fn external_rule_names(
+    cli: &Cli,
+    config_path: &std::path::Path,
+) -> Result<std::collections::HashSet<String>, ()> {
+    use super::plugin_opts::{allow_wasi_from, cache_config};
 
     let Some(ref dir) = cli.plugins else {
         return Ok(Default::default());
     };
-    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi(cli)?)
+    let allow_wasi = allow_wasi_from(cli, Some(config_path))?;
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi)
         .map(|docs| docs.into_iter().map(|doc| doc.name).collect())
         .map_err(|e| {
             eprintln!("Error loading plugins: {}", e);
@@ -126,7 +133,10 @@ fn external_rule_names(cli: &Cli) -> Result<std::collections::HashSet<String>, (
 }
 
 #[cfg(not(feature = "plugins"))]
-fn external_rule_names(_cli: &Cli) -> Result<std::collections::HashSet<String>, ()> {
+fn external_rule_names(
+    _cli: &Cli,
+    _config_path: &std::path::Path,
+) -> Result<std::collections::HashSet<String>, ()> {
     Ok(Default::default())
 }
 
