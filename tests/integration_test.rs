@@ -3400,18 +3400,51 @@ fn test_fixtures_are_per_rule_for_a_two_rule_plugin() {
         "stderr:\n{stderr}"
     );
 
-    // Per-rule layout: both rules' cases, each under its own rule
+    // A directory that is not a loaded rule's — a misspelt rule name — is
+    // refused rather than skipped, since skipping it would drop that
+    // rule's fixtures without a word
+    let misspelt = tempfile::tempdir().unwrap();
+    for rule in ["autoindex-enabled-rs", "server-token-enabled-rs"] {
+        let case = misspelt.path().join(rule).join("001_basic").join("error");
+        fs::create_dir_all(&case).unwrap();
+        fs::write(case.join("nginx.conf"), "http { server_tokens on; }\n").unwrap();
+    }
+    let (code, _, stderr) = run(misspelt.path());
+    assert_eq!(code, Some(2), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("not a loaded rule's: server-token-enabled-rs"),
+        "stderr:\n{stderr}"
+    );
+
+    // Per-rule layout: both rules' cases, each under its own rule. The
+    // report has no separator between rules, so a rule's section runs to
+    // the next rule's header.
     let (code, stdout, stderr) = run(&fixtures);
     assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
-    for rule in ["server-tokens-enabled-rs", "autoindex-enabled-rs"] {
-        let section = stdout
-            .split(&format!("{rule}\n"))
-            .nth(1)
-            .unwrap_or_else(|| panic!("{rule} is reported:\n{stdout}"));
-        let section = section.split("\n\n").next().unwrap_or(section);
+    let rules = ["server-tokens-enabled-rs", "autoindex-enabled-rs"];
+    let starts: Vec<usize> = rules
+        .iter()
+        .map(|rule| {
+            stdout
+                .find(&format!("{rule}\n"))
+                .unwrap_or_else(|| panic!("{rule} is reported:\n{stdout}"))
+        })
+        .collect();
+    assert!(
+        starts[0] < starts[1],
+        "rules are reported in spec order:\n{stdout}"
+    );
+    let sections = [&stdout[starts[0]..starts[1]], &stdout[starts[1]..]];
+    for (rule, section) in rules.iter().zip(sections) {
+        assert_eq!(
+            section
+                .matches("ok fixture 001_basic/error is reported")
+                .count(),
+            1,
+            "{rule} must get its own fixture checks:\n{stdout}"
+        );
         assert!(
-            section.contains("ok fixture 001_basic/error is reported")
-                && section.contains("ok fixture 001_basic/expected is clean"),
+            section.contains("ok fixture 001_basic/expected is clean"),
             "{rule} must get its own fixture checks:\n{stdout}"
         );
     }

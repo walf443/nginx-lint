@@ -17,6 +17,7 @@ use nginx_lint::plugin::PluginLoader;
 use nginx_lint_common::linter::apply_fixes_to_content_detailed;
 use nginx_lint_common::linter::{LintError, LintRule};
 use nginx_lint_common::parse_string_with_errors;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -30,16 +31,17 @@ enum Outcome {
     Skipped(String),
 }
 
-/// How the `--fixtures` directory is laid out, decided from what it holds
-/// against the rules that loaded.
+/// How the `--fixtures` directory is laid out, decided by how many rules
+/// loaded.
 #[derive(Clone, Copy)]
 enum FixturesLayout {
     /// No --fixtures
     None,
     /// `<dir>/<case>/`: the cases of the one rule loaded
     Flat,
-    /// `<dir>/<rule>/<case>/`: a directory per rule; a rule without one
-    /// gets the example checks only
+    /// `<dir>/<rule>/<case>/`: several rules loaded, a directory per
+    /// rule; a rule without one gets the example checks only, and every
+    /// directory has to be a loaded rule's
     PerRule,
 }
 
@@ -163,17 +165,27 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     // guessing, say what is wrong.
     let fixtures_layout = match &fixtures {
         None => FixturesLayout::None,
+        // One rule: the flat layout, whatever the directory holds (a
+        // missing or empty one is reported by the fixture checks)
+        Some(_) if plugins.len() == 1 => FixturesLayout::Flat,
         Some(dir) => {
-            let per_rule: Vec<&str> = plugins
-                .iter()
-                .map(|plugin| plugin.name())
-                .filter(|name| dir.join(name).is_dir())
+            if !dir.is_dir() {
+                eprintln!("Error: --fixtures {}: not a directory", dir.display());
+                return ExitCode::from(2);
+            }
+            let loaded: HashSet<&str> = plugins.iter().map(|plugin| plugin.name()).collect();
+            let mut subdirs: Vec<String> = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
                 .collect();
-            if !per_rule.is_empty() {
-                FixturesLayout::PerRule
-            } else if plugins.len() == 1 {
-                FixturesLayout::Flat
-            } else {
+            subdirs.sort();
+            let (for_rules, others): (Vec<String>, Vec<String>) = subdirs
+                .into_iter()
+                .partition(|name| loaded.contains(name.as_str()));
+            if for_rules.is_empty() {
                 eprintln!(
                     "Error: --fixtures holds one rule's cases, but {} rules loaded from {}\n\n\
                      Put each rule's cases under a directory named after the rule:\n{}",
@@ -187,6 +199,24 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 );
                 return ExitCode::from(2);
             }
+            // A directory that is not a loaded rule's would be skipped
+            // without a word, and a misspelt rule name is exactly what
+            // makes fixtures silently stop being checked
+            if !others.is_empty() {
+                eprintln!(
+                    "Error: {} holds directories that are not a loaded rule's: {}\n\n\
+                     Loaded rules:\n{}",
+                    dir.display(),
+                    others.join(", "),
+                    plugins
+                        .iter()
+                        .map(|plugin| format!("  - {}", plugin.name()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                return ExitCode::from(2);
+            }
+            FixturesLayout::PerRule
         }
     };
 
