@@ -204,6 +204,13 @@ asked rules' names when every one of them declares it.
 
 `plugins/rust/security-bundle` is a two-rule example.
 
+Both macros build the `plugin-rules` world, which the host loads from the same
+release of nginx-lint as this SDK onwards (the SDK and the CLI share a version
+number). A component built with this SDK does not load on an older nginx-lint:
+it fails to instantiate with a missing-export error, since that host knows only
+the original `plugin` world. Rebuild against the older SDK if you need to
+support one.
+
 ## Testing
 
 The SDK provides `PluginTestRunner` and `TestCase` for testing plugins:
