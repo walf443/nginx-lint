@@ -101,9 +101,13 @@ export function defineRules(...rules: Rule[]): RulesExports {
   };
 }
 
-/** A rule's spec as the host receives it, `apiVersion` filled in. */
+/**
+ * A rule's spec as the host receives it, `apiVersion` filled in — also
+ * when the rule set it to `undefined` explicitly, which a spread would
+ * have kept and the host cannot lower as a string.
+ */
 export function specOf(rule: Rule): PluginSpec {
-  return { apiVersion: API_VERSION, ...rule.spec };
+  return { ...rule.spec, apiVersion: rule.spec.apiVersion ?? API_VERSION };
 }
 
 /**

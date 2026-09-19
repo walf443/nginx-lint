@@ -80,9 +80,15 @@ describe("defineRules", () => {
     }
   });
 
-  it("keeps an apiVersion a rule sets itself", () => {
-    const rule: Rule = { ...serverTokens, spec: { ...serverTokens.spec, apiVersion: "0.1" } };
-    assert.equal(defineRules(rule).specs()[0].apiVersion, "0.1");
+  it("keeps an apiVersion a rule sets itself, and fills in an explicit undefined", () => {
+    const set: Rule = { ...serverTokens, spec: { ...serverTokens.spec, apiVersion: "0.1" } };
+    assert.equal(defineRules(set).specs()[0].apiVersion, "0.1");
+    // `apiVersion: undefined` is a present key; the host needs a string
+    const unset: Rule = {
+      ...serverTokens,
+      spec: { ...serverTokens.spec, apiVersion: undefined },
+    };
+    assert.equal(defineRules(unset).specs()[0].apiVersion, API_VERSION);
   });
 
   it("runs only the rules asked for, in definition order", () => {
