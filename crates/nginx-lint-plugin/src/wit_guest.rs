@@ -3,12 +3,107 @@
 //! This module provides the bridge between the existing Plugin trait
 //! and the WIT-generated Guest trait for component model plugins.
 
-// Generate guest-side bindings from the WIT file
+// Generate guest-side bindings from the WIT file. The `plugin` world's own
+// exports are no longer what the SDK produces (see `rules` below); this
+// invocation is what generates the shared interface types, `config-api`
+// and the rest, that both worlds import.
 wit_bindgen::generate!({
     path: "wit/nginx-lint-plugin.wit",
     world: "plugin",
     pub_export_macro: true,
 });
+
+/// Bindings for the `plugin-rules` world, the one
+/// [`export_component_plugins!`](crate::export_component_plugins) (and so
+/// every plugin built with this SDK) targets. It imports the same
+/// interfaces as `plugin`, which are mapped onto the modules generated
+/// above so the conversions in this module serve both worlds; only the
+/// world's own `Guest` trait and export macro are new.
+pub mod rules {
+    wit_bindgen::generate!({
+        path: "wit/nginx-lint-plugin.wit",
+        world: "plugin-rules",
+        pub_export_macro: true,
+        export_macro_name: "export_rules",
+        // wit-bindgen wants the interface ids with the package version
+        // (an unversioned key is reported as an unused remapping), so a
+        // bump of the `package` version in the WIT has to be repeated here
+        with: {
+            "nginx-lint:plugin/types@4.0.0": super::nginx_lint::plugin::types,
+            "nginx-lint:plugin/data-types@4.0.0": super::nginx_lint::plugin::data_types,
+            "nginx-lint:plugin/parser-types@4.0.0": super::nginx_lint::plugin::parser_types,
+            "nginx-lint:plugin/config-api@4.0.0": super::nginx_lint::plugin::config_api,
+        },
+    });
+
+    use super::nginx_lint::plugin::config_api::Config as WitConfig;
+    use super::nginx_lint::plugin::types::{
+        LintError as WitLintError, PluginSpec as WitPluginSpec,
+    };
+
+    /// One rule of an exported component, behind a uniform signature so
+    /// the export can loop over rules of different types. Built by
+    /// [`export_component_plugins!`](crate::export_component_plugins);
+    /// not part of the SDK's API.
+    #[doc(hidden)]
+    pub struct ExportedRule {
+        pub name: String,
+        pub relevant_directives: Option<&'static [&'static str]>,
+        pub spec: fn() -> crate::PluginSpec,
+        pub check: fn(&crate::Config, &str) -> Vec<crate::LintError>,
+    }
+
+    /// The `specs` export: every rule's spec, in the order given.
+    #[doc(hidden)]
+    pub fn specs_of(rules: &[ExportedRule]) -> Vec<WitPluginSpec> {
+        rules
+            .iter()
+            .map(|rule| super::convert_spec((rule.spec)()))
+            .collect()
+    }
+
+    /// The `check` export: run the rules named in `names`, over one
+    /// reconstruction of the config. The snapshot is pruned to the union
+    /// of the asked rules' `relevant_directives` when every one of them
+    /// declares it, and fetched whole otherwise.
+    #[doc(hidden)]
+    pub fn check_asked(
+        rules: &[ExportedRule],
+        config: &WitConfig,
+        path: &str,
+        names: &[String],
+    ) -> Vec<WitLintError> {
+        let asked: Vec<&ExportedRule> = rules
+            .iter()
+            .filter(|rule| names.contains(&rule.name))
+            .collect();
+        if asked.is_empty() {
+            return Vec::new();
+        }
+
+        let mut relevant: Vec<&str> = Vec::new();
+        let all_declare = asked.iter().all(|rule| match rule.relevant_directives {
+            Some(names) => {
+                relevant.extend_from_slice(names);
+                true
+            }
+            None => false,
+        });
+        let config = if all_declare {
+            relevant.sort_unstable();
+            relevant.dedup();
+            super::reconstruct_config_filtered(config, &relevant)
+        } else {
+            super::reconstruct_config(config)
+        };
+
+        asked
+            .iter()
+            .flat_map(|rule| (rule.check)(&config, path))
+            .map(super::convert_lint_error)
+            .collect()
+    }
+}
 
 /// Convert SDK PluginSpec to WIT PluginSpec
 pub fn convert_spec(sdk_spec: super::PluginSpec) -> nginx_lint::plugin::types::PluginSpec {

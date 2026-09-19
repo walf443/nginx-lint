@@ -62,10 +62,12 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
     }
 }
 
-/// One `.wasm` file of a plugin directory and what loading it produced
+/// One `.wasm` file of a plugin directory and what loading it produced:
+/// one rule per spec for a `plugin-rules` component, one rule for an
+/// original `plugin` world one
 pub struct PluginFile {
     pub path: PathBuf,
-    pub loaded: Result<Box<dyn LintRule>, PluginError>,
+    pub loaded: Result<Vec<Box<dyn LintRule>>, PluginError>,
 }
 
 /// A rule that loaded and will run, with the file it came from
@@ -294,35 +296,40 @@ impl PluginLoader {
         let mut plugins: Vec<LoadedPlugin> = Vec::new();
         let mut provided_by: HashMap<String, PathBuf> = HashMap::new();
         for file in self.load_plugin_files(dir)? {
-            let rule = match file.loaded {
-                Ok(rule) => rule,
+            let rules = match file.loaded {
+                Ok(rules) => rules,
                 Err(e) => {
                     eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e);
                     continue;
                 }
             };
-            let name = rule.name();
-            if reserved.contains(name) {
-                eprintln!(
-                    "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
-                    name,
-                    file.path.display()
-                );
-                continue;
-            }
-            match provided_by.entry(name.to_string()) {
-                Entry::Occupied(earlier) => eprintln!(
-                    "Warning: skipping rule '{}' from {}: already provided by {}",
-                    name,
-                    file.path.display(),
-                    earlier.get().display()
-                ),
-                Entry::Vacant(slot) => {
-                    slot.insert(file.path.clone());
-                    plugins.push(LoadedPlugin {
-                        path: file.path,
-                        rule,
-                    });
+            // A component's rules are checked one by one: names are unique
+            // within a component (it is rejected otherwise), so a collision
+            // is always with the host or with an earlier file
+            for rule in rules {
+                let name = rule.name();
+                if reserved.contains(name) {
+                    eprintln!(
+                        "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
+                        name,
+                        file.path.display()
+                    );
+                    continue;
+                }
+                match provided_by.entry(name.to_string()) {
+                    Entry::Occupied(earlier) => eprintln!(
+                        "Warning: skipping rule '{}' from {}: already provided by {}",
+                        name,
+                        file.path.display(),
+                        earlier.get().display()
+                    ),
+                    Entry::Vacant(slot) => {
+                        slot.insert(file.path.clone());
+                        plugins.push(LoadedPlugin {
+                            path: file.path.clone(),
+                            rule,
+                        });
+                    }
                 }
             }
         }
@@ -330,9 +337,9 @@ impl PluginLoader {
         Ok(plugins)
     }
 
-    /// Load every `.wasm` file in a directory, returning each file's result
-    /// as it is: nothing is reported, and a rule name provided by two files
-    /// is returned twice. Results are ordered by file name.
+    /// Load every `.wasm` file in a directory, returning each file's rules
+    /// as they are: nothing is reported, and a rule name provided by two
+    /// files is returned twice. Results are ordered by file name.
     ///
     /// Plugins are loaded in parallel: wasmtime already parallelizes code
     /// generation within one component, but the serial phases (parsing,
@@ -356,7 +363,7 @@ impl PluginLoader {
         }
         paths.sort();
 
-        let results: Vec<Result<Box<dyn LintRule>, PluginError>> = paths
+        let results: Vec<Result<Vec<Box<dyn LintRule>>, PluginError>> = paths
             .par_iter()
             .map(|path| self.load_plugin(path))
             .collect();
@@ -368,14 +375,18 @@ impl PluginLoader {
             .collect())
     }
 
-    /// Load a single WASM plugin from a file
-    pub fn load_plugin(&self, path: &Path) -> Result<Box<dyn LintRule>, PluginError> {
+    /// Load the rules of one WASM plugin file: one rule per spec for a
+    /// `plugin-rules` component, one rule for an original `plugin` one
+    pub fn load_plugin(&self, path: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
         let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
 
         match is_component_model(&wasm_bytes) {
             Some(true) => {
-                let rule = self.load_component_from_bytes(path, &wasm_bytes)?;
-                Ok(Box::new(rule))
+                let rules = self.load_component_from_bytes(path, &wasm_bytes)?;
+                Ok(rules
+                    .into_iter()
+                    .map(|rule| Box::new(rule) as Box<dyn LintRule>)
+                    .collect())
             }
             Some(false) => Err(PluginError::unsupported_format(
                 path,
@@ -385,13 +396,13 @@ impl PluginLoader {
         }
     }
 
-    /// Load a component from bytes
+    /// Load the rules of a component from its bytes
     pub fn load_component_from_bytes(
         &self,
         path: &Path,
         component_bytes: &[u8],
-    ) -> Result<ComponentLintRule, PluginError> {
-        ComponentLintRule::new(
+    ) -> Result<Vec<ComponentLintRule>, PluginError> {
+        ComponentLintRule::load(
             &self.engine,
             path.to_path_buf(),
             component_bytes,

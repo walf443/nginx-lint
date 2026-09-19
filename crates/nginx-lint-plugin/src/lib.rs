@@ -104,6 +104,7 @@ pub mod regex_scan;
 
 pub mod prelude {
     pub use super::export_component_plugin;
+    pub use super::export_component_plugins;
     pub use super::helpers;
     pub use super::types::API_VERSION;
     pub use super::types::*;
@@ -111,7 +112,9 @@ pub mod prelude {
 
 /// Macro to export a plugin as a WIT component
 ///
-/// This generates the WIT component model exports for your plugin.
+/// This generates the WIT component model exports for your plugin: the
+/// `plugin-rules` world, carrying this one rule. It is
+/// [`export_component_plugins!`] with a single plugin.
 ///
 /// # Example
 ///
@@ -131,47 +134,93 @@ pub mod prelude {
 #[macro_export]
 macro_rules! export_component_plugin {
     ($plugin_type:ty) => {
+        $crate::export_component_plugins!($plugin_type);
+    };
+}
+
+/// Macro to export several plugins as one WIT component
+///
+/// The component targets the `plugin-rules` world: it carries every rule
+/// listed, and the host loads each as its own rule. Rules are listed in
+/// the order they are given; the config is reconstructed once per `check`
+/// and shared by the rules the host asked for.
+///
+/// `relevant_directives` still applies: when every rule the host asked for
+/// declares one, the snapshot is pruned to the union of their names.
+/// One rule without a declaration means the whole config is fetched.
+///
+/// # Example
+///
+/// ```ignore
+/// use nginx_lint_plugin::prelude::*;
+///
+/// #[derive(Default)]
+/// struct ServerTokens;
+/// #[derive(Default)]
+/// struct Autoindex;
+///
+/// impl Plugin for ServerTokens { /* ... */ }
+/// impl Plugin for Autoindex { /* ... */ }
+///
+/// export_component_plugins!(ServerTokens, Autoindex);
+/// ```
+#[macro_export]
+macro_rules! export_component_plugins {
+    ($($plugin_type:ty),+ $(,)?) => {
         #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
         const _: () = {
-            use $crate::wit_guest::Guest;
+            // Everything this block defines is spelled to stay out of the
+            // way of `$plugin_type`, which is resolved inside it: an item
+            // named `Rule`, or a module named `rules`, in the plugin crate
+            // would otherwise be shadowed. macro_rules hygiene does not
+            // cover item names.
+            static __NGINX_LINT_RULES: std::sync::OnceLock<
+                Vec<$crate::wit_guest::rules::ExportedRule>,
+            > = std::sync::OnceLock::new();
 
-            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
-
-            fn get_plugin() -> &'static $plugin_type {
-                PLUGIN.get_or_init(|| <$plugin_type>::default())
+            fn __nginx_lint_rules() -> &'static [$crate::wit_guest::rules::ExportedRule] {
+                __NGINX_LINT_RULES.get_or_init(|| {
+                    vec![
+                        $(
+                            {
+                                static __NGINX_LINT_PLUGIN: std::sync::OnceLock<$plugin_type> =
+                                    std::sync::OnceLock::new();
+                                fn __nginx_lint_plugin() -> &'static $plugin_type {
+                                    __NGINX_LINT_PLUGIN.get_or_init(|| <$plugin_type>::default())
+                                }
+                                $crate::wit_guest::rules::ExportedRule {
+                                    name: $crate::Plugin::spec(__nginx_lint_plugin()).name,
+                                    relevant_directives: $crate::Plugin::relevant_directives(
+                                        __nginx_lint_plugin(),
+                                    ),
+                                    spec: || $crate::Plugin::spec(__nginx_lint_plugin()),
+                                    check: |config, path| {
+                                        $crate::Plugin::check(__nginx_lint_plugin(), config, path)
+                                    },
+                                }
+                            },
+                        )+
+                    ]
+                })
             }
 
-            struct ComponentExport;
+            struct __NginxLintExport;
 
-            impl Guest for ComponentExport {
-                fn spec() -> $crate::wit_guest::nginx_lint::plugin::types::PluginSpec {
-                    let plugin = get_plugin();
-                    let sdk_spec = $crate::Plugin::spec(plugin);
-                    $crate::wit_guest::convert_spec(sdk_spec)
+            impl $crate::wit_guest::rules::Guest for __NginxLintExport {
+                fn specs() -> Vec<$crate::wit_guest::nginx_lint::plugin::types::PluginSpec> {
+                    $crate::wit_guest::rules::specs_of(__nginx_lint_rules())
                 }
 
                 fn check(
                     config: &$crate::wit_guest::nginx_lint::plugin::config_api::Config,
                     path: String,
+                    names: Vec<String>,
                 ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
-                    let plugin = get_plugin();
-                    // Reconstruct parser Config from host resource handle,
-                    // pruned to relevant_directives() if the plugin declared it
-                    let config = match $crate::Plugin::relevant_directives(plugin) {
-                        Some(names) => {
-                            $crate::wit_guest::reconstruct_config_filtered(config, names)
-                        }
-                        None => $crate::wit_guest::reconstruct_config(config),
-                    };
-                    let errors = $crate::Plugin::check(plugin, &config, &path);
-                    errors
-                        .into_iter()
-                        .map($crate::wit_guest::convert_lint_error)
-                        .collect()
+                    $crate::wit_guest::rules::check_asked(__nginx_lint_rules(), config, &path, &names)
                 }
             }
 
-    $crate::wit_guest::export!(ComponentExport with_types_in $crate::wit_guest);
+            $crate::wit_guest::rules::export_rules!(__NginxLintExport with_types_in $crate::wit_guest::rules);
         };
     };
 }

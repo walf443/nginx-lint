@@ -17,19 +17,27 @@ use crate::Cli;
 ///
 /// Returns `Err` after reporting the failure, so the caller exits 2.
 pub fn allow_wasi(cli: &Cli) -> Result<bool, ()> {
+    allow_wasi_from(cli, cli.config.as_deref())
+}
+
+/// [`allow_wasi`] reading the setting from `config_path` rather than the
+/// global `--config`: `config validate` has a `--config` of its own, naming
+/// the file it validates, and that file is the one whose setting decides
+/// what its `[rules.<name>]` sections can refer to.
+pub fn allow_wasi_from(cli: &Cli, config_path: Option<&std::path::Path>) -> Result<bool, ()> {
     use nginx_lint_common::config::LintConfig;
 
     if cli.allow_wasi_plugins {
         return Ok(true);
     }
 
-    let config = match cli.config {
+    let config = match config_path {
         // An explicitly passed file that does not parse fails the command, as
         // it does for `lint`: continuing would deny WASI and surface as an
         // unrelated plugin-loading failure on the next line, with nothing
         // pointing at the configuration file. A discovered file stays silent,
         // which is what find_and_load does for `lint` too.
-        Some(ref path) => match LintConfig::from_file(path) {
+        Some(path) => match LintConfig::from_file(path) {
             Ok(config) => Some(config),
             Err(e) => {
                 eprintln!("Error: {}", e);

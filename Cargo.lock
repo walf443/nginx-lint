@@ -3054,6 +3054,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "security-rules-plugin"
+version = "0.22.0"
+dependencies = [
+ "nginx-lint-plugin",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"

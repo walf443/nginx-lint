@@ -62,8 +62,26 @@ mod bindings {
     });
 }
 
+/// Bindings for the `plugin-rules` world. It imports the same interfaces
+/// as the `plugin` world, so they are mapped onto the modules generated
+/// above rather than generated again: the one set of `Host` impls below
+/// serves both worlds.
+mod rules_bindings {
+    wasmtime::component::bindgen!({
+        path: "wit/nginx-lint-plugin.wit",
+        world: "plugin-rules",
+        with: {
+            "nginx-lint:plugin/types": super::bindings::nginx_lint::plugin::types,
+            "nginx-lint:plugin/data-types": super::bindings::nginx_lint::plugin::data_types,
+            "nginx-lint:plugin/parser-types": super::bindings::nginx_lint::plugin::parser_types,
+            "nginx-lint:plugin/config-api": super::bindings::nginx_lint::plugin::config_api,
+        },
+    });
+}
+
 use bindings::nginx_lint::plugin::config_api;
 use bindings::{Plugin, PluginPre};
+use rules_bindings::PluginRulesPre;
 
 /// Store data for component model execution
 struct ComponentStoreData {
@@ -952,6 +970,37 @@ fn convert_plugin_spec(spec: &bindings::nginx_lint::plugin::types::PluginSpec) -
 
 // === ComponentLintRule ===
 
+/// Pre-instantiated bindings of a component, by the world it targets.
+/// Import resolution and type checking are done once at load time, so each
+/// check call only pays for instantiation itself (shared across threads;
+/// also holds the engine).
+#[derive(Clone)]
+enum Exports {
+    /// The `plugin-rules` world: the component carries one or more rules,
+    /// and this `ComponentLintRule` is one of them. Every rule of a
+    /// component shares the one `PluginRulesPre` (it is reference counted),
+    /// so the component is compiled once however many rules it carries;
+    /// each rule still instantiates it separately per check.
+    Rules {
+        pre: PluginRulesPre<ComponentStoreData>,
+        /// The names of every rule the component carries, so a check can
+        /// tell a finding of a sibling rule from one under an unknown name
+        names: Arc<[String]>,
+    },
+    /// The original `plugin` world: the component is one rule. Kept so
+    /// components built before `plugin-rules` existed stay loadable.
+    Plugin(PluginPre<ComponentStoreData>),
+}
+
+impl Exports {
+    fn engine(&self) -> &Engine {
+        match self {
+            Exports::Rules { pre, .. } => pre.engine(),
+            Exports::Plugin(pre) => pre.engine(),
+        }
+    }
+}
+
 /// A lint rule implemented as a WIT component model plugin
 #[derive(Clone)]
 pub struct ComponentLintRule {
@@ -959,10 +1008,8 @@ pub struct ComponentLintRule {
     path: PathBuf,
     /// Plugin metadata
     spec: PluginSpec,
-    /// Pre-instantiated bindings: import resolution and type checking are
-    /// done once at load time, so each check call only pays for
-    /// instantiation itself (shared across threads; also holds the engine)
-    plugin_pre: PluginPre<ComponentStoreData>,
+    /// The component's pre-instantiated exports
+    exports: Exports,
     /// Memory limit in bytes
     memory_limit: u64,
     /// Execution timeout per call in epoch ticks (None = no timeout, for
@@ -975,21 +1022,23 @@ pub struct ComponentLintRule {
 }
 
 impl ComponentLintRule {
-    /// Create a new component lint rule from compiled bytes
-    pub fn new(
+    /// Load every rule a compiled component carries: one per spec for the
+    /// `plugin-rules` world, one for the original `plugin` world
+    pub fn load(
         engine: &Engine,
         path: PathBuf,
         component_bytes: &[u8],
         memory_limit: u64,
         timeout_ticks: Option<u64>,
         allow_wasi: bool,
-    ) -> Result<Self, PluginError> {
+    ) -> Result<Vec<Self>, PluginError> {
         // Compile the component
         let component = wasmtime::component::Component::new(engine, component_bytes)
             .map_err(|e| PluginError::compile_error(&path, e.to_string()))?;
 
         // Register all host functions (types + config-api) and resolve the
-        // component's imports once; per-call work is instantiation only
+        // component's imports once; per-call work is instantiation only.
+        // Both worlds import the same interfaces, so one linker serves both.
         let mut linker = wasmtime::component::Linker::<ComponentStoreData>::new(engine);
         Plugin::add_to_linker::<ComponentStoreData, ComponentStoreData>(&mut linker, |data| data)
             .map_err(|e| {
@@ -1009,30 +1058,59 @@ impl ComponentLintRule {
         let instance_pre = linker
             .instantiate_pre(&component)
             .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
-        let plugin_pre = PluginPre::new(instance_pre)
-            .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
 
-        // Get plugin spec
-        let spec_wit = Self::get_plugin_spec(&plugin_pre, &path, memory_limit, timeout_ticks)?;
-        let spec = convert_plugin_spec(&spec_wit);
+        // The world is told from the exports: `specs` exists only in
+        // `plugin-rules`. The typed wrapper for that world then checks
+        // the full export signatures.
+        let is_plugin_rules = component
+            .component_type()
+            .exports(engine)
+            .any(|(export, _)| export == "specs");
 
-        // Leak strings for 'static lifetime required by the LintRule trait.
-        // These live for the entire program duration. Since plugins are loaded once
-        // at startup and never unloaded, this is acceptable.
-        let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
-        let category: &'static str = Box::leak(spec.category.clone().into_boxed_str());
-        let description: &'static str = Box::leak(spec.description.clone().into_boxed_str());
+        let (exports, specs) = if is_plugin_rules {
+            let pre = PluginRulesPre::new(instance_pre)
+                .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
+            let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
+            let names: Arc<[String]> = specs.iter().map(|spec| sanitize_text(&spec.name)).collect();
+            (Exports::Rules { pre, names }, specs)
+        } else {
+            let pre = PluginPre::new(instance_pre)
+                .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
+            let spec = Self::get_plugin_spec(&pre, &path, memory_limit, timeout_ticks)?;
+            (Exports::Plugin(pre), vec![spec])
+        };
 
-        Ok(Self {
-            path,
-            spec,
-            plugin_pre,
-            memory_limit,
-            timeout_ticks,
-            name,
-            category,
-            description,
-        })
+        Ok(specs
+            .iter()
+            .map(|spec_wit| {
+                let spec = convert_plugin_spec(spec_wit);
+
+                // Leak strings for 'static lifetime required by the LintRule trait.
+                // These live for the entire program duration. Since plugins are loaded once
+                // at startup and never unloaded, this is acceptable.
+                let name: &'static str = Box::leak(spec.name.clone().into_boxed_str());
+                let category: &'static str = Box::leak(spec.category.clone().into_boxed_str());
+                let description: &'static str =
+                    Box::leak(spec.description.clone().into_boxed_str());
+
+                Self {
+                    path: path.clone(),
+                    spec,
+                    exports: exports.clone(),
+                    memory_limit,
+                    timeout_ticks,
+                    name,
+                    category,
+                    description,
+                }
+            })
+            .collect())
+    }
+
+    /// Whether the component targets the `plugin-rules` world rather than
+    /// the original `plugin` world
+    pub fn is_plugin_rules(&self) -> bool {
+        matches!(self.exports, Exports::Rules { .. })
     }
 
     /// Create a store with limits and the execution deadline
@@ -1079,21 +1157,74 @@ impl ComponentLintRule {
             .map_err(|e| PluginError::execution_error(path, format!("spec() call failed: {}", e)))
     }
 
+    /// Get the specs of a `plugin-rules` component by instantiating it and
+    /// calling specs(). A component with no rules, a rule without a name,
+    /// or two rules with the same name is rejected: the host addresses
+    /// rules by name, both in `check` and in the configuration.
+    fn get_rule_specs(
+        rules_pre: &PluginRulesPre<ComponentStoreData>,
+        path: &Path,
+        memory_limit: u64,
+        timeout_ticks: Option<u64>,
+    ) -> Result<Vec<bindings::nginx_lint::plugin::types::PluginSpec>, PluginError> {
+        let mut store = Self::create_store(rules_pre.engine(), memory_limit, timeout_ticks);
+        let rules = rules_pre
+            .instantiate(&mut store)
+            .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
+
+        let specs = rules.call_specs(&mut store).map_err(|e| {
+            PluginError::execution_error(path, format!("specs() call failed: {}", e))
+        })?;
+
+        if specs.is_empty() {
+            return Err(PluginError::invalid_plugin_spec(
+                path,
+                "specs() returned no rules",
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for spec in &specs {
+            let name = sanitize_text(&spec.name);
+            if name.is_empty() {
+                return Err(PluginError::invalid_plugin_spec(
+                    path,
+                    "specs() returned a rule with an empty name",
+                ));
+            }
+            // The host asks for a rule by its sanitized name and the
+            // component matches on the name it declared; a name the
+            // sanitizer alters would never match, and the rule would load
+            // and then silently never run. The message shows the name as
+            // declared, so the author can see which character is at
+            // fault; `{:?}` escapes it rather than writing it to the
+            // terminal.
+            if name != spec.name {
+                return Err(PluginError::invalid_plugin_spec(
+                    path,
+                    format!(
+                        "specs() returned the rule name {:?}, which contains control characters",
+                        spec.name
+                    ),
+                ));
+            }
+            if !seen.insert(name.clone()) {
+                return Err(PluginError::invalid_plugin_spec(
+                    path,
+                    format!("specs() returned the rule name '{}' twice", name),
+                ));
+            }
+        }
+        Ok(specs)
+    }
+
     /// Execute the check function using resource-based config access
     fn execute_check(
         &self,
         config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store = Self::create_store(
-            self.plugin_pre.engine(),
-            self.memory_limit,
-            self.timeout_ticks,
-        );
-        let plugin = self
-            .plugin_pre
-            .instantiate(&mut store)
-            .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+        let mut store =
+            Self::create_store(self.exports.engine(), self.memory_limit, self.timeout_ticks);
 
         // Create config resource handle
         let config_resource = store
@@ -1108,16 +1239,49 @@ impl ComponentLintRule {
             })?;
 
         let path_str = file_path.to_string_lossy().to_string();
-        let wit_errors = plugin
-            .call_check(&mut store, config_resource, &path_str)
-            .map_err(|e| {
-                // Epoch deadline expiry surfaces as Trap::Interrupt
-                if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
-                    PluginError::timeout(&self.path)
-                } else {
-                    PluginError::execution_error(&self.path, format!("check() failed: {}", e))
-                }
-            })?;
+        let check_failed = |e: wasmtime::Error| {
+            // Epoch deadline expiry surfaces as Trap::Interrupt
+            if e.downcast_ref::<Trap>() == Some(&Trap::Interrupt) {
+                PluginError::timeout(&self.path)
+            } else {
+                PluginError::execution_error(&self.path, format!("check() failed: {}", e))
+            }
+        };
+        let wit_errors = match &self.exports {
+            Exports::Rules { pre, names } => {
+                let rules = pre
+                    .instantiate(&mut store)
+                    .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+                let mut errors = rules
+                    .call_check(
+                        &mut store,
+                        config_resource,
+                        &path_str,
+                        &[self.name.to_string()],
+                    )
+                    .map_err(check_failed)?;
+                // Only this rule was asked for. A component that ignores
+                // the list and reports every rule would otherwise have each
+                // of its findings repeated once per rule it carries, so a
+                // sibling's findings are dropped. A finding under a name
+                // the component does not carry at all is kept: that is a
+                // rule whose spec and findings disagree on its name, which
+                // test-plugins diagnoses from what it gets back.
+                errors.retain(|e| {
+                    let rule = sanitize_text(&e.rule);
+                    rule == self.name || !names.contains(&rule)
+                });
+                errors
+            }
+            Exports::Plugin(pre) => {
+                let plugin = pre
+                    .instantiate(&mut store)
+                    .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+                plugin
+                    .call_check(&mut store, config_resource, &path_str)
+                    .map_err(check_failed)?
+            }
+        };
 
         // Note: The config resource and any directive resources created during
         // the check are cleaned up when `store` is dropped at function exit.
@@ -1214,11 +1378,67 @@ mod tests {
         }
         let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
         let bytes = std::fs::read(&wasm_path).unwrap();
+        let mut rules = loader
+            .load_component_from_bytes(&wasm_path, &bytes)
+            .unwrap();
+        assert_eq!(rules.len(), 1, "builtin plugins carry one rule each");
+        rules.pop()
+    }
+
+    /// Load the two-rule example component, skipping the test if
+    /// `make -C plugins/rust/security-rules build` has not been run.
+    fn load_real_two_rule_plugin() -> Option<Vec<ComponentLintRule>> {
+        use crate::plugin::{CompilationCache, PluginLoader};
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("plugins/rust/security-rules/security-rules.wasm");
+        if !wasm_path.exists() {
+            eprintln!(
+                "SKIP: run `make -C plugins/rust/security-rules build` first (missing {wasm_path:?})"
+            );
+            return None;
+        }
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
         Some(
             loader
                 .load_component_from_bytes(&wasm_path, &bytes)
                 .unwrap(),
         )
+    }
+
+    /// A `plugin-rules` component loads as one rule per spec, in spec
+    /// order, each carrying its own metadata.
+    #[test]
+    fn two_rule_plugin_loads_as_one_rule_per_spec() {
+        let Some(rules) = load_real_two_rule_plugin() else {
+            return;
+        };
+
+        let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+        assert_eq!(names, ["server-tokens-enabled-rs", "autoindex-enabled-rs"]);
+        assert!(rules.iter().all(|rule| rule.is_plugin_rules()));
+        assert!(rules.iter().all(|rule| rule.category() == "security"));
+        assert!(rules[0].description().contains("server_tokens"));
+        assert!(rules[1].description().contains("autoindex"));
+        assert!(rules[1].bad_example().unwrap().contains("autoindex on;"));
+    }
+
+    /// Each rule of the component reports only its own findings: the host asks
+    /// the component for that one rule, and keeps only findings that name it.
+    #[test]
+    fn two_rule_plugin_rules_report_their_own_findings_only() {
+        let Some(rules) = load_real_two_rule_plugin() else {
+            return;
+        };
+
+        let src = "http { server_tokens on; server { location / { autoindex on; } } }";
+        let config = Arc::new(crate::parser::parse_string(src).unwrap());
+        for rule in &rules {
+            let errors = rule.check_shared(&config, Path::new("test.conf"));
+            assert_eq!(errors.len(), 1, "{}: {errors:?}", rule.name());
+            assert_eq!(errors[0].rule, rule.name());
+        }
     }
 
     /// End-to-end check that `relevant_directives()`-based filtering (see
@@ -1545,6 +1765,8 @@ mod tests {
         let bytes = std::fs::read(&wasm_path).unwrap();
         let rule = loader
             .load_component_from_bytes(&wasm_path, &bytes)
+            .unwrap()
+            .pop()
             .unwrap();
 
         for n_servers in [30, 300] {
@@ -1564,11 +1786,18 @@ mod tests {
             let start = Instant::now();
             for _ in 0..iters {
                 let mut store = ComponentLintRule::create_store(
-                    rule.plugin_pre.engine(),
+                    rule.exports.engine(),
                     rule.memory_limit,
                     rule.timeout_ticks,
                 );
-                let _plugin = rule.plugin_pre.instantiate(&mut store).unwrap();
+                match &rule.exports {
+                    Exports::Rules { pre, .. } => {
+                        pre.instantiate(&mut store).unwrap();
+                    }
+                    Exports::Plugin(pre) => {
+                        pre.instantiate(&mut store).unwrap();
+                    }
+                }
             }
             let phase_a = start.elapsed() / iters;
 
@@ -2171,11 +2400,11 @@ http {
     }
 
     #[test]
-    fn test_new_with_invalid_bytes() {
+    fn test_load_with_invalid_bytes() {
         let mut config = wasmtime::Config::new();
         config.wasm_component_model(true);
         let engine = Engine::new(&config).unwrap();
-        let result = ComponentLintRule::new(
+        let result = ComponentLintRule::load(
             &engine,
             PathBuf::from("test.wasm"),
             b"not a wasm component",
@@ -2597,7 +2826,7 @@ http {
     )"#;
 
     /// Resolve a component's imports against a linker built the way
-    /// [`ComponentLintRule::new`] builds one, with or without the WASI subset.
+    /// [`ComponentLintRule::load`] builds one, with or without the WASI subset.
     fn instantiates_with_wasi(wat: &str, allow_wasi: bool) -> Result<(), String> {
         let engine = wasmtime::Engine::default();
         let component =

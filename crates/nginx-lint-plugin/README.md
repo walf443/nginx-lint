@@ -185,6 +185,32 @@ The host then sends a config pruned to just those directives (plus the ancestor 
 
 Don't declare this if `check()` reads comments or blank lines (`ConfigItem::Comment`/`ConfigItem::BlankLine`): the pruned config never includes them, regardless of `relevant_directives()`.
 
+## Several Rules in One Component
+
+`export_component_plugin!` makes a component that carries one rule. To ship
+several rules as one `.wasm`, implement each as its own `Plugin` and list them
+in `export_component_plugins!` (the former is this with a single plugin; both
+target the `plugin-rules` world):
+
+```rust
+nginx_lint_plugin::export_component_plugins!(NoAutoindexPlugin, NoServerTokensPlugin);
+```
+
+The host loads the component as one rule per plugin, each with its own name,
+`why` text and examples, and each enabled, disabled and ignored on its own.
+The config is reconstructed once per `check` and shared by the rules the host
+asked for; `relevant_directives()` still applies, pruning to the union of the
+asked rules' names when every one of them declares it.
+
+`plugins/rust/security-rules` is a two-rule example.
+
+Both macros build the `plugin-rules` world, which the host loads from the same
+release of nginx-lint as this SDK onwards (the SDK and the CLI share a version
+number). A component built with this SDK does not load on an older nginx-lint:
+it fails to instantiate with a missing-export error, since that host knows only
+the original `plugin` world. Rebuild against the older SDK if you need to
+support one.
+
 ## Testing
 
 The SDK provides `PluginTestRunner` and `TestCase` for testing plugins:

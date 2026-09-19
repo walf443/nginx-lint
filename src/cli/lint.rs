@@ -685,9 +685,12 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &reserved) {
                 Ok(plugins) => {
                     if cli.verbose {
+                        let files: HashSet<&Path> =
+                            plugins.iter().map(|plugin| plugin.path.as_path()).collect();
                         eprintln!(
-                            "Loaded {} plugin(s) from {}",
+                            "Loaded {} rule(s) from {} plugin(s) in {}",
                             plugins.len(),
+                            files.len(),
                             plugins_dir.display()
                         );
                         if let (Some(cache_dir), Some((hits, misses))) =
@@ -702,18 +705,44 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                         }
                     }
                     // One rule per name, and none named after a builtin:
-                    // the loader has already skipped the others, by file
+                    // the loader has already skipped the others, by file.
+                    //
+                    // `[rules.<name>] enabled = false` applies to external
+                    // rules as it does to builtins. The builtins are filtered
+                    // inside the linter constructor; external rule names are
+                    // only known once their component is loaded, so they are
+                    // filtered here. Only an explicit `enabled = false`
+                    // counts: the disabled-by-default list is about the
+                    // builtins, and a build without them loading the same
+                    // rules through --plugins must still run them all. A
+                    // disabled rule is registered as inactive so its
+                    // `# nginx-lint:ignore` comments stay valid and quiet.
+                    // This is the only way to silence one rule of a
+                    // component that carries several: there is no file per
+                    // rule to delete.
+                    let mut disabled = linter.inactive_rule_names().clone();
                     for plugin in plugins {
+                        let name = plugin.rule.name();
+                        let enabled = lint_config.as_ref().is_none_or(|config| {
+                            !config.rule_explicitly_configured(name) || config.is_rule_enabled(name)
+                        });
                         if cli.verbose {
+                            let note = if enabled { "" } else { " [disabled]" };
                             eprintln!(
-                                "  - {} ({}) [{}]",
-                                plugin.rule.name(),
+                                "  - {} ({}) [{}]{}",
+                                name,
                                 plugin.rule.description(),
-                                plugin.path.display()
+                                plugin.path.display(),
+                                note
                             );
                         }
-                        linter.add_rule(plugin.rule);
+                        if enabled {
+                            linter.add_rule(plugin.rule);
+                        } else {
+                            disabled.insert(name.to_string());
+                        }
                     }
+                    linter.set_inactive_rules(disabled);
                 }
                 Err(e) => {
                     eprintln!("Error loading plugins: {}", e);
@@ -743,7 +772,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             if registered.contains(name) {
                 continue;
             }
-            if rule_exists_in_catalog(name) {
+            // An external rule disabled in the config is inactive rather
+            // than registered, and is not in the builtin catalog
+            if rule_exists_in_catalog(name) || linter.inactive_rule_names().contains(name) {
                 not_loaded.push(name);
             } else {
                 no_such_rule.push(name);

@@ -1,3 +1,7 @@
+// The version is baked into every built component's import names, and
+// the Rust SDK's guest bindings for the `plugin-rules` world name it
+// (crates/nginx-lint-plugin/src/wit_guest.rs): a bump has to be repeated
+// there and reloads nothing built before it.
 package nginx-lint:plugin@4.0.0;
 
 interface types {
@@ -288,6 +292,9 @@ interface parser-types {
     }
 }
 
+/// The original plugin world: one rule per component. Superseded by
+/// `plugin-rules`, which every SDK now targets; kept so that components
+/// built against it stay loadable.
 world plugin {
     use types.{plugin-spec, lint-error};
     use config-api.{config};
@@ -298,6 +305,34 @@ world plugin {
 
     /// Check config and return lint errors
     export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
+}
+
+/// A component carrying one or more rules. One rule per component meant
+/// one copy of the language runtime per rule for an SDK that bundles one
+/// (Python, TypeScript, Lua), so a plugin's rules go into one component;
+/// a single rule is a list of one. The host loads each rule as its own,
+/// with its own name, documentation and configuration.
+world plugin-rules {
+    use types.{plugin-spec, lint-error};
+    use config-api.{config};
+    import config-api;
+
+    /// Return the metadata of every rule in the component. Names must be
+    /// non-empty and unique within the component; the host rejects the
+    /// component otherwise.
+    export specs: func() -> list<plugin-spec>;
+
+    /// Check config with the named rules and return their lint errors.
+    /// `rules` holds names from `specs`, only those the host wants run
+    /// (a disabled rule is left out); a name the component does not
+    /// carry is to be ignored, and an empty list yields no findings. Each
+    /// returned lint-error names its rule in `rule`. The host drops a
+    /// finding named for one of the component's other rules, so a
+    /// component that ignores `rules` cannot duplicate findings, but a
+    /// finding under a name the component does not declare at all is
+    /// passed through: that is a rule whose spec and findings disagree,
+    /// which `nginx-lint test-plugins` reports.
+    export check: func(cfg: borrow<config>, path: string, rules: list<string>) -> list<lint-error>;
 }
 
 /// What the fix applier reports back. Kept out of `types` so the `plugin`

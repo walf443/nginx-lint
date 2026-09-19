@@ -1,3 +1,4 @@
+use crate::Cli;
 use clap::Subcommand;
 use nginx_lint::LintConfig;
 use std::fs;
@@ -36,10 +37,10 @@ pub enum SchemaFormat {
     Markdown,
 }
 
-pub fn run_config(command: &ConfigCommands) -> ExitCode {
+pub fn run_config(command: &ConfigCommands, cli: &Cli) -> ExitCode {
     match command {
         ConfigCommands::Init { output, force } => run_init(output.clone(), *force),
-        ConfigCommands::Validate { config } => run_validate(config.clone()),
+        ConfigCommands::Validate { config } => run_validate(config.clone(), cli),
         ConfigCommands::Schema { format } => run_schema(*format),
     }
 }
@@ -71,13 +72,22 @@ fn run_init(output: PathBuf, force: bool) -> ExitCode {
     }
 }
 
-fn run_validate(config_path: PathBuf) -> ExitCode {
+fn run_validate(config_path: PathBuf, cli: &Cli) -> ExitCode {
     if !config_path.exists() {
         eprintln!("Error: {} not found", config_path.display());
         return ExitCode::from(2);
     }
 
-    match LintConfig::validate_file(&config_path) {
+    // A `[rules.<name>]` section may configure a rule from a --plugins
+    // directory, which is the only way to disable one rule of a component
+    // that carries several; those names are only known once the plugins
+    // are loaded, so `config validate` loads them when the directory is
+    // given, the way `lint` does.
+    let Ok(external_rules) = external_rule_names(cli, &config_path) else {
+        return ExitCode::from(2);
+    };
+
+    match LintConfig::validate_file_with_rules(&config_path, &external_rules) {
         Ok(errors) => {
             if errors.is_empty() {
                 eprintln!("{}: OK", config_path.display());
@@ -96,6 +106,38 @@ fn run_validate(config_path: PathBuf) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// The rule names of the `--plugins` directory, if one was given. Whether
+/// WASI-importing plugins load is read from the file being validated —
+/// the subcommand's own `--config`, not the global one — so a file that
+/// grants it can configure the rules it makes loadable. Returns `Err`
+/// after reporting the failure, so the caller exits 2, as `lint` and `why`
+/// do for a directory that cannot be loaded.
+#[cfg(feature = "plugins")]
+fn external_rule_names(
+    cli: &Cli,
+    config_path: &std::path::Path,
+) -> Result<std::collections::HashSet<String>, ()> {
+    use super::plugin_opts::{allow_wasi_from, cache_config};
+
+    let Some(ref dir) = cli.plugins else {
+        return Ok(Default::default());
+    };
+    let allow_wasi = allow_wasi_from(cli, Some(config_path))?;
+    nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi)
+        .map(|docs| docs.into_iter().map(|doc| doc.name).collect())
+        .map_err(|e| {
+            eprintln!("Error loading plugins: {}", e);
+        })
+}
+
+#[cfg(not(feature = "plugins"))]
+fn external_rule_names(
+    _cli: &Cli,
+    _config_path: &std::path::Path,
+) -> Result<std::collections::HashSet<String>, ()> {
+    Ok(Default::default())
 }
 
 fn run_schema(format: SchemaFormat) -> ExitCode {
