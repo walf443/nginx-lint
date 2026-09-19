@@ -711,16 +711,21 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     // rules as it does to builtins. The builtins are filtered
                     // inside the linter constructor; external rule names are
                     // only known once their component is loaded, so they are
-                    // filtered here. A disabled rule is registered as
-                    // inactive so its `# nginx-lint:ignore` comments stay
-                    // valid and quiet. This is the only way to silence one
-                    // rule of a bundle, which has no file to delete.
+                    // filtered here. Only an explicit `enabled = false`
+                    // counts: the disabled-by-default list is about the
+                    // builtins, and a build without them loading the same
+                    // rules through --plugins must still run them all. A
+                    // disabled rule is registered as inactive so its
+                    // `# nginx-lint:ignore` comments stay valid and quiet.
+                    // This is the only way to silence one rule of a
+                    // component that carries several: there is no file per
+                    // rule to delete.
                     let mut disabled = linter.inactive_rule_names().clone();
                     for plugin in plugins {
                         let name = plugin.rule.name();
-                        let enabled = lint_config
-                            .as_ref()
-                            .is_none_or(|config| config.is_rule_enabled(name));
+                        let enabled = lint_config.as_ref().is_none_or(|config| {
+                            !config.rule_explicitly_configured(name) || config.is_rule_enabled(name)
+                        });
                         if cli.verbose {
                             let note = if enabled { "" } else { " [disabled]" };
                             eprintln!(
