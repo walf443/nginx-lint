@@ -416,10 +416,15 @@ jobs:
         run: make test-e2e
       - name: Run the host's bundle tests
         # The tests that load the bundle skip themselves when it is not
-        # built; here it is.
+        # built; the test -f makes it a precondition of this step. A cargo
+        # test filter that matches nothing exits 0, so each run is held to
+        # the number of tests it is expected to find.
         run: |
-          cargo test --features plugins --lib plugin::component_rule::tests::bundle
-          cargo test --features plugins --test integration_test bundle
+          test -f plugins/rust/security-bundle/security-bundle.wasm
+          cargo test --features plugins --lib plugin::component_rule::tests::bundle 2>&1 | tee lib.log
+          grep -q 'test result: ok. 2 passed' lib.log
+          cargo test --features plugins --test integration_test bundle 2>&1 | tee it.log
+          grep -q 'test result: ok. 1 passed' it.log
 
   wasm-integration:
     name: WASM Integration Test
