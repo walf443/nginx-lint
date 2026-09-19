@@ -288,6 +288,9 @@ interface parser-types {
     }
 }
 
+/// The original plugin world: one rule per component. Superseded by
+/// `plugin-rules`, which every SDK now targets; kept so that components
+/// built against it stay loadable.
 world plugin {
     use types.{plugin-spec, lint-error};
     use config-api.{config};
@@ -300,19 +303,18 @@ world plugin {
     export check: func(cfg: borrow<config>, path: string) -> list<lint-error>;
 }
 
-/// A component carrying several rules. One rule per component means one
-/// copy of the language runtime per rule for an SDK that bundles one
-/// (Python, TypeScript, Lua), so an SDK targets this world instead and puts
-/// every rule of a plugin into one component. A single rule is a bundle of
-/// one. The host keeps loading the `plugin` world as well, so components
-/// built before this world existed stay loadable.
-world plugin-bundle {
+/// A component carrying one or more rules. One rule per component meant
+/// one copy of the language runtime per rule for an SDK that bundles one
+/// (Python, TypeScript, Lua), so a plugin's rules go into one component;
+/// a single rule is a list of one. The host loads each rule as its own,
+/// with its own name, documentation and configuration.
+world plugin-rules {
     use types.{plugin-spec, lint-error};
     use config-api.{config};
     import config-api;
 
-    /// Return the metadata of every rule in the bundle. Names must be
-    /// non-empty and unique within the bundle; the host rejects the
+    /// Return the metadata of every rule in the component. Names must be
+    /// non-empty and unique within the component; the host rejects the
     /// component otherwise.
     export specs: func() -> list<plugin-spec>;
 

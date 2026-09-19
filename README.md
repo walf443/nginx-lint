@@ -230,8 +230,10 @@ nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 
 Each `.wasm` file in the directory is loaded as a plugin, in file name order. A
 file carries one rule, or several: a component built against the
-`plugin-bundle` world exports a list of rules, which the host loads as though
-each had come from its own file. Only the Rust SDK builds those yet.
+`plugin-rules` world exports a list of rules, which the host loads as though
+each had come from its own file. The Rust SDK builds that world (a single rule
+is a list of one); the other SDKs still build the original `plugin` world,
+one rule per file, which the host keeps loading.
 
 There is an `nginx-lint-plugin` SDK for four languages, each with a worked
 example beside it, and a builder for Lua scripts:

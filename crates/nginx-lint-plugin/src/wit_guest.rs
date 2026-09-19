@@ -3,24 +3,28 @@
 //! This module provides the bridge between the existing Plugin trait
 //! and the WIT-generated Guest trait for component model plugins.
 
-// Generate guest-side bindings from the WIT file
+// Generate guest-side bindings from the WIT file. The `plugin` world's own
+// exports are no longer what the SDK produces (see `rules` below); this
+// invocation is what generates the shared interface types, `config-api`
+// and the rest, that both worlds import.
 wit_bindgen::generate!({
     path: "wit/nginx-lint-plugin.wit",
     world: "plugin",
     pub_export_macro: true,
 });
 
-/// Bindings for the `plugin-bundle` world (see
-/// [`export_component_plugins!`](crate::export_component_plugins)). It
-/// imports the same interfaces as `plugin`, which are mapped onto the
-/// modules generated above so the conversions in this module serve both
-/// worlds; only the world's own `Guest` trait and export macro are new.
-pub mod bundle {
+/// Bindings for the `plugin-rules` world, the one
+/// [`export_component_plugins!`](crate::export_component_plugins) (and so
+/// every plugin built with this SDK) targets. It imports the same
+/// interfaces as `plugin`, which are mapped onto the modules generated
+/// above so the conversions in this module serve both worlds; only the
+/// world's own `Guest` trait and export macro are new.
+pub mod rules {
     wit_bindgen::generate!({
         path: "wit/nginx-lint-plugin.wit",
-        world: "plugin-bundle",
+        world: "plugin-rules",
         pub_export_macro: true,
-        export_macro_name: "export_bundle",
+        export_macro_name: "export_rules",
         with: {
             "nginx-lint:plugin/types@4.0.0": super::nginx_lint::plugin::types,
             "nginx-lint:plugin/data-types@4.0.0": super::nginx_lint::plugin::data_types,

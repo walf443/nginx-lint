@@ -63,8 +63,8 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
 }
 
 /// One `.wasm` file of a plugin directory and what loading it produced:
-/// one rule for a `plugin` world component, one per spec for a
-/// `plugin-bundle` one
+/// one rule per spec for a `plugin-rules` component, one rule for an
+/// original `plugin` world one
 pub struct PluginFile {
     pub path: PathBuf,
     pub loaded: Result<Vec<Box<dyn LintRule>>, PluginError>,
@@ -303,9 +303,9 @@ impl PluginLoader {
                     continue;
                 }
             };
-            // A bundle's rules are checked one by one: names are unique
-            // within a bundle (the component is rejected otherwise), so a
-            // collision is always with the host or with an earlier file
+            // A component's rules are checked one by one: names are unique
+            // within a component (it is rejected otherwise), so a collision
+            // is always with the host or with an earlier file
             for rule in rules {
                 let name = rule.name();
                 if reserved.contains(name) {
@@ -375,8 +375,8 @@ impl PluginLoader {
             .collect())
     }
 
-    /// Load the rules of one WASM plugin file: one rule for a `plugin`
-    /// world component, one per spec for a `plugin-bundle` one
+    /// Load the rules of one WASM plugin file: one rule per spec for a
+    /// `plugin-rules` component, one rule for an original `plugin` one
     pub fn load_plugin(&self, path: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
         let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
 

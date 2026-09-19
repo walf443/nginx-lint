@@ -1,4 +1,4 @@
-//! Two rules in one component: the `plugin-bundle` world from Rust.
+//! Two rules in one component: the `plugin-rules` world from Rust.
 //!
 //! Each rule is an ordinary [`Plugin`]; `export_component_plugins!` lists
 //! them, and the host loads the component as two rules. The rules here

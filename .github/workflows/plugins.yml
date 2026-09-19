@@ -410,7 +410,7 @@ jobs:
       - name: Build the host
         run: cargo build --features plugins
       - name: Build and test the bundle
-        # A plugin-bundle component: two rules in one .wasm. test-plugins
+        # A plugin-rules component with two rules in one .wasm. test-plugins
         # loads it as two rules and checks each against its own examples.
         working-directory: plugins/rust/security-bundle
         run: make test-e2e

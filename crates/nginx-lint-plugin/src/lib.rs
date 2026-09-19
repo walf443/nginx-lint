@@ -132,54 +132,13 @@ pub mod prelude {
 #[macro_export]
 macro_rules! export_component_plugin {
     ($plugin_type:ty) => {
-        #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
-        const _: () = {
-            use $crate::wit_guest::Guest;
-
-            static PLUGIN: std::sync::OnceLock<$plugin_type> = std::sync::OnceLock::new();
-
-            fn get_plugin() -> &'static $plugin_type {
-                PLUGIN.get_or_init(|| <$plugin_type>::default())
-            }
-
-            struct ComponentExport;
-
-            impl Guest for ComponentExport {
-                fn spec() -> $crate::wit_guest::nginx_lint::plugin::types::PluginSpec {
-                    let plugin = get_plugin();
-                    let sdk_spec = $crate::Plugin::spec(plugin);
-                    $crate::wit_guest::convert_spec(sdk_spec)
-                }
-
-                fn check(
-                    config: &$crate::wit_guest::nginx_lint::plugin::config_api::Config,
-                    path: String,
-                ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
-                    let plugin = get_plugin();
-                    // Reconstruct parser Config from host resource handle,
-                    // pruned to relevant_directives() if the plugin declared it
-                    let config = match $crate::Plugin::relevant_directives(plugin) {
-                        Some(names) => {
-                            $crate::wit_guest::reconstruct_config_filtered(config, names)
-                        }
-                        None => $crate::wit_guest::reconstruct_config(config),
-                    };
-                    let errors = $crate::Plugin::check(plugin, &config, &path);
-                    errors
-                        .into_iter()
-                        .map($crate::wit_guest::convert_lint_error)
-                        .collect()
-                }
-            }
-
-    $crate::wit_guest::export!(ComponentExport with_types_in $crate::wit_guest);
-        };
+        $crate::export_component_plugins!($plugin_type);
     };
 }
 
 /// Macro to export several plugins as one WIT component
 ///
-/// The component targets the `plugin-bundle` world: it carries every rule
+/// The component targets the `plugin-rules` world: it carries every rule
 /// listed, and the host loads each as its own rule. Rules are listed in
 /// the order they are given; the config is reconstructed once per `check`
 /// and shared by the rules the host asked for.
@@ -208,10 +167,10 @@ macro_rules! export_component_plugins {
     ($($plugin_type:ty),+ $(,)?) => {
         #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
         const _: () = {
-            use $crate::wit_guest::bundle::Guest;
+            use $crate::wit_guest::rules::Guest;
 
-            /// One rule of the bundle, behind a uniform signature so the
-            /// export can loop over rules of different types
+            /// One rule of the component, behind a uniform signature so
+            /// the export can loop over rules of different types
             struct Rule {
                 name: String,
                 relevant_directives: Option<&'static [&'static str]>,
@@ -292,7 +251,7 @@ macro_rules! export_component_plugins {
                 }
             }
 
-            $crate::wit_guest::bundle::export_bundle!(ComponentExport with_types_in $crate::wit_guest::bundle);
+            $crate::wit_guest::rules::export_rules!(ComponentExport with_types_in $crate::wit_guest::rules);
         };
     };
 }

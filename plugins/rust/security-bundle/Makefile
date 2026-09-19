@@ -6,7 +6,7 @@ NGINX_LINT := ../../../target/debug/nginx-lint
 
 # Built like a builtin: a core module from cargo, wrapped into a component
 # by wasm-tools. The one difference is export_component_plugins! in
-# src/lib.rs, which makes it a plugin-bundle component.
+# src/lib.rs, listing two rules where a builtin exports one.
 build:
 	cargo build --target wasm32-unknown-unknown --release
 	wasm-tools component new $(CORE) -o $(WASM)

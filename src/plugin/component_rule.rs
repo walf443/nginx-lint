@@ -62,14 +62,14 @@ mod bindings {
     });
 }
 
-/// Bindings for the `plugin-bundle` world. It imports the same interfaces
+/// Bindings for the `plugin-rules` world. It imports the same interfaces
 /// as the `plugin` world, so they are mapped onto the modules generated
 /// above rather than generated again: the one set of `Host` impls below
 /// serves both worlds.
-mod bundle_bindings {
+mod rules_bindings {
     wasmtime::component::bindgen!({
         path: "wit/nginx-lint-plugin.wit",
-        world: "plugin-bundle",
+        world: "plugin-rules",
         with: {
             "nginx-lint:plugin/types": super::bindings::nginx_lint::plugin::types,
             "nginx-lint:plugin/data-types": super::bindings::nginx_lint::plugin::data_types,
@@ -81,7 +81,7 @@ mod bundle_bindings {
 
 use bindings::nginx_lint::plugin::config_api;
 use bindings::{Plugin, PluginPre};
-use bundle_bindings::PluginBundlePre;
+use rules_bindings::PluginRulesPre;
 
 /// Store data for component model execution
 struct ComponentStoreData {
@@ -976,21 +976,22 @@ fn convert_plugin_spec(spec: &bindings::nginx_lint::plugin::types::PluginSpec) -
 /// also holds the engine).
 #[derive(Clone)]
 enum Exports {
-    /// The `plugin` world: the component is one rule
-    Single(PluginPre<ComponentStoreData>),
-    /// The `plugin-bundle` world: the component carries several rules, and
-    /// this `ComponentLintRule` is one of them. Every rule of a bundle
-    /// shares the one `PluginBundlePre` (it is reference counted), so the
-    /// component is compiled once however many rules it carries; each rule
-    /// still instantiates it separately per check.
-    Bundle(PluginBundlePre<ComponentStoreData>),
+    /// The `plugin-rules` world: the component carries one or more rules,
+    /// and this `ComponentLintRule` is one of them. Every rule of a
+    /// component shares the one `PluginRulesPre` (it is reference counted),
+    /// so the component is compiled once however many rules it carries;
+    /// each rule still instantiates it separately per check.
+    Rules(PluginRulesPre<ComponentStoreData>),
+    /// The original `plugin` world: the component is one rule. Kept so
+    /// components built before `plugin-rules` existed stay loadable.
+    Plugin(PluginPre<ComponentStoreData>),
 }
 
 impl Exports {
     fn engine(&self) -> &Engine {
         match self {
-            Exports::Single(pre) => pre.engine(),
-            Exports::Bundle(pre) => pre.engine(),
+            Exports::Rules(pre) => pre.engine(),
+            Exports::Plugin(pre) => pre.engine(),
         }
     }
 }
@@ -1016,8 +1017,8 @@ pub struct ComponentLintRule {
 }
 
 impl ComponentLintRule {
-    /// Load every rule a compiled component carries: one for the `plugin`
-    /// world, one per spec for the `plugin-bundle` world
+    /// Load every rule a compiled component carries: one per spec for the
+    /// `plugin-rules` world, one for the original `plugin` world
     pub fn load(
         engine: &Engine,
         path: PathBuf,
@@ -1054,23 +1055,23 @@ impl ComponentLintRule {
             .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
 
         // The world is told from the exports: `specs` exists only in
-        // `plugin-bundle`. The typed wrapper for that world then checks
+        // `plugin-rules`. The typed wrapper for that world then checks
         // the full export signatures.
-        let is_bundle = component
+        let is_plugin_rules = component
             .component_type()
             .exports(engine)
             .any(|(export, _)| export == "specs");
 
-        let (exports, specs) = if is_bundle {
-            let pre = PluginBundlePre::new(instance_pre)
+        let (exports, specs) = if is_plugin_rules {
+            let pre = PluginRulesPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
-            let specs = Self::get_bundle_specs(&pre, &path, memory_limit, timeout_ticks)?;
-            (Exports::Bundle(pre), specs)
+            let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
+            (Exports::Rules(pre), specs)
         } else {
             let pre = PluginPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
             let spec = Self::get_plugin_spec(&pre, &path, memory_limit, timeout_ticks)?;
-            (Exports::Single(pre), vec![spec])
+            (Exports::Plugin(pre), vec![spec])
         };
 
         Ok(specs
@@ -1100,10 +1101,10 @@ impl ComponentLintRule {
             .collect())
     }
 
-    /// Whether the component carries several rules (the `plugin-bundle`
-    /// world) rather than one (the `plugin` world)
-    pub fn is_from_bundle(&self) -> bool {
-        matches!(self.exports, Exports::Bundle(_))
+    /// Whether the component targets the `plugin-rules` world rather than
+    /// the original `plugin` world
+    pub fn is_plugin_rules(&self) -> bool {
+        matches!(self.exports, Exports::Rules(_))
     }
 
     /// Create a store with limits and the execution deadline
@@ -1150,22 +1151,22 @@ impl ComponentLintRule {
             .map_err(|e| PluginError::execution_error(path, format!("spec() call failed: {}", e)))
     }
 
-    /// Get the specs of a bundle by instantiating the component and calling
-    /// specs(). A bundle with no rules, a rule without a name, or two rules
-    /// with the same name is rejected: the host addresses rules by name,
-    /// both in `check` and in the configuration.
-    fn get_bundle_specs(
-        bundle_pre: &PluginBundlePre<ComponentStoreData>,
+    /// Get the specs of a `plugin-rules` component by instantiating it and
+    /// calling specs(). A component with no rules, a rule without a name,
+    /// or two rules with the same name is rejected: the host addresses
+    /// rules by name, both in `check` and in the configuration.
+    fn get_rule_specs(
+        rules_pre: &PluginRulesPre<ComponentStoreData>,
         path: &Path,
         memory_limit: u64,
         timeout_ticks: Option<u64>,
     ) -> Result<Vec<bindings::nginx_lint::plugin::types::PluginSpec>, PluginError> {
-        let mut store = Self::create_store(bundle_pre.engine(), memory_limit, timeout_ticks);
-        let bundle = bundle_pre
+        let mut store = Self::create_store(rules_pre.engine(), memory_limit, timeout_ticks);
+        let rules = rules_pre
             .instantiate(&mut store)
             .map_err(|e| PluginError::instantiate_error(path, e.to_string()))?;
 
-        let specs = bundle.call_specs(&mut store).map_err(|e| {
+        let specs = rules.call_specs(&mut store).map_err(|e| {
             PluginError::execution_error(path, format!("specs() call failed: {}", e))
         })?;
 
@@ -1225,19 +1226,11 @@ impl ComponentLintRule {
             }
         };
         let wit_errors = match &self.exports {
-            Exports::Single(pre) => {
-                let plugin = pre
+            Exports::Rules(pre) => {
+                let rules = pre
                     .instantiate(&mut store)
                     .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
-                plugin
-                    .call_check(&mut store, config_resource, &path_str)
-                    .map_err(check_failed)?
-            }
-            Exports::Bundle(pre) => {
-                let bundle = pre
-                    .instantiate(&mut store)
-                    .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
-                let mut errors = bundle
+                let mut errors = rules
                     .call_check(
                         &mut store,
                         config_resource,
@@ -1245,11 +1238,19 @@ impl ComponentLintRule {
                         &[self.name.to_string()],
                     )
                     .map_err(check_failed)?;
-                // Only this rule was asked for. A bundle that ignores the
-                // list and reports every rule would otherwise have each of
-                // its findings repeated once per rule it carries.
+                // Only this rule was asked for. A component that ignores
+                // the list and reports every rule would otherwise have each
+                // of its findings repeated once per rule it carries.
                 errors.retain(|e| sanitize_text(&e.rule) == self.name);
                 errors
+            }
+            Exports::Plugin(pre) => {
+                let plugin = pre
+                    .instantiate(&mut store)
+                    .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+                plugin
+                    .call_check(&mut store, config_resource, &path_str)
+                    .map_err(check_failed)?
             }
         };
 
@@ -1377,7 +1378,7 @@ mod tests {
         )
     }
 
-    /// A `plugin-bundle` component loads as one rule per spec, in spec
+    /// A `plugin-rules` component loads as one rule per spec, in spec
     /// order, each carrying its own metadata.
     #[test]
     fn bundle_loads_as_one_rule_per_spec() {
@@ -1390,7 +1391,7 @@ mod tests {
             names,
             ["server-tokens-enabled-bundle", "autoindex-enabled-bundle"]
         );
-        assert!(rules.iter().all(|rule| rule.is_from_bundle()));
+        assert!(rules.iter().all(|rule| rule.is_plugin_rules()));
         assert!(rules.iter().all(|rule| rule.category() == "security"));
         assert!(rules[0].description().contains("server_tokens"));
         assert!(rules[1].description().contains("autoindex"));
@@ -1764,10 +1765,10 @@ mod tests {
                     rule.timeout_ticks,
                 );
                 match &rule.exports {
-                    Exports::Single(pre) => {
+                    Exports::Rules(pre) => {
                         pre.instantiate(&mut store).unwrap();
                     }
-                    Exports::Bundle(pre) => {
+                    Exports::Plugin(pre) => {
                         pre.instantiate(&mut store).unwrap();
                     }
                 }
