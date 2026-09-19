@@ -98,10 +98,10 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
             Ok(plugin) => {
                 if let Some(earlier) = provided_by.get(plugin.name()) {
                     eprintln!(
-                        "Error: rule '{}' is provided by both {} and {}",
+                        "Error: rule '{}' from {} is already provided by {}",
                         plugin.name(),
-                        earlier.display(),
-                        file.path.display()
+                        file.path.display(),
+                        earlier.display()
                     );
                     unusable += 1;
                 } else {

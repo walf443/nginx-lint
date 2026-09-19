@@ -3256,9 +3256,9 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
         "test-plugins must refuse a directory with a duplicate rule\nstderr:\n{stderr}"
     );
     assert!(
-        stderr.contains("Error: rule 'autoindex-enabled' is provided by both")
+        stderr.contains("Error: rule 'autoindex-enabled' from")
+            && stderr.contains("b.wasm is already provided by")
             && stderr.contains("a.wasm")
-            && stderr.contains("b.wasm")
             && stderr.contains("1 of the 2 .wasm file(s)"),
         "stderr:\n{stderr}"
     );
