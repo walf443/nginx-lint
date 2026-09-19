@@ -5,6 +5,8 @@
 use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
 use crate::linter::LintRule;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use wasmtime::{Cache, CacheConfig, Config, Engine};
@@ -268,7 +270,7 @@ impl PluginLoader {
     /// [`load_plugins_reserving`](Self::load_plugins_reserving).
     pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
         Ok(self
-            .load_plugins_reserving(dir, &[])?
+            .load_plugins_reserving(dir, &HashSet::new())?
             .into_iter()
             .map(|plugin| plugin.rule)
             .collect())
@@ -287,11 +289,10 @@ impl PluginLoader {
     pub fn load_plugins_reserving(
         &self,
         dir: &Path,
-        reserved: &[&str],
+        reserved: &HashSet<String>,
     ) -> Result<Vec<LoadedPlugin>, PluginError> {
         let mut plugins: Vec<LoadedPlugin> = Vec::new();
-        let mut provided_by: std::collections::HashMap<String, PathBuf> =
-            std::collections::HashMap::new();
+        let mut provided_by: HashMap<String, PathBuf> = HashMap::new();
         for file in self.load_plugin_files(dir)? {
             let rule = match file.loaded {
                 Ok(rule) => rule,
@@ -301,7 +302,7 @@ impl PluginLoader {
                 }
             };
             let name = rule.name();
-            if reserved.contains(&name) {
+            if reserved.contains(name) {
                 eprintln!(
                     "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
                     name,
@@ -310,13 +311,13 @@ impl PluginLoader {
                 continue;
             }
             match provided_by.entry(name.to_string()) {
-                std::collections::hash_map::Entry::Occupied(earlier) => eprintln!(
+                Entry::Occupied(earlier) => eprintln!(
                     "Warning: skipping rule '{}' from {}: already provided by {}",
                     name,
                     file.path.display(),
                     earlier.get().display()
                 ),
-                std::collections::hash_map::Entry::Vacant(slot) => {
+                Entry::Vacant(slot) => {
                     slot.insert(file.path.clone());
                     plugins.push(LoadedPlugin {
                         path: file.path,

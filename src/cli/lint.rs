@@ -79,7 +79,7 @@ enum FileResult {
 /// reserve their names, so the builtin components can still be loaded
 /// through --plugins there.
 #[cfg(feature = "plugins")]
-fn reserved_rule_names(linter: &Linter) -> Vec<String> {
+fn reserved_rule_names(linter: &Linter) -> HashSet<String> {
     #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
     let builtin: &[&str] = nginx_lint::plugin::BUILTIN_PLUGIN_NAMES;
     // The one builtin a build without them still ships, natively. Listed
@@ -88,14 +88,13 @@ fn reserved_rule_names(linter: &Linter) -> Vec<String> {
     #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
     let builtin: &[&str] = &["invalid-directive-context"];
 
-    let mut names: Vec<String> = LintConfig::NATIVE_RULE_NAMES
-        .iter()
-        .chain(builtin)
-        .map(|name| name.to_string())
-        .collect();
-    names.extend(linter.rule_names());
-    names.sort();
-    names.dedup();
+    let mut names = linter.rule_names();
+    names.extend(
+        LintConfig::NATIVE_RULE_NAMES
+            .iter()
+            .chain(builtin)
+            .map(|name| name.to_string()),
+    );
     names
 }
 
@@ -698,7 +697,6 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         use nginx_lint::plugin::PluginLoader;
 
         let reserved = reserved_rule_names(&linter);
-        let reserved: Vec<&str> = reserved.iter().map(String::as_str).collect();
         match PluginLoader::new_with_cache(compilation_cache)
             .map(|loader| loader.with_wasi(allow_wasi_plugins))
         {
