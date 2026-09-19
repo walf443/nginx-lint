@@ -320,10 +320,13 @@ export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): Reconstructed
     resolveConfigItem(allItems, i),
   );
 
+  // Fresh arrays per call: one reconstructed config serves every rule the
+  // host asks for in a `check`, so a rule that sorts or splices what it
+  // was handed must not change what its siblings iterate
   return {
-    allDirectivesWithContext() { return directiveContexts; },
+    allDirectivesWithContext() { return [...directiveContexts]; },
     allDirectives() { return directiveContexts.map((c) => c.directive); },
-    items() { return topLevelItems; },
+    items() { return [...topLevelItems]; },
     ...makeIncludeContextMethods(inclCtx),
   } as ReconstructedConfig;
 }
