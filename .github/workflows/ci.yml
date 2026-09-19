@@ -91,7 +91,7 @@ jobs:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-      - run: cargo test -p nginx-lint --features plugins -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin
+      - run: cargo test -p nginx-lint --features plugins -p nginx-lint-common -p nginx-lint-parser -p nginx-lint-plugin -p security-rules-plugin
 
   pages-build:
     name: Pages Build
