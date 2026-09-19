@@ -13,10 +13,8 @@
 
 import { buildConfigFromParseOutput } from "./config-builder.js";
 import type { Config } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
-import type {
-  LintError,
-  PluginSpec,
-} from "./generated/interfaces/nginx-lint-plugin-types.js";
+import type { LintError } from "./generated/interfaces/nginx-lint-plugin-types.js";
+import { reconstructFor, type Rule } from "./rules.js";
 import type { ParseOutput } from "../wasm/parser/interfaces/nginx-lint-plugin-parser-types.js";
 import type { Fix } from "./generated/interfaces/nginx-lint-plugin-types.js";
 import type { FixResult } from "../wasm/fixer/interfaces/nginx-lint-plugin-fixer-types.js";
@@ -38,9 +36,6 @@ export type ParseConfigFn = (
   source: string,
   opts?: { includeContext?: string[] },
 ) => Config;
-
-type SpecFn = () => PluginSpec;
-type CheckFn = (cfg: Config, path: string) => LintError[];
 
 /** Wrap the raw component `parse-config` into the high-level `parseConfig`. */
 export function makeParseConfig(parseConfigWasm: WasmParseConfig): ParseConfigFn {
@@ -72,7 +67,7 @@ export interface PluginTestRunner {
 
 /** Constructor of {@link PluginTestRunner}. */
 export interface PluginTestRunnerClass {
-  new (spec: SpecFn, check: CheckFn): PluginTestRunner;
+  new (rule: Rule): PluginTestRunner;
 }
 
 /** Build the PluginTestRunner class bound to a given `parseConfig`. */
@@ -83,25 +78,28 @@ export function makePluginTestRunner(
   // The explicit PluginTestRunnerClass return type keeps the anonymous class's
   // private members out of re-exporters' declaration files (TS4094).
   return class PluginTestRunner {
-    private specFn: SpecFn;
-    private checkFn: CheckFn;
+    private rule: Rule;
 
-    constructor(spec: SpecFn, check: CheckFn) {
-      this.specFn = spec;
-      this.checkFn = check;
+    constructor(rule: Rule) {
+      this.rule = rule;
+    }
+
+    private get name(): string {
+      return this.rule.spec.name;
     }
 
     /**
-     * Parse and check a config string, returning only errors from this plugin's rule.
+     * Parse and check a config string, returning only errors from this
+     * rule. The config reaches the rule the way it does in production:
+     * pruned to its `relevantDirectives` when it declares them.
      */
     checkString(
       content: string,
       opts?: { includeContext?: string[] },
     ): LintError[] {
       const cfg = parseConfig(content, opts);
-      const errors = this.checkFn(cfg, "test.conf");
-      const ruleName = this.specFn().name;
-      return errors.filter((e) => e.rule === ruleName);
+      const errors = this.rule.check(reconstructFor([this.rule], cfg), "test.conf");
+      return errors.filter((e) => e.rule === this.name);
     }
 
     /**
@@ -112,7 +110,7 @@ export function makePluginTestRunner(
       const errors = this.checkString(content);
       if (errors.length !== count) {
         throw new Error(
-          `Expected ${count} error(s) from "${this.specFn().name}", got ${errors.length}: ${JSON.stringify(errors, null, 2)}`,
+          `Expected ${count} error(s) from "${this.name}", got ${errors.length}: ${JSON.stringify(errors, null, 2)}`,
         );
       }
     }
@@ -126,7 +124,7 @@ export function makePluginTestRunner(
       if (!hasLine) {
         const lines = errors.map((e) => e.line);
         throw new Error(
-          `Expected error on line ${line} from "${this.specFn().name}", got errors on lines: ${JSON.stringify(lines)}`,
+          `Expected error on line ${line} from "${this.name}", got errors on lines: ${JSON.stringify(lines)}`,
         );
       }
     }
@@ -162,7 +160,7 @@ export function makePluginTestRunner(
       const result = this.fixString(content, opts);
       if (result.skippedInvalid > 0) {
         throw new Error(
-          `${result.skippedInvalid} fix(es) from "${this.specFn().name}" could not be applied ` +
+          `${result.skippedInvalid} fix(es) from "${this.name}" could not be applied ` +
             `(applied ${result.applied}); the rule is producing fixes the linter rejects`,
         );
       }
@@ -172,7 +170,7 @@ export function makePluginTestRunner(
             ? "\n(the only difference is the trailing newline the applier always adds)"
             : "";
         throw new Error(
-          `Applying ${result.applied} fix(es) from "${this.specFn().name}" gave:\n` +
+          `Applying ${result.applied} fix(es) from "${this.name}" gave:\n` +
             `${JSON.stringify(result.content)}\nexpected:\n${JSON.stringify(expected)}${hint}`,
         );
       }
@@ -184,7 +182,7 @@ export function makePluginTestRunner(
      * - `goodConf` must produce zero errors.
      */
     testExamples(badConf: string, goodConf: string): void {
-      const ruleName = this.specFn().name;
+      const ruleName = this.name;
 
       const badErrors = this.checkString(badConf);
       if (badErrors.length === 0) {

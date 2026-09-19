@@ -5,19 +5,14 @@
  * by `jco types` during the build step.
  *
  * Usage:
- *   import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
+ *   import { defineRules } from "nginx-lint-plugin";
+ *   import type { Rule, LintError } from "nginx-lint-plugin";
+ *
+ *   const serverTokens: Rule = { spec: { ... }, check(cfg, path) { ... } };
+ *   export const { specs, check } = defineRules(serverTokens);
  */
 
-/**
- * Current API version of the plugin interface.
- *
- * Use this for `PluginSpec.apiVersion` so plugins track the SDK version
- * automatically. Informational only: compatibility is enforced structurally
- * by WIT import resolution (a plugin built against a newer SDK fails to
- * instantiate on an older host). Kept in sync with the Rust SDK's
- * `API_VERSION` in crates/nginx-lint-plugin/src/types.rs.
- */
-export const API_VERSION = "1.2";
+export { API_VERSION } from "./api-version.js";
 
 // --- types interface (severity, fix, lint-error, plugin-spec) ---
 export type {
@@ -49,33 +44,28 @@ export type {
 } from "./generated/interfaces/nginx-lint-plugin-config-api.js";
 
 /**
- * Reconstruct a method-based {@link Config} from a (possibly filtered)
- * {@link ConfigSnapshot} — the result of `cfg.snapshot()` or
- * `cfg.snapshotFiltered(names)`. Use this when a plugin only reads a fixed,
- * known set of directive names: fetching a filtered snapshot and walking a
- * pruned tree is faster than `cfg.allDirectivesWithContext()`, which walks
- * the whole file via one host call per directive.
+ * Reconstruct a method-based config from a {@link ConfigSnapshot} — the
+ * result of `cfg.snapshot()` or `cfg.snapshotFiltered(names)`.
  *
- * @example
- * ```ignore
- * export function check(cfg: Config, path: string): LintError[] {
- *   const filtered = buildConfigFromSnapshot(cfg.snapshotFiltered(["http", "gzip"]));
- *   for (const ctx of filtered.allDirectivesWithContext()) { ... }
- * }
- * ```
+ * A {@link Rule} does not call this: `defineRules` fetches and rebuilds the
+ * config for the rules the host asked for, pruned to their
+ * `relevantDirectives`, and hands each `check` the result. It is exported
+ * for code that holds a raw host `Config` itself — a test, or a custom
+ * export written against the generated bindings.
  *
- * IMPORTANT for `jco componentize`-built plugins: its bundler
- * (StarlingMonkey/wizer) requires a single, fully self-contained JS file —
- * it does not resolve ANY local module import at componentize time (not
- * even a relative path to a file in the plugin's own directory, let alone
- * a package import), failing with "No such file or directory" even though
- * tsc and plain Node resolve the same import fine. A real runtime import of
- * this function must be bundled away before that step: run a bundler (e.g.
- * `esbuild --bundle --format=esm --platform=neutral`) on the tsc output to
- * produce one self-contained file, then pass THAT to `jco componentize`
- * instead of the raw per-file tsc output. See
- * plugins/typescript/server-tokens-enabled-ts/package.json's `build` script
- * for a worked example.
+ * `defineRules` is a runtime import, so a plugin's build has to bundle
+ * before `jco componentize`: its bundler (StarlingMonkey/wizer) requires a
+ * single, fully self-contained JS file and does not resolve any module
+ * import at componentize time, not even a relative one, failing with "No
+ * such file or directory" even though tsc and Node resolve it fine. Run a
+ * bundler (e.g. `esbuild --bundle --format=esm --platform=neutral`) on the
+ * tsc output and pass that file to `jco componentize`. See
+ * plugins/typescript/server-tokens-enabled-ts/package.json's `build`
+ * script for a worked example.
  */
 export { buildConfigFromSnapshot } from "./config-builder.js";
 export type { ReconstructedConfig } from "./config-builder.js";
+
+// --- the plugin-rules world: a component of one or more rules ---
+export { defineRules } from "./rules.js";
+export type { Rule, RuleSpec, RulesExports } from "./rules.js";

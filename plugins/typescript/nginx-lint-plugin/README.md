@@ -12,85 +12,117 @@ npm install nginx-lint-plugin
 
 ## Quick Start
 
-A plugin exports two functions: `spec` (metadata) and `check` (lint logic).
+A plugin is one or more rules. Each rule is a `Rule`: its metadata (`spec`),
+the directive names it reads (`relevantDirectives`), and a `check`. The
+module exports the two functions the host calls, built by `defineRules`:
 
 ```typescript
 // src/plugin.ts
-import type { Config, LintError, PluginSpec } from "nginx-lint-plugin";
+import { defineRules } from "nginx-lint-plugin";
+import type { LintError, ReconstructedConfig, Rule } from "nginx-lint-plugin";
 
-export function spec(): PluginSpec {
-  return {
+export const myRule: Rule = {
+  spec: {
     name: "my-rule",
     category: "best-practices",
     description: "Describe what this rule checks",
-    // Literal on purpose: jco componentize cannot resolve runtime imports.
-    // Assert equality with the SDK's API_VERSION constant in your tests
-    // (which run in Node) to keep it in sync.
-    apiVersion: "1.2",
     severity: "warning",
-  };
-}
+    // apiVersion is filled in by defineRules
+  },
+  relevantDirectives: ["proxy_pass"],
+  check(cfg: ReconstructedConfig, path: string): LintError[] {
+    const errors: LintError[] = [];
 
-export function check(cfg: Config, path: string): LintError[] {
-  const errors: LintError[] = [];
+    for (const ctx of cfg.allDirectivesWithContext()) {
+      const directive = ctx.directive;
 
-  for (const ctx of cfg.allDirectivesWithContext()) {
-    const directive = ctx.directive;
-
-    if (directive.is("proxy_pass") && !directive.hasBlock()) {
-      errors.push({
-        rule: "my-rule",
-        category: "best-practices",
-        message: "proxy_pass should ...",
-        severity: "warning",
-        line: directive.line(),
-        column: directive.column(),
-        fixes: [directive.replaceWith("proxy_pass http://upstream;")],
-      });
+      if (directive.is("proxy_pass") && !directive.hasBlock()) {
+        errors.push({
+          rule: "my-rule",
+          category: "best-practices",
+          message: "proxy_pass should ...",
+          severity: "warning",
+          line: directive.line(),
+          column: directive.column(),
+          fixes: [directive.replaceWith("proxy_pass http://upstream;")],
+        });
+      }
     }
-  }
 
-  return errors;
-}
+    return errors;
+  },
+};
+
+// The component's exports. A plugin with several rules lists them all
+// here; the host loads each as its own rule, with its own name,
+// documentation and configuration.
+export const { specs, check } = defineRules(myRule);
 ```
+
+The component targets the `plugin-rules` world, which the host loads from
+the same release of nginx-lint as this SDK onwards (the two share a version
+number). A component built with this SDK does not load on an older
+nginx-lint.
+
+## Migrating from the `plugin` world
+
+A plugin written against an earlier SDK exported `spec()` and
+`check(cfg, path)` directly. Moving it to `defineRules` is mechanical:
+
+1. **Spec**: turn `function spec(): PluginSpec { return { ... } }` into the
+   rule's `spec: { ... }` property. Drop `apiVersion`; `defineRules` fills
+   it in. Anything the spec references (example strings, say) has to be
+   defined above the rule, since the spec is now a value.
+2. **Check**: delete the `buildConfigFromSnapshot(cfg.snapshotFiltered(names))`
+   line at the top of `check` and put `names` in the rule's
+   `relevantDirectives` instead. The parameter type becomes
+   `ReconstructedConfig`. A `check` that walked the raw config with
+   `allDirectivesWithContext()` needs no change beyond the type.
+3. **Exports**: `export const { specs, check } = defineRules(rule)`. If the
+   old `check` function is still exported under that name, rename it.
+4. **Build and tests**: `-n plugin-rules` in the `jco componentize` command,
+   with the bundle step in place; `new PluginTestRunner(rule)` instead of
+   `new PluginTestRunner(spec, check)`; a test that called `check(cfg, path)`
+   directly now calls the component's `check(cfg, path, [rule.spec.name])`.
 
 ## Performance: Reading Only What Your Rule Needs
 
-By default, `check()` gets the entire parsed config: `cfg.allDirectivesWithContext()` makes one host call per directive in the file. For large config files this dominates the per-check cost, even if your rule only ever reads one or two directive names.
+`check` gets the config already fetched from the host and rebuilt. What is
+fetched depends on `relevantDirectives`:
 
-If your rule only inspects a fixed, known set of directive names, fetch a filtered snapshot instead and rebuild a `Config` from it with `buildConfigFromSnapshot`:
+- Set it to the directive names your rule reads, and the config is pruned to
+  those directives plus the ancestor blocks needed for `parentStack` and
+  include-context checks to keep working. One host call, proportional to
+  what is relevant rather than to the file.
+- Leave it undefined, and the whole file is fetched. This is the only way to
+  see comments and blank lines (`ConfigItem`'s `comment-item` /
+  `blank-line-item` variants): the pruned config never includes them.
 
-```typescript
-import { buildConfigFromSnapshot } from "nginx-lint-plugin";
-import type { Config, LintError } from "nginx-lint-plugin";
+When the host asks for several rules of one component at once, the config is
+fetched once, pruned to the union of their `relevantDirectives` if every
+asked rule declares them. So the list is a floor, not a ceiling: a rule can
+see directives it did not ask for. Match by name, and do not read anything
+into a block being empty or a list having a certain length.
 
-const RELEVANT_DIRECTIVES = ["autoindex"];
-
-export function check(rawCfg: Config, path: string): LintError[] {
-  const cfg = buildConfigFromSnapshot(rawCfg.snapshotFiltered(RELEVANT_DIRECTIVES));
-
-  const errors: LintError[] = [];
-  for (const ctx of cfg.allDirectivesWithContext()) {
-    // ... same logic as before, now walking a much smaller tree
-  }
-  return errors;
-}
-```
-
-The host sends back a config pruned to just those directive names (plus the ancestor blocks needed for `parentStack`/`is_inside`-style checks to keep working), instead of the whole file. Skipping this (calling `allDirectivesWithContext()` on `rawCfg` directly, as in Quick Start above) behaves exactly as before — this is purely opt-in.
-
-**One important exception**: if your rule warns when a directive is *missing* inside some block (e.g. "this `http` block has no `server_tokens`"), include that enclosing block's own name (`"http"`) in the list, not just the directive you're checking for. Otherwise a block with none of the listed directives inside it has nothing to keep it in the pruned config, and the host drops it entirely — along with the evidence your rule needs to report the block exists but is missing something. If your rule only reports on directives it finds (the common case), you don't need to list ancestor block names — a matched directive's ancestors are always kept automatically.
-
-Don't do this if `check()` reads comments or blank lines (`ConfigItem`'s `comment-item`/`blank-line-item` variants): the pruned snapshot never includes them.
+**One important exception**: if your rule warns when a directive is
+*missing* inside some block (e.g. "this `http` block has no
+`server_tokens`"), include that enclosing block's own name (`"http"`) in the
+list, not just the directive you're checking for. Otherwise a block with none
+of the listed directives inside it has nothing to keep it in the pruned
+config, and the host drops it entirely — along with the evidence your rule
+needs to report the block exists but is missing something. If your rule only
+reports on directives it finds (the common case), you don't need to list
+ancestor block names — a matched directive's ancestors are always kept
+automatically.
 
 ### Bundling required for `jco componentize`
 
-`jco componentize`'s bundler (StarlingMonkey/wizer) does not resolve local module imports at componentize time — not a bare package specifier, not even a relative import to a file in your own plugin's directory. If your `check()` imports a real value from `nginx-lint-plugin` (like `buildConfigFromSnapshot` above — type-only imports are fine, they're erased by `tsc`), bundle it away first with a tool like [esbuild](https://esbuild.github.io/) before handing the output to `jco componentize`:
+`jco componentize`'s bundler (StarlingMonkey/wizer) does not resolve local module imports at componentize time — not a bare package specifier, not even a relative import to a file in your own plugin's directory. `defineRules` is a real value imported from `nginx-lint-plugin` (type-only imports are fine, they're erased by `tsc`), so bundle it away first with a tool like [esbuild](https://esbuild.github.io/) before handing the output to `jco componentize`:
 
 ```json
 {
   "scripts": {
-    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/my-plugin.wasm",
+    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin-rules --disable all -o dist/my-plugin.wasm",
     "bundle": "esbuild dist/plugin.js --bundle --format=esm --platform=neutral --outfile=dist/plugin.bundle.js"
   },
   "devDependencies": {
@@ -107,11 +139,13 @@ The `nginx-lint-plugin/testing` entry provides parser-based testing utilities. T
 
 ```typescript
 import { describe, it } from "node:test";
-import { spec, check } from "./plugin.js";
+import { myRule } from "./plugin.js";
 import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
 
 describe("my-rule", () => {
-  const runner = new PluginTestRunner(spec, check);
+  // The runner hands the rule its config the way the host does: pruned to
+  // its relevantDirectives when it declares them
+  const runner = new PluginTestRunner(myRule);
 
   it("detects the issue", () => {
     runner.assertErrors("http {\n    proxy_pass http://bad;\n}", 1);
@@ -136,17 +170,23 @@ describe("my-rule", () => {
 
 ### Testing with include context
 
-Use `parseConfig` directly to simulate files included from specific blocks:
+Use `parseConfig` directly to simulate files included from specific blocks,
+and call the component's `check` the way the host does — naming the rules to
+run:
 
 ```typescript
+import { check } from "./plugin.js";
+
 it("handles included files", () => {
   const cfg = parseConfig("server_tokens off;", {
     includeContext: ["http", "server"],
   });
-  const errors = check(cfg, "test.conf");
+  const errors = check(cfg, "test.conf", ["my-rule"]);
   assert.equal(errors.length, 0);
 });
 ```
+
+`runner.checkString(content, { includeContext })` does the same for one rule.
 
 ### PluginTestRunner
 
@@ -187,7 +227,7 @@ const { parseConfig, PluginTestRunner } = await createTesting({
 });
 
 // Same API as nginx-lint-plugin/testing from here on:
-const runner = new PluginTestRunner(spec, check);
+const runner = new PluginTestRunner(myRule);
 runner.assertErrors("http { server_tokens on; }", 1);
 ```
 
@@ -198,14 +238,15 @@ default entry. In Node/browser you don't need this — use `.../testing`.
 
 ### package.json
 
-The WIT definition file is bundled with this package, so `jco componentize` can reference it directly from `node_modules`.
+The WIT definition file is bundled with this package, so `jco componentize` can reference it directly from `node_modules`. The bundle step is required: `defineRules` is a runtime import (see above).
 
 ```json
 {
   "name": "my-plugin",
   "type": "module",
   "scripts": {
-    "build": "tsc && jco componentize dist/plugin.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/my-plugin.wasm",
+    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin-rules --disable all -o dist/my-plugin.wasm",
+    "bundle": "esbuild dist/plugin.js --bundle --format=esm --platform=neutral --outfile=dist/plugin.bundle.js",
     "test": "tsc && node --test dist/plugin.test.js"
   },
   "dependencies": {
@@ -214,6 +255,7 @@ The WIT definition file is bundled with this package, so `jco componentize` can 
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.19",
     "@bytecodealliance/jco": "^1",
+    "esbuild": "^0.28",
     "typescript": "^5"
   }
 }
@@ -247,6 +289,30 @@ The `--plugins` option takes a directory path. nginx-lint automatically loads al
 
 ## API Reference
 
+### Rules
+
+```typescript
+import { defineRules } from "nginx-lint-plugin";
+import type { Rule, RuleSpec, RulesExports } from "nginx-lint-plugin";
+
+// A rule: metadata, the directives it reads, and its check
+interface Rule {
+  spec: RuleSpec;                  // PluginSpec with apiVersion optional
+  relevantDirectives?: string[];   // undefined: the whole config
+  check(cfg: ReconstructedConfig, path: string): LintError[];
+}
+
+// The component's exports, for one or more rules
+function defineRules(...rules: Rule[]): RulesExports;
+interface RulesExports {
+  specs(): PluginSpec[];
+  check(cfg: Config, path: string, rules: string[]): LintError[];
+}
+```
+
+`defineRules` throws on an empty list, a rule without a name, or two rules
+with one name — the host would refuse the component for any of these.
+
 ### Types
 
 ```typescript
@@ -255,7 +321,7 @@ import type {
   Severity,        // "error" | "warning"
   Fix,             // Autofix descriptor
   LintError,       // Lint error with rule, message, line, column, fixes
-  PluginSpec,      // Plugin metadata
+  PluginSpec,      // Plugin metadata, as the host receives it
 
   // Directive data
   ArgumentType,    // "literal" | "quoted-string" | "single-quoted-string" | "variable"
@@ -331,7 +397,7 @@ import type {
   name: string;         // Rule identifier (e.g. "my-rule")
   category: string;     // Category (e.g. "security", "best-practices", "style", "syntax")
   description: string;  // Human-readable description
-  apiVersion: string;   // API version — keep in sync with the SDK's exported API_VERSION
+  apiVersion: string;   // API version; defineRules fills in the SDK's API_VERSION when a rule omits it
   severity?: string;    // Default: "warning". Also accepts "error"
   why?: string;         // Explanation of why this rule matters
   badExample?: string;  // Config that triggers the rule
