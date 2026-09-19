@@ -320,9 +320,11 @@ export function buildConfigFromSnapshot(snapshot: ConfigSnapshot): Reconstructed
     resolveConfigItem(allItems, i),
   );
 
-  // Fresh arrays per call: one reconstructed config serves every rule the
-  // host asks for in a `check`, so a rule that sorts or splices what it
-  // was handed must not change what its siblings iterate
+  // Fresh outer arrays per call: one reconstructed config serves every
+  // rule the host asks for in a `check`, so a rule that sorts or splices
+  // the list it was handed must not change what its siblings iterate. The
+  // contexts, directives and parent stacks inside are shared, not copied;
+  // a rule is expected to read them, not mutate them.
   return {
     allDirectivesWithContext() { return [...directiveContexts]; },
     allDirectives() { return directiveContexts.map((c) => c.directive); },

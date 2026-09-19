@@ -47,7 +47,12 @@ export interface Rule {
    * only way to see comments and blank lines.
    */
   relevantDirectives?: string[];
-  /** Inspect the config and report findings under `spec.name`. */
+  /**
+   * Inspect the config and report findings under `spec.name`. When the
+   * host asks for several rules at once they share one config, so treat
+   * what it returns as read-only: its arrays are fresh per call, the
+   * directives and parent stacks inside them are not.
+   */
   check(cfg: ReconstructedConfig, path: string): LintError[];
 }
 
