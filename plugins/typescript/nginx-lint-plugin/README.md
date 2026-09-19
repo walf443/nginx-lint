@@ -64,6 +64,27 @@ the same release of nginx-lint as this SDK onwards (the two share a version
 number). A component built with this SDK does not load on an older
 nginx-lint.
 
+## Migrating from the `plugin` world
+
+A plugin written against an earlier SDK exported `spec()` and
+`check(cfg, path)` directly. Moving it to `defineRules` is mechanical:
+
+1. **Spec**: turn `function spec(): PluginSpec { return { ... } }` into the
+   rule's `spec: { ... }` property. Drop `apiVersion`; `defineRules` fills
+   it in. Anything the spec references (example strings, say) has to be
+   defined above the rule, since the spec is now a value.
+2. **Check**: delete the `buildConfigFromSnapshot(cfg.snapshotFiltered(names))`
+   line at the top of `check` and put `names` in the rule's
+   `relevantDirectives` instead. The parameter type becomes
+   `ReconstructedConfig`. A `check` that walked the raw config with
+   `allDirectivesWithContext()` needs no change beyond the type.
+3. **Exports**: `export const { specs, check } = defineRules(rule)`. If the
+   old `check` function is still exported under that name, rename it.
+4. **Build and tests**: `-n plugin-rules` in the `jco componentize` command,
+   with the bundle step in place; `new PluginTestRunner(rule)` instead of
+   `new PluginTestRunner(spec, check)`; a test that called `check(cfg, path)`
+   directly now calls the component's `check(cfg, path, [rule.spec.name])`.
+
 ## Performance: Reading Only What Your Rule Needs
 
 `check` gets the config already fetched from the host and rebuilt. What is
