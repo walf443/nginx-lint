@@ -3177,3 +3177,102 @@ fn test_fix_reports_positions_of_fixed_file() {
         "--fix must report exactly what a plain lint of the fixed file reports"
     );
 }
+
+/// A rule name runs once: a plugin named after a builtin this build ships
+/// is skipped, and so is a second file providing a name an earlier file
+/// already does, each with a warning naming the file. So a finding is
+/// reported once. Needs a built builtin component (`make build-plugins`);
+/// skips otherwise.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_duplicate_plugin_rule_name_is_skipped() {
+    use std::process::Command;
+
+    let wasm =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("target/builtin-plugins/autoindex_enabled.wasm");
+    if !wasm.exists() {
+        // The CI job that runs this test checks the component is there
+        // before invoking cargo, so this skip only ever happens locally
+        eprintln!("SKIP: run `make build-plugins` first");
+        return;
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let plugins = dir.path().join("plugins");
+    fs::create_dir(&plugins).unwrap();
+    // The same rule twice: a.wasm registers (or collides with the builtin of
+    // the same name, depending on the build), b.wasm always collides
+    fs::copy(&wasm, plugins.join("a.wasm")).unwrap();
+    fs::copy(&wasm, plugins.join("b.wasm")).unwrap();
+    let conf = dir.path().join("nginx.conf");
+    fs::write(
+        &conf,
+        "http {\n    server {\n        location / {\n            autoindex on;\n        }\n    }\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--plugins")
+        .arg(&plugins)
+        .args(["--rule-only", "autoindex-enabled"])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(
+        stdout
+            .matches("warning[security/autoindex-enabled]")
+            .count(),
+        1,
+        "the finding must be reported once\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    // Which file is skipped for which reason depends on whether this build
+    // ships the builtin of that name; either way both files are named
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    for file in ["a.wasm", "b.wasm"] {
+        assert!(
+            stderr.contains(&format!("{file}: the host ships a rule of that name")),
+            "{file} must be skipped for the builtin's name\nstderr:\n{stderr}"
+        );
+    }
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
+    assert!(
+        stderr.contains("b.wasm: already provided by") && stderr.contains("a.wasm"),
+        "b.wasm must be skipped in favour of a.wasm\nstderr:\n{stderr}"
+    );
+
+    // `test-plugins` refuses the directory: b.wasm would never run
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["test-plugins", "--plugins"])
+        .arg(&plugins)
+        .output()
+        .expect("Failed to run nginx-lint test-plugins");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "test-plugins must refuse a directory with a duplicate rule\nstderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Error: rule 'autoindex-enabled' from")
+            && stderr.contains("b.wasm is already provided by")
+            && stderr.contains("a.wasm")
+            && stderr.contains("1 of the 2 .wasm file(s)"),
+        "stderr:\n{stderr}"
+    );
+
+    // `why --list` shows the name once as well
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["why", "--list", "--plugins"])
+        .arg(&plugins)
+        .output()
+        .expect("Failed to run nginx-lint why");
+    let listing = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        listing.matches("autoindex-enabled - ").count(),
+        1,
+        "why --list must list a name once:\n{listing}"
+    );
+}

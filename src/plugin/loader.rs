@@ -5,6 +5,8 @@
 use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
 use crate::linter::LintRule;
+use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use wasmtime::{Cache, CacheConfig, Config, Engine};
@@ -58,6 +60,18 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
         [0x01, 0x00, 0x00, 0x00] => Some(false), // Core module (no longer supported)
         _ => None,
     }
+}
+
+/// One `.wasm` file of a plugin directory and what loading it produced
+pub struct PluginFile {
+    pub path: PathBuf,
+    pub loaded: Result<Box<dyn LintRule>, PluginError>,
+}
+
+/// A rule that loaded and will run, with the file it came from
+pub struct LoadedPlugin {
+    pub path: PathBuf,
+    pub rule: Box<dyn LintRule>,
 }
 
 /// Plugin loader that discovers and loads WASM plugins from a directory
@@ -252,14 +266,79 @@ impl PluginLoader {
         self.timeout_enabled
     }
 
-    /// Load all WASM plugins from a directory.
+    /// Load all WASM plugins from a directory, keeping only the rules. See
+    /// [`load_plugins_reserving`](Self::load_plugins_reserving).
+    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+        Ok(self
+            .load_plugins_reserving(dir, &HashSet::new())?
+            .into_iter()
+            .map(|plugin| plugin.rule)
+            .collect())
+    }
+
+    /// Load all WASM plugins from a directory for a lint run.
+    ///
+    /// A file that fails to load is reported as a warning and left out: one
+    /// broken plugin should not stop a lint run. A rule name is provided
+    /// once: everything keyed by name (findings, configuration, ignore
+    /// comments, `why`) assumes one rule behind it. A rule whose name is in
+    /// `reserved` — the names of the rules the host itself ships — is
+    /// skipped, and so is a rule an earlier file already provides; each is
+    /// reported as a warning naming the file. Results are ordered by file
+    /// name.
+    pub fn load_plugins_reserving(
+        &self,
+        dir: &Path,
+        reserved: &HashSet<String>,
+    ) -> Result<Vec<LoadedPlugin>, PluginError> {
+        let mut plugins: Vec<LoadedPlugin> = Vec::new();
+        let mut provided_by: HashMap<String, PathBuf> = HashMap::new();
+        for file in self.load_plugin_files(dir)? {
+            let rule = match file.loaded {
+                Ok(rule) => rule,
+                Err(e) => {
+                    eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e);
+                    continue;
+                }
+            };
+            let name = rule.name();
+            if reserved.contains(name) {
+                eprintln!(
+                    "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
+                    name,
+                    file.path.display()
+                );
+                continue;
+            }
+            match provided_by.entry(name.to_string()) {
+                Entry::Occupied(earlier) => eprintln!(
+                    "Warning: skipping rule '{}' from {}: already provided by {}",
+                    name,
+                    file.path.display(),
+                    earlier.get().display()
+                ),
+                Entry::Vacant(slot) => {
+                    slot.insert(file.path.clone());
+                    plugins.push(LoadedPlugin {
+                        path: file.path,
+                        rule,
+                    });
+                }
+            }
+        }
+
+        Ok(plugins)
+    }
+
+    /// Load every `.wasm` file in a directory, returning each file's result
+    /// as it is: nothing is reported, and a rule name provided by two files
+    /// is returned twice. Results are ordered by file name.
     ///
     /// Plugins are loaded in parallel: wasmtime already parallelizes code
     /// generation within one component, but the serial phases (parsing,
     /// validation, instantiation for `spec()`) overlap across plugins,
     /// which speeds up cache-miss/first runs.
-    /// Results are ordered by file name so the rule order is deterministic.
-    pub fn load_plugins(&self, dir: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
+    pub fn load_plugin_files(&self, dir: &Path) -> Result<Vec<PluginFile>, PluginError> {
         use rayon::prelude::*;
 
         if !dir.exists() || !dir.is_dir() {
@@ -282,17 +361,11 @@ impl PluginLoader {
             .map(|path| self.load_plugin(path))
             .collect();
 
-        // Report failures serially so the warnings appear in path order
-        // regardless of which worker finished first
-        let mut plugins = Vec::new();
-        for (path, result) in paths.iter().zip(results) {
-            match result {
-                Ok(plugin) => plugins.push(plugin),
-                Err(e) => eprintln!("Warning: Failed to load plugin {:?}: {}", path, e),
-            }
-        }
-
-        Ok(plugins)
+        Ok(paths
+            .into_iter()
+            .zip(results)
+            .map(|(path, loaded)| PluginFile { path, loaded })
+            .collect())
     }
 
     /// Load a single WASM plugin from a file

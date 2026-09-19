@@ -70,6 +70,16 @@ enum FileResult {
     },
 }
 
+/// The rule names a plugin cannot take: the rules this build ships, plus
+/// whatever the linter has registered so far, which at plugin-loading time
+/// is only host rules.
+#[cfg(feature = "plugins")]
+fn reserved_rule_names(linter: &Linter) -> HashSet<String> {
+    let mut names = linter.rule_names();
+    names.extend(nginx_lint::plugin::shipped_rule_names());
+    names
+}
+
 /// Check whether a rule name corresponds to a known builtin rule, regardless
 /// of whether it is currently registered on the linter. Used by `--rule-only`
 /// validation to distinguish "disabled in config" from "no such rule".
@@ -668,10 +678,11 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;
 
+        let reserved = reserved_rule_names(&linter);
         match PluginLoader::new_with_cache(compilation_cache)
             .map(|loader| loader.with_wasi(allow_wasi_plugins))
         {
-            Ok(loader) => match loader.load_plugins(plugins_dir) {
+            Ok(loader) => match loader.load_plugins_reserving(plugins_dir, &reserved) {
                 Ok(plugins) => {
                     if cli.verbose {
                         eprintln!(
@@ -690,11 +701,18 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             );
                         }
                     }
+                    // One rule per name, and none named after a builtin:
+                    // the loader has already skipped the others, by file
                     for plugin in plugins {
                         if cli.verbose {
-                            eprintln!("  - {} ({})", plugin.name(), plugin.description());
+                            eprintln!(
+                                "  - {} ({}) [{}]",
+                                plugin.rule.name(),
+                                plugin.rule.description(),
+                                plugin.path.display()
+                            );
                         }
-                        linter.add_rule(plugin);
+                        linter.add_rule(plugin.rule);
                     }
                 }
                 Err(e) => {

@@ -18,7 +18,7 @@ pub use component_rule::ComponentLintRule;
 #[cfg(feature = "plugins")]
 pub use error::PluginError;
 #[cfg(feature = "plugins")]
-pub use loader::{CompilationCache, PluginLoader};
+pub use loader::{CompilationCache, LoadedPlugin, PluginFile, PluginLoader};
 
 /// Current API version for the plugin interface.
 ///
@@ -67,6 +67,25 @@ pub const BUILTIN_PLUGIN_NAMES: &[&str] = &[
 /// Check if a rule name is a builtin plugin
 pub fn is_builtin_plugin(name: &str) -> bool {
     BUILTIN_PLUGIN_NAMES.contains(&name)
+}
+
+/// The names of the rules this build ships, which a plugin loaded from a
+/// directory cannot take: `[rules.<name>]`, ignore comments, `why` and the
+/// version gate all address the host's rule by that name, whether or not it
+/// is enabled. A build without builtins ships only the native rules and,
+/// natively, `invalid-directive-context`, so there the other builtin
+/// components can be loaded through `--plugins`.
+pub fn shipped_rule_names() -> std::collections::HashSet<String> {
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    let builtin: &[&str] = BUILTIN_PLUGIN_NAMES;
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
+    let builtin: &[&str] = &["invalid-directive-context"];
+
+    crate::LintConfig::NATIVE_RULE_NAMES
+        .iter()
+        .chain(builtin)
+        .map(|name| name.to_string())
+        .collect()
 }
 
 #[cfg(test)]

@@ -55,6 +55,9 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
         );
     }
 
+    // One entry per name: the loader skips a plugin rule named after one
+    // the host ships, or after one an earlier file provides, as it does
+    // for `lint`
     #[cfg(feature = "plugins")]
     docs.extend(external_plugin_docs(cli)?);
 
