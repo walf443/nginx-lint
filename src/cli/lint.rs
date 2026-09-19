@@ -70,31 +70,13 @@ enum FileResult {
     },
 }
 
-/// The rule names a plugin cannot take: the rules this build ships, whether
-/// or not they are enabled — `[rules.<name>]`, ignore comments, `why` and
-/// the version gate all address the host's rule by that name — plus
+/// The rule names a plugin cannot take: the rules this build ships, plus
 /// whatever the linter has registered so far, which at plugin-loading time
-/// is only host rules (a build without builtins registers a native
-/// `invalid-directive-context`, say). A build without builtins does not
-/// reserve their names, so the builtin components can still be loaded
-/// through --plugins there.
+/// is only host rules.
 #[cfg(feature = "plugins")]
 fn reserved_rule_names(linter: &Linter) -> HashSet<String> {
-    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
-    let builtin: &[&str] = nginx_lint::plugin::BUILTIN_PLUGIN_NAMES;
-    // The one builtin a build without them still ships, natively. Listed
-    // here rather than found on the linter because a disabled rule is not
-    // registered, and its name is reserved all the same.
-    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
-    let builtin: &[&str] = &["invalid-directive-context"];
-
     let mut names = linter.rule_names();
-    names.extend(
-        LintConfig::NATIVE_RULE_NAMES
-            .iter()
-            .chain(builtin)
-            .map(|name| name.to_string()),
-    );
+    names.extend(nginx_lint::plugin::shipped_rule_names());
     names
 }
 

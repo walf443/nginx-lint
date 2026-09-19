@@ -197,7 +197,9 @@ fn rule_to_doc(rule: &dyn crate::linter::LintRule) -> RuleDocOwned {
 /// Get documentation for the plugins in an external `--plugins` directory.
 ///
 /// Unlike the builtin plugins these are not compiled in, so the caller has
-/// to say where they live and how to cache their compilation.
+/// to say where they live and how to cache their compilation. Loaded the
+/// way `lint` loads them — a rule named after one the host ships is skipped
+/// with the same warning — so `why` documents the rules that run.
 #[cfg(feature = "plugins")]
 pub fn external_plugin_docs(
     dir: &std::path::Path,
@@ -206,9 +208,9 @@ pub fn external_plugin_docs(
 ) -> Result<Vec<RuleDocOwned>, crate::plugin::PluginError> {
     let loader = crate::plugin::PluginLoader::new_with_cache(cache)?.with_wasi(allow_wasi);
     Ok(loader
-        .load_plugins(dir)?
+        .load_plugins_reserving(dir, &crate::plugin::shipped_rule_names())?
         .iter()
-        .map(|rule| rule_to_doc(rule.as_ref()))
+        .map(|plugin| rule_to_doc(plugin.rule.as_ref()))
         .collect())
 }
 

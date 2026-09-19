@@ -55,13 +55,11 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
         );
     }
 
+    // One entry per name: the loader skips a plugin rule named after one
+    // the host ships, or after one an earlier file provides, as it does
+    // for `lint`
     #[cfg(feature = "plugins")]
     docs.extend(external_plugin_docs(cli)?);
-
-    // One entry per name, the earlier one, which is the rule `lint`
-    // registers under that name and the one `why <name>` resolves to
-    let mut seen = std::collections::HashSet::new();
-    docs.retain(|doc| seen.insert(doc.name.clone()));
 
     let _ = cli;
     Ok(docs)

@@ -69,6 +69,25 @@ pub fn is_builtin_plugin(name: &str) -> bool {
     BUILTIN_PLUGIN_NAMES.contains(&name)
 }
 
+/// The names of the rules this build ships, which a plugin loaded from a
+/// directory cannot take: `[rules.<name>]`, ignore comments, `why` and the
+/// version gate all address the host's rule by that name, whether or not it
+/// is enabled. A build without builtins ships only the native rules and,
+/// natively, `invalid-directive-context`, so there the other builtin
+/// components can be loaded through `--plugins`.
+pub fn shipped_rule_names() -> std::collections::HashSet<String> {
+    #[cfg(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins"))]
+    let builtin: &[&str] = BUILTIN_PLUGIN_NAMES;
+    #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
+    let builtin: &[&str] = &["invalid-directive-context"];
+
+    crate::LintConfig::NATIVE_RULE_NAMES
+        .iter()
+        .chain(builtin)
+        .map(|name| name.to_string())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::API_VERSION;
