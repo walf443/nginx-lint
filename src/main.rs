@@ -21,10 +21,9 @@ fn main() -> ExitCode {
         Some(Commands::Guide) => cli::guide::run_guide(),
         Some(Commands::Web { port, open }) => cli::web::run_web(*port, *open),
         #[cfg(feature = "plugins")]
-        Some(Commands::TestPlugins {
-            fixtures,
-            fixtures_for,
-        }) => cli::test_plugins::run_test_plugins(fixtures.clone(), fixtures_for.clone(), &cli),
+        Some(Commands::TestPlugins { fixtures }) => {
+            cli::test_plugins::run_test_plugins(fixtures.clone(), &cli)
+        }
         Some(Commands::Why { rule, list }) => cli::why::run_why(rule.clone(), *list, &cli),
         None => cli::lint::run_lint(cli),
     }

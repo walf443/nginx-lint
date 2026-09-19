@@ -30,17 +30,26 @@ enum Outcome {
     Skipped(String),
 }
 
+/// How the `--fixtures` directory is laid out, decided from what it holds
+/// against the rules that loaded.
+#[derive(Clone, Copy)]
+enum FixturesLayout {
+    /// No --fixtures
+    None,
+    /// `<dir>/<case>/`: the cases of the one rule loaded
+    Flat,
+    /// `<dir>/<rule>/<case>/`: a directory per rule; a rule without one
+    /// gets the example checks only
+    PerRule,
+}
+
 /// One named check against one plugin.
 struct Check {
     name: &'static str,
     outcome: Outcome,
 }
 
-pub fn run_test_plugins(
-    fixtures: Option<PathBuf>,
-    fixtures_rule: Option<String>,
-    cli: &Cli,
-) -> ExitCode {
+pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     if cli.color {
         colored::control::set_override(true);
     } else if cli.no_color {
@@ -145,50 +154,55 @@ pub fn run_test_plugins(
     }
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
-    // configuration that rule reports. Running the same cases against every
-    // rule in the directory would fail all the others, so the rule they
-    // belong to has to be known: the only rule loaded, or the one named
-    // with --fixtures-for. Rather than guessing, say what is wrong.
-    let fixtures_for: Option<&str> = match (&fixtures, &fixtures_rule) {
-        (None, _) => None,
-        (Some(_), Some(name)) => {
-            if !plugins.iter().any(|plugin| plugin.name() == name) {
-                let mut loaded: Vec<&str> = plugins.iter().map(|plugin| plugin.name()).collect();
-                loaded.sort_unstable();
+    // configuration that rule reports. With one rule loaded the cases sit
+    // directly in the directory, as the SDKs document. A component can
+    // carry several rules, and then each rule's cases sit under a
+    // directory named after it: the layout says which rule a case belongs
+    // to, and one run covers every rule that has cases. Running flat
+    // cases against several rules would fail all but one, so rather than
+    // guessing, say what is wrong.
+    let fixtures_layout = match &fixtures {
+        None => FixturesLayout::None,
+        Some(dir) => {
+            let per_rule: Vec<&str> = plugins
+                .iter()
+                .map(|plugin| plugin.name())
+                .filter(|name| dir.join(name).is_dir())
+                .collect();
+            if !per_rule.is_empty() {
+                FixturesLayout::PerRule
+            } else if plugins.len() == 1 {
+                FixturesLayout::Flat
+            } else {
                 eprintln!(
-                    "Error: --fixtures-for {} is not a rule loaded from {}\n\nLoaded rules:\n{}",
-                    name,
+                    "Error: --fixtures holds one rule's cases, but {} rules loaded from {}\n\n\
+                     Put each rule's cases under a directory named after the rule:\n{}",
+                    plugins.len(),
                     dir.display(),
-                    loaded
+                    plugins
                         .iter()
-                        .map(|name| format!("  - {name}"))
+                        .map(|plugin| format!("  {}/{}/<case>/", dir.display(), plugin.name()))
                         .collect::<Vec<_>>()
                         .join("\n")
                 );
                 return ExitCode::from(2);
             }
-            Some(name.as_str())
         }
-        (Some(_), None) if plugins.len() > 1 => {
-            eprintln!(
-                "Error: --fixtures describes one rule's cases, but {} rules loaded from {}\n\n\
-                 Say which with --fixtures-for NAME.",
-                plugins.len(),
-                dir.display()
-            );
-            return ExitCode::from(2);
-        }
-        (Some(_), None) => Some(plugins[0].name()),
     };
 
     let mut failed = 0;
     let mut passed = 0;
     let mut unchecked = Vec::new();
     for plugin in &plugins {
-        let fixtures = fixtures
-            .as_deref()
-            .filter(|_| fixtures_for == Some(plugin.name()));
-        let checks = test_plugin(plugin.as_ref(), fixtures);
+        let fixtures = match fixtures_layout {
+            FixturesLayout::None => None,
+            FixturesLayout::Flat => fixtures.clone(),
+            FixturesLayout::PerRule => fixtures
+                .as_ref()
+                .map(|dir| dir.join(plugin.name()))
+                .filter(|dir| dir.is_dir()),
+        };
+        let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
         report(plugin.name(), &checks);
 
         let mut checked = 0;

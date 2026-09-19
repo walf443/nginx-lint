@@ -458,7 +458,7 @@ jobs:
             run: |
               test -f plugins/rust/security-rules/security-rules.wasm
               ./artifacts/nginx-lint test-plugins --plugins plugins/rust/security-rules \
-                --fixtures plugins/rust/security-rules/tests/fixtures --fixtures-for autoindex-enabled-rs
+                --fixtures plugins/rust/security-rules/tests/fixtures
           - name: Test TypeScript plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint

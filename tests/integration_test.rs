@@ -3361,14 +3361,13 @@ fn test_config_disables_one_rule_of_a_two_rule_plugin() {
 }
 
 /// `test-plugins --fixtures` on a component that carries several rules
-/// needs `--fixtures-for` to say which rule the cases belong to: without it
-/// the command refuses, with a wrong name it refuses and lists the rules,
-/// and with the right one the fixtures are checked against that rule only.
-/// Needs the two-rule example built (`make -C plugins/rust/security-rules
-/// build`); skips otherwise.
+/// reads the cases from a directory per rule: flat cases are refused,
+/// since they can belong to only one of the rules, and per-rule cases are
+/// checked against their rule, all in one run. Needs the two-rule example
+/// built (`make -C plugins/rust/security-rules build`); skips otherwise.
 #[cfg(feature = "plugins")]
 #[test]
-fn test_fixtures_for_names_the_rule_of_a_two_rule_plugin() {
+fn test_fixtures_are_per_rule_for_a_two_rule_plugin() {
     use std::process::Command;
 
     let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-rules");
@@ -3378,13 +3377,12 @@ fn test_fixtures_for_names_the_rule_of_a_two_rule_plugin() {
     }
     let fixtures = plugin_dir.join("tests/fixtures");
 
-    let run = |extra: &[&str]| {
+    let run = |fixtures: &Path| {
         let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
             .args(["test-plugins", "--plugins"])
             .arg(&plugin_dir)
             .arg("--fixtures")
-            .arg(&fixtures)
-            .args(extra)
+            .arg(fixtures)
             .output()
             .expect("Failed to run nginx-lint test-plugins");
         (
@@ -3394,30 +3392,27 @@ fn test_fixtures_for_names_the_rule_of_a_two_rule_plugin() {
         )
     };
 
-    let (code, _, stderr) = run(&[]);
-    assert_eq!(code, Some(2), "stderr:\n{stderr}");
-    assert!(stderr.contains("--fixtures-for NAME"), "stderr:\n{stderr}");
-
-    let (code, _, stderr) = run(&["--fixtures-for", "no-such-rule"]);
+    // Flat cases (one rule's directory pointed at directly) with two rules
+    let (code, _, stderr) = run(&fixtures.join("autoindex-enabled-rs"));
     assert_eq!(code, Some(2), "stderr:\n{stderr}");
     assert!(
-        stderr.contains("no-such-rule is not a rule loaded")
-            && stderr.contains("autoindex-enabled-rs")
-            && stderr.contains("server-tokens-enabled-rs"),
+        stderr.contains("Put each rule's cases under a directory named after the rule"),
         "stderr:\n{stderr}"
     );
 
-    let (code, stdout, stderr) = run(&["--fixtures-for", "autoindex-enabled-rs"]);
+    // Per-rule layout: both rules' cases, each under its own rule
+    let (code, stdout, stderr) = run(&fixtures);
     assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
-    // The fixture checks appear under the named rule and nowhere else
-    let fixture_lines = stdout.matches("fixture 001_basic").count();
-    assert_eq!(fixture_lines, 3, "stdout:\n{stdout}");
-    let autoindex_section = stdout
-        .split("autoindex-enabled-rs\n")
-        .nth(1)
-        .expect("the named rule is reported");
-    assert!(
-        autoindex_section.contains("fixture 001_basic/error is reported"),
-        "stdout:\n{stdout}"
-    );
+    for rule in ["server-tokens-enabled-rs", "autoindex-enabled-rs"] {
+        let section = stdout
+            .split(&format!("{rule}\n"))
+            .nth(1)
+            .unwrap_or_else(|| panic!("{rule} is reported:\n{stdout}"));
+        let section = section.split("\n\n").next().unwrap_or(section);
+        assert!(
+            section.contains("ok fixture 001_basic/error is reported")
+                && section.contains("ok fixture 001_basic/expected is clean"),
+            "{rule} must get its own fixture checks:\n{stdout}"
+        );
+    }
 }
