@@ -27,7 +27,7 @@ env:
 jobs:
   test-plugins:
     name: Test Plugins (${{ matrix.chunk }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -61,7 +61,7 @@ jobs:
 
   wasm-build:
     name: Build WASM Plugins (${{ matrix.chunk }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -141,7 +141,7 @@ jobs:
     # to exist before the host compiles. Reuse the components the build jobs
     # already produced rather than rebuilding them here.
     needs: [wasm-build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -190,7 +190,7 @@ jobs:
 
   build-host:
     name: Build Host Binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -216,7 +216,7 @@ jobs:
 
   python-plugin:
     name: Python Plugin
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -282,7 +282,7 @@ jobs:
 
   go-plugin:
     name: Go Plugin
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -360,7 +360,7 @@ jobs:
 
   lua-plugin:
     name: Lua Plugin
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -406,7 +406,7 @@ jobs:
   wasm-integration:
     name: WASM Integration Test
     needs: [wasm-build, typescript-plugin, python-plugin, go-plugin, lua-plugin, build-host]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -579,7 +579,7 @@ jobs:
 
   typescript-plugin:
     name: TypeScript Plugin
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read

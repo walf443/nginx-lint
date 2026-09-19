@@ -20,8 +20,11 @@ jobs:
     strategy:
       matrix:
         include:
+          # The Linux binaries link the runner's glibc dynamically, so the
+          # runner release sets the oldest glibc they run on; both stay on
+          # 24.04 rather than following ubuntu-latest to a newer one.
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
@@ -70,7 +73,7 @@ jobs:
   release:
     name: Release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -89,7 +92,7 @@ jobs:
   tag-go-module:
     name: Tag the Go SDK module
     needs: release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -119,7 +122,7 @@ jobs:
   publish-crates:
     name: Publish to crates.io
     needs: docker
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: release
     permissions:
@@ -151,7 +154,7 @@ jobs:
 
   build-npm:
     name: Build npm package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -214,7 +217,7 @@ jobs:
   publish-npm:
     name: Publish to npm
     needs: [docker, build-npm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     environment: release
     permissions:
@@ -246,7 +249,7 @@ jobs:
 
   docker:
     name: Docker Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: build
     timeout-minutes: 60
     permissions:
@@ -300,7 +303,7 @@ jobs:
 
   build-python-sdist:
     name: Build Python sdist
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -340,7 +343,7 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-26.04
             manylinux: "2014"
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
@@ -382,7 +385,7 @@ jobs:
   verify-python-wheel:
     name: Verify Python wheel
     needs: build-python-wheels
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -438,7 +441,7 @@ jobs:
     # build the way a user's `pip install` will. Failing here blocks the
     # upload, which PyPI would not let us replace.
     needs: [publish-crates, build-python-sdist]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -482,7 +485,7 @@ jobs:
     name: Publish to PyPI
     # publish-crates (through verify-python-sdist) already waits on docker
     needs: [verify-python-wheel, verify-python-sdist]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     environment: release
     permissions:
