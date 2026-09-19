@@ -40,6 +40,7 @@ CARGO_FILES=(
     "$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
     # The Lua plugin builder is released as a binary next to nginx-lint
     "$ROOT_DIR/plugins/nginx-lint-plugin-sdk/Cargo.toml"
+    "$ROOT_DIR/plugins/rust/security-rules/Cargo.toml"
 )
 
 # Add all plugin Cargo.toml files
