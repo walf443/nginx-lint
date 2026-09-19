@@ -169,34 +169,34 @@ macro_rules! export_component_plugins {
     ($($plugin_type:ty),+ $(,)?) => {
         #[cfg(all(target_arch = "wasm32", feature = "wit-export"))]
         const _: () = {
-            use $crate::wit_guest::rules::Guest;
+            // Everything this block defines is spelled to stay out of the
+            // way of `$plugin_type`, which is resolved inside it: an item
+            // named `Rule`, or a module named `rules`, in the plugin crate
+            // would otherwise be shadowed. macro_rules hygiene does not
+            // cover item names.
+            static __NGINX_LINT_RULES: std::sync::OnceLock<
+                Vec<$crate::wit_guest::rules::ExportedRule>,
+            > = std::sync::OnceLock::new();
 
-            /// One rule of the component, behind a uniform signature so
-            /// the export can loop over rules of different types
-            struct Rule {
-                name: String,
-                relevant_directives: Option<&'static [&'static str]>,
-                spec: fn() -> $crate::PluginSpec,
-                check: fn(&$crate::Config, &str) -> Vec<$crate::LintError>,
-            }
-
-            static RULES: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
-
-            fn rules() -> &'static [Rule] {
-                RULES.get_or_init(|| {
+            fn __nginx_lint_rules() -> &'static [$crate::wit_guest::rules::ExportedRule] {
+                __NGINX_LINT_RULES.get_or_init(|| {
                     vec![
                         $(
                             {
-                                static PLUGIN: std::sync::OnceLock<$plugin_type> =
+                                static __NGINX_LINT_PLUGIN: std::sync::OnceLock<$plugin_type> =
                                     std::sync::OnceLock::new();
-                                fn plugin() -> &'static $plugin_type {
-                                    PLUGIN.get_or_init(|| <$plugin_type>::default())
+                                fn __nginx_lint_plugin() -> &'static $plugin_type {
+                                    __NGINX_LINT_PLUGIN.get_or_init(|| <$plugin_type>::default())
                                 }
-                                Rule {
-                                    name: $crate::Plugin::spec(plugin()).name,
-                                    relevant_directives: $crate::Plugin::relevant_directives(plugin()),
-                                    spec: || $crate::Plugin::spec(plugin()),
-                                    check: |config, path| $crate::Plugin::check(plugin(), config, path),
+                                $crate::wit_guest::rules::ExportedRule {
+                                    name: $crate::Plugin::spec(__nginx_lint_plugin()).name,
+                                    relevant_directives: $crate::Plugin::relevant_directives(
+                                        __nginx_lint_plugin(),
+                                    ),
+                                    spec: || $crate::Plugin::spec(__nginx_lint_plugin()),
+                                    check: |config, path| {
+                                        $crate::Plugin::check(__nginx_lint_plugin(), config, path)
+                                    },
                                 }
                             },
                         )+
@@ -204,14 +204,11 @@ macro_rules! export_component_plugins {
                 })
             }
 
-            struct ComponentExport;
+            struct __NginxLintExport;
 
-            impl Guest for ComponentExport {
+            impl $crate::wit_guest::rules::Guest for __NginxLintExport {
                 fn specs() -> Vec<$crate::wit_guest::nginx_lint::plugin::types::PluginSpec> {
-                    rules()
-                        .iter()
-                        .map(|rule| $crate::wit_guest::convert_spec((rule.spec)()))
-                        .collect()
+                    $crate::wit_guest::rules::specs_of(__nginx_lint_rules())
                 }
 
                 fn check(
@@ -219,41 +216,11 @@ macro_rules! export_component_plugins {
                     path: String,
                     names: Vec<String>,
                 ) -> Vec<$crate::wit_guest::nginx_lint::plugin::types::LintError> {
-                    let asked: Vec<&Rule> = rules()
-                        .iter()
-                        .filter(|rule| names.iter().any(|name| *name == rule.name))
-                        .collect();
-                    if asked.is_empty() {
-                        return Vec::new();
-                    }
-
-                    // Prune the snapshot only when every asked rule can
-                    // live with a pruned one
-                    let mut relevant: Vec<&str> = Vec::new();
-                    let all_declare = asked.iter().all(|rule| match rule.relevant_directives {
-                        Some(names) => {
-                            relevant.extend_from_slice(names);
-                            true
-                        }
-                        None => false,
-                    });
-                    let config = if all_declare {
-                        relevant.sort_unstable();
-                        relevant.dedup();
-                        $crate::wit_guest::reconstruct_config_filtered(config, &relevant)
-                    } else {
-                        $crate::wit_guest::reconstruct_config(config)
-                    };
-
-                    asked
-                        .iter()
-                        .flat_map(|rule| (rule.check)(&config, &path))
-                        .map($crate::wit_guest::convert_lint_error)
-                        .collect()
+                    $crate::wit_guest::rules::check_asked(__nginx_lint_rules(), config, &path, &names)
                 }
             }
 
-            $crate::wit_guest::rules::export_rules!(ComponentExport with_types_in $crate::wit_guest::rules);
+            $crate::wit_guest::rules::export_rules!(__NginxLintExport with_types_in $crate::wit_guest::rules);
         };
     };
 }
