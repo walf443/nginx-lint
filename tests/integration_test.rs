@@ -3359,3 +3359,93 @@ fn test_config_disables_one_rule_of_a_two_rule_plugin() {
         "config validate must accept a plugin rule's section with --plugins:\n{stderr}"
     );
 }
+
+/// `test-plugins --fixtures` on a component that carries several rules
+/// reads the cases from a directory per rule: flat cases are refused,
+/// since they can belong to only one of the rules, and per-rule cases are
+/// checked against their rule, all in one run. Needs the two-rule example
+/// built (`make -C plugins/rust/security-rules build`); skips otherwise.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_fixtures_are_per_rule_for_a_two_rule_plugin() {
+    use std::process::Command;
+
+    let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-rules");
+    if !plugin_dir.join("security-rules.wasm").exists() {
+        eprintln!("SKIP: run `make -C plugins/rust/security-rules build` first");
+        return;
+    }
+    let fixtures = plugin_dir.join("tests/fixtures");
+
+    let run = |fixtures: &Path| {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .args(["test-plugins", "--plugins"])
+            .arg(&plugin_dir)
+            .arg("--fixtures")
+            .arg(fixtures)
+            .output()
+            .expect("Failed to run nginx-lint test-plugins");
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    // Flat cases (one rule's directory pointed at directly) with two rules
+    let (code, _, stderr) = run(&fixtures.join("autoindex-enabled-rs"));
+    assert_eq!(code, Some(2), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("Put each rule's cases under a directory named after the rule"),
+        "stderr:\n{stderr}"
+    );
+
+    // A directory that is not a loaded rule's — a misspelt rule name — is
+    // refused rather than skipped, since skipping it would drop that
+    // rule's fixtures without a word
+    let misspelt = tempfile::tempdir().unwrap();
+    for rule in ["autoindex-enabled-rs", "server-token-enabled-rs"] {
+        let case = misspelt.path().join(rule).join("001_basic").join("error");
+        fs::create_dir_all(&case).unwrap();
+        fs::write(case.join("nginx.conf"), "http { server_tokens on; }\n").unwrap();
+    }
+    let (code, _, stderr) = run(misspelt.path());
+    assert_eq!(code, Some(2), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("not a loaded rule's: server-token-enabled-rs"),
+        "stderr:\n{stderr}"
+    );
+
+    // Per-rule layout: both rules' cases, each under its own rule. The
+    // report has no separator between rules, so a rule's section runs to
+    // the next rule's header.
+    let (code, stdout, stderr) = run(&fixtures);
+    assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    let rules = ["server-tokens-enabled-rs", "autoindex-enabled-rs"];
+    let starts: Vec<usize> = rules
+        .iter()
+        .map(|rule| {
+            stdout
+                .find(&format!("{rule}\n"))
+                .unwrap_or_else(|| panic!("{rule} is reported:\n{stdout}"))
+        })
+        .collect();
+    assert!(
+        starts[0] < starts[1],
+        "rules are reported in spec order:\n{stdout}"
+    );
+    let sections = [&stdout[starts[0]..starts[1]], &stdout[starts[1]..]];
+    for (rule, section) in rules.iter().zip(sections) {
+        assert_eq!(
+            section
+                .matches("ok fixture 001_basic/error is reported")
+                .count(),
+            1,
+            "{rule} must get its own fixture checks:\n{stdout}"
+        );
+        assert!(
+            section.contains("ok fixture 001_basic/expected is clean"),
+            "{rule} must get its own fixture checks:\n{stdout}"
+        );
+    }
+}

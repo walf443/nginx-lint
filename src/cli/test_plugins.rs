@@ -17,6 +17,7 @@ use nginx_lint::plugin::PluginLoader;
 use nginx_lint_common::linter::apply_fixes_to_content_detailed;
 use nginx_lint_common::linter::{LintError, LintRule};
 use nginx_lint_common::parse_string_with_errors;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -28,6 +29,20 @@ enum Outcome {
     /// fix to apply. Reported, and not a failure: a rule without an autofix
     /// is ordinary.
     Skipped(String),
+}
+
+/// How the `--fixtures` directory is laid out, decided by how many rules
+/// loaded.
+#[derive(Clone, Copy)]
+enum FixturesLayout {
+    /// No --fixtures
+    None,
+    /// `<dir>/<case>/`: the cases of the one rule loaded
+    Flat,
+    /// `<dir>/<rule>/<case>/`: several rules loaded, a directory per
+    /// rule; a rule without one gets the example checks only, and every
+    /// directory has to be a loaded rule's
+    PerRule,
 }
 
 /// One named check against one plugin.
@@ -141,23 +156,82 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     }
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
-    // configuration that rule reports. Running the same cases against every
-    // plugin in the directory would fail all the others, so rather than
-    // guessing which plugin a case belongs to, say what is wrong.
-    if fixtures.is_some() && plugins.len() > 1 {
-        eprintln!(
-            "Error: --fixtures describes one rule's cases, but {} rules loaded from {}\n\n\
-             Point --plugins at a directory with the one rule whose fixtures these are.",
-            plugins.len(),
-            dir.display()
-        );
-        return ExitCode::from(2);
-    }
+    // configuration that rule reports. With one rule loaded the cases sit
+    // directly in the directory, as the SDKs document. A component can
+    // carry several rules, and then each rule's cases sit under a
+    // directory named after it: the layout says which rule a case belongs
+    // to, and one run covers every rule that has cases. Running flat
+    // cases against several rules would fail all but one, so rather than
+    // guessing, say what is wrong.
+    let fixtures_layout = match &fixtures {
+        None => FixturesLayout::None,
+        // One rule: the flat layout, whatever the directory holds (a
+        // missing or empty one is reported by the fixture checks)
+        Some(_) if plugins.len() == 1 => FixturesLayout::Flat,
+        Some(dir) => {
+            if !dir.is_dir() {
+                eprintln!("Error: --fixtures {}: not a directory", dir.display());
+                return ExitCode::from(2);
+            }
+            let loaded: HashSet<&str> = plugins.iter().map(|plugin| plugin.name()).collect();
+            let mut subdirs: Vec<String> = std::fs::read_dir(dir)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| entry.path().is_dir())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect();
+            subdirs.sort();
+            let (for_rules, others): (Vec<String>, Vec<String>) = subdirs
+                .into_iter()
+                .partition(|name| loaded.contains(name.as_str()));
+            if for_rules.is_empty() {
+                eprintln!(
+                    "Error: --fixtures holds one rule's cases, but {} rules loaded from {}\n\n\
+                     Put each rule's cases under a directory named after the rule:\n{}",
+                    plugins.len(),
+                    dir.display(),
+                    plugins
+                        .iter()
+                        .map(|plugin| format!("  {}/{}/<case>/", dir.display(), plugin.name()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                return ExitCode::from(2);
+            }
+            // A directory that is not a loaded rule's would be skipped
+            // without a word, and a misspelt rule name is exactly what
+            // makes fixtures silently stop being checked
+            if !others.is_empty() {
+                eprintln!(
+                    "Error: {} holds directories that are not a loaded rule's: {}\n\n\
+                     Loaded rules:\n{}",
+                    dir.display(),
+                    others.join(", "),
+                    plugins
+                        .iter()
+                        .map(|plugin| format!("  - {}", plugin.name()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                return ExitCode::from(2);
+            }
+            FixturesLayout::PerRule
+        }
+    };
 
     let mut failed = 0;
     let mut passed = 0;
     let mut unchecked = Vec::new();
     for plugin in &plugins {
+        let fixtures = match fixtures_layout {
+            FixturesLayout::None => None,
+            FixturesLayout::Flat => fixtures.clone(),
+            FixturesLayout::PerRule => fixtures
+                .as_ref()
+                .map(|dir| dir.join(plugin.name()))
+                .filter(|dir| dir.is_dir()),
+        };
         let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
         report(plugin.name(), &checks);
 

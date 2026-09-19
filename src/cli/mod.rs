@@ -134,7 +134,9 @@ pub enum Commands {
     #[cfg(feature = "plugins")]
     TestPlugins {
         /// Directory of fixture cases, each with error/nginx.conf and/or
-        /// expected/nginx.conf (the layout the SDKs document)
+        /// expected/nginx.conf (the layout the SDKs document). When the
+        /// directory loads more than one rule, the cases live one level
+        /// down, under a directory named after their rule
         #[arg(long, value_name = "DIR")]
         fixtures: Option<PathBuf>,
     },

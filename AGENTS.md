@@ -211,7 +211,9 @@ nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
 It requires the bad example to be reported, the good example to be clean, and
 the fixes to resolve the bad example, matching findings by the plugin's own
 rule name. With `--fixtures` it also runs each case's `error/` and `expected/`,
-and requires the fixes to resolve the `error/` one.
+and requires the fixes to resolve the `error/` one. The cases belong to one
+rule; when the directory loads several, each rule's cases sit under
+`tests/fixtures/<rule>/`.
 
 `make test-builtin-plugins` runs it over every builtin, one plugin per
 invocation so each sees its own `tests/fixtures`; the language plugins'

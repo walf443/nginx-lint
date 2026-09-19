@@ -12,9 +12,9 @@ build:
 	wasm-tools component new $(CORE) -o $(WASM)
 
 # test-plugins loads the component as two rules and checks each against its
-# own examples.
+# own examples, and each rule's fixtures under tests/fixtures/<rule>/.
 test-e2e: build
-	$(NGINX_LINT) test-plugins --plugins .
+	$(NGINX_LINT) test-plugins --plugins . --fixtures tests/fixtures
 
 clean:
 	rm -f $(WASM)

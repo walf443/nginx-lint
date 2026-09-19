@@ -186,7 +186,7 @@ jobs:
           cargo test --no-default-features --features cli,wasm-builtin-plugins --lib plugin::component_rule::tests::two_rule 2>&1 | tee lib.log
           grep -q 'test result: ok. 2 passed' lib.log
           cargo test --no-default-features --features cli,wasm-builtin-plugins --test integration_test two_rule 2>&1 | tee it.log
-          grep -q 'test result: ok. 1 passed' it.log
+          grep -q 'test result: ok. 2 passed' it.log
 
   build-host:
     name: Build Host Binaries
@@ -457,7 +457,8 @@ jobs:
             # rules and checks each against its own examples.
             run: |
               test -f plugins/rust/security-rules/security-rules.wasm
-              ./artifacts/nginx-lint test-plugins --plugins plugins/rust/security-rules
+              ./artifacts/nginx-lint test-plugins --plugins plugins/rust/security-rules \
+                --fixtures plugins/rust/security-rules/tests/fixtures
           - name: Test TypeScript plugin integration
             run: |
               NGINX_LINT=./artifacts/nginx-lint
