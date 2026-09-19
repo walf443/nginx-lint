@@ -45,6 +45,11 @@ export interface Rule {
    * none of the listed names inside it, the block is pruned away with the
    * evidence. Leave undefined to get the whole config, which is also the
    * only way to see comments and blank lines.
+   *
+   * This is a floor, not a ceiling: when the host asks for several rules
+   * at once, the config is pruned to the union of their lists, so a rule
+   * can see directives it did not ask for. Match by name; do not read
+   * anything into a block being empty or a list having a certain length.
    */
   relevantDirectives?: string[];
   /**

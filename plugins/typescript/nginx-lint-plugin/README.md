@@ -100,7 +100,9 @@ fetched depends on `relevantDirectives`:
 
 When the host asks for several rules of one component at once, the config is
 fetched once, pruned to the union of their `relevantDirectives` if every
-asked rule declares them.
+asked rule declares them. So the list is a floor, not a ceiling: a rule can
+see directives it did not ask for. Match by name, and do not read anything
+into a block being empty or a list having a certain length.
 
 **One important exception**: if your rule warns when a directive is
 *missing* inside some block (e.g. "this `http` block has no
