@@ -981,7 +981,12 @@ enum Exports {
     /// component shares the one `PluginRulesPre` (it is reference counted),
     /// so the component is compiled once however many rules it carries;
     /// each rule still instantiates it separately per check.
-    Rules(PluginRulesPre<ComponentStoreData>),
+    Rules {
+        pre: PluginRulesPre<ComponentStoreData>,
+        /// The names of every rule the component carries, so a check can
+        /// tell a finding of a sibling rule from one under an unknown name
+        names: Arc<[String]>,
+    },
     /// The original `plugin` world: the component is one rule. Kept so
     /// components built before `plugin-rules` existed stay loadable.
     Plugin(PluginPre<ComponentStoreData>),
@@ -990,7 +995,7 @@ enum Exports {
 impl Exports {
     fn engine(&self) -> &Engine {
         match self {
-            Exports::Rules(pre) => pre.engine(),
+            Exports::Rules { pre, .. } => pre.engine(),
             Exports::Plugin(pre) => pre.engine(),
         }
     }
@@ -1066,7 +1071,8 @@ impl ComponentLintRule {
             let pre = PluginRulesPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
             let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
-            (Exports::Rules(pre), specs)
+            let names: Arc<[String]> = specs.iter().map(|spec| sanitize_text(&spec.name)).collect();
+            (Exports::Rules { pre, names }, specs)
         } else {
             let pre = PluginPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
@@ -1104,7 +1110,7 @@ impl ComponentLintRule {
     /// Whether the component targets the `plugin-rules` world rather than
     /// the original `plugin` world
     pub fn is_plugin_rules(&self) -> bool {
-        matches!(self.exports, Exports::Rules(_))
+        matches!(self.exports, Exports::Rules { .. })
     }
 
     /// Create a store with limits and the execution deadline
@@ -1226,7 +1232,7 @@ impl ComponentLintRule {
             }
         };
         let wit_errors = match &self.exports {
-            Exports::Rules(pre) => {
+            Exports::Rules { pre, names } => {
                 let rules = pre
                     .instantiate(&mut store)
                     .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
@@ -1240,8 +1246,15 @@ impl ComponentLintRule {
                     .map_err(check_failed)?;
                 // Only this rule was asked for. A component that ignores
                 // the list and reports every rule would otherwise have each
-                // of its findings repeated once per rule it carries.
-                errors.retain(|e| sanitize_text(&e.rule) == self.name);
+                // of its findings repeated once per rule it carries, so a
+                // sibling's findings are dropped. A finding under a name
+                // the component does not carry at all is kept: that is a
+                // rule whose spec and findings disagree on its name, which
+                // test-plugins diagnoses from what it gets back.
+                errors.retain(|e| {
+                    let rule = sanitize_text(&e.rule);
+                    rule == self.name || !names.contains(&rule)
+                });
                 errors
             }
             Exports::Plugin(pre) => {
@@ -1765,7 +1778,7 @@ mod tests {
                     rule.timeout_ticks,
                 );
                 match &rule.exports {
-                    Exports::Rules(pre) => {
+                    Exports::Rules { pre, .. } => {
                         pre.instantiate(&mut store).unwrap();
                     }
                     Exports::Plugin(pre) => {
