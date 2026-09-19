@@ -187,9 +187,10 @@ Don't declare this if `check()` reads comments or blank lines (`ConfigItem::Comm
 
 ## Several Rules in One Component
 
-`export_component_plugin!` makes a component that is one rule. To ship several
-rules as one `.wasm`, implement each as its own `Plugin` and list them in
-`export_component_plugins!`:
+`export_component_plugin!` makes a component that carries one rule. To ship
+several rules as one `.wasm`, implement each as its own `Plugin` and list them
+in `export_component_plugins!` (the former is this with a single plugin; both
+target the `plugin-rules` world):
 
 ```rust
 nginx_lint_plugin::export_component_plugins!(NoAutoindexPlugin, NoServerTokensPlugin);

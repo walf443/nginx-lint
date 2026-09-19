@@ -112,7 +112,9 @@ pub mod prelude {
 
 /// Macro to export a plugin as a WIT component
 ///
-/// This generates the WIT component model exports for your plugin.
+/// This generates the WIT component model exports for your plugin: the
+/// `plugin-rules` world, carrying this one rule. It is
+/// [`export_component_plugins!`] with a single plugin.
 ///
 /// # Example
 ///
