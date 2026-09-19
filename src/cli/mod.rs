@@ -137,6 +137,12 @@ pub enum Commands {
         /// expected/nginx.conf (the layout the SDKs document)
         #[arg(long, value_name = "DIR")]
         fixtures: Option<PathBuf>,
+
+        /// The rule the fixture cases are written for. Required when the
+        /// directory loads more than one rule (a component can carry
+        /// several); the other rules get the example checks only
+        #[arg(long, value_name = "NAME", requires = "fixtures")]
+        fixtures_for: Option<String>,
     },
     /// Show detailed documentation for a rule
     Why {

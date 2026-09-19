@@ -284,8 +284,9 @@ nginx-lint test-plugins --plugins . --fixtures tests/fixtures
 
 Each `<case>/error/nginx.conf` has to be reported and each
 `<case>/expected/nginx.conf` has to be clean; a case may declare only one of
-the two. Because the cases are written for one rule, `--fixtures` needs the
-directory to hold exactly one plugin.
+the two. The cases are written for one rule, so when the directory loads more
+than one — a component can carry several — say which with `--fixtures-for NAME`; the
+other rules get the example checks only.
 
 ### The plugin sandbox
 

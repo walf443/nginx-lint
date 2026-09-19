@@ -3359,3 +3359,65 @@ fn test_config_disables_one_rule_of_a_two_rule_plugin() {
         "config validate must accept a plugin rule's section with --plugins:\n{stderr}"
     );
 }
+
+/// `test-plugins --fixtures` on a component that carries several rules
+/// needs `--fixtures-for` to say which rule the cases belong to: without it
+/// the command refuses, with a wrong name it refuses and lists the rules,
+/// and with the right one the fixtures are checked against that rule only.
+/// Needs the two-rule example built (`make -C plugins/rust/security-rules
+/// build`); skips otherwise.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_fixtures_for_names_the_rule_of_a_two_rule_plugin() {
+    use std::process::Command;
+
+    let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-rules");
+    if !plugin_dir.join("security-rules.wasm").exists() {
+        eprintln!("SKIP: run `make -C plugins/rust/security-rules build` first");
+        return;
+    }
+    let fixtures = plugin_dir.join("tests/fixtures");
+
+    let run = |extra: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .args(["test-plugins", "--plugins"])
+            .arg(&plugin_dir)
+            .arg("--fixtures")
+            .arg(&fixtures)
+            .args(extra)
+            .output()
+            .expect("Failed to run nginx-lint test-plugins");
+        (
+            output.status.code(),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    let (code, _, stderr) = run(&[]);
+    assert_eq!(code, Some(2), "stderr:\n{stderr}");
+    assert!(stderr.contains("--fixtures-for NAME"), "stderr:\n{stderr}");
+
+    let (code, _, stderr) = run(&["--fixtures-for", "no-such-rule"]);
+    assert_eq!(code, Some(2), "stderr:\n{stderr}");
+    assert!(
+        stderr.contains("no-such-rule is not a rule loaded")
+            && stderr.contains("autoindex-enabled-rs")
+            && stderr.contains("server-tokens-enabled-rs"),
+        "stderr:\n{stderr}"
+    );
+
+    let (code, stdout, stderr) = run(&["--fixtures-for", "autoindex-enabled-rs"]);
+    assert_eq!(code, Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}");
+    // The fixture checks appear under the named rule and nowhere else
+    let fixture_lines = stdout.matches("fixture 001_basic").count();
+    assert_eq!(fixture_lines, 3, "stdout:\n{stdout}");
+    let autoindex_section = stdout
+        .split("autoindex-enabled-rs\n")
+        .nth(1)
+        .expect("the named rule is reported");
+    assert!(
+        autoindex_section.contains("fixture 001_basic/error is reported"),
+        "stdout:\n{stdout}"
+    );
+}

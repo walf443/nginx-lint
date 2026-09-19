@@ -36,7 +36,11 @@ struct Check {
     outcome: Outcome,
 }
 
-pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
+pub fn run_test_plugins(
+    fixtures: Option<PathBuf>,
+    fixtures_rule: Option<String>,
+    cli: &Cli,
+) -> ExitCode {
     if cli.color {
         colored::control::set_override(true);
     } else if cli.no_color {
@@ -142,23 +146,49 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
 
     // A fixture case is written for one rule: `error/nginx.conf` is a
     // configuration that rule reports. Running the same cases against every
-    // plugin in the directory would fail all the others, so rather than
-    // guessing which plugin a case belongs to, say what is wrong.
-    if fixtures.is_some() && plugins.len() > 1 {
-        eprintln!(
-            "Error: --fixtures describes one rule's cases, but {} rules loaded from {}\n\n\
-             Point --plugins at a directory with the one rule whose fixtures these are.",
-            plugins.len(),
-            dir.display()
-        );
-        return ExitCode::from(2);
-    }
+    // rule in the directory would fail all the others, so the rule they
+    // belong to has to be known: the only rule loaded, or the one named
+    // with --fixtures-for. Rather than guessing, say what is wrong.
+    let fixtures_for: Option<&str> = match (&fixtures, &fixtures_rule) {
+        (None, _) => None,
+        (Some(_), Some(name)) => {
+            if !plugins.iter().any(|plugin| plugin.name() == name) {
+                let mut loaded: Vec<&str> = plugins.iter().map(|plugin| plugin.name()).collect();
+                loaded.sort_unstable();
+                eprintln!(
+                    "Error: --fixtures-for {} is not a rule loaded from {}\n\nLoaded rules:\n{}",
+                    name,
+                    dir.display(),
+                    loaded
+                        .iter()
+                        .map(|name| format!("  - {name}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+                return ExitCode::from(2);
+            }
+            Some(name.as_str())
+        }
+        (Some(_), None) if plugins.len() > 1 => {
+            eprintln!(
+                "Error: --fixtures describes one rule's cases, but {} rules loaded from {}\n\n\
+                 Say which with --fixtures-for NAME.",
+                plugins.len(),
+                dir.display()
+            );
+            return ExitCode::from(2);
+        }
+        (Some(_), None) => Some(plugins[0].name()),
+    };
 
     let mut failed = 0;
     let mut passed = 0;
     let mut unchecked = Vec::new();
     for plugin in &plugins {
-        let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
+        let fixtures = fixtures
+            .as_deref()
+            .filter(|_| fixtures_for == Some(plugin.name()));
+        let checks = test_plugin(plugin.as_ref(), fixtures);
         report(plugin.name(), &checks);
 
         let mut checked = 0;

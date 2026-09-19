@@ -205,13 +205,14 @@ Check a built plugin end to end with the CLI, which needs nothing but the
 directory — the examples travel inside the component:
 
 ```bash
-nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
+nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures [--fixtures-for <name>]]
 ```
 
 It requires the bad example to be reported, the good example to be clean, and
 the fixes to resolve the bad example, matching findings by the plugin's own
 rule name. With `--fixtures` it also runs each case's `error/` and `expected/`,
-and requires the fixes to resolve the `error/` one.
+and requires the fixes to resolve the `error/` one; the cases belong to one
+rule, so `--fixtures-for` names it when the directory loads more than one.
 
 `make test-builtin-plugins` runs it over every builtin, one plugin per
 invocation so each sees its own `tests/fixtures`; the language plugins'

@@ -12,9 +12,9 @@ build:
 	wasm-tools component new $(CORE) -o $(WASM)
 
 # test-plugins loads the component as two rules and checks each against its
-# own examples.
+# own examples; the fixtures are autoindex-enabled-rs's, so --fixtures-for says so.
 test-e2e: build
-	$(NGINX_LINT) test-plugins --plugins .
+	$(NGINX_LINT) test-plugins --plugins . --fixtures tests/fixtures --fixtures-for autoindex-enabled-rs
 
 clean:
 	rm -f $(WASM)
