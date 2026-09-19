@@ -240,7 +240,7 @@ example beside it, and a builder for Lua scripts:
 
 | Language | SDK | Example |
 | --- | --- | --- |
-| Rust | `crates/nginx-lint-plugin` | `plugins/builtin/` (one rule each), `plugins/rust/security-bundle` (two rules in one component) |
+| Rust | `crates/nginx-lint-plugin` | `plugins/builtin/` (one rule each), `plugins/rust/security-rules` (two rules in one component) |
 | TypeScript | [`nginx-lint-plugin`](https://www.npmjs.com/package/nginx-lint-plugin) (`plugins/typescript/nginx-lint-plugin`) | `plugins/typescript/server-tokens-enabled-ts` |
 | Python | [`nginx-lint-plugin`](https://pypi.org/project/nginx-lint-plugin/) (`plugins/python/nginx-lint-plugin`) | `plugins/python/server-tokens-enabled-py` |
 | Go | `plugins/go/nginx-lint-plugin` | `plugins/go/server-tokens-enabled-go` |

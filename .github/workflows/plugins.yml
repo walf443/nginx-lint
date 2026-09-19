@@ -382,8 +382,8 @@ jobs:
           path: plugins/lua/server-tokens-enabled-lua/server-tokens-enabled-lua.wasm
           retention-days: 1
 
-  rust-bundle-plugin:
-    name: Rust Bundle Plugin
+  rust-two-rule-plugin:
+    name: Rust Plugin (two rules)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -397,7 +397,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          shared-key: "rust-bundle-plugin"
+          shared-key: "rust-two-rule-plugin"
       - name: Install wasm-tools
         run: |
           WASM_TOOLS_VERSION=1.245.1
@@ -405,25 +405,25 @@ jobs:
             | tar xz --strip-components=1 --wildcards "*/wasm-tools"
           mv wasm-tools /usr/local/bin/
           wasm-tools --version
-      - name: Run the bundle's unit tests
-        run: cargo test -p security-bundle-plugin
+      - name: Run the plugin's unit tests
+        run: cargo test -p security-rules-plugin
       - name: Build the host
         run: cargo build --features plugins
-      - name: Build and test the bundle
+      - name: Build and test the plugin
         # A plugin-rules component with two rules in one .wasm. test-plugins
         # loads it as two rules and checks each against its own examples.
-        working-directory: plugins/rust/security-bundle
+        working-directory: plugins/rust/security-rules
         run: make test-e2e
-      - name: Run the host's bundle tests
-        # The tests that load the bundle skip themselves when it is not
+      - name: Run the host's two-rule tests
+        # The tests that load the plugin skip themselves when it is not
         # built; the test -f makes it a precondition of this step. A cargo
         # test filter that matches nothing exits 0, so each run is held to
         # the number of tests it is expected to find.
         run: |
-          test -f plugins/rust/security-bundle/security-bundle.wasm
-          cargo test --features plugins --lib plugin::component_rule::tests::bundle 2>&1 | tee lib.log
+          test -f plugins/rust/security-rules/security-rules.wasm
+          cargo test --features plugins --lib plugin::component_rule::tests::two_rule 2>&1 | tee lib.log
           grep -q 'test result: ok. 2 passed' lib.log
-          cargo test --features plugins --test integration_test bundle 2>&1 | tee it.log
+          cargo test --features plugins --test integration_test two_rule 2>&1 | tee it.log
           grep -q 'test result: ok. 1 passed' it.log
 
   wasm-integration:

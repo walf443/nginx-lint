@@ -30,7 +30,7 @@ members = [
     "plugins/builtin/deprecation/listen_http2_deprecated",
     "plugins/builtin/deprecation/ssl_on_deprecated",
     "plugins/nginx-lint-plugin-sdk",
-    "plugins/rust/security-bundle",
+    "plugins/rust/security-rules",
 ]
 # The Python SDK's native module is its own workspace: it's a Python
 # extension module (built via maturin against a local interpreter), which

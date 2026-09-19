@@ -1,5 +1,5 @@
-WASM := security-bundle.wasm
-CORE := ../../../target/wasm32-unknown-unknown/release/security_bundle_plugin.wasm
+WASM := security-rules.wasm
+CORE := ../../../target/wasm32-unknown-unknown/release/security_rules_plugin.wasm
 NGINX_LINT := ../../../target/debug/nginx-lint
 
 .PHONY: build test-e2e clean

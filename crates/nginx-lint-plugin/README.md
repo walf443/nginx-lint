@@ -202,7 +202,7 @@ The config is reconstructed once per `check` and shared by the rules the host
 asked for; `relevant_directives()` still applies, pruning to the union of the
 asked rules' names when every one of them declares it.
 
-`plugins/rust/security-bundle` is a two-rule example.
+`plugins/rust/security-rules` is a two-rule example.
 
 Both macros build the `plugin-rules` world, which the host loads from the same
 release of nginx-lint as this SDK onwards (the SDK and the CLI share a version

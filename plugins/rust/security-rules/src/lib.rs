@@ -4,7 +4,8 @@
 //! them, and the host loads the component as two rules. The rules here
 //! are the security builtins `server-tokens-enabled` and
 //! `autoindex-enabled` cut down to their explicit-`on` cases, under
-//! `-bundle` names so they can sit beside the builtins.
+//! `-rs` names so they can sit beside the builtins, the way the other
+//! SDKs' examples do.
 //!
 //! Build with:
 //! ```sh
@@ -20,7 +21,7 @@ pub struct ServerTokensEnabled;
 impl Plugin for ServerTokensEnabled {
     fn spec(&self) -> PluginSpec {
         PluginSpec::new(
-            "server-tokens-enabled-bundle",
+            "server-tokens-enabled-rs",
             "security",
             "Detects when server_tokens is enabled (exposes nginx version)",
         )
@@ -62,7 +63,7 @@ pub struct AutoindexEnabled;
 impl Plugin for AutoindexEnabled {
     fn spec(&self) -> PluginSpec {
         PluginSpec::new(
-            "autoindex-enabled-bundle",
+            "autoindex-enabled-rs",
             "security",
             "Detects when autoindex is enabled (can expose directory contents)",
         )
@@ -109,7 +110,7 @@ mod tests {
         let runner = PluginTestRunner::new(ServerTokensEnabled);
         let errors = runner.check_string("http { server_tokens on; }").unwrap();
         assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].rule, "server-tokens-enabled-bundle");
+        assert_eq!(errors[0].rule, "server-tokens-enabled-rs");
         runner.assert_no_errors("http { server_tokens off; }");
     }
 

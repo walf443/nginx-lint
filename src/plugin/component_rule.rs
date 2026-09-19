@@ -1382,16 +1382,16 @@ mod tests {
         rules.pop()
     }
 
-    /// Load the example bundle (two rules in one component), skipping the
-    /// test if `make -C plugins/rust/security-bundle build` has not been run.
-    fn load_real_bundle() -> Option<Vec<ComponentLintRule>> {
+    /// Load the two-rule example component, skipping the test if
+    /// `make -C plugins/rust/security-rules build` has not been run.
+    fn load_real_two_rule_plugin() -> Option<Vec<ComponentLintRule>> {
         use crate::plugin::{CompilationCache, PluginLoader};
 
         let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("plugins/rust/security-bundle/security-bundle.wasm");
+            .join("plugins/rust/security-rules/security-rules.wasm");
         if !wasm_path.exists() {
             eprintln!(
-                "SKIP: run `make -C plugins/rust/security-bundle build` first (missing {wasm_path:?})"
+                "SKIP: run `make -C plugins/rust/security-rules build` first (missing {wasm_path:?})"
             );
             return None;
         }
@@ -1407,16 +1407,13 @@ mod tests {
     /// A `plugin-rules` component loads as one rule per spec, in spec
     /// order, each carrying its own metadata.
     #[test]
-    fn bundle_loads_as_one_rule_per_spec() {
-        let Some(rules) = load_real_bundle() else {
+    fn two_rule_plugin_loads_as_one_rule_per_spec() {
+        let Some(rules) = load_real_two_rule_plugin() else {
             return;
         };
 
         let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
-        assert_eq!(
-            names,
-            ["server-tokens-enabled-bundle", "autoindex-enabled-bundle"]
-        );
+        assert_eq!(names, ["server-tokens-enabled-rs", "autoindex-enabled-rs"]);
         assert!(rules.iter().all(|rule| rule.is_plugin_rules()));
         assert!(rules.iter().all(|rule| rule.category() == "security"));
         assert!(rules[0].description().contains("server_tokens"));
@@ -1424,11 +1421,11 @@ mod tests {
         assert!(rules[1].bad_example().unwrap().contains("autoindex on;"));
     }
 
-    /// Each rule of a bundle reports only its own findings: the host asks
+    /// Each rule of the component reports only its own findings: the host asks
     /// the component for that one rule, and keeps only findings that name it.
     #[test]
-    fn bundle_rules_report_their_own_findings_only() {
-        let Some(rules) = load_real_bundle() else {
+    fn two_rule_plugin_rules_report_their_own_findings_only() {
+        let Some(rules) = load_real_two_rule_plugin() else {
             return;
         };
 

@@ -3278,18 +3278,19 @@ fn test_duplicate_plugin_rule_name_is_skipped() {
 }
 
 /// `[rules.<name>] enabled = false` silences an external rule, and one rule
-/// of a bundle in particular: a bundle has no file to delete, so the config
-/// is the only way to run some of its rules and not others. Needs the
-/// example bundle built (`make -C plugins/rust/security-bundle build`);
-/// skips otherwise, as the host's own bundle tests do.
+/// of a multi-rule component in particular: there is no file per rule to
+/// delete, so the config is the only way to run some of its rules and not
+/// others. Needs the two-rule example built
+/// (`make -C plugins/rust/security-rules build`); skips otherwise, as the
+/// host's own tests of it do.
 #[cfg(feature = "plugins")]
 #[test]
-fn test_config_disables_one_rule_of_a_bundle() {
+fn test_config_disables_one_rule_of_a_two_rule_plugin() {
     use std::process::Command;
 
-    let bundle_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-bundle");
-    if !bundle_dir.join("security-bundle.wasm").exists() {
-        eprintln!("SKIP: run `make -C plugins/rust/security-bundle build` first");
+    let plugin_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-rules");
+    if !plugin_dir.join("security-rules.wasm").exists() {
+        eprintln!("SKIP: run `make -C plugins/rust/security-rules build` first");
         return;
     }
 
@@ -3301,20 +3302,16 @@ fn test_config_disables_one_rule_of_a_bundle() {
     )
     .unwrap();
     let config = dir.path().join("nginx-lint.toml");
-    fs::write(
-        &config,
-        "[rules.autoindex-enabled-bundle]\nenabled = false\n",
-    )
-    .unwrap();
+    fs::write(&config, "[rules.autoindex-enabled-rs]\nenabled = false\n").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
         .arg("--config")
         .arg(&config)
         .arg("--plugins")
-        .arg(&bundle_dir)
+        .arg(&plugin_dir)
         .args([
             "--rule-only",
-            "server-tokens-enabled-bundle,autoindex-enabled-bundle",
+            "server-tokens-enabled-rs,autoindex-enabled-rs",
         ])
         .arg(&conf)
         .output()
@@ -3325,7 +3322,7 @@ fn test_config_disables_one_rule_of_a_bundle() {
     // Asking for the disabled rule by name is reported the way a disabled
     // builtin is, rather than as a rule that does not exist
     assert!(
-        stderr.contains("not loaded in this build") && stderr.contains("autoindex-enabled-bundle"),
+        stderr.contains("not loaded in this build") && stderr.contains("autoindex-enabled-rs"),
         "stdout:\n{stdout}\nstderr:\n{stderr}"
     );
 
@@ -3333,25 +3330,25 @@ fn test_config_disables_one_rule_of_a_bundle() {
         .arg("--config")
         .arg(&config)
         .arg("--plugins")
-        .arg(&bundle_dir)
-        .args(["--rule-only", "server-tokens-enabled-bundle"])
+        .arg(&plugin_dir)
+        .args(["--rule-only", "server-tokens-enabled-rs"])
         .arg(&conf)
         .output()
         .expect("Failed to run nginx-lint");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("server-tokens-enabled-bundle"),
-        "the enabled rule of the bundle must still run:\n{stdout}"
+        stdout.contains("server-tokens-enabled-rs"),
+        "the enabled rule of the component must still run:\n{stdout}"
     );
     assert!(
-        !stdout.contains("autoindex-enabled-bundle"),
-        "the disabled rule of the bundle must not run:\n{stdout}"
+        !stdout.contains("autoindex-enabled-rs"),
+        "the disabled rule of the component must not run:\n{stdout}"
     );
 
     // `config validate` accepts the section once it can see the plugin
     let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
         .arg("--plugins")
-        .arg(&bundle_dir)
+        .arg(&plugin_dir)
         .args(["config", "validate", "--config"])
         .arg(&config)
         .output()

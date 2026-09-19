@@ -1,5 +1,5 @@
 [package]
-name = "security-bundle-plugin"
+name = "security-rules-plugin"
 version = "0.22.0"
 edition = "2024"
 publish = false
