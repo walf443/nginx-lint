@@ -1,6 +1,6 @@
 [package]
 name = "nginx-lint-plugin-sdk"
-version = "0.22.0"
+version = "0.23.0"
 edition = "2024"
 description = "Plugin SDK binary for nginx-lint: builds plugins from Lua scripts"
 license = "MIT"
