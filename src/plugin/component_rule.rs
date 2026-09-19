@@ -1191,6 +1191,19 @@ impl ComponentLintRule {
                     "specs() returned a rule with an empty name",
                 ));
             }
+            // The host asks for a rule by its sanitized name and the
+            // component matches on the name it declared; a name the
+            // sanitizer alters would never match, and the rule would load
+            // and then silently never run
+            if name != spec.name {
+                return Err(PluginError::invalid_plugin_spec(
+                    path,
+                    format!(
+                        "specs() returned the rule name {:?}, which contains control characters",
+                        name
+                    ),
+                ));
+            }
             if !seen.insert(name.clone()) {
                 return Err(PluginError::invalid_plugin_spec(
                     path,
