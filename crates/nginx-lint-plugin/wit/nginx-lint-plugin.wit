@@ -318,10 +318,16 @@ world plugin-rules {
     /// component otherwise.
     export specs: func() -> list<plugin-spec>;
 
-    /// Check config with the named rules and return their lint errors. The
-    /// host asks only for rules that are enabled, and each returned
-    /// lint-error names its rule in `rule`; the host drops findings for
-    /// rules it did not ask for.
+    /// Check config with the named rules and return their lint errors.
+    /// `rules` holds names from `specs`, only those the host wants run
+    /// (a disabled rule is left out); a name the component does not
+    /// carry is to be ignored, and an empty list yields no findings. Each
+    /// returned lint-error names its rule in `rule`. The host drops a
+    /// finding named for one of the component's other rules, so a
+    /// component that ignores `rules` cannot duplicate findings, but a
+    /// finding under a name the component does not declare at all is
+    /// passed through: that is a rule whose spec and findings disagree,
+    /// which `nginx-lint test-plugins` reports.
     export check: func(cfg: borrow<config>, path: string, rules: list<string>) -> list<lint-error>;
 }
 
