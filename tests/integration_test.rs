@@ -3347,4 +3347,18 @@ fn test_config_disables_one_rule_of_a_bundle() {
         !stdout.contains("autoindex-enabled-bundle"),
         "the disabled rule of the bundle must not run:\n{stdout}"
     );
+
+    // `config validate` accepts the section once it can see the plugin
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--plugins")
+        .arg(&bundle_dir)
+        .args(["config", "validate", "--config"])
+        .arg(&config)
+        .output()
+        .expect("Failed to run nginx-lint config validate");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stderr.contains("OK"),
+        "config validate must accept a plugin rule's section with --plugins:\n{stderr}"
+    );
 }

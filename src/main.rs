@@ -17,7 +17,7 @@ fn main() -> ExitCode {
     }
 
     match &cli.command {
-        Some(Commands::Config { command }) => cli::config::run_config(command),
+        Some(Commands::Config { command }) => cli::config::run_config(command, &cli),
         Some(Commands::Guide) => cli::guide::run_guide(),
         Some(Commands::Web { port, open }) => cli::web::run_web(*port, *open),
         #[cfg(feature = "plugins")]

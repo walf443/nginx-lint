@@ -839,16 +839,30 @@ impl LintConfig {
 
     /// Validate a configuration file and return any errors
     pub fn validate_file(path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+        Self::validate_file_with_rules(path, &HashSet::new())
+    }
+
+    /// Validate a configuration file, accepting `[rules.<name>]` sections
+    /// for `extra_rules` as well as for the builtin rules. The rules of a
+    /// `--plugins` directory are only known to the caller.
+    pub fn validate_file_with_rules(
+        path: &Path,
+        extra_rules: &HashSet<String>,
+    ) -> Result<Vec<ValidationError>, ConfigError> {
         let content = fs::read_to_string(path).map_err(|e| ConfigError::IoError {
             path: path.to_path_buf(),
             source: e,
         })?;
 
-        Self::validate_content(&content, path)
+        Self::validate_content(&content, path, extra_rules)
     }
 
     /// Validate configuration content and return any errors
-    fn validate_content(content: &str, path: &Path) -> Result<Vec<ValidationError>, ConfigError> {
+    fn validate_content(
+        content: &str,
+        path: &Path,
+        extra_rules: &HashSet<String>,
+    ) -> Result<Vec<ValidationError>, ConfigError> {
         let value: toml::Value = toml::from_str(content).map_err(|e| ConfigError::ParseError {
             path: path.to_path_buf(),
             source: e,
@@ -950,7 +964,11 @@ impl LintConfig {
 
             // Validate [rules.*] sections
             if let Some(toml::Value::Table(rules)) = root.get("rules") {
-                let known_rules: HashSet<&str> = Self::KNOWN_RULE_NAMES.iter().copied().collect();
+                let known_rules: HashSet<&str> = Self::KNOWN_RULE_NAMES
+                    .iter()
+                    .copied()
+                    .chain(extra_rules.iter().map(String::as_str))
+                    .collect();
 
                 for (rule_name, rule_value) in rules {
                     if !known_rules.contains(rule_name.as_str()) {
@@ -1354,6 +1372,33 @@ indent_size = "auto"
 
         let errors = LintConfig::validate_file(file.path()).unwrap();
         assert!(errors.is_empty(), "expected no errors, got: {errors:?}");
+    }
+
+    #[test]
+    fn test_validate_accepts_extra_rules_only_when_given() {
+        // A `[rules.<name>]` section for a plugin's rule is unknown to the
+        // builtin catalog; the caller that loaded the plugin passes its name.
+        let mut file = NamedTempFile::new().unwrap();
+        write!(
+            file,
+            "[rules.my-plugin-rule]\nenabled = false\nno_such_option = 1\n"
+        )
+        .unwrap();
+
+        let errors = LintConfig::validate_file(file.path()).unwrap();
+        assert!(
+            matches!(&errors[..], [ValidationError::UnknownRule { name, .. }] if name == "my-plugin-rule"),
+            "expected the rule to be unknown, got: {errors:?}"
+        );
+
+        let extra: HashSet<String> = ["my-plugin-rule".to_string()].into_iter().collect();
+        let errors = LintConfig::validate_file_with_rules(file.path(), &extra).unwrap();
+        // Known now, and its options are validated like any rule's
+        assert!(
+            matches!(&errors[..], [ValidationError::UnknownRuleOption { rule, option, .. }]
+                if rule == "my-plugin-rule" && option == "no_such_option"),
+            "expected only the option to be rejected, got: {errors:?}"
+        );
     }
 
     #[test]
