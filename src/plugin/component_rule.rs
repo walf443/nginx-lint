@@ -1194,13 +1194,16 @@ impl ComponentLintRule {
             // The host asks for a rule by its sanitized name and the
             // component matches on the name it declared; a name the
             // sanitizer alters would never match, and the rule would load
-            // and then silently never run
+            // and then silently never run. The message shows the name as
+            // declared, so the author can see which character is at
+            // fault; `{:?}` escapes it rather than writing it to the
+            // terminal.
             if name != spec.name {
                 return Err(PluginError::invalid_plugin_spec(
                     path,
                     format!(
                         "specs() returned the rule name {:?}, which contains control characters",
-                        name
+                        spec.name
                     ),
                 ));
             }

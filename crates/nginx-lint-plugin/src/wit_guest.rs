@@ -25,6 +25,9 @@ pub mod rules {
         world: "plugin-rules",
         pub_export_macro: true,
         export_macro_name: "export_rules",
+        // wit-bindgen wants the interface ids with the package version
+        // (an unversioned key is reported as an unused remapping), so a
+        // bump of the `package` version in the WIT has to be repeated here
         with: {
             "nginx-lint:plugin/types@4.0.0": super::nginx_lint::plugin::types,
             "nginx-lint:plugin/data-types@4.0.0": super::nginx_lint::plugin::data_types,

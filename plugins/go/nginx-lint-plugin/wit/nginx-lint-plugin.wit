@@ -1,3 +1,7 @@
+// The version is baked into every built component's import names, and
+// the Rust SDK's guest bindings for the `plugin-rules` world name it
+// (crates/nginx-lint-plugin/src/wit_guest.rs): a bump has to be repeated
+// there and reloads nothing built before it.
 package nginx-lint:plugin@4.0.0;
 
 interface types {
