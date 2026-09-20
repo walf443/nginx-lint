@@ -519,12 +519,15 @@ impl Linter {
     /// one WASM component — are checked in one call, so the component is
     /// instantiated and handed the config once per file rather than once
     /// per rule; the unit of parallelism is that group. Every other rule
-    /// is a group of one.
+    /// is a group of one — including the rules of a group whose batched
+    /// check has failed, which run in parallel again from then on rather
+    /// than one after another in one task.
     #[cfg(feature = "cli")]
     fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
-        batch_rules(&self.rules)
+        self.batch_memo
+            .split_failed(batch_rules(&self.rules))
             .par_iter()
             .map(|group| {
                 run_group(
@@ -548,7 +551,8 @@ impl Linter {
     fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
-        batch_rules(&self.rules)
+        self.batch_memo
+            .split_failed(batch_rules(&self.rules))
             .iter()
             .flat_map(|group| {
                 run_group(

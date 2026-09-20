@@ -225,15 +225,12 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     // them all, so that is a way a rule runs that checking it alone does
     // not reach: sharing the config with its siblings. Each rule of such a
     // group is also checked that way, and has to report the same.
-    let groups: Vec<Vec<&dyn LintRule>> = batch_rules(&plugins)
+    let groups: Vec<SiblingRuns> = batch_rules(&plugins)
         .into_iter()
         .filter(|group| group.len() > 1)
+        .map(|group| SiblingRuns::of(&group))
         .collect();
-    let group_of = |name: &str| {
-        groups
-            .iter()
-            .find(|group| group.iter().any(|rule| rule.name() == name))
-    };
+    let group_of = |name: &str| groups.iter().find(|runs| runs.carries(name));
 
     let mut failed = 0;
     let mut passed = 0;
@@ -377,44 +374,79 @@ fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Checked {
 /// siblings' — that is where it would leak — but agreeing there is not a
 /// pass: it has reported nothing beside nothing, and a rule that declares
 /// no examples must not count as checked on the strength of that.
-fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outcome {
-    let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
-    let siblings = names
+/// A group of rules sharing a batch key, checked together — one call
+/// naming every member, as the linter makes it — over each member's bad
+/// example, once for the group; every member is then compared against
+/// the same runs.
+struct SiblingRuns {
+    names: Vec<String>,
+    /// Per bad example: the rule it belongs to, the example, and what the
+    /// batched call returned over it
+    runs: Vec<(String, String, Result<Vec<LintError>, String>)>,
+}
+
+impl SiblingRuns {
+    fn of(group: &[&dyn LintRule]) -> Self {
+        let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
+        let runs = group
+            .iter()
+            .filter_map(|rule| {
+                rule.bad_example()
+                    .filter(|example| !example.is_empty())
+                    .map(|example| (rule.name(), example))
+            })
+            .map(|(owner, example)| {
+                let (config, _) = parse_string_with_errors(example);
+                let config = std::sync::Arc::new(config);
+                // The batched call itself, not the linter's fallback to
+                // one rule at a time: a component that fails only when
+                // asked for several rules is what this check exists to
+                // catch, and the fallback would hide it
+                let together = group[0].check_shared_batch(&names, &config, Path::new("bad.conf"));
+                (owner.to_string(), example.to_string(), together)
+            })
+            .collect();
+        SiblingRuns {
+            names: names.into_iter().map(str::to_string).collect(),
+            runs,
+        }
+    }
+
+    fn carries(&self, name: &str) -> bool {
+        self.names.iter().any(|carried| carried == name)
+    }
+}
+
+fn check_beside_siblings(plugin: &dyn LintRule, group: &SiblingRuns) -> Outcome {
+    let siblings = group
+        .names
         .iter()
-        .filter(|name| **name != plugin.name())
+        .filter(|name| *name != plugin.name())
         .map(|name| format!("'{name}'"))
         .collect::<Vec<_>>()
         .join(", ");
-    let examples: Vec<(&str, &str)> = group
+    let has_own_example = group
+        .runs
         .iter()
-        .filter_map(|rule| {
-            rule.bad_example()
-                .filter(|example| !example.is_empty())
-                .map(|example| (rule.name(), example))
-        })
-        .collect();
-    let has_own_example = examples.iter().any(|(owner, _)| *owner == plugin.name());
-    if examples.is_empty() {
+        .any(|(owner, _, _)| owner == plugin.name());
+    if group.runs.is_empty() {
         return Outcome::Skipped("no rule of the component declares a bad example".to_string());
     }
 
-    // Compared as sets, and in full — position, message, severity and
-    // every fix — since what a rule reports must not depend on company,
-    // while the order it reports in may
-    let sorted = |mut errors: Vec<LintError>| {
-        let mut lines: Vec<String> = errors.drain(..).map(|e| fingerprint(&e)).collect();
+    // Compared as sets, and in full — position, message, severity,
+    // category and every fix — since what a rule reports must not depend
+    // on company, while the order it reports in may
+    let sorted = |errors: &[LintError]| {
+        let mut lines: Vec<String> = errors.iter().map(fingerprint).collect();
         lines.sort();
         lines.join("\n")
     };
 
-    for (owner, example) in examples {
-        let (config, _) = parse_string_with_errors(example);
-        let config = std::sync::Arc::new(config);
-        // The batched call itself, not the linter's fallback to one rule
-        // at a time: a component that fails only when asked for several
-        // rules is what this check exists to catch, and the fallback would
-        // hide it
-        let together = match plugin.check_shared_batch(&names, &config, Path::new("bad.conf")) {
+    for (owner, example, together) in &group.runs {
+        // Every rule of the group is affected by the batched call failing —
+        // none of them can be checked the way the linter checks them — so
+        // each reports it
+        let together = match together {
             Ok(errors) => errors,
             Err(why) => {
                 return Outcome::Failed(format!(
@@ -422,12 +454,13 @@ fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outc
                 ));
             }
         };
-        let alone = sorted(findings(plugin, example, "bad.conf").found);
+        let alone = sorted(&findings(plugin, example, "bad.conf").found);
         let together = sorted(
-            together
-                .into_iter()
+            &together
+                .iter()
                 .filter(|error| error.rule == plugin.name())
-                .collect(),
+                .cloned()
+                .collect::<Vec<_>>(),
         );
         if together != alone {
             return Outcome::Failed(format!(
@@ -447,7 +480,7 @@ fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outc
 }
 
 /// Everything a finding says, on one line, for comparing two runs of a
-/// rule: position, message, severity and each fix in full.
+/// rule: position, message, severity, category and each fix in full.
 fn fingerprint(error: &LintError) -> String {
     let fixes: Vec<String> = error
         .fixes
@@ -466,10 +499,11 @@ fn fingerprint(error: &LintError) -> String {
         })
         .collect();
     format!(
-        "{}:{}: {:?} {} {}",
+        "{}:{}: {:?} [{}] {} {}",
         error.line.unwrap_or(0),
         error.column.unwrap_or(0),
         error.severity,
+        error.category,
         error.message,
         fixes.join(" ")
     )
@@ -1402,6 +1436,9 @@ mod sibling_tests {
         SeesSiblings,
         /// When batched, the finding is the same but its fix is not
         FixDiffers,
+        /// When batched, the finding carries the first asked rule's
+        /// category: what a runtime taking one spec for the whole call does
+        CategoryDiffers,
     }
 
     fn report(name: &str, config: &Config, directive: &str) -> Vec<LintError> {
@@ -1475,6 +1512,19 @@ mod sibling_tests {
                         })
                     })
                     .collect()),
+                BatchBehaviour::CategoryDiffers => Ok(names
+                    .iter()
+                    .flat_map(|name| {
+                        let directive = match *name {
+                            "tokens" => "server_tokens",
+                            _ => "autoindex",
+                        };
+                        report(name, config, directive).into_iter().map(|mut e| {
+                            e.category = "batched".to_string();
+                            e
+                        })
+                    })
+                    .collect()),
             }
         }
     }
@@ -1501,7 +1551,7 @@ mod sibling_tests {
 
     fn outcome(rule: Member, group: [Member; 2]) -> Outcome {
         let refs: Vec<&dyn LintRule> = group.iter().map(|m| m as &dyn LintRule).collect();
-        check_beside_siblings(&rule, &refs)
+        check_beside_siblings(&rule, &SiblingRuns::of(&refs))
     }
 
     #[test]
@@ -1574,6 +1624,20 @@ mod sibling_tests {
         };
         match outcome(with_fix, [with_fix, AUTOINDEX]) {
             Outcome::Failed(why) => assert!(why.contains("new \"batched\""), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The category is part of what a finding says — the reporter prints
+    /// it — so one that changes when batched is a difference too.
+    #[test]
+    fn a_category_that_differs_when_batched_fails_the_check() {
+        let recategorised = Member {
+            batch: BatchBehaviour::CategoryDiffers,
+            ..TOKENS
+        };
+        match outcome(recategorised, [recategorised, AUTOINDEX]) {
+            Outcome::Failed(why) => assert!(why.contains("[batched]"), "{why}"),
             other => panic!("{other:?}"),
         }
     }

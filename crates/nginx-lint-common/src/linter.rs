@@ -587,6 +587,30 @@ impl BatchMemo {
     pub fn remember_failed(&self, key: BatchKey) -> bool {
         self.failed().insert(key)
     }
+
+    /// Split every group whose batched check has failed into groups of
+    /// one, so a caller running groups in parallel runs those rules in
+    /// parallel again, as it did before they were grouped, rather than
+    /// through [`run_batch`]'s one-at-a-time fallback in one task. A
+    /// group of one has no key to look up.
+    pub fn split_failed<'a>(
+        &self,
+        groups: Vec<Vec<&'a dyn LintRule>>,
+    ) -> Vec<Vec<&'a dyn LintRule>> {
+        let failed = self.failed();
+        groups
+            .into_iter()
+            .flat_map(|group| {
+                let key = group.first().and_then(|rule| rule.batch_key());
+                match key {
+                    Some(key) if group.len() > 1 && failed.contains(&key) => {
+                        group.into_iter().map(|rule| vec![rule]).collect()
+                    }
+                    _ => vec![group],
+                }
+            })
+            .collect()
+    }
 }
 
 /// Group rules for [`run_batch`]: rules sharing a [`batch_key`](LintRule::batch_key)
@@ -1270,6 +1294,26 @@ mod batch_tests {
             .map(|group| group.iter().map(|rule| rule.name()).collect())
             .collect();
         assert_eq!(groups, vec![vec!["a1", "a2"], vec!["wants-content"]]);
+    }
+
+    /// A group whose batched check has failed is split into groups of
+    /// one; the others are left as they are.
+    #[test]
+    fn split_failed_breaks_up_only_the_failed_groups() {
+        let rules: Vec<Box<dyn LintRule>> = vec![
+            Box::new(Keyed("a1", Some(1))),
+            Box::new(Keyed("b1", Some(2))),
+            Box::new(Keyed("a2", Some(1))),
+            Box::new(Keyed("b2", Some(2))),
+        ];
+        let memo = BatchMemo::default();
+        memo.remember_failed(BatchKey::new::<Keyed>(1));
+        let groups: Vec<Vec<&str>> = memo
+            .split_failed(batch_rules(&rules))
+            .iter()
+            .map(|group| group.iter().map(|rule| rule.name()).collect())
+            .collect();
+        assert_eq!(groups, vec![vec!["a1"], vec!["a2"], vec!["b1", "b2"]]);
     }
 
     /// The default batched check answers only for the rule itself: asked
