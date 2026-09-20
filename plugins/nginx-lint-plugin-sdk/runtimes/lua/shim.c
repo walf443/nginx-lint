@@ -760,13 +760,16 @@ static int protected_check(lua_State *L) {
             lua_pop(L, 1);
             continue;
         }
+        /* The config is built once, for the first rule that needs it, and
+         * before that rule's spec is made current: a failure building it
+         * is the runtime's, not the rule's */
+        if (!config) {
+            push_config(L, snap, path);         /* [.., spec, config] */
+            lua_insert(L, -2);                  /* [.., config, spec] */
+            config = lua_gettop(L) - 1;
+        }
         /* This rule's spec names its findings */
         lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
-        /* The config is built once, for the first rule that needs it */
-        if (!config) {
-            push_config(L, snap, path);
-            config = lua_gettop(L);
-        }
 
         int top = lua_gettop(L);
         size_t before = ret->len;
@@ -853,7 +856,11 @@ void exports_plugin_rules_check(plugin_rules_borrow_config_t cfg, plugin_rules_s
     int status = lua_pcall(L, 4, 0, 0);
     nginx_lint_plugin_config_api_config_snapshot_free(&snap);
     if (status != LUA_OK) {
+        /* The generated free leaves ptr and len as they were, and
+         * runtime_failure appends to what they describe */
         plugin_rules_list_lint_error_free(ret);
+        ret->ptr = NULL;
+        ret->len = 0;
         runtime_failure(L, error_message(L), ret);
         lua_pushnil(L);
         lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
