@@ -1638,17 +1638,32 @@ mod tests {
         assert_eq!(rules[0].batch_key(), rules[1].batch_key());
         assert!(rules[0].batch_key().is_some());
 
+        let src = "http { server_tokens on; server { location / { autoindex on; } } }";
+        let config = Arc::new(crate::parser::parse_string(src).unwrap());
+
+        // The batched call itself succeeds with both findings — asserted
+        // directly, since through the linter a failed batch would fall back
+        // to one rule at a time and report the same
+        let both = ["server-tokens-enabled-rs", "autoindex-enabled-rs"];
+        let mut batched = rules[0]
+            .check_shared_batch(&both, &config, Path::new("test.conf"))
+            .expect("the batched check succeeds");
+        batched.sort_by(|x, y| x.rule.cmp(&y.rule));
+        let names: Vec<&str> = batched.iter().map(|e| e.rule.as_str()).collect();
+        assert_eq!(names, ["autoindex-enabled-rs", "server-tokens-enabled-rs"]);
+        assert!(batched.iter().all(|e| e.fixes.len() == 1), "{batched:?}");
+
+        // And the linter routes the two rules through it
         let mut linter = crate::linter::Linter::new();
         for rule in rules {
             linter.add_rule(Box::new(rule));
         }
-        let src = "http { server_tokens on; server { location / { autoindex on; } } }";
-        let config = crate::parser::parse_string(src).unwrap();
         let mut errors = linter.lint(&config, Path::new("test.conf"));
         errors.sort_by(|x, y| x.rule.cmp(&y.rule));
-        let names: Vec<&str> = errors.iter().map(|e| e.rule.as_str()).collect();
-        assert_eq!(names, ["autoindex-enabled-rs", "server-tokens-enabled-rs"]);
-        assert!(errors.iter().all(|e| e.fixes.len() == 1), "{errors:?}");
+        assert_eq!(
+            errors.iter().map(|e| e.rule.as_str()).collect::<Vec<_>>(),
+            names
+        );
     }
 
     /// Each rule of the component reports only its own findings: the host asks

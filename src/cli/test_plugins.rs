@@ -224,16 +224,15 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     // them all, so that is a way a rule runs that checking it alone does
     // not reach: sharing the config with its siblings. Each rule of such a
     // group is also checked that way, and has to report the same.
-    let siblings: std::collections::HashMap<&str, Vec<&str>> = batch_rules(&plugins)
+    let groups: Vec<Vec<&dyn LintRule>> = batch_rules(&plugins)
         .into_iter()
         .filter(|group| group.len() > 1)
-        .flat_map(|group| {
-            let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
-            group
-                .into_iter()
-                .map(move |rule| (rule.name(), names.clone()))
-        })
         .collect();
+    let group_of = |name: &str| {
+        groups
+            .iter()
+            .find(|group| group.iter().any(|rule| rule.name() == name))
+    };
 
     let mut failed = 0;
     let mut passed = 0;
@@ -248,10 +247,10 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 .filter(|dir| dir.is_dir()),
         };
         let mut checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
-        if let Some(names) = siblings.get(plugin.name()) {
+        if let Some(group) = group_of(plugin.name()) {
             checks.push(Check {
                 name: "checked beside its siblings, it reports the same",
-                outcome: check_beside_siblings(plugin.as_ref(), names),
+                outcome: check_beside_siblings(plugin.as_ref(), group),
             });
         }
         report(plugin.name(), &checks);
@@ -364,33 +363,33 @@ fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Checked {
 }
 
 /// Run the rule the way the linter runs a component of several rules —
-/// one call naming them all — over its bad example, and require the
-/// findings under this rule to be what checking it alone reports. What
-/// differs is that the config is shared: a rule that changes what it was
-/// handed, or that reads something into a config pruned for its siblings
-/// too, shows up here and nowhere else in this command.
-fn check_beside_siblings(plugin: &dyn LintRule, names: &[&str]) -> Outcome {
-    let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
-        return Outcome::Skipped("the plugin declares no bad example".to_string());
-    };
+/// one call naming them all — and require the findings under this rule
+/// to be what checking it alone reports. What differs is that the config
+/// is shared: a rule that changes what it was handed, or that reads
+/// something into a config pruned for its siblings too, shows up here and
+/// nowhere else in this command. Every member's bad example is used, not
+/// just this rule's: what its siblings' rules look for is what the shared
+/// config holds that its own would not, and their examples are where it
+/// appears.
+fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outcome {
+    let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
     let siblings = names
         .iter()
         .filter(|name| **name != plugin.name())
         .map(|name| format!("'{name}'"))
         .collect::<Vec<_>>()
         .join(", ");
-
-    let (config, _) = parse_string_with_errors(bad);
-    let config = std::sync::Arc::new(config);
-    // The batched call itself, not the linter's fallback to one rule at a
-    // time: a component that fails only when asked for several rules is
-    // what this check exists to catch, and the fallback would hide it
-    let together = match plugin.check_shared_batch(names, &config, Path::new("bad.conf")) {
-        Ok(errors) => errors,
-        Err(why) => {
-            return Outcome::Failed(format!("checked with {siblings}, the plugin failed: {why}"));
-        }
-    };
+    let examples: Vec<(&str, &str)> = group
+        .iter()
+        .filter_map(|rule| {
+            rule.bad_example()
+                .filter(|example| !example.is_empty())
+                .map(|example| (rule.name(), example))
+        })
+        .collect();
+    if examples.is_empty() {
+        return Outcome::Skipped("no rule of the component declares a bad example".to_string());
+    }
 
     // Compared as sets: what a rule reports must not depend on company,
     // but the order it reports in may
@@ -398,20 +397,37 @@ fn check_beside_siblings(plugin: &dyn LintRule, names: &[&str]) -> Outcome {
         errors.sort_by(|a, b| (a.line, a.column, &a.message).cmp(&(b.line, b.column, &b.message)));
         describe(&errors)
     };
-    let alone = sorted(findings(plugin, bad, "bad.conf").found);
-    let together = sorted(
-        together
-            .into_iter()
-            .filter(|error| error.rule == plugin.name())
-            .collect(),
-    );
 
-    if together == alone {
-        return Outcome::Passed;
+    for (owner, example) in examples {
+        let (config, _) = parse_string_with_errors(example);
+        let config = std::sync::Arc::new(config);
+        // The batched call itself, not the linter's fallback to one rule
+        // at a time: a component that fails only when asked for several
+        // rules is what this check exists to catch, and the fallback would
+        // hide it
+        let together = match plugin.check_shared_batch(&names, &config, Path::new("bad.conf")) {
+            Ok(errors) => errors,
+            Err(why) => {
+                return Outcome::Failed(format!(
+                    "checked with {siblings} over {owner}'s bad example, the plugin failed: {why}"
+                ));
+            }
+        };
+        let alone = sorted(findings(plugin, example, "bad.conf").found);
+        let together = sorted(
+            together
+                .into_iter()
+                .filter(|error| error.rule == plugin.name())
+                .collect(),
+        );
+        if together != alone {
+            return Outcome::Failed(format!(
+                "over {owner}'s bad example, checked with {siblings} the rule reports:\n{together}\n\
+                 checked alone, it reports:\n{alone}"
+            ));
+        }
     }
-    Outcome::Failed(format!(
-        "checked with {siblings}, the rule reports:\n{together}\nchecked alone, it reports:\n{alone}"
-    ))
+    Outcome::Passed
 }
 
 fn check_bad_example(plugin: &dyn LintRule) -> Outcome {

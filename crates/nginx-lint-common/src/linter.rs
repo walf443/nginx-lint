@@ -497,10 +497,11 @@ pub fn run_rule(
     }
 }
 
-/// Run a group of rules sharing a [`batch_key`](LintRule::batch_key) in one
-/// call, through the first rule's [`check_shared_batch`](LintRule::check_shared_batch).
-/// A group of one is run through [`run_rule`], so a rule with a key of its
-/// own costs nothing extra.
+/// Run a group of rules sharing a [`batch_key`](LintRule::batch_key) — as
+/// [`batch_rules`] groups them — in one call, through the first rule's
+/// [`check_shared_batch`](LintRule::check_shared_batch). A group of one is
+/// run through [`run_rule`], so a rule with a key of its own costs nothing
+/// extra; several keyless rules are not a group, and run one at a time.
 ///
 /// Should the batched check fail, the rules are checked one at a time
 /// instead — each reporting its own outcome, a failing rule taking only
@@ -523,12 +524,18 @@ pub fn run_batch(
         [first, ..] => {
             let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
             let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
-            let key = first.batch_key();
             let one_at_a_time = || -> Vec<LintError> {
                 rules
                     .iter()
                     .flat_map(|rule| rule.check_shared(shared, path))
                     .collect()
+            };
+            // A group is several rules sharing one key, which is what
+            // batch_rules produces. Keyless rules handed here together are
+            // not a group: they are checked one at a time, and remembered
+            // as nothing, since they have no key to remember by.
+            let Some(key) = first.batch_key() else {
+                return one_at_a_time();
             };
             if batch_has_failed(key) {
                 return one_at_a_time();
@@ -551,22 +558,21 @@ pub fn run_batch(
 }
 
 /// The groups whose batched check has failed in this process.
-fn failed_batches() -> std::sync::MutexGuard<'static, std::collections::HashSet<Option<BatchKey>>> {
-    static FAILED: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashSet<Option<BatchKey>>>,
-    > = std::sync::OnceLock::new();
+fn failed_batches() -> std::sync::MutexGuard<'static, std::collections::HashSet<BatchKey>> {
+    static FAILED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<BatchKey>>> =
+        std::sync::OnceLock::new();
     FAILED
         .get_or_init(Default::default)
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn batch_has_failed(key: Option<BatchKey>) -> bool {
+fn batch_has_failed(key: BatchKey) -> bool {
     failed_batches().contains(&key)
 }
 
 /// Record a group's batched check failing; true the first time.
-fn remember_batch_failed(key: Option<BatchKey>) -> bool {
+fn remember_batch_failed(key: BatchKey) -> bool {
     failed_batches().insert(key)
 }
 
