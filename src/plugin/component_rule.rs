@@ -979,13 +979,19 @@ enum Exports {
     /// The `plugin-rules` world: the component carries one or more rules,
     /// and this `ComponentLintRule` is one of them. Every rule of a
     /// component shares the one `PluginRulesPre` (it is reference counted),
-    /// so the component is compiled once however many rules it carries;
-    /// each rule still instantiates it separately per check.
+    /// so the component is compiled once however many rules it carries,
+    /// and — through `batch_key` — instantiated once per file for all of
+    /// them by the linter.
     Rules {
         pre: PluginRulesPre<ComponentStoreData>,
-        /// The names of every rule the component carries, so a check can
-        /// tell a finding of a sibling rule from one under an unknown name
-        names: Arc<[String]>,
+        /// The name and category of every rule the component carries, so
+        /// a check can tell a finding of a sibling rule from one under an
+        /// unknown name, and a failure can be reported under each asked
+        /// rule with that rule's category
+        rules: Arc<[(String, String)]>,
+        /// Identifies the component: every rule loaded from it carries the
+        /// same id, which is what lets the linter check them in one call
+        id: u64,
     },
     /// The original `plugin` world: the component is one rule. Kept so
     /// components built before `plugin-rules` existed stay loadable.
@@ -1071,8 +1077,12 @@ impl ComponentLintRule {
             let pre = PluginRulesPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
             let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
-            let names: Arc<[String]> = specs.iter().map(|spec| sanitize_text(&spec.name)).collect();
-            (Exports::Rules { pre, names }, specs)
+            let rules: Arc<[(String, String)]> = specs
+                .iter()
+                .map(|spec| (sanitize_text(&spec.name), sanitize_text(&spec.category)))
+                .collect();
+            let id = next_component_id();
+            (Exports::Rules { pre, rules, id }, specs)
         } else {
             let pre = PluginPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
@@ -1217,14 +1227,38 @@ impl ComponentLintRule {
         Ok(specs)
     }
 
-    /// Execute the check function using resource-based config access
+    /// Execute the check function using resource-based config access.
+    /// `asked` names the rules to run, for a `plugin-rules` component: this
+    /// one alone, or every rule of the component the linter has enabled.
     fn execute_check(
         &self,
+        asked: &[&str],
         config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store =
-            Self::create_store(self.exports.engine(), self.memory_limit, self.timeout_ticks);
+        // The deadline is per rule: a call that checks several rules of the
+        // component gets each rule's budget, so a component is not cut off
+        // for carrying many rules — up to a cap, since the number of rules
+        // is the component's to declare. A call that does hit the deadline
+        // is retried by the linter one rule at a time, each with its own,
+        // so the most an untrusted component can spend on a file is the
+        // batch attempt plus the per-rule deadlines: about twice what the
+        // per-rule calls alone allowed, on the failure path only. That is
+        // an upper bound, not a cost: a component that works returns in
+        // milliseconds, and only one that hangs is waited for — up to the
+        // scaled deadline for the batch, and then the per-rule deadlines
+        // one after another, where the per-rule calls ran in parallel. The
+        // memory limit is not scaled: it bounds what one instance may
+        // hold, and a batched call reconstructs the config once — pruned
+        // to the union of the asked rules' relevant directives, so larger
+        // than any one rule's slice but at most the whole file, which a
+        // rule declaring no pruning gets on its own. A component that
+        // does exceed it when batched falls back to one rule at a time,
+        // for good (see run_batch).
+        let timeout_ticks = self
+            .timeout_ticks
+            .map(|ticks| ticks.saturating_mul((asked.len() as u64).clamp(1, DEADLINE_RULES_CAP)));
+        let mut store = Self::create_store(self.exports.engine(), self.memory_limit, timeout_ticks);
 
         // Create config resource handle
         let config_resource = store
@@ -1248,28 +1282,28 @@ impl ComponentLintRule {
             }
         };
         let wit_errors = match &self.exports {
-            Exports::Rules { pre, names } => {
+            Exports::Rules {
+                pre,
+                rules: carried,
+                ..
+            } => {
                 let rules = pre
                     .instantiate(&mut store)
                     .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+                let asked_owned: Vec<String> = asked.iter().map(|name| name.to_string()).collect();
                 let mut errors = rules
-                    .call_check(
-                        &mut store,
-                        config_resource,
-                        &path_str,
-                        &[self.name.to_string()],
-                    )
+                    .call_check(&mut store, config_resource, &path_str, &asked_owned)
                     .map_err(check_failed)?;
-                // Only this rule was asked for. A component that ignores
-                // the list and reports every rule would otherwise have each
-                // of its findings repeated once per rule it carries, so a
-                // sibling's findings are dropped. A finding under a name
-                // the component does not carry at all is kept: that is a
-                // rule whose spec and findings disagree on its name, which
+                // Only the asked rules' findings. A component that ignores
+                // the list and reports every rule would otherwise have the
+                // findings of rules that are disabled, so a sibling's
+                // findings are dropped. A finding under a name the
+                // component does not carry at all is kept: that is a rule
+                // whose spec and findings disagree on its name, which
                 // test-plugins diagnoses from what it gets back.
                 errors.retain(|e| {
                     let rule = sanitize_text(&e.rule);
-                    rule == self.name || !names.contains(&rule)
+                    asked.contains(&rule.as_str()) || !carried.iter().any(|(name, _)| *name == rule)
                 });
                 errors
             }
@@ -1291,21 +1325,53 @@ impl ComponentLintRule {
         Ok(wit_errors.iter().map(convert_lint_error).collect())
     }
 
-    /// Run a check with a shared config handle, converting failures into a
-    /// reported lint error
-    fn run_check(&self, config: Arc<Config>, path: &Path) -> Vec<LintError> {
-        match self.execute_check(config, path) {
+    /// Run a check for the asked rules with a shared config handle,
+    /// converting a failure into a reported lint error under each of them:
+    /// a rule the user asked for — with `--rule-only`, say — is what they
+    /// look for the failure under.
+    fn run_check(&self, asked: &[&str], config: Arc<Config>, path: &Path) -> Vec<LintError> {
+        match self.execute_check(asked, config, path) {
             Ok(errors) => errors,
-            Err(e) => {
-                vec![LintError::new(
-                    self.name,
-                    self.category,
-                    &format!("Plugin execution failed: {}", e),
-                    Severity::Error,
-                )]
-            }
+            Err(e) => asked
+                .iter()
+                .map(|name| {
+                    LintError::new(
+                        name,
+                        self.category_of(name),
+                        &format!("Plugin execution failed: {}", e),
+                        Severity::Error,
+                    )
+                })
+                .collect(),
         }
     }
+
+    /// The category of one of the component's rules, for a failure
+    /// reported under that rule; this rule's own for a name the component
+    /// does not carry, which the linter never asks for.
+    fn category_of(&self, name: &str) -> &str {
+        match &self.exports {
+            Exports::Rules { rules, .. } => rules
+                .iter()
+                .find(|(rule, _)| rule == name)
+                .map(|(_, category)| category.as_str())
+                .unwrap_or(self.category),
+            Exports::Plugin(_) => self.category,
+        }
+    }
+}
+
+/// The most rules a batched call's deadline is scaled by. A component
+/// declares its own rules, so without a bound the deadline would be the
+/// component's to set; past this many rules, the remaining ones share.
+const DEADLINE_RULES_CAP: u64 = 32;
+
+/// The next component id (see `Exports::Rules::id`). Ids only have to be
+/// distinct within a process; components are never unloaded.
+fn next_component_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl LintRule for ComponentLintRule {
@@ -1324,7 +1390,7 @@ impl LintRule for ComponentLintRule {
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
         // Direct callers only have a borrowed Config, so this pays a deep
         // clone. The linter passes a shared handle via check_shared instead.
-        self.run_check(Arc::new(config.clone()), path)
+        self.run_check(&[self.name], Arc::new(config.clone()), path)
     }
 
     fn wants_shared_config(&self) -> bool {
@@ -1332,7 +1398,52 @@ impl LintRule for ComponentLintRule {
     }
 
     fn check_shared(&self, config: &Arc<Config>, path: &Path) -> Vec<LintError> {
-        self.run_check(config.clone(), path)
+        self.run_check(&[self.name], config.clone(), path)
+    }
+
+    /// Every rule of a `plugin-rules` component shares its id, so the
+    /// linter checks them in one call; a rule of the original `plugin`
+    /// world is the component, and has none.
+    fn batch_key(&self) -> Option<nginx_lint_common::linter::BatchKey> {
+        match &self.exports {
+            Exports::Rules { id, .. } => {
+                Some(nginx_lint_common::linter::BatchKey::new::<Self>(*id))
+            }
+            Exports::Plugin(_) => None,
+        }
+    }
+
+    /// One call for every asked rule. A failure — a rule that traps, or
+    /// the call timing out — is the linter's to handle: it checks the
+    /// rules one at a time instead (see `run_batch`), so a failing rule
+    /// takes only its own findings with it and is the only one reported
+    /// failed, as it was when every rule was its own call. That costs the
+    /// batch attempt plus what the rules cost before, bounded by their
+    /// deadlines; the batched call is the fast path.
+    ///
+    /// A rule of the `plugin` world has no batch key and no siblings, so
+    /// like the default it answers only for its own name: its `check`
+    /// takes no list and would report itself whatever was asked.
+    fn check_shared_batch(
+        &self,
+        names: &[&str],
+        config: &Arc<Config>,
+        path: &Path,
+    ) -> Result<Vec<LintError>, String> {
+        if let Exports::Plugin(_) = &self.exports {
+            match names {
+                [] => return Ok(Vec::new()),
+                [name] if *name == self.name() => {}
+                _ => {
+                    return Err(format!(
+                        "{} is a rule of the plugin world and checks only itself",
+                        self.name()
+                    ));
+                }
+            }
+        }
+        self.execute_check(names, config.clone(), path)
+            .map_err(|e| e.to_string())
     }
 
     fn why(&self) -> Option<&str> {
@@ -1433,15 +1544,38 @@ mod tests {
             rule.check_shared(&config, Path::new("good.conf"))
                 .is_empty()
         );
+
+        // Batched, it answers only for itself: its check takes no list
+        let config = Arc::new(crate::parser::parse_string(bad).unwrap());
+        let own = rule
+            .check_shared_batch(
+                &["server-tokens-enabled-lua"],
+                &config,
+                Path::new("bad.conf"),
+            )
+            .unwrap();
+        assert_eq!(own.len(), 1);
+        assert!(
+            rule.check_shared_batch(&["other"], &config, Path::new("bad.conf"))
+                .is_err()
+        );
+        assert!(
+            rule.check_shared_batch(
+                &["server-tokens-enabled-lua", "other"],
+                &config,
+                Path::new("bad.conf")
+            )
+            .is_err()
+        );
     }
 
-    /// The host asks a component for one rule per call, so what one rule's
-    /// failure does to its siblings' findings in the same call is not
-    /// something the CLI can show. This calls the Lua SDK's failing-rules
-    /// component with all three of its rules at once: the working rule's
-    /// finding has to come back beside the two failures, each under its
-    /// own rule. Skips unless `make -C plugins/nginx-lint-plugin-sdk
-    /// test-e2e` has built the component.
+    /// What one rule's failure does to its siblings' findings in the same
+    /// call is the Lua runtime's to decide, and it isolates them. This
+    /// calls the Lua SDK's failing-rules component with all three of its
+    /// rules at once, as the linter does: the working rule's finding has
+    /// to come back beside the two failures, each under its own rule.
+    /// Skips unless `make -C plugins/nginx-lint-plugin-sdk test-e2e` has
+    /// built the component.
     #[test]
     fn lua_rules_fail_one_at_a_time() {
         use crate::plugin::{CompilationCache, PluginLoader};
@@ -1534,6 +1668,45 @@ mod tests {
         assert!(rules[0].description().contains("server_tokens"));
         assert!(rules[1].description().contains("autoindex"));
         assert!(rules[1].bad_example().unwrap().contains("autoindex on;"));
+    }
+
+    /// Through the linter, the two rules of the component are checked in
+    /// one call — the batched path, `check_shared_batch` with both names —
+    /// and each finding comes back under its rule.
+    #[test]
+    fn two_rule_plugin_is_linted_in_one_call() {
+        let Some(rules) = load_real_two_rule_plugin() else {
+            return;
+        };
+        assert_eq!(rules[0].batch_key(), rules[1].batch_key());
+        assert!(rules[0].batch_key().is_some());
+
+        let src = "http { server_tokens on; server { location / { autoindex on; } } }";
+        let config = Arc::new(crate::parser::parse_string(src).unwrap());
+
+        // The batched call itself succeeds with both findings — asserted
+        // directly, since through the linter a failed batch would fall back
+        // to one rule at a time and report the same
+        let both = ["server-tokens-enabled-rs", "autoindex-enabled-rs"];
+        let mut batched = rules[0]
+            .check_shared_batch(&both, &config, Path::new("test.conf"))
+            .expect("the batched check succeeds");
+        batched.sort_by(|x, y| x.rule.cmp(&y.rule));
+        let names: Vec<&str> = batched.iter().map(|e| e.rule.as_str()).collect();
+        assert_eq!(names, ["autoindex-enabled-rs", "server-tokens-enabled-rs"]);
+        assert!(batched.iter().all(|e| e.fixes.len() == 1), "{batched:?}");
+
+        // And the linter routes the two rules through it
+        let mut linter = crate::linter::Linter::new();
+        for rule in rules {
+            linter.add_rule(Box::new(rule));
+        }
+        let mut errors = linter.lint(&config, Path::new("test.conf"));
+        errors.sort_by(|x, y| x.rule.cmp(&y.rule));
+        assert_eq!(
+            errors.iter().map(|e| e.rule.as_str()).collect::<Vec<_>>(),
+            names
+        );
     }
 
     /// Each rule of the component reports only its own findings: the host asks
@@ -1857,29 +2030,40 @@ mod tests {
         }
     }
 
-    /// Temporary measurement harness for the WIT-boundary cost investigation.
-    /// Run manually with:
+    /// Measurement harness for the WIT-boundary cost investigation: what
+    /// a check costs, split into instantiation, host-side conversion and
+    /// the guest's own work. Run manually with:
     /// cargo test --release --features plugins --lib phase_timing -- --ignored --nocapture
+    /// It measures the builtin server_tokens_enabled component, or the one
+    /// named by NGINX_LINT_BENCH_COMPONENT — a Python or TypeScript
+    /// component, say, whose instantiation is the runtime's.
     #[test]
     #[ignore]
     fn phase_timing() {
         use crate::plugin::{CompilationCache, PluginLoader};
         use std::time::Instant;
 
-        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/builtin-plugins/server_tokens_enabled.wasm");
+        let wasm_path = match std::env::var_os("NGINX_LINT_BENCH_COMPONENT") {
+            Some(path) => std::path::PathBuf::from(path),
+            None => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target/builtin-plugins/server_tokens_enabled.wasm"),
+        };
         if !wasm_path.exists() {
-            eprintln!("SKIP: run `make build-plugins` first");
+            eprintln!("SKIP: run `make build-plugins` first (missing {wasm_path:?})");
             return;
         }
 
-        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        // WASI allowed, for a Go component; the builtins import none
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled)
+            .unwrap()
+            .with_wasi(true);
         let bytes = std::fs::read(&wasm_path).unwrap();
         let rule = loader
             .load_component_from_bytes(&wasm_path, &bytes)
             .unwrap()
             .pop()
             .unwrap();
+        println!("component: {} ({} bytes)", wasm_path.display(), bytes.len());
 
         for n_servers in [30, 300] {
             let mut src = String::from("http {\n  gzip on;\n");
