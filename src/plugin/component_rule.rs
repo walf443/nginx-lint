@@ -1385,6 +1385,45 @@ mod tests {
         rules.pop()
     }
 
+    /// A component of the original `plugin` world still loads as one rule,
+    /// and runs. Nothing in the tree builds that world any more (every SDK
+    /// targets plugin-rules), so the component is a committed fixture; see
+    /// tests/fixtures/plugins/plugin-world/README.md.
+    #[test]
+    fn plugin_world_component_still_loads() {
+        use crate::plugin::{CompilationCache, PluginLoader};
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/plugins/plugin-world/server-tokens-enabled-lua.wasm");
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
+        let rules = loader
+            .load_component_from_bytes(&wasm_path, &bytes)
+            .unwrap();
+
+        assert_eq!(rules.len(), 1);
+        let rule = &rules[0];
+        assert!(!rule.is_plugin_rules());
+        assert_eq!(rule.name(), "server-tokens-enabled-lua");
+        assert_eq!(rule.category(), "security");
+
+        let bad = rule.bad_example().expect("the spec carries a bad example");
+        let config = Arc::new(crate::parser::parse_string(bad).unwrap());
+        let errors = rule.check_shared(&config, Path::new("bad.conf"));
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].rule, "server-tokens-enabled-lua");
+        assert_eq!(errors[0].fixes.len(), 1);
+
+        let good = rule
+            .good_example()
+            .expect("the spec carries a good example");
+        let config = Arc::new(crate::parser::parse_string(good).unwrap());
+        assert!(
+            rule.check_shared(&config, Path::new("good.conf"))
+                .is_empty()
+        );
+    }
+
     /// Load the two-rule example component, skipping the test if
     /// `make -C plugins/rust/security-rules build` has not been run.
     fn load_real_two_rule_plugin() -> Option<Vec<ComponentLintRule>> {
