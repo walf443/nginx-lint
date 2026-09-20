@@ -234,7 +234,6 @@ file carries one rule, or several: a component built against the
 each had come from its own file. Every SDK builds that world (a single rule
 is a list of one). Components built against the original `plugin` world,
 one rule per file, keep loading.
-the original `plugin` world, one rule per file, which the host keeps loading.
 
 There is an `nginx-lint-plugin` SDK for four languages, each with a worked
 example beside it, and a builder for Lua scripts:

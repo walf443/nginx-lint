@@ -100,6 +100,7 @@ The component targets the `plugin-rules` world, which the host loads from
 the same release of nginx-lint as this builder onwards (the two share a
 version number). A component built with this builder does not load on an
 older nginx-lint.
+
 Strings cross to the host as UTF-8: a message holding bytes that are not
 (a multibyte argument cut with `string.sub`, say) has each such byte
 replaced with U+FFFD rather than failing the check.

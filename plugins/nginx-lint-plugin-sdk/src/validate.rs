@@ -77,7 +77,14 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     let rules: Vec<Table> = if plugin.contains_key("check")? || plugin.contains_key("spec")? {
         vec![plugin]
     } else {
-        let rules: Vec<Value> = plugin.sequence_values().collect::<Result<_, _>>()?;
+        // The runtime reads the list with lua_rawlen, whose border can
+        // sit past a nil hole (`{ a, cond and b or nil, c }`), so the
+        // same border is read here: a hole is a nil entry, refused below,
+        // rather than the end of the list
+        let len = plugin.raw_len();
+        let rules: Vec<Value> = (1..=len)
+            .map(|i| plugin.raw_get::<Value>(i))
+            .collect::<Result<_, _>>()?;
         if rules.is_empty() {
             bail!(
                 "{name}: the script returned neither a rule table (`spec` and `check`) nor a list of them"
@@ -325,6 +332,8 @@ mod tests {
         for (script, expected) in [
             (&b"return {}"[..], "neither a rule table"),
             (b"return { 1 }", "rule 1 is an integer, not a table"),
+            // A nil hole is a nil entry to the runtime's lua_rawlen, not the end
+            (b"local r = { spec = { name = 'a', category = 'c', description = 'd' }, check = function() end }\nreturn { r, nil, r }", "rule 2 is a nil, not a table"),
             (b"local r = { spec = { name = 'a', category = 'c', description = 'd' }, check = function() end }\nreturn { r, r }", "two rules are named \"a\""),
             (b"return { { spec = { name = 'a', category = 'c', description = 'd' } } }", "`check` is missing"),
         ] {
