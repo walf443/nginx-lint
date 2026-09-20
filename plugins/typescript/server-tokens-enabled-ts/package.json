@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin --disable all -o dist/server-tokens-enabled-ts.wasm",
+    "build": "tsc && npm run bundle && jco componentize dist/plugin.bundle.js -w node_modules/nginx-lint-plugin/wit -n plugin-rules --disable all -o dist/server-tokens-enabled-ts.wasm",
     "bundle": "esbuild dist/plugin.js --bundle --format=esm --platform=neutral --outfile=dist/plugin.bundle.js",
     "test": "tsc && node --test dist/plugin.test.js"
   },

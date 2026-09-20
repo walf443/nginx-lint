@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "copy-wit": "mkdir -p wit && cp ../../../wit/nginx-lint-plugin.wit wit/",
-    "generate": "jco types wit -n plugin -o src/generated",
+    "generate": "rm -rf src/generated && jco types wit -n plugin-rules -o src/generated",
     "copy-types": "rm -rf dist/generated && cp -R src/generated dist/generated",
     "build": "npm run copy-wit && npm run generate && tsc && npm run copy-types",
     "prepublishOnly": "npm run build",

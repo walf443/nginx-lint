@@ -49,10 +49,10 @@ export const parseConfig = makeParseConfig(parseConfigWasm);
  *
  * Example:
  * ```typescript
- * import { spec, check } from "./plugin.js";
+ * import { serverTokens } from "./plugin.js";
  * import { PluginTestRunner } from "nginx-lint-plugin/testing";
  *
- * const runner = new PluginTestRunner(spec, check);
+ * const runner = new PluginTestRunner(serverTokens);
  * runner.assertErrors("http { server_tokens on; }", 1);
  * runner.assertErrors("http { server_tokens off; }", 0);
  * ```

@@ -118,8 +118,8 @@ mod tests {
                 workspace_root.join("crates/nginx-lint-plugin/src/types.rs"),
             ),
             (
-                "TypeScript SDK (plugins/typescript/nginx-lint-plugin/src/index.ts)",
-                workspace_root.join("plugins/typescript/nginx-lint-plugin/src/index.ts"),
+                "TypeScript SDK (plugins/typescript/nginx-lint-plugin/src/api-version.ts)",
+                workspace_root.join("plugins/typescript/nginx-lint-plugin/src/api-version.ts"),
             ),
             (
                 "Python SDK (plugins/python/nginx-lint-plugin/python/nginx_lint_plugin/__init__.py)",

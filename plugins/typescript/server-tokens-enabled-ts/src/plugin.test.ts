@@ -3,20 +3,20 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-import { spec, check } from "./plugin.js";
+import { serverTokensEnabled, specs, check } from "./plugin.js";
 import { API_VERSION } from "nginx-lint-plugin";
 import { parseConfig, PluginTestRunner } from "nginx-lint-plugin/testing";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const examplesDir = resolve(__dirname, "../examples");
 
-describe("spec", () => {
-  it("returns valid plugin metadata", () => {
-    const s = spec();
+describe("specs", () => {
+  it("lists this one rule, with the SDK's apiVersion stamped in", () => {
+    const all = specs();
+    assert.equal(all.length, 1);
+    const s = all[0];
     assert.equal(s.name, "server-tokens-enabled-ts");
     assert.equal(s.category, "security");
-    // The plugin declares apiVersion as a literal (a runtime import would
-    // break jco componentize); this assertion keeps it in sync with the SDK
     assert.equal(s.apiVersion, API_VERSION);
     assert.equal(s.severity, "warning");
     assert.ok(s.description.length > 0);
@@ -26,7 +26,10 @@ describe("spec", () => {
 });
 
 describe("check", () => {
-  const runner = new PluginTestRunner(spec, check);
+  const runner = new PluginTestRunner(serverTokensEnabled);
+  // The world's check, as the host calls it: the rule asked for by name
+  const checkOne = (cfg: Parameters<typeof check>[0]) =>
+    check(cfg, "test.conf", ["server-tokens-enabled-ts"]);
 
   it("detects server_tokens on", () => {
     const errors = runner.checkString(`\
@@ -95,7 +98,7 @@ events {
 server {
     listen 80;
 }`, { includeContext: ["http"] });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 0);
   });
 
@@ -104,7 +107,7 @@ server {
 server {
     server_tokens on;
 }`, { includeContext: ["http"] });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 1);
     assert.ok(errors[0].message.includes("should be 'off'"));
     assert.equal(errors[0].line, 2);
@@ -115,7 +118,7 @@ server {
 server {
     server_tokens off;
 }`, { includeContext: ["http"] });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 0);
   });
 
@@ -126,13 +129,13 @@ location / {
 }`, {
       includeContext: ["http", "server"],
     });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 0);
   });
 
   it("detects server_tokens on in file included from http > server context", () => {
     const cfg = parseConfig("server_tokens on;", { includeContext: ["http", "server"] });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 1);
     assert.ok(errors[0].message.includes("should be 'off'"));
   });
@@ -142,7 +145,7 @@ location / {
 server {
     server_tokens on;
 }`, { includeContext: ["stream"] });
-    const errors = check(cfg, "test.conf");
+    const errors = checkOne(cfg);
     assert.equal(errors.length, 0);
   });
 
