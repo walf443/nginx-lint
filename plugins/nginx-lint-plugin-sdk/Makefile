@@ -19,8 +19,11 @@ test:
 # two, check each against its own examples, and the fixes of both, asked
 # for together, have to produce good.conf. tests/failing-rules has a rule
 # that returns a malformed finding and one that throws beside a working
-# one: each failure is that rule's own finding, and the working rule's
-# finding survives.
+# one: each failure is that rule's own finding. (The host asks one rule
+# per call, so this checks the per-rule reporting; what one rule's
+# failure does to its siblings' findings in a single call is checked by
+# the host's lua_rules_fail_one_at_a_time test, which calls the
+# component with all three names at once.)
 test-e2e:
 	cargo run -q -p nginx-lint-plugin-sdk -- build $(FIX_KINDS)/plugin.lua -o $(FIX_KINDS)/fix-kinds.wasm
 	$(NGINX_LINT) test-plugins --plugins $(FIX_KINDS)

@@ -102,8 +102,10 @@ toolchain: $(TOOLCHAIN)
 
 # One rule produces all three files: with a target per file, `make -j`
 # would run wit-bindgen once for each into the same directory.
-bindings/.generated: $(WIT)
-	mkdir -p bindings
+# The Makefile is a prerequisite too: the world is named here, and a change
+# of world with the WIT untouched would otherwise leave stale bindings.
+bindings/.generated: $(WIT) Makefile
+	rm -rf bindings && mkdir -p bindings
 	wit-bindgen c --world plugin-rules --out-dir bindings $(dir $(WIT))
 	touch $@
 
