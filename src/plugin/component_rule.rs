@@ -1414,6 +1414,17 @@ mod tests {
         assert_eq!(errors[0].rule, "server-tokens-enabled-lua");
         assert_eq!(errors[0].fixes.len(), 1);
 
+        // The fix, applied the way --fix applies it, resolves the finding
+        let fixes: Vec<&crate::linter::Fix> = errors[0].fixes.iter().collect();
+        let (fixed, applied) = crate::apply_fixes_to_content(bad, &fixes);
+        assert_eq!(applied, 1);
+        let config = Arc::new(crate::parser::parse_string(&fixed).unwrap());
+        assert!(
+            rule.check_shared(&config, Path::new("fixed.conf"))
+                .is_empty(),
+            "after fixing:\n{fixed}"
+        );
+
         let good = rule
             .good_example()
             .expect("the spec carries a good example");
