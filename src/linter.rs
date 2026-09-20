@@ -1,8 +1,10 @@
 // Re-export core types from nginx-lint-common
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
+use nginx_lint_common::linter::{
+    BatchMemo, batch_rules, run_batch, run_rule, run_rule_with_content,
+};
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
-use nginx_lint_common::linter::{batch_rules, run_batch, run_rule, run_rule_with_content};
 use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
@@ -113,6 +115,9 @@ pub struct Linter {
     /// names *and* as dormant rules whose unused ignore directives are
     /// suppressed — so toggling the filter does not churn the user's config.
     inactive_rules: HashSet<String>,
+    /// The rule groups whose batched check has failed in this linter; see
+    /// [`run_batch`].
+    batch_memo: BatchMemo,
 }
 
 impl Linter {
@@ -120,6 +125,7 @@ impl Linter {
         Self {
             rules: Vec::new(),
             inactive_rules: HashSet::new(),
+            batch_memo: BatchMemo::default(),
         }
     }
 
@@ -520,7 +526,16 @@ impl Linter {
 
         batch_rules(&self.rules)
             .par_iter()
-            .map(|group| run_group(group, config, path, content, &shared_config))
+            .map(|group| {
+                run_group(
+                    group,
+                    config,
+                    path,
+                    content,
+                    &shared_config,
+                    &self.batch_memo,
+                )
+            })
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
@@ -535,7 +550,16 @@ impl Linter {
 
         batch_rules(&self.rules)
             .iter()
-            .flat_map(|group| run_group(group, config, path, content, &shared_config))
+            .flat_map(|group| {
+                run_group(
+                    group,
+                    config,
+                    path,
+                    content,
+                    &shared_config,
+                    &self.batch_memo,
+                )
+            })
             .collect()
     }
 
@@ -664,11 +688,12 @@ fn run_group(
     path: &Path,
     content: Option<&str>,
     shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+    memo: &BatchMemo,
 ) -> Vec<LintError> {
     match (group, content) {
         ([rule], Some(c)) => run_rule_with_content(*rule, config, path, c, shared_config),
         ([rule], None) => run_rule(*rule, config, path, shared_config),
-        (group, _) => run_batch(group, config, path, shared_config),
+        (group, _) => run_batch(group, config, path, shared_config, memo),
     }
 }
 

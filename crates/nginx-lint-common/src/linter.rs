@@ -506,17 +506,18 @@ pub fn run_rule(
 /// Should the batched check fail, the rules are checked one at a time
 /// instead — each reporting its own outcome, a failing rule taking only
 /// its own findings with it, as when every rule was its own call — and
-/// the failure is reported to stderr once per group per process. From
-/// then on the group is checked one rule at a time without trying the
-/// batch again: a component that fails only when checked for several
-/// rules is a defect of the component, which `nginx-lint test-plugins`
-/// also catches, and would otherwise cost the failed attempt on every
-/// file.
+/// the failure is reported to stderr once per group, as `memo` remembers
+/// it. From then on the group is checked one rule at a time without
+/// trying the batch again: a component that fails only when checked for
+/// several rules is a defect of the component, which `nginx-lint
+/// test-plugins` also catches, and would otherwise cost the failed
+/// attempt on every file.
 pub fn run_batch(
     rules: &[&dyn LintRule],
     config: &Config,
     path: &Path,
     shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+    memo: &BatchMemo,
 ) -> Vec<LintError> {
     match rules {
         [] => Vec::new(),
@@ -537,13 +538,13 @@ pub fn run_batch(
             let Some(key) = first.batch_key() else {
                 return one_at_a_time();
             };
-            if batch_has_failed(key) {
+            if memo.has_failed(key) {
                 return one_at_a_time();
             }
             match first.check_shared_batch(&names, shared, path) {
                 Ok(errors) => errors,
                 Err(why) => {
-                    if remember_batch_failed(key) {
+                    if memo.remember_failed(key) {
                         eprintln!(
                             "Warning: checking {} together failed ({}); checking them one at a time from now on",
                             names.join(", "),
@@ -557,23 +558,29 @@ pub fn run_batch(
     }
 }
 
-/// The groups whose batched check has failed in this process.
-fn failed_batches() -> std::sync::MutexGuard<'static, std::collections::HashSet<BatchKey>> {
-    static FAILED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<BatchKey>>> =
-        std::sync::OnceLock::new();
-    FAILED
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
+/// The groups whose batched check has failed, for [`run_batch`] to stop
+/// attempting. Owned by whoever runs the rules — one per linter, so two
+/// rule sets in one process, or two tests, never disable each other's
+/// batching.
+#[derive(Debug, Default)]
+pub struct BatchMemo(std::sync::Mutex<std::collections::HashSet<BatchKey>>);
 
-fn batch_has_failed(key: BatchKey) -> bool {
-    failed_batches().contains(&key)
-}
+impl BatchMemo {
+    fn failed(&self) -> std::sync::MutexGuard<'_, std::collections::HashSet<BatchKey>> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
-/// Record a group's batched check failing; true the first time.
-fn remember_batch_failed(key: BatchKey) -> bool {
-    failed_batches().insert(key)
+    /// Whether the group's batched check has failed before.
+    pub fn has_failed(&self, key: BatchKey) -> bool {
+        self.failed().contains(&key)
+    }
+
+    /// Record the group's batched check failing; true the first time.
+    pub fn remember_failed(&self, key: BatchKey) -> bool {
+        self.failed().insert(key)
+    }
 }
 
 /// Group rules for [`run_batch`]: rules sharing a [`batch_key`](LintRule::batch_key)
