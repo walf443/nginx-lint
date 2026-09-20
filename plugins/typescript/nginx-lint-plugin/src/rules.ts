@@ -57,8 +57,13 @@ export interface Rule {
    * host asks for several rules at once they share one config, so treat
    * what it returns as read-only: its arrays are fresh per call, the
    * directives and parent stacks inside them are not.
+   *
+   * A property rather than a method signature: TypeScript checks method
+   * parameters bivariantly, which would let a `check` written against the
+   * raw host `Config` (calling `snapshotFiltered` itself) type-check and
+   * then fail at runtime; as a property it is rejected at compile time.
    */
-  check(cfg: ReconstructedConfig, path: string): LintError[];
+  check: (cfg: ReconstructedConfig, path: string) => LintError[];
 }
 
 /** What {@link defineRules} returns: the `plugin-rules` world's exports. */
@@ -94,6 +99,13 @@ export function defineRules(...rules: Rule[]): RulesExports {
       throw new Error(`two rules are named ${JSON.stringify(name)}`);
     }
     seen.add(name);
+    // An empty list would fetch an empty config, and the rule would never
+    // report anything, without a word
+    if (rule.relevantDirectives !== undefined && rule.relevantDirectives.length === 0) {
+      throw new Error(
+        `rule ${JSON.stringify(name)} has an empty relevantDirectives; omit it to read the whole config`,
+      );
+    }
   }
 
   return {

@@ -298,8 +298,8 @@ import type { Rule, RuleSpec, RulesExports } from "nginx-lint-plugin";
 // A rule: metadata, the directives it reads, and its check
 interface Rule {
   spec: RuleSpec;                  // PluginSpec with apiVersion optional
-  relevantDirectives?: string[];   // undefined: the whole config
-  check(cfg: ReconstructedConfig, path: string): LintError[];
+  relevantDirectives?: string[];   // undefined: the whole config; [] is refused
+  check: (cfg: ReconstructedConfig, path: string) => LintError[];
 }
 
 // The component's exports, for one or more rules
@@ -311,7 +311,8 @@ interface RulesExports {
 ```
 
 `defineRules` throws on an empty list, a rule without a name, or two rules
-with one name — the host would refuse the component for any of these.
+with one name — the host would refuse the component for any of these — and
+on an empty `relevantDirectives`, which would fetch an empty config.
 
 ### Types
 

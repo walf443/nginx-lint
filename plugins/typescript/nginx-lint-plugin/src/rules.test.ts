@@ -131,11 +131,13 @@ describe("defineRules", () => {
     assert.ok(autoindexSaw.includes("server_tokens"));
   });
 
-  it("refuses an empty, unnamed or duplicated rule list", () => {
+  it("refuses an empty, unnamed or duplicated rule list, and an empty directive list", () => {
     assert.throws(() => defineRules(), /at least one rule/);
     const unnamed: Rule = { ...serverTokens, spec: { ...serverTokens.spec, name: "" } };
     assert.throws(() => defineRules(unnamed), /non-empty spec.name/);
     assert.throws(() => defineRules(serverTokens, serverTokens), /two rules are named/);
+    const nothing: Rule = { ...serverTokens, relevantDirectives: [] };
+    assert.throws(() => defineRules(nothing), /empty relevantDirectives/);
   });
 });
 
