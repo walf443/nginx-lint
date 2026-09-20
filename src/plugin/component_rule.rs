@@ -979,8 +979,9 @@ enum Exports {
     /// The `plugin-rules` world: the component carries one or more rules,
     /// and this `ComponentLintRule` is one of them. Every rule of a
     /// component shares the one `PluginRulesPre` (it is reference counted),
-    /// so the component is compiled once however many rules it carries;
-    /// each rule still instantiates it separately per check.
+    /// so the component is compiled once however many rules it carries,
+    /// and — through `batch_key` — instantiated once per file for all of
+    /// them by the linter.
     Rules {
         pre: PluginRulesPre<ComponentStoreData>,
         /// The names of every rule the component carries, so a check can
@@ -1230,8 +1231,13 @@ impl ComponentLintRule {
         config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
-        let mut store =
-            Self::create_store(self.exports.engine(), self.memory_limit, self.timeout_ticks);
+        // The deadline is per rule: a call that checks several rules of the
+        // component gets each rule's budget, so a component is not cut off
+        // for carrying many rules
+        let timeout_ticks = self
+            .timeout_ticks
+            .map(|ticks| ticks.saturating_mul(asked.len().max(1) as u64));
+        let mut store = Self::create_store(self.exports.engine(), self.memory_limit, timeout_ticks);
 
         // Create config resource handle
         let config_resource = store
@@ -1569,6 +1575,30 @@ mod tests {
         assert!(rules[0].description().contains("server_tokens"));
         assert!(rules[1].description().contains("autoindex"));
         assert!(rules[1].bad_example().unwrap().contains("autoindex on;"));
+    }
+
+    /// Through the linter, the two rules of the component are checked in
+    /// one call — the batched path, `check_shared_batch` with both names —
+    /// and each finding comes back under its rule.
+    #[test]
+    fn two_rule_plugin_is_linted_in_one_call() {
+        let Some(rules) = load_real_two_rule_plugin() else {
+            return;
+        };
+        assert_eq!(rules[0].batch_key(), rules[1].batch_key());
+        assert!(rules[0].batch_key().is_some());
+
+        let mut linter = crate::linter::Linter::new();
+        for rule in rules {
+            linter.add_rule(Box::new(rule));
+        }
+        let src = "http { server_tokens on; server { location / { autoindex on; } } }";
+        let config = crate::parser::parse_string(src).unwrap();
+        let mut errors = linter.lint(&config, Path::new("test.conf"));
+        errors.sort_by(|x, y| x.rule.cmp(&y.rule));
+        let names: Vec<&str> = errors.iter().map(|e| e.rule.as_str()).collect();
+        assert_eq!(names, ["autoindex-enabled-rs", "server-tokens-enabled-rs"]);
+        assert!(errors.iter().all(|e| e.fixes.len() == 1), "{errors:?}");
     }
 
     /// Each rule of the component reports only its own findings: the host asks

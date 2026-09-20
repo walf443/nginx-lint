@@ -184,7 +184,7 @@ jobs:
           cargo test --no-default-features --features cli,wasm-builtin-plugins --test integration_test test_duplicate_plugin_rule_name_is_skipped 2>&1 | tee test.log
           grep -q 'test result: ok. 1 passed' test.log
           cargo test --no-default-features --features cli,wasm-builtin-plugins --lib plugin::component_rule::tests::two_rule 2>&1 | tee lib.log
-          grep -q 'test result: ok. 2 passed' lib.log
+          grep -q 'test result: ok. 3 passed' lib.log
           cargo test --no-default-features --features cli,wasm-builtin-plugins --test integration_test two_rule 2>&1 | tee it.log
           grep -q 'test result: ok. 2 passed' it.log
 

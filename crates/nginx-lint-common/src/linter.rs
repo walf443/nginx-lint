@@ -304,6 +304,12 @@ pub trait LintRule: Send + Sync {
     /// component is then instantiated, and the config transferred to it,
     /// once per file rather than once per rule. Rules with no key — the
     /// default — are checked one at a time.
+    ///
+    /// A rule with a key must not also [want the file
+    /// content](Self::wants_content): a group of several is checked through
+    /// [`check_shared_batch`](Self::check_shared_batch), which has no content
+    /// to pass. The execution deadline a host applies to a batched check is
+    /// expected to be the per-rule deadline times the number of rules asked.
     fn batch_key(&self) -> Option<u64> {
         None
     }
