@@ -82,5 +82,5 @@ def test_error_builder_attaches_fixes():
 
 def test_sdk_reexports_everything_a_plugin_needs():
     # Plugin code should not have to reach into the generated bindings
-    for name in ("Plugin", "Config", "LintError", "PluginSpec", "Fix", "Severity"):
+    for name in ("Rule", "define_rules", "Config", "LintError", "PluginSpec", "Fix", "Severity"):
         assert hasattr(nginx_lint_plugin, name), name

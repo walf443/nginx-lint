@@ -8,19 +8,20 @@ constructors for the WIT record types, and testing utilities
 Everything a plugin needs is re-exported here, so plugin code imports from
 this package rather than reaching into the generated bindings:
 
-    from nginx_lint_plugin import Plugin, error_builder, plugin_spec
+    from nginx_lint_plugin import Rule, define_rules, error_builder, plugin_spec
 
-    class WitWorld(Plugin):
-        def spec(self):
-            return plugin_spec("my-rule", "style", "...", severity="warning")
+    class MyRule(Rule):
+        spec = plugin_spec("my-rule", "style", "...", severity="warning")
+        relevant_directives = ["some_directive"]
+
+        def check(self, cfg, path):
+            ...
+
+    WitWorld = define_rules(MyRule())
 """
 
 from pathlib import Path
 
-# The generated world protocol, under a name that says what it is. A plugin
-# subclasses this; the subclass must still be named WitWorld for
-# componentize-py to find it.
-from wit_world import WitWorld as Plugin
 from wit_world.imports.config_api import (
     Config,
     ConfigItem,
@@ -43,6 +44,7 @@ from .config_builder import (
     build_config_from_parse_output,
     build_config_from_snapshot,
 )
+from .rules import Rule, define_rules
 
 # Keep in sync with API_VERSION in crates/nginx-lint-plugin/src/types.rs
 API_VERSION = "1.2"
@@ -55,7 +57,7 @@ def wit_dir() -> Path:
     SDK ships it. Pass this to its `-d` option:
 
         componentize-py -d "$(python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')" \\
-            -w plugin componentize app -o plugin.wasm --stub-wasi
+            -w plugin-rules componentize app -o plugin.wasm --stub-wasi
 
     Raises FileNotFoundError if the installed package has no bundled WIT,
     which happens when it was built without the Makefile's `copy-wit` step
@@ -88,12 +90,13 @@ __all__ = [
     "ErrorBuilder",
     "Fix",
     "LintError",
-    "Plugin",
     "PluginSpec",
     "ReconstructedConfig",
+    "Rule",
     "Severity",
     "build_config_from_parse_output",
     "build_config_from_snapshot",
+    "define_rules",
     "error_builder",
     "plugin_spec",
     "wit_dir",

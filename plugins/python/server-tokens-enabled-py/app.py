@@ -10,18 +10,17 @@ This is a Python implementation of the TypeScript plugin at:
   plugins/typescript/server-tokens-enabled-ts/
 
 Built as a WASM component with componentize-py:
-  componentize-py -d wit -w plugin componentize app -o server-tokens-enabled-py.wasm --stub-wasi
+  componentize-py -d wit -w plugin-rules componentize app -o server-tokens-enabled-py.wasm --stub-wasi
 """
 
 from pathlib import Path
 from typing import List
 
 from nginx_lint_plugin import (
-    Config,
     LintError,
-    Plugin,
-    PluginSpec,
-    build_config_from_snapshot,
+    ReconstructedConfig,
+    Rule,
+    define_rules,
     error_builder,
     plugin_spec,
 )
@@ -48,34 +47,30 @@ BAD_EXAMPLE = (_EXAMPLES / "bad.conf").read_text().rstrip("\n")
 GOOD_EXAMPLE = (_EXAMPLES / "good.conf").read_text().rstrip("\n")
 
 
-class WitWorld(Plugin):
-    def spec(self) -> PluginSpec:
-        return plugin_spec(
-            RULE_NAME,
-            "security",
-            "Detects when server_tokens is enabled (exposes nginx version) [Python]",
-            severity="warning",
-            why=(
-                "When server_tokens is 'on' (the default), nginx includes its version "
-                "number in the Server response header and on default error pages. This "
-                "information can help attackers identify specific vulnerabilities "
-                "associated with your nginx version."
-            ),
-            bad_example=BAD_EXAMPLE,
-            good_example=GOOD_EXAMPLE,
-            references=[
-                "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
-            ],
-        )
+class ServerTokensEnabled(Rule):
+    spec = plugin_spec(
+        RULE_NAME,
+        "security",
+        "Detects when server_tokens is enabled (exposes nginx version) [Python]",
+        severity="warning",
+        why=(
+            "When server_tokens is 'on' (the default), nginx includes its version "
+            "number in the Server response header and on default error pages. This "
+            "information can help attackers identify specific vulnerabilities "
+            "associated with your nginx version."
+        ),
+        bad_example=BAD_EXAMPLE,
+        good_example=GOOD_EXAMPLE,
+        references=[
+            "https://nginx.org/en/docs/http/ngx_http_core_module.html#server_tokens",
+        ],
+    )
+    relevant_directives = RELEVANT_DIRECTIVES
 
-    def check(self, raw_cfg: Config, path: str) -> List[LintError]:
-        # Fetch only "http"/"server_tokens" (plus their ancestors) instead of
-        # the whole file: raw_cfg.all_directives_with_context() makes one host
-        # call per directive in the file, while snapshot_filtered() transfers
-        # everything needed in a single call proportional to what's actually
-        # relevant.
-        cfg = build_config_from_snapshot(raw_cfg.snapshot_filtered(RELEVANT_DIRECTIVES))
-        err = error_builder(self.spec())
+    def check(self, cfg: ReconstructedConfig, path: str) -> List[LintError]:
+        # The config arrives already pruned to RELEVANT_DIRECTIVES (plus
+        # their ancestors): one host call, proportional to what is relevant
+        err = error_builder(self.spec)
 
         errors: List[LintError] = []
         has_server_tokens_off = False
@@ -134,3 +129,9 @@ class WitWorld(Plugin):
             )
 
         return errors
+
+
+# The component's world: the `plugin-rules` world carrying this one rule. A
+# plugin with several rules lists them all here. componentize-py looks the
+# class up as `WitWorld`, so that is the name it has to be bound to.
+WitWorld = define_rules(ServerTokensEnabled())
