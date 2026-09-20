@@ -1243,7 +1243,11 @@ impl ComponentLintRule {
         // is retried by the linter one rule at a time, each with its own,
         // so the most an untrusted component can spend on a file is the
         // batch attempt plus the per-rule deadlines: about twice what the
-        // per-rule calls alone allowed, on the failure path only. The
+        // per-rule calls alone allowed, on the failure path only. That is
+        // an upper bound, not a cost: a component that works returns in
+        // milliseconds, and only one that hangs is waited for — up to the
+        // scaled deadline for the batch, and then the per-rule deadlines
+        // one after another, where the per-rule calls ran in parallel. The
         // memory limit is not scaled: it bounds what one instance may
         // hold, and a batched call reconstructs the config once — pruned
         // to the union of the asked rules' relevant directives, so larger
