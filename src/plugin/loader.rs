@@ -62,6 +62,16 @@ fn is_component_model(bytes: &[u8]) -> Option<bool> {
     }
 }
 
+/// The warning a component of the original `plugin` world loads with.
+pub fn plugin_world_deprecation(path: &Path) -> String {
+    format!(
+        "Warning: {} was built against the original `plugin` world, which a future major \
+         release of nginx-lint will stop loading; rebuild it with a current SDK, which \
+         produces the `plugin-rules` world",
+        path.display()
+    )
+}
+
 /// One `.wasm` file of a plugin directory and what loading it produced:
 /// one rule per spec for a `plugin-rules` component, one rule for an
 /// original `plugin` world one
@@ -338,7 +348,9 @@ impl PluginLoader {
     }
 
     /// Load every `.wasm` file in a directory, returning each file's rules
-    /// as they are: nothing is reported, and a rule name provided by two
+    /// as they are: no failure or duplicate is reported (only the
+    /// deprecation warning of a `plugin`-world component, which is about
+    /// the file rather than the load), and a rule name provided by two
     /// files is returned twice. Results are ordered by file name.
     ///
     /// Plugins are loaded in parallel: wasmtime already parallelizes code
@@ -376,13 +388,21 @@ impl PluginLoader {
     }
 
     /// Load the rules of one WASM plugin file: one rule per spec for a
-    /// `plugin-rules` component, one rule for an original `plugin` one
+    /// `plugin-rules` component, one rule for an original `plugin` one.
+    ///
+    /// A `plugin`-world component is deprecated and loads with a warning:
+    /// it is the one signal its author gets before a later major release
+    /// stops loading the world (see the retirement issue), and there is
+    /// no SDK left that builds it.
     pub fn load_plugin(&self, path: &Path) -> Result<Vec<Box<dyn LintRule>>, PluginError> {
         let wasm_bytes = fs::read(path).map_err(|e| PluginError::io_error(path, e))?;
 
         match is_component_model(&wasm_bytes) {
             Some(true) => {
                 let rules = self.load_component_from_bytes(path, &wasm_bytes)?;
+                if rules.iter().any(|rule| !rule.is_plugin_rules()) {
+                    eprintln!("{}", plugin_world_deprecation(path));
+                }
                 Ok(rules
                     .into_iter()
                     .map(|rule| Box::new(rule) as Box<dyn LintRule>)

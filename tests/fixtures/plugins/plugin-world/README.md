@@ -9,13 +9,17 @@ rule, importing `nginx-lint:plugin/*@4.0.0`.
 Every SDK builds `plugin-rules` from #452 on, so nothing in the tree
 produces this world any more, and this file cannot be rebuilt from the
 tree — which is the point. The host keeps loading the world, for plugins
-built before the move, and this file is what keeps that path tested
-(`plugin_world_component_still_loads` in `src/plugin/component_rule.rs`).
+built before the move, and this file is what keeps that path tested:
+`plugin_world_component_still_loads` in `src/plugin/component_rule.rs`,
+and `test_plugin_world_component_loads_with_a_deprecation_warning` in
+`tests/integration_test.rs`, which also checks the warning the loader
+prints for such a component.
 
 Two things end it, and the test with it:
 
 - dropping the `plugin` world from the host — delete this directory with
-  the code;
+  the code, both tests above, and the deprecation warning in
+  `src/plugin/loader.rs`, which has nothing left to warn about;
 - bumping the WIT package version (`package nginx-lint:plugin@…`), which
   is baked into this component's import names, so it stops instantiating.
   A bump is a decision that no component built before it loads; that

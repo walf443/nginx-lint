@@ -3449,3 +3449,58 @@ fn test_fixtures_are_per_rule_for_a_two_rule_plugin() {
         );
     }
 }
+
+/// A component of the original `plugin` world still loads and runs, with a
+/// warning naming the file: the one signal its author gets before a later
+/// major release stops loading the world. A `plugin-rules` component gets
+/// no such warning. The fixture is committed (see its README), so this
+/// never skips.
+#[cfg(feature = "plugins")]
+#[test]
+fn test_plugin_world_component_loads_with_a_deprecation_warning() {
+    use std::process::Command;
+
+    let plugin_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/plugins/plugin-world");
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("nginx.conf");
+    fs::write(&conf, "http {\n    server_tokens on;\n}\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("--plugins")
+        .arg(&plugin_dir)
+        .args(["--rule-only", "server-tokens-enabled-lua"])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert!(
+        stderr.contains(
+            "server-tokens-enabled-lua.wasm was built against the original `plugin` world"
+        ) && stderr.contains("rebuild it with a current SDK"),
+        "stderr:\n{stderr}"
+    );
+    // Deprecated, not broken: the rule still runs
+    assert!(
+        stdout.contains("warning[security/server-tokens-enabled-lua]"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    // A plugin-rules component loads without the warning
+    let rules_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/rust/security-rules");
+    if rules_dir.join("security-rules.wasm").exists() {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .arg("--plugins")
+            .arg(&rules_dir)
+            .arg(&conf)
+            .output()
+            .expect("Failed to run nginx-lint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("original `plugin` world"),
+            "stderr:\n{stderr}"
+        );
+    }
+}
