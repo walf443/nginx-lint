@@ -58,23 +58,24 @@ directory, so `app.py` is importable from the tests without a `sys.path`
 shim. There is no `[build-system]`: a plugin is compiled to a WASM
 component, not installed as a Python distribution.
 
-The same `WitWorld` class in `app.py` runs unmodified under pytest and
-inside the WASM component.
+The same `Rule` class in `app.py` runs unmodified under pytest and inside
+the WASM component.
 
 ## Development
 
-The plugin implements the `plugin` world from `wit/nginx-lint-plugin.wit`:
-a `WitWorld` class with `spec()` and `check(cfg, path)`. The typed bindings
-(`wit_world`) come from the SDK, so no per-plugin binding generation is
-needed.
+The plugin implements the `plugin-rules` world from
+`wit/nginx-lint-plugin.wit` through the SDK: the rule is a `Rule` subclass
+with `spec`, `relevant_directives` and `check(cfg, path)`, and
+`WitWorld = define_rules(...)` binds the world class componentize-py looks
+for. The typed bindings (`wit_world`) come from the SDK, so no per-plugin
+binding generation is needed.
 
-`cfg` is a host-backed resource: every method call crosses the component
-boundary, so `check()` starts by pulling the directives it cares about over
-in one call (`cfg.snapshot_filtered(RELEVANT_DIRECTIVES)`) and rebuilding a
-Config guest-side with `build_config_from_snapshot()` — the same approach the
-TypeScript plugin takes. Walking `cfg.all_directives_with_context()` on the
-host resource directly would instead cost one host call per directive in the
-file.
+The host's config is a resource whose every method call crosses the
+component boundary, so the SDK fetches the directives the rule declares in
+`relevant_directives` (plus their ancestors) in one call and rebuilds the
+config guest-side before calling `check` — the same approach the TypeScript
+plugin takes. Walking the host resource directly would instead cost one host
+call per directive in the file.
 
 ## Known trade-offs vs TypeScript plugins
 

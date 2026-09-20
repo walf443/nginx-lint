@@ -9,10 +9,12 @@ as a native module.
 ## Layout
 
 - `python/nginx_lint_plugin/` — the SDK package. Everything a plugin needs
-  is re-exported from its root (`Plugin`, `Config`, `LintError`, `Fix`,
-  `Severity`, …), so plugin code never imports from the generated bindings
-  directly. It ships a PEP 561 `py.typed` marker, so mypy and pyright use
-  the annotations.
+  is re-exported from its root (`Rule`, `define_rules`, `Config`,
+  `LintError`, `Fix`, `Severity`, …), so plugin code never imports from the
+  generated bindings directly. It ships a PEP 561 `py.typed` marker, so mypy
+  and pyright use the annotations.
+  - `rules` — `Rule`, the base class of a lint rule, and `define_rules()`,
+    which builds the `plugin-rules` world class for one or more of them.
   - `builders` — `plugin_spec()` and `error_builder()`, mirroring the Rust
     SDK's `PluginSpec::new()` and `spec().error_builder()`. The generated
     dataclasses have no defaults, so without these a spec means spelling out
@@ -68,7 +70,7 @@ interface definition to build against:
 
 ```bash
 componentize-py -d "$(python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')" \
-    -w plugin componentize app -o plugin.wasm --stub-wasi \
+    -w plugin-rules componentize app -o plugin.wasm --stub-wasi \
     -p . -p "$(python -c 'import nginx_lint_plugin as p, pathlib; print(pathlib.Path(p.__file__).parent.parent)')"
 ```
 
@@ -79,24 +81,56 @@ can copy.
 
 ## Writing a plugin
 
+A plugin is one or more rules. Each rule is a `Rule` subclass: its metadata
+(`spec`), the directive names it reads (`relevant_directives`), and a
+`check`. `define_rules` builds the world class the host calls, which
+componentize-py looks up as `WitWorld`:
+
 ```python
-from nginx_lint_plugin import Config, LintError, Plugin, plugin_spec, error_builder
+from nginx_lint_plugin import (
+    LintError, ReconstructedConfig, Rule, define_rules, error_builder, plugin_spec,
+)
 
 
-class WitWorld(Plugin):          # the class must keep this name
-    def spec(self):
-        return plugin_spec("my-rule", "style", "What it checks",
-                           severity="warning")
+class NoAutoindex(Rule):
+    spec = plugin_spec("no-autoindex", "style", "What it checks", severity="warning")
+    relevant_directives = ["autoindex"]      # None: the whole config
 
-    def check(self, cfg: Config, path: str) -> list[LintError]:
-        err = error_builder(self.spec())
+    def check(self, cfg: ReconstructedConfig, path: str) -> list[LintError]:
+        err = error_builder(self.spec)
         return [
             err.warning_at("autoindex should be off", ctx.directive,
                            fixes=[ctx.directive.replace_with("autoindex off;")])
             for ctx in cfg.all_directives_with_context()
             if ctx.directive.is_("autoindex") and ctx.directive.first_arg_is("on")
         ]
+
+
+# A plugin with several rules lists them all here; the host loads each as
+# its own rule, with its own name, documentation and configuration.
+WitWorld = define_rules(NoAutoindex())
 ```
+
+`check` gets the config already fetched from the host and rebuilt. With
+`relevant_directives` set, it is pruned to those directives plus the ancestor
+blocks needed for `parent_stack` and include-context checks — one host call,
+proportional to what is relevant rather than to the file. A rule that warns
+when a directive is *missing* inside a block has to list that block's name
+too (`"http"` beside `"server_tokens"`, say): with none of the listed names
+inside it, the block is pruned away with the evidence. Leave it `None` to
+get the whole config, which is also the only way to see comments and blank
+lines. When the host asks for several rules of one component at once, the
+config is fetched once, pruned to the union of their lists — so the list is
+a floor, not a ceiling: match by name, and do not read anything into a block
+being empty.
+
+`define_rules` raises `ValueError` on an empty list, a rule without a name,
+two rules with one name, or an empty `relevant_directives`.
+
+The component targets the `plugin-rules` world, which the host loads from
+the same release of nginx-lint as this SDK onwards (the two share a version
+number). A component built with this SDK does not load on an older
+nginx-lint.
 
 ## Testing a plugin
 
@@ -104,30 +138,32 @@ Tests are ordinary pytest. Parsing goes through the same Rust parser the
 production linter uses:
 
 ```python
-from app import WitWorld
+from app import NoAutoindex, WitWorld
 from nginx_lint_plugin.testing import PluginTestRunner, parse_config
 
-plugin = WitWorld()
-runner = PluginTestRunner(plugin.spec, plugin.check)
+# The runner hands the rule its config the way the host does: pruned to
+# its relevant_directives when it declares them
+runner = PluginTestRunner(NoAutoindex())
 
-def test_detects_server_tokens_on():
-    runner.assert_errors("http {\n    server_tokens on;\n}", 1)
+def test_detects_autoindex_on():
+    runner.assert_errors("http {\n    autoindex on;\n}", 1)
 
 def test_include_context():
-    cfg = parse_config("server_tokens on;", include_context=["http"])
-    assert len(plugin.check(cfg, "test.conf")) == 1
+    # The world's check, as the host calls it: the rules asked for by name
+    cfg = parse_config("autoindex on;", include_context=["http"])
+    assert len(WitWorld().check(cfg, "test.conf", ["no-autoindex"])) == 1
 
 def test_fix():
     # Asserting on the applied output, not just the reported findings: a fix
     # the linter normalizes into a different operation than intended shows up
     # here rather than in a user's config.
     runner.assert_fixed(
-        "http {\n    server_tokens on;\n}\n",
-        "http {\n    server_tokens off;\n}\n",
+        "http {\n    autoindex on;\n}\n",
+        "http {\n    autoindex off;\n}\n",
     )
 ```
 
-The same `WitWorld` class runs unmodified under pytest and inside the WASM
+The same `Rule` classes run unmodified under pytest and inside the WASM
 component — the test Config/Directive objects reproduce the exact method
 surface of the componentize-py bindings.
 

@@ -20,7 +20,7 @@ copy-wit:
 # temporary one.
 bindings:
 	rm -rf $(TMP_DIR) $(PY_DIR)/wit_world $(PY_DIR)/componentize_py_types.py
-	componentize-py -d $(WIT_DIR) -w plugin bindings $(TMP_DIR)
+	componentize-py -d $(WIT_DIR) -w plugin-rules bindings $(TMP_DIR)
 	cp -R $(TMP_DIR)/wit_world $(PY_DIR)/
 	cp $(TMP_DIR)/componentize_py_types.py $(PY_DIR)/
 	# PEP 561 marker: without it type checkers ignore the generated annotations

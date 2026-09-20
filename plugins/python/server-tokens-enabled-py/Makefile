@@ -11,7 +11,7 @@ SDK_DIR = $(shell python -c 'import nginx_lint_plugin as p, pathlib; print(pathl
 .PHONY: build test typecheck test-e2e clean
 
 build:
-	componentize-py -d "$(WIT_DIR)" -w plugin componentize app -o $(WASM) --stub-wasi \
+	componentize-py -d "$(WIT_DIR)" -w plugin-rules componentize app -o $(WASM) --stub-wasi \
 		-p . -p "$(SDK_DIR)"
 
 # Unit tests (plain pytest; requires the SDK installed:

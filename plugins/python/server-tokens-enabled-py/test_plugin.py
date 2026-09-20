@@ -7,22 +7,28 @@ parser (via the SDK's nginx_lint_plugin._native module).
 
 from pathlib import Path
 
-from app import RULE_NAME, WitWorld
+from app import RULE_NAME, ServerTokensEnabled, WitWorld
 from nginx_lint_plugin import API_VERSION
 from nginx_lint_plugin.testing import PluginTestRunner, parse_config
 from wit_world.imports.parser_types import ConfigItemValue_DirectiveItem
 
 EXAMPLES_DIR = Path(__file__).resolve().parent / "examples"
 
-plugin = WitWorld()
-runner = PluginTestRunner(plugin.spec, plugin.check)
+rule = ServerTokensEnabled()
+runner = PluginTestRunner(rule)
+# The world's check, as the host calls it: the rule asked for by name
+world = WitWorld()
+
+
+def check(cfg, path):
+    return world.check(cfg, path, [RULE_NAME])
 
 
 # ── spec ────────────────────────────────────────────────────────────
 
 
 def test_spec_returns_valid_plugin_metadata():
-    s = plugin.spec()
+    (s,) = world.specs()
     assert s.name == "server-tokens-enabled-py"
     assert s.category == "security"
     # plugin_spec() fills api_version in from the SDK, so this checks that
@@ -84,13 +90,13 @@ def test_no_warning_for_config_without_http_block():
 def test_no_warning_for_file_included_from_http_context():
     # Parent should set server_tokens
     cfg = parse_config("server {\n    listen 80;\n}", include_context=["http"])
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 0
 
 
 def test_detects_server_tokens_on_in_file_included_from_http_context():
     cfg = parse_config("server {\n    server_tokens on;\n}", include_context=["http"])
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 1
     assert "should be 'off'" in errors[0].message
     assert errors[0].line == 2
@@ -98,7 +104,7 @@ def test_detects_server_tokens_on_in_file_included_from_http_context():
 
 def test_no_error_for_server_tokens_off_in_file_included_from_http_context():
     cfg = parse_config("server {\n    server_tokens off;\n}", include_context=["http"])
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 0
 
 
@@ -106,13 +112,13 @@ def test_no_warning_for_file_included_from_http_server_context():
     cfg = parse_config(
         "location / {\n    root /var/www;\n}", include_context=["http", "server"]
     )
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 0
 
 
 def test_detects_server_tokens_on_in_file_included_from_http_server_context():
     cfg = parse_config("server_tokens on;", include_context=["http", "server"])
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 1
     assert "should be 'off'" in errors[0].message
 
@@ -121,7 +127,7 @@ def test_ignores_file_included_from_stream_context():
     cfg = parse_config(
         "server {\n    server_tokens on;\n}", include_context=["stream"]
     )
-    errors = plugin.check(cfg, "test.conf")
+    errors = check(cfg, "test.conf")
     assert len(errors) == 0
 
 

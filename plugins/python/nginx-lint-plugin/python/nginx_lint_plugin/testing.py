@@ -10,14 +10,13 @@ the production linter uses. Usage:
 
     from nginx_lint_plugin.testing import parse_config, PluginTestRunner
 
-    plugin = WitWorld()
-    runner = PluginTestRunner(plugin.spec, plugin.check)
+    runner = PluginTestRunner(MyRule())
     runner.assert_errors("http { server_tokens on; }", 1)
 """
 
 import json
 from dataclasses import asdict
-from typing import Callable, List, NamedTuple, Optional, cast
+from typing import List, NamedTuple, Optional, cast
 
 from wit_world.imports.config_api import Config
 from wit_world.imports import parser_types
@@ -29,10 +28,11 @@ from wit_world.imports.data_types import (
     DirectiveData,
 )
 from wit_world.imports.parser_types import ParseOutput
-from wit_world.imports.types import Fix, LintError, PluginSpec
+from wit_world.imports.types import Fix, LintError
 
 from . import _native
 from .config_builder import build_config_from_parse_output
+from .rules import Rule, reconstruct_for
 
 # ── JSON → generated dataclasses ────────────────────────────────────
 
@@ -192,40 +192,41 @@ def apply_fixes(content: str, fixes: List[Fix]) -> FixResult:
 
 # ── Test runner ─────────────────────────────────────────────────────
 
-SpecFn = Callable[[], PluginSpec]
-CheckFn = Callable[..., List[LintError]]
-
-
 class PluginTestRunner:
-    """Test runner for Python nginx-lint plugins.
+    """Test runner for one Python nginx-lint rule.
 
     Mirrors the Rust and TypeScript ``PluginTestRunner`` APIs:
 
-        plugin = WitWorld()
-        runner = PluginTestRunner(plugin.spec, plugin.check)
+        runner = PluginTestRunner(MyRule())
         runner.assert_errors("http { server_tokens on; }", 1)
         runner.assert_errors("http { server_tokens off; }", 0)
     """
 
-    def __init__(self, spec: SpecFn, check: CheckFn):
-        self._spec = spec
-        self._check = check
+    def __init__(self, rule: Rule):
+        self._rule = rule
+
+    @property
+    def _name(self) -> str:
+        return self._rule.spec.name
 
     def check_string(
         self, content: str, include_context: Optional[List[str]] = None
     ) -> List[LintError]:
-        """Parse and check a config string, returning only this rule's errors."""
+        """Parse and check a config string, returning only this rule's errors.
+
+        The config reaches the rule the way it does in production: pruned to
+        its ``relevant_directives`` when it declares them.
+        """
         cfg = parse_config(content, include_context)
-        errors = self._check(cfg, "test.conf")
-        rule_name = self._spec().name
-        return [e for e in errors if e.rule == rule_name]
+        errors = self._rule.check(reconstruct_for([self._rule], cfg), "test.conf")
+        return [e for e in errors if e.rule == self._name]
 
     def assert_errors(self, content: str, count: int) -> None:
         """Assert the config produces exactly `count` errors from this rule."""
         errors = self.check_string(content)
         if len(errors) != count:
             raise AssertionError(
-                f'Expected {count} error(s) from "{self._spec().name}", '
+                f'Expected {count} error(s) from "{self._name}", '
                 f"got {len(errors)}: {errors!r}"
             )
 
@@ -235,7 +236,7 @@ class PluginTestRunner:
         if not any(e.line == line for e in errors):
             lines = [e.line for e in errors]
             raise AssertionError(
-                f'Expected error on line {line} from "{self._spec().name}", '
+                f'Expected error on line {line} from "{self._name}", '
                 f"got errors on lines: {lines!r}"
             )
 
@@ -271,7 +272,7 @@ class PluginTestRunner:
         result = self.fix_string(content, include_context)
         if result.skipped_invalid:
             raise AssertionError(
-                f'{result.skipped_invalid} fix(es) from "{self._spec().name}" could '
+                f'{result.skipped_invalid} fix(es) from "{self._name}" could '
                 f"not be applied (applied {result.applied}); the rule is producing "
                 f"fixes the linter rejects"
             )
@@ -283,13 +284,13 @@ class PluginTestRunner:
                     "always adds; include it in the expected text)"
                 )
             raise AssertionError(
-                f'Applying {result.applied} fix(es) from "{self._spec().name}" gave:\n'
+                f'Applying {result.applied} fix(es) from "{self._name}" gave:\n'
                 f"{result.content!r}\nexpected:\n{expected!r}{hint}"
             )
 
     def test_examples(self, bad_conf: str, good_conf: str) -> None:
         """Assert `bad_conf` produces errors and `good_conf` produces none."""
-        rule_name = self._spec().name
+        rule_name = self._name
 
         bad_errors = self.check_string(bad_conf)
         if not bad_errors:
