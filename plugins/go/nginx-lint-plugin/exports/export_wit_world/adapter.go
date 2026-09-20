@@ -1,6 +1,6 @@
-// Package export_wit_world implements the `plugin` world's exports. Its
-// package name and the two function signatures are fixed by the bindings
-// componentize-go generates; it forwards to the plugin registered with
+// Package export_wit_world implements the `plugin-rules` world's exports.
+// Its package name and the two function signatures are fixed by the bindings
+// componentize-go generates; it forwards to the rules registered with
 // [nginxlint.Register] and is the only place in the SDK that speaks WIT.
 //
 // A plugin does not import this package. It blank imports
@@ -8,6 +8,8 @@
 package export_wit_world
 
 import (
+	"slices"
+
 	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
 	configapi "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/bindings/nginx_lint_plugin_config_api"
 	datatypes "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin/bindings/nginx_lint_plugin_data_types"
@@ -19,16 +21,16 @@ import (
 
 // registered fails loudly when a plugin forgot to call
 // [nginxlint.Register], which the old hand-written export layout could not
-// get wrong. A nil interface would otherwise panic somewhere inside the
-// conversion, and reach the host as an opaque trap; this at least names the
-// cause, and does it from spec, so the plugin fails to load rather than on
-// the first configuration it is handed.
-func registered() nginxlint.Plugin {
-	plugin := nginxlint.Registered()
-	if plugin == nil {
-		panic("nginx-lint-plugin: no plugin registered; call nginxlint.Register from an init function")
+// get wrong. An empty list would otherwise reach the host as a component
+// with no rules, which it refuses with a message that does not name the
+// cause; this does, and from specs, so the plugin fails to load rather than
+// on the first configuration it is handed.
+func registered() []nginxlint.Rule {
+	rules := nginxlint.Registered()
+	if len(rules) == 0 {
+		panic("nginx-lint-plugin: no rule registered; call nginxlint.Register from an init function")
 	}
-	return plugin
+	return rules
 }
 
 func optional(value string) witTypes.Option[string] {
@@ -45,9 +47,18 @@ func text(value witTypes.Option[string]) string {
 	return value.Some()
 }
 
-// Spec is the world's `spec` export.
-func Spec() plugintypes.PluginSpec {
-	spec := registered().Spec()
+// Specs is the world's `specs` export: every registered rule's metadata, in
+// registration order.
+func Specs() []plugintypes.PluginSpec {
+	rules := registered()
+	specs := make([]plugintypes.PluginSpec, 0, len(rules))
+	for _, rule := range rules {
+		specs = append(specs, convertSpec(rule.Spec()))
+	}
+	return specs
+}
+
+func convertSpec(spec nginxlint.Spec) plugintypes.PluginSpec {
 	converted := plugintypes.PluginSpec{
 		Name:            spec.Name,
 		Category:        spec.Category,
@@ -66,8 +77,10 @@ func Spec() plugintypes.PluginSpec {
 	return converted
 }
 
-// Check is the world's `check` export.
-func Check(cfg *configapi.Config, path string) []plugintypes.LintError {
+// Check is the world's `check` export: the findings of the registered rules
+// named in asked, over one snapshot of the config. Names the component does
+// not carry are ignored, and an empty list yields no findings.
+func Check(cfg *configapi.Config, path string, asked []string) []plugintypes.LintError {
 	// The config arrives as a `borrow<config>`, and the canonical ABI expects
 	// the guest to release it before the call returns. The generated export
 	// glue does not, so without this the host rejects the call with "borrow
@@ -76,21 +89,33 @@ func Check(cfg *configapi.Config, path string) []plugintypes.LintError {
 	// is ever created, so this is the only drop there is.
 	defer cfg.Drop()
 
-	plugin := registered()
-	spec := plugin.Spec()
+	var rules []nginxlint.Rule
+	for _, rule := range registered() {
+		if slices.Contains(asked, rule.Spec().Name) {
+			rules = append(rules, rule)
+		}
+	}
+	errors := []plugintypes.LintError{}
+	if len(rules) == 0 {
+		return errors
+	}
+	// One snapshot for every asked rule. The SDK's Config is plain data the
+	// rules only read, so they share it.
 	config := parseOutput(cfg.Snapshot()).Config(path)
 
-	errors := []plugintypes.LintError{}
-	for _, found := range plugin.Check(config) {
-		errors = append(errors, plugintypes.LintError{
-			Rule:     spec.Name,
-			Category: spec.Category,
-			Message:  found.Message,
-			Severity: plugintypes.Severity(found.Severity),
-			Line:     witTypes.Some(found.Line),
-			Column:   witTypes.Some(found.Column),
-			Fixes:    fixes(found.Fixes),
-		})
+	for _, rule := range rules {
+		spec := rule.Spec()
+		for _, found := range rule.Check(config) {
+			errors = append(errors, plugintypes.LintError{
+				Rule:     spec.Name,
+				Category: spec.Category,
+				Message:  found.Message,
+				Severity: plugintypes.Severity(found.Severity),
+				Line:     witTypes.Some(found.Line),
+				Column:   witTypes.Some(found.Column),
+				Fixes:    fixes(found.Fixes),
+			})
+		}
 	}
 	return errors
 }

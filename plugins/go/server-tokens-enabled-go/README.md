@@ -42,7 +42,7 @@ what the flag does and does not grant.
 
 Three files, one package:
 
-- `main.go` — the rule. It implements the SDK's `Plugin` interface, registers
+- `main.go` — the rule. It implements the SDK's `Rule` interface, registers
   itself from `init`, and blank imports the SDK's `export` package so the
   component's exports get linked.
 - `main_test.go` — the rule's tests, run against the real parser.

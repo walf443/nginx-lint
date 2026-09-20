@@ -2,6 +2,7 @@ package nginxlint_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
@@ -193,17 +194,33 @@ func TestFindingConstructors(t *testing.T) {
 	}
 }
 
-type stubPlugin struct{}
+type stubRule struct{ name string }
 
-func (stubPlugin) Spec() nginxlint.Spec                         { return nginxlint.Spec{Name: "stub"} }
-func (stubPlugin) Check(nginxlint.Config) []nginxlint.LintError { return nil }
+func (r stubRule) Spec() nginxlint.Spec                       { return nginxlint.Spec{Name: r.name} }
+func (stubRule) Check(nginxlint.Config) []nginxlint.LintError { return nil }
 
 func TestRegister(t *testing.T) {
-	nginxlint.Register(stubPlugin{})
-	if nginxlint.Registered() == nil {
-		t.Fatal("Registered() returned nil after Register()")
+	nginxlint.Register(stubRule{"stub"}, stubRule{"other"})
+	var names []string
+	for _, rule := range nginxlint.Registered() {
+		names = append(names, rule.Spec().Name)
 	}
-	if name := nginxlint.Registered().Spec().Name; name != "stub" {
-		t.Errorf("Registered().Spec().Name = %q, want \"stub\"", name)
+	if got := strings.Join(names, ","); got != "stub,other" {
+		t.Errorf("Registered() names = %q, want \"stub,other\"", got)
 	}
+}
+
+func TestRegisterRefusesWhatTheHostWould(t *testing.T) {
+	mustPanic := func(what string, register func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Errorf("Register did not panic on %s", what)
+			}
+		}()
+		register()
+	}
+	mustPanic("an empty name", func() { nginxlint.Register(stubRule{""}) })
+	// "stub" is registered by TestRegister; registration is process-wide
+	mustPanic("a duplicate name", func() { nginxlint.Register(stubRule{"stub"}) })
 }

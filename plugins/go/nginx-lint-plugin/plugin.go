@@ -1,7 +1,8 @@
 // Package nginxlint is the SDK for writing nginx-lint plugins in Go.
 //
-// A plugin implements [Plugin], registers it from an init function, and blank
-// imports the export package so the component's exports get linked:
+// A plugin is one or more rules. Each implements [Rule]; the plugin registers
+// them from an init function and blank imports the export package so the
+// component's exports get linked:
 //
 //	package main
 //
@@ -15,8 +16,13 @@
 //	func (myRule) Spec() nginxlint.Spec { ... }
 //	func (myRule) Check(cfg nginxlint.Config) []nginxlint.LintError { ... }
 //
-//	func init() { nginxlint.Register(myRule{}) }
+//	func init() { nginxlint.Register(myRule{}, anotherRule{}) }
 //	func main()  {}
+//
+// The component targets the `plugin-rules` world: the host loads it as one
+// rule per registered [Rule], each with its own name, documentation and
+// configuration, and asks the component to check a file with the rules it
+// wants run.
 //
 // This package imports none of the generated bindings, and everything a rule
 // sees is plain Go data. That is what lets a plugin be tested with a plain
@@ -319,21 +325,40 @@ func (e LintError) WithFix(fixes ...Fix) LintError {
 	return e
 }
 
-// Plugin is what a rule implements.
-type Plugin interface {
+// Rule is what a lint rule implements.
+type Rule interface {
 	// Spec returns the rule's metadata. It is called on its own by
 	// `nginx-lint why`, so it must not depend on Check having run.
 	Spec() Spec
-	// Check reports every finding in cfg.
+	// Check reports every finding in cfg. When the host asks for several
+	// rules at once they are handed the same Config, so treat it as
+	// read-only.
 	Check(cfg Config) []LintError
 }
 
-var registered Plugin
+var registered []Rule
 
-// Register makes p the plugin this component exports. Call it from an init
-// function: the host calls the exports directly and main never runs.
-func Register(p Plugin) { registered = p }
+// Register adds rules to the ones this component exports, in this order.
+// Call it from an init function: the host calls the exports directly and
+// main never runs. It panics on a rule without a name or on a name already
+// registered, which the host would refuse the component for; a plugin's own
+// `go test` runs the init functions too, so that is where it is heard.
+func Register(rules ...Rule) {
+	for _, rule := range rules {
+		name := rule.Spec().Name
+		if name == "" {
+			panic("nginx-lint-plugin: Register: a rule with an empty name")
+		}
+		for _, earlier := range registered {
+			if earlier.Spec().Name == name {
+				panic("nginx-lint-plugin: Register: two rules named " + name)
+			}
+		}
+		registered = append(registered, rule)
+	}
+}
 
-// Registered returns the plugin passed to Register. It exists for the export
-// glue in the exports package and is not needed by a plugin.
-func Registered() Plugin { return registered }
+// Registered returns the rules passed to Register, in registration order. It
+// exists for the export glue in the exports package and is not needed by a
+// plugin.
+func Registered() []Rule { return registered }

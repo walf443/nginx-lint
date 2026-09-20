@@ -24,7 +24,7 @@ bindings: copy-wit
 		exit 1; \
 	}
 	rm -rf bindings
-	componentize-go -d wit -w plugin bindings --format \
+	componentize-go -d wit -w plugin-rules bindings --format \
 		--output bindings \
 		--pkg-name $(MODULE)/bindings \
 		--export-pkg-name $(MODULE)/exports

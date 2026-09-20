@@ -70,11 +70,28 @@ func (myRule) Check(cfg nginxlint.Config) []nginxlint.LintError {
 	return errors
 }
 
+// A plugin with several rules registers them all; the host loads each as
+// its own rule, with its own name, documentation and configuration.
 func init() { nginxlint.Register(myRule{}) }
 
 // The host calls the exports directly; main never runs.
 func main() {}
 ```
+
+A rule is anything with `Spec()` and `Check(cfg)` — the [`Rule`] interface.
+`Register` panics on a rule without a name or on a name already registered,
+which the host would refuse the component for; a plugin's `go test` runs the
+init functions too, so that is where it is heard. When the host asks the
+component to check a file, it names the rules it wants run; the SDK takes one
+snapshot of the config and hands the same `Config` to each, so a rule should
+treat it as read-only.
+
+The component targets the `plugin-rules` world, which the host loads from the
+same release of nginx-lint as this SDK onwards (the two share a version
+number). A component built with this SDK does not load on an older
+nginx-lint.
+
+[`Rule`]: https://pkg.go.dev/github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin#Rule
 
 Build it:
 
