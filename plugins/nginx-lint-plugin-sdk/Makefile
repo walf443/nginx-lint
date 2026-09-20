@@ -1,5 +1,6 @@
 NGINX_LINT := ../../target/debug/nginx-lint
 FIX_KINDS := tests/fix-kinds
+TWO_RULES := tests/two-rules
 
 .PHONY: test test-e2e clean
 
@@ -12,6 +13,10 @@ test:
 # test-plugins requires its fixes to resolve the finding, and the diff
 # requires them to produce exactly good.conf — the Lua fix arithmetic is a
 # reimplementation of the host's, and this is what pins the two together.
+#
+# tests/two-rules returns a list of two rules: test-plugins has to load it as
+# two, check each against its own examples, and the fixes of both, asked
+# for together, have to produce good.conf.
 test-e2e:
 	cargo run -q -p nginx-lint-plugin-sdk -- build $(FIX_KINDS)/plugin.lua -o $(FIX_KINDS)/fix-kinds.wasm
 	$(NGINX_LINT) test-plugins --plugins $(FIX_KINDS)
@@ -19,6 +24,12 @@ test-e2e:
 		$(NGINX_LINT) --plugins $(FIX_KINDS) --rule-only fix-kinds --fix $$tmp/nginx.conf >/dev/null; \
 		diff $(FIX_KINDS)/good.conf $$tmp/nginx.conf && echo "  --fix produced good.conf"; \
 		status=$$?; rm -rf $$tmp; exit $$status
+	cargo run -q -p nginx-lint-plugin-sdk -- build $(TWO_RULES)/plugin.lua -o $(TWO_RULES)/two-rules.wasm
+	$(NGINX_LINT) test-plugins --plugins $(TWO_RULES) 2>&1 | tee /dev/stderr | grep -q '^2 rule(s), 6 check(s) passed'
+	@tmp=$$(mktemp -d); cp $(TWO_RULES)/bad.conf $$tmp/nginx.conf; \
+		$(NGINX_LINT) --plugins $(TWO_RULES) --rule-only server-tokens-enabled-two,autoindex-enabled-two --fix $$tmp/nginx.conf >/dev/null; \
+		diff $(TWO_RULES)/good.conf $$tmp/nginx.conf && echo "  --fix produced good.conf with both rules"; \
+		status=$$?; rm -rf $$tmp; exit $$status
 
 clean:
-	rm -f $(FIX_KINDS)/fix-kinds.wasm
+	rm -f $(FIX_KINDS)/fix-kinds.wasm $(TWO_RULES)/two-rules.wasm

@@ -30,8 +30,9 @@ someone you do not trust the way you would any other code you run.
 
 ## Writing a plugin
 
-A script returns a table with a `spec` (the same fields the other SDKs
-take, in snake_case) and a `check` function:
+A script returns a rule: a table with a `spec` (the same fields the other
+SDKs take, in snake_case) and a `check` function. A script with several
+rules returns a list of such tables (see the next section):
 
 ```lua
 local nginx_lint = require("nginx_lint")
@@ -76,6 +77,29 @@ The sandbox has no file system, clock or environment: `io`, `os`,
 `package` and `debug` are absent, `require` knows only `nginx_lint`, and
 `print` goes nowhere. Errors thrown by the script are reported as findings
 against the file being linted, with the script's file name and line.
+
+### Several rules in one script
+
+Return a list of rule tables instead of one:
+
+```lua
+local server_tokens = { spec = { ... }, check = function(config) ... end }
+local autoindex = { spec = { ... }, check = function(config) ... end }
+return { server_tokens, autoindex }
+```
+
+The host loads the component as one rule per entry, each with its own name,
+documentation and configuration, and names the rules it wants run when it
+checks a file; the runtime builds the config table once and calls each
+asked rule's `check` with it, in the script's order. The rules share that
+table, so treat it as read-only. A rule without a name, or two rules with
+one name, fail the build (and would fail to load). `tests/two-rules` is a
+two-rule script.
+
+The component targets the `plugin-rules` world, which the host loads from
+the same release of nginx-lint as this builder onwards (the two share a
+version number). A component built with this builder does not load on an
+older nginx-lint.
 Strings cross to the host as UTF-8: a message holding bytes that are not
 (a multibyte argument cut with `string.sub`, say) has each such byte
 replaced with U+FFFD rather than failing the check.
