@@ -305,9 +305,12 @@ pub trait LintRule: Send + Sync {
     /// once per file rather than once per rule. Rules with no key — the
     /// default — are checked one at a time.
     ///
-    /// A rule with a key must not also [want the file
-    /// content](Self::wants_content): a group of several is checked through
-    /// [`check_shared_batch`](Self::check_shared_batch), which has no content
+    /// **A rule that returns a key must implement
+    /// [`check_shared_batch`](Self::check_shared_batch)**: the linter checks
+    /// a group through that method on one of its members, and the default
+    /// checks that member alone — the rest of the group would never run,
+    /// with nothing to say so. A rule with a key must not also [want the
+    /// file content](Self::wants_content): a group of several has no content
     /// to pass. The execution deadline a host applies to a batched check is
     /// expected to be the per-rule deadline times the number of rules asked.
     fn batch_key(&self) -> Option<u64> {
@@ -319,7 +322,8 @@ pub trait LintRule: Send + Sync {
     /// their findings together, each naming its rule in
     /// [`LintError::rule`]. The default checks this rule alone, which is
     /// right for a rule with no key, on which the linter never calls this
-    /// with other names.
+    /// with other names — and wrong for a rule with one, which has to
+    /// override it (see [`batch_key`](Self::batch_key)).
     fn check_shared_batch(
         &self,
         _names: &[&str],

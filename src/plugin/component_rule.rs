@@ -984,9 +984,11 @@ enum Exports {
     /// them by the linter.
     Rules {
         pre: PluginRulesPre<ComponentStoreData>,
-        /// The names of every rule the component carries, so a check can
-        /// tell a finding of a sibling rule from one under an unknown name
-        names: Arc<[String]>,
+        /// The name and category of every rule the component carries, so
+        /// a check can tell a finding of a sibling rule from one under an
+        /// unknown name, and a failure can be reported under each asked
+        /// rule with that rule's category
+        rules: Arc<[(String, String)]>,
         /// Identifies the component: every rule loaded from it carries the
         /// same id, which is what lets the linter check them in one call
         id: u64,
@@ -1075,9 +1077,12 @@ impl ComponentLintRule {
             let pre = PluginRulesPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
             let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
-            let names: Arc<[String]> = specs.iter().map(|spec| sanitize_text(&spec.name)).collect();
+            let rules: Arc<[(String, String)]> = specs
+                .iter()
+                .map(|spec| (sanitize_text(&spec.name), sanitize_text(&spec.category)))
+                .collect();
             let id = next_component_id();
-            (Exports::Rules { pre, names, id }, specs)
+            (Exports::Rules { pre, rules, id }, specs)
         } else {
             let pre = PluginPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
@@ -1233,7 +1238,10 @@ impl ComponentLintRule {
     ) -> Result<Vec<LintError>, PluginError> {
         // The deadline is per rule: a call that checks several rules of the
         // component gets each rule's budget, so a component is not cut off
-        // for carrying many rules
+        // for carrying many rules. The memory limit is not scaled: the
+        // config, which is what takes memory, is reconstructed once for
+        // the whole call rather than once per rule, so a batched call needs
+        // less than the per-rule calls it replaces, not more.
         let timeout_ticks = self
             .timeout_ticks
             .map(|ticks| ticks.saturating_mul(asked.len().max(1) as u64));
@@ -1261,7 +1269,11 @@ impl ComponentLintRule {
             }
         };
         let wit_errors = match &self.exports {
-            Exports::Rules { pre, names, .. } => {
+            Exports::Rules {
+                pre,
+                rules: carried,
+                ..
+            } => {
                 let rules = pre
                     .instantiate(&mut store)
                     .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
@@ -1278,7 +1290,7 @@ impl ComponentLintRule {
                 // test-plugins diagnoses from what it gets back.
                 errors.retain(|e| {
                     let rule = sanitize_text(&e.rule);
-                    asked.contains(&rule.as_str()) || !names.contains(&rule)
+                    asked.contains(&rule.as_str()) || !carried.iter().any(|(name, _)| *name == rule)
                 });
                 errors
             }
@@ -1312,12 +1324,26 @@ impl ComponentLintRule {
                 .map(|name| {
                     LintError::new(
                         name,
-                        self.category,
+                        self.category_of(name),
                         &format!("Plugin execution failed: {}", e),
                         Severity::Error,
                     )
                 })
                 .collect(),
+        }
+    }
+
+    /// The category of one of the component's rules, for a failure
+    /// reported under that rule; this rule's own for a name the component
+    /// does not carry, which the linter never asks for.
+    fn category_of(&self, name: &str) -> &str {
+        match &self.exports {
+            Exports::Rules { rules, .. } => rules
+                .iter()
+                .find(|(rule, _)| rule == name)
+                .map(|(_, category)| category.as_str())
+                .unwrap_or(self.category),
+            Exports::Plugin(_) => self.category,
         }
     }
 }
