@@ -329,10 +329,12 @@ pub trait LintRule: Send + Sync {
     /// a group through that method on one of its members. The default
     /// declines a call for more than one rule, which the linter answers by
     /// checking the group one rule at a time, with a warning — correct,
-    /// but without the saving a key is for. A rule with a key must not also [want the
-    /// file content](Self::wants_content): a group of several has no content
-    /// to pass. The execution deadline a host applies to a batched check is
-    /// expected to be the per-rule deadline times the number of rules asked.
+    /// but without the saving a key is for. A rule that also [wants the
+    /// file content](Self::wants_content) is never grouped, whatever its
+    /// key: a group of several has no content to pass, so it runs on its
+    /// own, with the content, and its siblings batch without it. The
+    /// execution deadline a host applies to a batched check is expected to
+    /// be the per-rule deadline times the number of rules asked.
     fn batch_key(&self) -> Option<BatchKey> {
         None
     }
@@ -345,10 +347,11 @@ pub trait LintRule: Send + Sync {
     /// linter then checks the rules one at a time through
     /// [`check_shared`](Self::check_shared), each reporting its own
     /// outcome, and says so once per group. The default checks this rule
-    /// alone when it is the only name, and declines any other call as
-    /// unimplemented — which the linter answers by checking the group one
-    /// rule at a time, so a rule with a key that does not override this
-    /// still has its siblings run, slower and with a warning saying why.
+    /// alone when its own name is the only one, returns nothing for no
+    /// names, and declines any other call as unimplemented — which the
+    /// linter answers by checking the group one rule at a time, so a rule
+    /// with a key that does not override this still has its siblings run,
+    /// slower and with a warning saying why.
     fn check_shared_batch(
         &self,
         names: &[&str],
@@ -356,7 +359,8 @@ pub trait LintRule: Send + Sync {
         path: &Path,
     ) -> Result<Vec<LintError>, String> {
         match names {
-            [_] | [] => Ok(self.check_shared(config, path)),
+            [] => Ok(Vec::new()),
+            [name] if *name == self.name() => Ok(self.check_shared(config, path)),
             _ => Err(format!(
                 "{} does not implement check_shared_batch",
                 self.name()
@@ -586,13 +590,16 @@ impl BatchMemo {
 
 /// Group rules for [`run_batch`]: rules sharing a [`batch_key`](LintRule::batch_key)
 /// form one group, in the order their first member appears; every other
-/// rule is a group of its own, in place. The order of findings across
-/// groups is the caller's to fix, as it is across rules today.
+/// rule is a group of its own, in place — including a keyed rule that
+/// [wants the file content](LintRule::wants_content), which a batched
+/// check has no way to hand it. The order of findings across groups is
+/// the caller's to fix, as it is across rules today.
 pub fn batch_rules<'a>(rules: &'a [Box<dyn LintRule>]) -> Vec<Vec<&'a dyn LintRule>> {
     let mut groups: Vec<Vec<&'a dyn LintRule>> = Vec::new();
     let mut by_key: std::collections::HashMap<BatchKey, usize> = std::collections::HashMap::new();
     for rule in rules {
-        match rule.batch_key() {
+        let key = rule.batch_key().filter(|_| !rule.wants_content());
+        match key {
             Some(key) => match by_key.get(&key) {
                 Some(&index) => groups[index].push(rule.as_ref()),
                 None => {
@@ -1224,5 +1231,57 @@ mod batch_tests {
         let rules: Vec<Box<dyn LintRule>> =
             vec![Box::new(Keyed("x", None)), Box::new(Keyed("y", None))];
         assert_eq!(batch_rules(&rules).len(), 2);
+    }
+
+    /// A keyed rule that wants the file content stays a group of its own —
+    /// a batched check could not hand it the content — while its siblings
+    /// still batch.
+    #[test]
+    fn batch_rules_keeps_a_rule_that_wants_content_on_its_own() {
+        struct WantsContent(u64);
+        impl LintRule for WantsContent {
+            fn name(&self) -> &'static str {
+                "wants-content"
+            }
+            fn category(&self) -> &'static str {
+                "test"
+            }
+            fn description(&self) -> &'static str {
+                "keyed, but reads the source text"
+            }
+            fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+                Vec::new()
+            }
+            fn batch_key(&self) -> Option<BatchKey> {
+                Some(BatchKey::new::<Keyed>(self.0))
+            }
+            fn wants_content(&self) -> bool {
+                true
+            }
+        }
+        let rules: Vec<Box<dyn LintRule>> = vec![
+            Box::new(Keyed("a1", Some(1))),
+            Box::new(WantsContent(1)),
+            Box::new(Keyed("a2", Some(1))),
+        ];
+        let groups: Vec<Vec<&str>> = batch_rules(&rules)
+            .iter()
+            .map(|group| group.iter().map(|rule| rule.name()).collect())
+            .collect();
+        assert_eq!(groups, vec![vec!["a1", "a2"], vec!["wants-content"]]);
+    }
+
+    /// The default batched check answers only for the rule itself: asked
+    /// for a sibling by name, it declines rather than report its own
+    /// findings as the sibling's.
+    #[test]
+    fn default_batched_check_answers_only_its_own_name() {
+        let rule = Keyed("a", Some(1));
+        let config = std::sync::Arc::new(Config::default());
+        let path = Path::new("t.conf");
+        assert!(rule.check_shared_batch(&["a"], &config, path).is_ok());
+        assert!(rule.check_shared_batch(&[], &config, path).is_ok());
+        assert!(rule.check_shared_batch(&["b"], &config, path).is_err());
+        assert!(rule.check_shared_batch(&["a", "b"], &config, path).is_err());
     }
 }
