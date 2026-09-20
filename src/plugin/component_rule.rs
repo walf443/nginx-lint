@@ -1416,12 +1416,28 @@ impl LintRule for ComponentLintRule {
     /// failed, as it was when every rule was its own call. That costs the
     /// batch attempt plus what the rules cost before, bounded by their
     /// deadlines; the batched call is the fast path.
+    ///
+    /// A rule of the `plugin` world has no batch key and no siblings, so
+    /// like the default it answers only for its own name: its `check`
+    /// takes no list and would report itself whatever was asked.
     fn check_shared_batch(
         &self,
         names: &[&str],
         config: &Arc<Config>,
         path: &Path,
     ) -> Result<Vec<LintError>, String> {
+        if let Exports::Plugin(_) = &self.exports {
+            match names {
+                [] => return Ok(Vec::new()),
+                [name] if *name == self.name() => {}
+                _ => {
+                    return Err(format!(
+                        "{} is a rule of the plugin world and checks only itself",
+                        self.name()
+                    ));
+                }
+            }
+        }
         self.execute_check(names, config.clone(), path)
             .map_err(|e| e.to_string())
     }
@@ -1523,6 +1539,29 @@ mod tests {
         assert!(
             rule.check_shared(&config, Path::new("good.conf"))
                 .is_empty()
+        );
+
+        // Batched, it answers only for itself: its check takes no list
+        let config = Arc::new(crate::parser::parse_string(bad).unwrap());
+        let own = rule
+            .check_shared_batch(
+                &["server-tokens-enabled-lua"],
+                &config,
+                Path::new("bad.conf"),
+            )
+            .unwrap();
+        assert_eq!(own.len(), 1);
+        assert!(
+            rule.check_shared_batch(&["other"], &config, Path::new("bad.conf"))
+                .is_err()
+        );
+        assert!(
+            rule.check_shared_batch(
+                &["server-tokens-enabled-lua", "other"],
+                &config,
+                Path::new("bad.conf")
+            )
+            .is_err()
         );
     }
 

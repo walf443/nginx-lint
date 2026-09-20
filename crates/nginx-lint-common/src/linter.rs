@@ -551,8 +551,9 @@ pub fn run_batch(
                 Err(why) => {
                     if memo.remember_failed(key) {
                         eprintln!(
-                            "Warning: checking {} together failed ({}); checking them one at a time from now on",
+                            "Warning: checking {} together failed on {} ({}); checking them one at a time from now on",
                             names.join(", "),
+                            path.display(),
                             why
                         );
                     }
