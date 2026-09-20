@@ -1031,6 +1031,49 @@ mod batch_tests {
         );
         assert_eq!(*calls.lock().unwrap(), vec![vec!["a", "b", "c"]]);
         assert_eq!(single.load(Ordering::SeqCst), 3);
+
+        // The next file goes straight to one rule at a time: the batch is
+        // not attempted again for a group that has failed
+        let errors = linter.lint(&config, Path::new("u.conf"));
+        assert_eq!(errors.len(), 3);
+        assert_eq!(calls.lock().unwrap().len(), 1, "no second batch attempt");
+        assert_eq!(single.load(Ordering::SeqCst), 6);
+    }
+
+    /// A rule with a key that does not implement check_shared_batch: the
+    /// default declines the batch, and the group runs one rule at a time
+    /// rather than losing every rule but the first.
+    #[test]
+    fn a_keyed_rule_without_a_batch_implementation_still_runs_its_siblings() {
+        struct KeyedOnly(&'static str);
+        impl LintRule for KeyedOnly {
+            fn name(&self) -> &'static str {
+                self.0
+            }
+            fn category(&self) -> &'static str {
+                "test"
+            }
+            fn description(&self) -> &'static str {
+                "keyed, no batch"
+            }
+            fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+                vec![LintError::new(self.0, "test", "ran", Severity::Warning)]
+            }
+            fn batch_key(&self) -> Option<nginx_lint_common::linter::BatchKey> {
+                Some(nginx_lint_common::linter::BatchKey::new::<KeyedOnly>(1))
+            }
+        }
+        let mut linter = Linter::new();
+        linter.add_rule(Box::new(KeyedOnly("x")));
+        linter.add_rule(Box::new(KeyedOnly("y")));
+        let config = crate::parser::parse_string("http {}").unwrap();
+        let mut names: Vec<String> = linter
+            .lint(&config, Path::new("t.conf"))
+            .into_iter()
+            .map(|e| e.rule)
+            .collect();
+        names.sort();
+        assert_eq!(names, ["x", "y"]);
     }
 
     /// Profiling is per rule, so it never batches: a rule's time is its own.

@@ -344,16 +344,23 @@ pub trait LintRule: Send + Sync {
     /// linter then checks the rules one at a time through
     /// [`check_shared`](Self::check_shared), each reporting its own
     /// outcome, and says so once per group. The default checks this rule
-    /// alone, which is right for a rule with no key, on which the linter
-    /// never calls this with other names — and wrong for a rule with one,
-    /// which has to override it (see [`batch_key`](Self::batch_key)).
+    /// alone when it is the only name, and declines any other call as
+    /// unimplemented — which the linter answers by checking the group one
+    /// rule at a time, so a rule with a key that does not override this
+    /// still has its siblings run, slower and with a warning saying why.
     fn check_shared_batch(
         &self,
-        _names: &[&str],
+        names: &[&str],
         config: &std::sync::Arc<Config>,
         path: &Path,
     ) -> Result<Vec<LintError>, String> {
-        Ok(self.check_shared(config, path))
+        match names {
+            [_] | [] => Ok(self.check_shared(config, path)),
+            _ => Err(format!(
+                "{} does not implement check_shared_batch",
+                self.name()
+            )),
+        }
     }
 
     /// Whether this rule wants the raw file content directly.
@@ -498,10 +505,12 @@ pub fn run_rule(
 /// Should the batched check fail, the rules are checked one at a time
 /// instead — each reporting its own outcome, a failing rule taking only
 /// its own findings with it, as when every rule was its own call — and
-/// the failure is reported to stderr once per group per process: a
-/// component that fails only when checked for several rules is a defect
-/// of the component, which `nginx-lint test-plugins` also catches, and
-/// one that keeps failing is costing the batch attempt on every file.
+/// the failure is reported to stderr once per group per process. From
+/// then on the group is checked one rule at a time without trying the
+/// batch again: a component that fails only when checked for several
+/// rules is a defect of the component, which `nginx-lint test-plugins`
+/// also catches, and would otherwise cost the failed attempt on every
+/// file.
 pub fn run_batch(
     rules: &[&dyn LintRule],
     config: &Config,
@@ -514,36 +523,51 @@ pub fn run_batch(
         [first, ..] => {
             let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
             let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
+            let key = first.batch_key();
+            let one_at_a_time = || -> Vec<LintError> {
+                rules
+                    .iter()
+                    .flat_map(|rule| rule.check_shared(shared, path))
+                    .collect()
+            };
+            if batch_has_failed(key) {
+                return one_at_a_time();
+            }
             match first.check_shared_batch(&names, shared, path) {
                 Ok(errors) => errors,
                 Err(why) => {
-                    warn_batch_failed_once(first.batch_key(), &names, &why);
-                    rules
-                        .iter()
-                        .flat_map(|rule| rule.check_shared(shared, path))
-                        .collect()
+                    if remember_batch_failed(key) {
+                        eprintln!(
+                            "Warning: checking {} together failed ({}); checking them one at a time from now on",
+                            names.join(", "),
+                            why
+                        );
+                    }
+                    one_at_a_time()
                 }
             }
         }
     }
 }
 
-/// Report a group's batched check failing, the first time for that group.
-fn warn_batch_failed_once(key: Option<BatchKey>, names: &[&str], why: &str) {
-    static WARNED: std::sync::OnceLock<
+/// The groups whose batched check has failed in this process.
+fn failed_batches() -> std::sync::MutexGuard<'static, std::collections::HashSet<Option<BatchKey>>> {
+    static FAILED: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashSet<Option<BatchKey>>>,
     > = std::sync::OnceLock::new();
-    let mut warned = WARNED
+    FAILED
         .get_or_init(Default::default)
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    if warned.insert(key) {
-        eprintln!(
-            "Warning: checking {} together failed ({}); checking them one at a time instead",
-            names.join(", "),
-            why
-        );
-    }
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn batch_has_failed(key: Option<BatchKey>) -> bool {
+    failed_batches().contains(&key)
+}
+
+/// Record a group's batched check failing; true the first time.
+fn remember_batch_failed(key: Option<BatchKey>) -> bool {
+    failed_batches().insert(key)
 }
 
 /// Group rules for [`run_batch`]: rules sharing a [`batch_key`](LintRule::batch_key)

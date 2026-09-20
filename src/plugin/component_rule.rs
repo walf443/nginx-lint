@@ -1244,10 +1244,13 @@ impl ComponentLintRule {
         // so the most an untrusted component can spend on a file is the
         // batch attempt plus the per-rule deadlines: about twice what the
         // per-rule calls alone allowed, on the failure path only. The
-        // memory limit is not scaled: the config, which is what takes
-        // memory, is reconstructed once for the whole call rather than
-        // once per rule, so a batched call needs less than the per-rule
-        // calls it replaces, not more.
+        // memory limit is not scaled: it bounds what one instance may
+        // hold, and a batched call reconstructs the config once — pruned
+        // to the union of the asked rules' relevant directives, so larger
+        // than any one rule's slice but at most the whole file, which a
+        // rule declaring no pruning gets on its own. A component that
+        // does exceed it when batched falls back to one rule at a time,
+        // for good (see run_batch).
         let timeout_ticks = self
             .timeout_ticks
             .map(|ticks| ticks.saturating_mul((asked.len() as u64).clamp(1, DEADLINE_RULES_CAP)));
