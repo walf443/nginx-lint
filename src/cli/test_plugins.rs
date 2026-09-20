@@ -373,29 +373,44 @@ fn check_beside_siblings(plugin: &dyn LintRule, names: &[&str]) -> Outcome {
     let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
         return Outcome::Skipped("the plugin declares no bad example".to_string());
     };
-    let alone = describe(&findings(plugin, bad, "bad.conf").found);
+    let siblings = names
+        .iter()
+        .filter(|name| **name != plugin.name())
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
 
     let (config, _) = parse_string_with_errors(bad);
     let config = std::sync::Arc::new(config);
-    let mut together: Vec<LintError> = plugin
-        .check_shared_batch(names, &config, Path::new("bad.conf"))
-        .into_iter()
-        .filter(|error| error.rule == plugin.name())
-        .collect();
-    together.sort_by_key(|e| (e.line, e.column));
-    let together = describe(&together);
+    // The batched call itself, not the linter's fallback to one rule at a
+    // time: a component that fails only when asked for several rules is
+    // what this check exists to catch, and the fallback would hide it
+    let together = match plugin.check_shared_batch(names, &config, Path::new("bad.conf")) {
+        Ok(errors) => errors,
+        Err(why) => {
+            return Outcome::Failed(format!("checked with {siblings}, the plugin failed: {why}"));
+        }
+    };
+
+    // Compared as sets: what a rule reports must not depend on company,
+    // but the order it reports in may
+    let sorted = |mut errors: Vec<LintError>| {
+        errors.sort_by(|a, b| (a.line, a.column, &a.message).cmp(&(b.line, b.column, &b.message)));
+        describe(&errors)
+    };
+    let alone = sorted(findings(plugin, bad, "bad.conf").found);
+    let together = sorted(
+        together
+            .into_iter()
+            .filter(|error| error.rule == plugin.name())
+            .collect(),
+    );
 
     if together == alone {
         return Outcome::Passed;
     }
     Outcome::Failed(format!(
-        "checked with {}, the rule reports:\n{together}\nchecked alone, it reports:\n{alone}",
-        names
-            .iter()
-            .filter(|name| **name != plugin.name())
-            .map(|name| format!("'{name}'"))
-            .collect::<Vec<_>>()
-            .join(", ")
+        "checked with {siblings}, the rule reports:\n{together}\nchecked alone, it reports:\n{alone}"
     ))
 }
 

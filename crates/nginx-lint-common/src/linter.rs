@@ -339,17 +339,21 @@ pub trait LintRule: Send + Sync {
     /// Check every rule named in `names` — all sharing this rule's
     /// [`batch_key`](Self::batch_key), this one among them — and return
     /// their findings together, each naming its rule in
-    /// [`LintError::rule`]. The default checks this rule alone, which is
-    /// right for a rule with no key, on which the linter never calls this
-    /// with other names — and wrong for a rule with one, which has to
-    /// override it (see [`batch_key`](Self::batch_key)).
+    /// [`LintError::rule`]. `Err` means the batched check itself failed
+    /// (the component trapped, or ran out of time) and says why; the
+    /// linter then checks the rules one at a time through
+    /// [`check_shared`](Self::check_shared), each reporting its own
+    /// outcome, and says so once per group. The default checks this rule
+    /// alone, which is right for a rule with no key, on which the linter
+    /// never calls this with other names — and wrong for a rule with one,
+    /// which has to override it (see [`batch_key`](Self::batch_key)).
     fn check_shared_batch(
         &self,
         _names: &[&str],
         config: &std::sync::Arc<Config>,
         path: &Path,
-    ) -> Vec<LintError> {
-        self.check_shared(config, path)
+    ) -> Result<Vec<LintError>, String> {
+        Ok(self.check_shared(config, path))
     }
 
     /// Whether this rule wants the raw file content directly.
@@ -490,6 +494,14 @@ pub fn run_rule(
 /// call, through the first rule's [`check_shared_batch`](LintRule::check_shared_batch).
 /// A group of one is run through [`run_rule`], so a rule with a key of its
 /// own costs nothing extra.
+///
+/// Should the batched check fail, the rules are checked one at a time
+/// instead — each reporting its own outcome, a failing rule taking only
+/// its own findings with it, as when every rule was its own call — and
+/// the failure is reported to stderr once per group per process: a
+/// component that fails only when checked for several rules is a defect
+/// of the component, which `nginx-lint test-plugins` also catches, and
+/// one that keeps failing is costing the batch attempt on every file.
 pub fn run_batch(
     rules: &[&dyn LintRule],
     config: &Config,
@@ -502,8 +514,35 @@ pub fn run_batch(
         [first, ..] => {
             let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
             let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
-            first.check_shared_batch(&names, shared, path)
+            match first.check_shared_batch(&names, shared, path) {
+                Ok(errors) => errors,
+                Err(why) => {
+                    warn_batch_failed_once(first.batch_key(), &names, &why);
+                    rules
+                        .iter()
+                        .flat_map(|rule| rule.check_shared(shared, path))
+                        .collect()
+                }
+            }
         }
+    }
+}
+
+/// Report a group's batched check failing, the first time for that group.
+fn warn_batch_failed_once(key: Option<BatchKey>, names: &[&str], why: &str) {
+    static WARNED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<Option<BatchKey>>>,
+    > = std::sync::OnceLock::new();
+    let mut warned = WARNED
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if warned.insert(key) {
+        eprintln!(
+            "Warning: checking {} together failed ({}); checking them one at a time instead",
+            names.join(", "),
+            why
+        );
     }
 }
 

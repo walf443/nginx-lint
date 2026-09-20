@@ -905,6 +905,7 @@ mod batch_tests {
         key: Option<u64>,
         calls: Arc<Mutex<Vec<Vec<String>>>>,
         single_calls: Arc<AtomicUsize>,
+        fail_batch: bool,
     }
 
     impl LintRule for Batched {
@@ -935,15 +936,18 @@ mod batch_tests {
             names: &[&str],
             _config: &Arc<Config>,
             _path: &Path,
-        ) -> Vec<LintError> {
+        ) -> Result<Vec<LintError>, String> {
             self.calls
                 .lock()
                 .unwrap()
                 .push(names.iter().map(|n| n.to_string()).collect());
-            names
+            if self.fail_batch {
+                return Err("the component trapped".to_string());
+            }
+            Ok(names
                 .iter()
                 .map(|n| LintError::new(n, "test", "batched", Severity::Warning))
-                .collect()
+                .collect())
         }
     }
 
@@ -959,6 +963,7 @@ mod batch_tests {
                 key,
                 calls: calls.clone(),
                 single_calls: single.clone(),
+                fail_batch: false,
             }) as Box<dyn LintRule>
         };
         let mut linter = Linter::new();
@@ -992,6 +997,42 @@ mod batch_tests {
         assert_eq!(single.load(Ordering::SeqCst), 2);
     }
 
+    /// A batched check that fails is retried one rule at a time: every
+    /// rule of the group reports its own outcome, and the batch was
+    /// attempted once.
+    #[test]
+    fn a_failed_batch_is_retried_one_rule_at_a_time() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let single = Arc::new(AtomicUsize::new(0));
+        let mut linter = Linter::new();
+        for name in ["a", "b", "c"] {
+            linter.add_rule(Box::new(Batched {
+                name,
+                key: Some(7),
+                calls: calls.clone(),
+                single_calls: single.clone(),
+                fail_batch: true,
+            }));
+        }
+        let config = crate::parser::parse_string("http {}").unwrap();
+        let mut errors = linter.lint(&config, Path::new("t.conf"));
+        errors.sort_by(|x, y| x.rule.cmp(&y.rule));
+        let outcomes: Vec<(String, String)> = errors
+            .iter()
+            .map(|e| (e.rule.clone(), e.message.clone()))
+            .collect();
+        assert_eq!(
+            outcomes,
+            [
+                ("a".to_string(), "alone".to_string()),
+                ("b".to_string(), "alone".to_string()),
+                ("c".to_string(), "alone".to_string()),
+            ]
+        );
+        assert_eq!(*calls.lock().unwrap(), vec![vec!["a", "b", "c"]]);
+        assert_eq!(single.load(Ordering::SeqCst), 3);
+    }
+
     /// Profiling is per rule, so it never batches: a rule's time is its own.
     #[test]
     #[cfg(feature = "cli")]
@@ -1005,6 +1046,7 @@ mod batch_tests {
                 key: Some(1),
                 calls: calls.clone(),
                 single_calls: single.clone(),
+                fail_batch: false,
             }));
         }
         let config = crate::parser::parse_string("http {}").unwrap();

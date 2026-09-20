@@ -1240,11 +1240,14 @@ impl ComponentLintRule {
         // component gets each rule's budget, so a component is not cut off
         // for carrying many rules — up to a cap, since the number of rules
         // is the component's to declare. A call that does hit the deadline
-        // is retried one rule at a time (see check_shared_batch), each with
-        // its own. The memory limit is not scaled: the config, which is
-        // what takes memory, is reconstructed once for the whole call
-        // rather than once per rule, so a batched call needs less than the
-        // per-rule calls it replaces, not more.
+        // is retried by the linter one rule at a time, each with its own,
+        // so the most an untrusted component can spend on a file is the
+        // batch attempt plus the per-rule deadlines: about twice what the
+        // per-rule calls alone allowed, on the failure path only. The
+        // memory limit is not scaled: the config, which is what takes
+        // memory, is reconstructed once for the whole call rather than
+        // once per rule, so a batched call needs less than the per-rule
+        // calls it replaces, not more.
         let timeout_ticks = self
             .timeout_ticks
             .map(|ticks| ticks.saturating_mul((asked.len() as u64).clamp(1, DEADLINE_RULES_CAP)));
@@ -1351,24 +1354,6 @@ impl ComponentLintRule {
     }
 }
 
-/// Check every asked rule in one call, and when that call fails, each
-/// rule on its own — `batch` returns `None` for a failure, `one` reports
-/// a rule's own outcome, failure included. A lone rule goes straight to
-/// `one`, since a batch of one has nothing to fall back to.
-fn batched_or_one_by_one(
-    names: &[&str],
-    batch: impl FnOnce(&[&str]) -> Option<Vec<LintError>>,
-    one: impl Fn(&str) -> Vec<LintError>,
-) -> Vec<LintError> {
-    if let [name] = names {
-        return one(name);
-    }
-    match batch(names) {
-        Some(errors) => errors,
-        None => names.iter().flat_map(|name| one(name)).collect(),
-    }
-}
-
 /// The most rules a batched call's deadline is scaled by. A component
 /// declares its own rules, so without a bound the deadline would be the
 /// component's to set; past this many rules, the remaining ones share.
@@ -1421,23 +1406,21 @@ impl LintRule for ComponentLintRule {
         }
     }
 
-    /// One call for every asked rule. Should that call fail — a rule that
-    /// traps, or times out — the rules are checked one at a time instead,
-    /// so a failing rule takes only its own findings with it and is the
-    /// only one reported failed, as it was when every rule was its own
-    /// call. The batched call is the fast path; the failure path costs
-    /// what the rules cost before.
+    /// One call for every asked rule. A failure — a rule that traps, or
+    /// the call timing out — is the linter's to handle: it checks the
+    /// rules one at a time instead (see `run_batch`), so a failing rule
+    /// takes only its own findings with it and is the only one reported
+    /// failed, as it was when every rule was its own call. That costs the
+    /// batch attempt plus what the rules cost before, bounded by their
+    /// deadlines; the batched call is the fast path.
     fn check_shared_batch(
         &self,
         names: &[&str],
         config: &Arc<Config>,
         path: &Path,
-    ) -> Vec<LintError> {
-        batched_or_one_by_one(
-            names,
-            |asked| self.execute_check(asked, config.clone(), path).ok(),
-            |name| self.run_check(&[name], config.clone(), path),
-        )
+    ) -> Result<Vec<LintError>, String> {
+        self.execute_check(names, config.clone(), path)
+            .map_err(|e| e.to_string())
     }
 
     fn why(&self) -> Option<&str> {
@@ -1600,53 +1583,6 @@ mod tests {
         );
         assert_eq!(summary[2].0, "throw-rule");
         assert!(summary[2].1.contains("boom"), "{summary:?}");
-    }
-
-    /// A batched call that succeeds is the result; one that fails is
-    /// retried one rule at a time, each reporting its own outcome; a lone
-    /// rule is never batched.
-    #[test]
-    fn a_failed_batch_falls_back_to_one_rule_at_a_time() {
-        use std::cell::RefCell;
-        let one = |name: &str| {
-            vec![LintError::new(
-                name,
-                "c",
-                if name == "bad" { "failed" } else { "ok" },
-                Severity::Warning,
-            )]
-        };
-
-        let batched = batched_or_one_by_one(&["a", "b"], |_| Some(vec![]), one);
-        assert!(batched.is_empty(), "a successful batch is the result");
-
-        let asked = RefCell::new(Vec::new());
-        let fallen_back = batched_or_one_by_one(
-            &["a", "bad", "c"],
-            |names| {
-                asked
-                    .borrow_mut()
-                    .extend(names.iter().map(|n| n.to_string()));
-                None
-            },
-            one,
-        );
-        assert_eq!(*asked.borrow(), ["a", "bad", "c"]);
-        let outcomes: Vec<(String, String)> = fallen_back
-            .iter()
-            .map(|e| (e.rule.clone(), e.message.clone()))
-            .collect();
-        assert_eq!(
-            outcomes,
-            [
-                ("a".to_string(), "ok".to_string()),
-                ("bad".to_string(), "failed".to_string()),
-                ("c".to_string(), "ok".to_string()),
-            ]
-        );
-
-        let lone = batched_or_one_by_one(&["only"], |_| panic!("a lone rule is not batched"), one);
-        assert_eq!(lone[0].rule, "only");
     }
 
     /// Load the two-rule example component, skipping the test if
