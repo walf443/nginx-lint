@@ -231,8 +231,8 @@ nginx-lint --plugins ./my-plugins /etc/nginx/nginx.conf
 Each `.wasm` file in the directory is loaded as a plugin, in file name order. A
 file carries one rule, or several: a component built against the
 `plugin-rules` world exports a list of rules, which the host loads as though
-each had come from its own file. The Rust, TypeScript and Python SDKs build
-that world (a single rule is a list of one); the Go and Lua SDKs still build
+each had come from its own file. The Rust, TypeScript, Python and Go SDKs
+build that world (a single rule is a list of one); the Lua SDK still builds
 the original `plugin` world, one rule per file, which the host keeps loading.
 
 There is an `nginx-lint-plugin` SDK for four languages, each with a worked

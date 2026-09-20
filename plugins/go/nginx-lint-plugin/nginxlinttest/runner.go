@@ -8,23 +8,23 @@ import (
 	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
 )
 
-// Runner exercises one plugin against the real parser.
+// Runner exercises one rule against the real parser.
 //
 // The assertions take a [testing.TB] rather than storing one, so a single
 // runner can be shared across subtests.
 type Runner struct {
-	plugin nginxlint.Plugin
+	plugin nginxlint.Rule
 }
 
-// New returns a runner for the plugin.
-func New(plugin nginxlint.Plugin) *Runner {
-	return &Runner{plugin: plugin}
+// New returns a runner for the rule.
+func New(rule nginxlint.Rule) *Runner {
+	return &Runner{plugin: rule}
 }
 
-// Spec returns the plugin's metadata.
+// Spec returns the rule's metadata.
 func (r *Runner) Spec() nginxlint.Spec { return r.plugin.Spec() }
 
-// Check parses source and runs the plugin over it.
+// Check parses source and runs the rule over it.
 //
 // includeContext names the blocks the file would have been included from, as
 // `--context` does on the command line.
@@ -36,7 +36,7 @@ func (r *Runner) Check(source string, includeContext ...string) ([]nginxlint.Lin
 	return r.plugin.Check(config), nil
 }
 
-// CheckFile parses a file from disk and runs the plugin over it.
+// CheckFile parses a file from disk and runs the rule over it.
 func (r *Runner) CheckFile(path string, includeContext ...string) ([]nginxlint.LintError, error) {
 	config, err := ParseFile(path, includeContext...)
 	if err != nil {
