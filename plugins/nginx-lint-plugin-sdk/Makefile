@@ -16,7 +16,7 @@ test:
 # reimplementation of the host's, and this is what pins the two together.
 #
 # tests/two-rules returns a list of two rules: test-plugins has to load it as
-# two, check each against its own examples, and the fixes of both, asked
+# two, check each against its own examples and beside the other, and the fixes of both, asked
 # for together, have to produce good.conf. tests/failing-rules has a rule
 # that returns a malformed finding and one that throws beside a working
 # one: each failure is that rule's own finding. (The host asks one rule
@@ -32,7 +32,7 @@ test-e2e:
 		diff $(FIX_KINDS)/good.conf $$tmp/nginx.conf && echo "  --fix produced good.conf"; \
 		status=$$?; rm -rf $$tmp; exit $$status
 	cargo run -q -p nginx-lint-plugin-sdk -- build $(TWO_RULES)/plugin.lua -o $(TWO_RULES)/two-rules.wasm
-	$(NGINX_LINT) test-plugins --plugins $(TWO_RULES) 2>&1 | tee /dev/stderr | grep -q '^2 rule(s), 6 check(s) passed'
+	$(NGINX_LINT) test-plugins --plugins $(TWO_RULES) 2>&1 | tee /dev/stderr | grep -q '^2 rule(s), 8 check(s) passed'
 	@tmp=$$(mktemp -d); cp $(TWO_RULES)/bad.conf $$tmp/nginx.conf; \
 		$(NGINX_LINT) --plugins $(TWO_RULES) --rule-only server-tokens-enabled-two,autoindex-enabled-two --fix $$tmp/nginx.conf >/dev/null; \
 		diff $(TWO_RULES)/good.conf $$tmp/nginx.conf && echo "  --fix produced good.conf with both rules"; \

@@ -211,7 +211,9 @@ nginx-lint test-plugins --plugins <dir> [--fixtures tests/fixtures]
 
 It requires the bad example to be reported, the good example to be clean, and
 the fixes to resolve the bad example, matching findings by the plugin's own
-rule name. With `--fixtures` it also runs each case's `error/` and `expected/`,
+rule name; a rule of a component that carries several is also checked the way
+the linter checks it — in one call with its siblings — and has to report the
+same. With `--fixtures` it also runs each case's `error/` and `expected/`,
 and requires the fixes to resolve the `error/` one. The cases belong to one
 rule; when the directory loads several, each rule's cases sit under
 `tests/fixtures/<rule>/`.

@@ -232,6 +232,25 @@ impl LintError {
     }
 }
 
+/// Identifies a group of rules that can be checked together; see
+/// [`LintRule::batch_key`]. The implementor's type is part of the key, so
+/// two implementors numbering their groups independently never share one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BatchKey {
+    implementor: std::any::TypeId,
+    id: u64,
+}
+
+impl BatchKey {
+    /// A key for group `id` of the rules of type `T`.
+    pub fn new<T: 'static>(id: u64) -> Self {
+        Self {
+            implementor: std::any::TypeId::of::<T>(),
+            id,
+        }
+    }
+}
+
 /// A lint rule that can be checked against a parsed nginx configuration.
 ///
 /// Every rule — whether implemented as a native Rust struct or as a WASM
@@ -313,7 +332,7 @@ pub trait LintRule: Send + Sync {
     /// file content](Self::wants_content): a group of several has no content
     /// to pass. The execution deadline a host applies to a batched check is
     /// expected to be the per-rule deadline times the number of rules asked.
-    fn batch_key(&self) -> Option<u64> {
+    fn batch_key(&self) -> Option<BatchKey> {
         None
     }
 
@@ -494,7 +513,7 @@ pub fn run_batch(
 /// groups is the caller's to fix, as it is across rules today.
 pub fn batch_rules<'a>(rules: &'a [Box<dyn LintRule>]) -> Vec<Vec<&'a dyn LintRule>> {
     let mut groups: Vec<Vec<&'a dyn LintRule>> = Vec::new();
-    let mut by_key: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    let mut by_key: std::collections::HashMap<BatchKey, usize> = std::collections::HashMap::new();
     for rule in rules {
         match rule.batch_key() {
             Some(key) => match by_key.get(&key) {
@@ -1053,6 +1072,25 @@ mod batch_tests {
     use super::*;
 
     struct Keyed(&'static str, Option<u64>);
+    struct OtherKeyed(&'static str, u64);
+
+    impl LintRule for OtherKeyed {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn category(&self) -> &'static str {
+            "test"
+        }
+        fn description(&self) -> &'static str {
+            "keyed by another implementor"
+        }
+        fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+            Vec::new()
+        }
+        fn batch_key(&self) -> Option<BatchKey> {
+            Some(BatchKey::new::<OtherKeyed>(self.1))
+        }
+    }
 
     impl LintRule for Keyed {
         fn name(&self) -> &'static str {
@@ -1067,9 +1105,18 @@ mod batch_tests {
         fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
             Vec::new()
         }
-        fn batch_key(&self) -> Option<u64> {
-            self.1
+        fn batch_key(&self) -> Option<BatchKey> {
+            self.1.map(BatchKey::new::<Keyed>)
         }
+    }
+
+    /// Two implementors numbering their groups the same way do not share
+    /// one: the implementor's type is part of the key.
+    #[test]
+    fn batch_keys_of_different_implementors_never_collide() {
+        let rules: Vec<Box<dyn LintRule>> =
+            vec![Box::new(Keyed("a", Some(1))), Box::new(OtherKeyed("b", 1))];
+        assert_eq!(batch_rules(&rules).len(), 2);
     }
 
     /// Rules sharing a key group at the position of their first member;

@@ -15,7 +15,7 @@ use crate::Cli;
 use colored::Colorize;
 use nginx_lint::plugin::PluginLoader;
 use nginx_lint_common::linter::apply_fixes_to_content_detailed;
-use nginx_lint_common::linter::{LintError, LintRule};
+use nginx_lint_common::linter::{LintError, LintRule, batch_rules};
 use nginx_lint_common::parse_string_with_errors;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -220,6 +220,21 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         }
     };
 
+    // The linter checks the rules of one component in a single call, naming
+    // them all, so that is a way a rule runs that checking it alone does
+    // not reach: sharing the config with its siblings. Each rule of such a
+    // group is also checked that way, and has to report the same.
+    let siblings: std::collections::HashMap<&str, Vec<&str>> = batch_rules(&plugins)
+        .into_iter()
+        .filter(|group| group.len() > 1)
+        .flat_map(|group| {
+            let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
+            group
+                .into_iter()
+                .map(move |rule| (rule.name(), names.clone()))
+        })
+        .collect();
+
     let mut failed = 0;
     let mut passed = 0;
     let mut unchecked = Vec::new();
@@ -232,7 +247,13 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 .map(|dir| dir.join(plugin.name()))
                 .filter(|dir| dir.is_dir()),
         };
-        let checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
+        let mut checks = test_plugin(plugin.as_ref(), fixtures.as_deref());
+        if let Some(names) = siblings.get(plugin.name()) {
+            checks.push(Check {
+                name: "checked beside its siblings, it reports the same",
+                outcome: check_beside_siblings(plugin.as_ref(), names),
+            });
+        }
         report(plugin.name(), &checks);
 
         let mut checked = 0;
@@ -340,6 +361,42 @@ fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Checked {
         found,
         syntax_errors: syntax_errors.len(),
     }
+}
+
+/// Run the rule the way the linter runs a component of several rules —
+/// one call naming them all — over its bad example, and require the
+/// findings under this rule to be what checking it alone reports. What
+/// differs is that the config is shared: a rule that changes what it was
+/// handed, or that reads something into a config pruned for its siblings
+/// too, shows up here and nowhere else in this command.
+fn check_beside_siblings(plugin: &dyn LintRule, names: &[&str]) -> Outcome {
+    let Some(bad) = plugin.bad_example().filter(|example| !example.is_empty()) else {
+        return Outcome::Skipped("the plugin declares no bad example".to_string());
+    };
+    let alone = describe(&findings(plugin, bad, "bad.conf").found);
+
+    let (config, _) = parse_string_with_errors(bad);
+    let config = std::sync::Arc::new(config);
+    let mut together: Vec<LintError> = plugin
+        .check_shared_batch(names, &config, Path::new("bad.conf"))
+        .into_iter()
+        .filter(|error| error.rule == plugin.name())
+        .collect();
+    together.sort_by_key(|e| (e.line, e.column));
+    let together = describe(&together);
+
+    if together == alone {
+        return Outcome::Passed;
+    }
+    Outcome::Failed(format!(
+        "checked with {}, the rule reports:\n{together}\nchecked alone, it reports:\n{alone}",
+        names
+            .iter()
+            .filter(|name| **name != plugin.name())
+            .map(|name| format!("'{name}'"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 fn check_bad_example(plugin: &dyn LintRule) -> Outcome {

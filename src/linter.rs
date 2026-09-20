@@ -926,8 +926,9 @@ mod batch_tests {
                 Severity::Warning,
             )]
         }
-        fn batch_key(&self) -> Option<u64> {
+        fn batch_key(&self) -> Option<nginx_lint_common::linter::BatchKey> {
             self.key
+                .map(nginx_lint_common::linter::BatchKey::new::<Batched>)
         }
         fn check_shared_batch(
             &self,
