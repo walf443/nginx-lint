@@ -491,10 +491,18 @@ static int convert_findings(lua_State *L) {
     return 0;
 }
 
-/* A single error-severity finding carrying `message`, for failures of the
- * runtime itself (a script that does not load, or throws). */
+/* Appends one error-severity finding carrying `message` to the list, for
+ * failures of the runtime itself (a script that does not load, or throws).
+ * Findings already in the list stay: a rule that threw does not take the
+ * findings of the rules before it with it. */
 static void runtime_failure(lua_State *L, const char *message, plugin_rules_list_lint_error_t *ret) {
-    plugin_rules_lint_error_t *e = checked_alloc(L, sizeof(*e));
+    size_t start = ret->len;
+    plugin_rules_lint_error_t *grown = checked_alloc(L, (start + 1) * sizeof(*grown));
+    if (start) memcpy(grown, ret->ptr, start * sizeof(*grown));
+    free(ret->ptr);
+    ret->ptr = grown;
+    ret->len = start + 1;
+    plugin_rules_lint_error_t *e = &grown[start];
     if (L) {
         /* Under the rule that was running, if one was; a failure before
          * any rule ran goes out under the runtime's own name, which the
@@ -510,8 +518,6 @@ static void runtime_failure(lua_State *L, const char *message, plugin_rules_list
     if (!e->category.ptr) plugin_rules_string_dup(&e->category, "plugin");
     dup_utf8(L, &e->message, message, strlen(message));
     e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR;
-    ret->ptr = e;
-    ret->len = 1;
 }
 
 /* --- C -> Lua conversions ------------------------------------------------ */
@@ -695,11 +701,33 @@ static int protected_specs(lua_State *L) {
     return 0;
 }
 
-/* (snapshot, path, asked, findings-out): builds the config once, calls
- * the check() of every rule whose name is in `asked` — in the script's
- * order, ignoring names the script does not carry — and appends what each
- * returns. Shape errors are luaL_error, so a finding or fix that is not a
- * table reads as a message rather than a trap. */
+/* (config, path, rule, findings-out): calls one rule's check() over the
+ * config and appends what it returns. Runs under its own lua_pcall, so a
+ * rule that throws — or returns findings of the wrong shape, which is a
+ * luaL_error — is reported for that rule alone, and the rules before and
+ * after it keep their findings. */
+static int protected_rule_check(lua_State *L) {
+    const plugin_rules_string_t *path = lua_touserdata(L, 2);
+    plugin_rules_list_lint_error_t *ret = lua_touserdata(L, 4);
+
+    lua_getfield(L, 3, "check");
+    lua_pushvalue(L, 1);
+    push_string(L, path);
+    lua_call(L, 2, 1);
+
+    lua_pushcfunction(L, convert_findings);
+    lua_pushlightuserdata(L, ret);
+    lua_pushvalue(L, -3);
+    lua_call(L, 2, 0);
+    return 0;
+}
+
+/* (snapshot, path, asked, findings-out): builds the config once and runs
+ * every rule whose name is in `asked` — in the script's order, ignoring
+ * names the script does not carry — each under protected_rule_check. What
+ * can still fail here is building the config itself (out of memory, for
+ * a large file), which is then the only finding, under the runtime's own
+ * name. */
 static int protected_check(lua_State *L) {
     const nginx_lint_plugin_config_api_config_snapshot_t *snap = lua_touserdata(L, 1);
     const plugin_rules_string_t *path = lua_touserdata(L, 2);
@@ -740,18 +768,25 @@ static int protected_check(lua_State *L) {
             config = lua_gettop(L);
         }
 
-        lua_rawgeti(L, rules, (lua_Integer)i);
-        lua_getfield(L, -1, "check");
-        lua_remove(L, -2);
+        int top = lua_gettop(L);
+        size_t before = ret->len;
+        lua_pushcfunction(L, protected_rule_check);
         lua_pushvalue(L, config);
-        push_string(L, path);
-        lua_call(L, 2, 1);
-
-        lua_pushcfunction(L, convert_findings);
+        lua_pushlightuserdata(L, (void *)path);
+        lua_rawgeti(L, rules, (lua_Integer)i);
         lua_pushlightuserdata(L, ret);
-        lua_pushvalue(L, -3);
-        lua_call(L, 2, 0);
-        lua_pop(L, 1);                          /* the findings */
+        if (lua_pcall(L, 4, 0, 0) != LUA_OK) {
+            /* This rule's failure, as its finding, in place of whatever
+             * convert_findings had appended for it before the error —
+             * possibly entries it had grown the list by and not filled.
+             * The rules before it keep theirs. */
+            for (size_t j = before; j < ret->len; j++) {
+                plugin_rules_lint_error_free(&ret->ptr[j]);
+            }
+            ret->len = before;
+            runtime_failure(L, error_message(L), ret);
+        }
+        lua_settop(L, top);
     }
     lua_pushnil(L);
     lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
