@@ -117,7 +117,7 @@ cd plugins/go/server-tokens-enabled-go && make check test-e2e
 
 The Lua plugin builder (`plugins/nginx-lint-plugin-sdk`) embeds a prebuilt Lua
 runtime, `runtimes/lua/runtime.core.wasm`: PUC Lua plus a C shim implementing the
-plugin world, compiled with wasi-sdk and committed. Rebuild it with
+plugin-rules world, compiled with wasi-sdk and committed. Rebuild it with
 `make build-lua-runtime` at the root (which fetches the pinned wasi-sdk and
 Lua sources) after changing anything under `runtimes/lua/` or the WIT, and commit
 the result. The runtime stamps a hash of its inputs and the plugin API
@@ -129,7 +129,8 @@ the tool, runs `nginx-lint test-plugins` on it and diffs `--fix` output
 against `examples/good.conf`; `make -C plugins/nginx-lint-plugin-sdk
 test-e2e` does the same for `tests/fix-kinds`, which uses every fix builder
 in `nginx_lint.lua` once — the Lua fix arithmetic is a reimplementation of
-the host's, so change both together.
+the host's, so change both together — and for `tests/two-rules`, a script
+returning two rules.
 
 The Go SDK's `nginxlinttest` package runs the real parser and the real fix
 applier from a plain `go test`, by embedding them as core wasm modules built

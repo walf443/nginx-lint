@@ -1,5 +1,5 @@
 # Builds the Lua plugin runtime: a core wasm module implementing the
-# nginx-lint `plugin` world by delegating to a Lua script that is not part
+# nginx-lint `plugin-rules` world by delegating to a Lua script that is not part
 # of the module. `nginx-lint-plugin-sdk build` writes the script into the finished
 # module (see the slot in shim.c), so this build happens once, here, and
 # plugin authors never need the toolchain below.
@@ -102,12 +102,14 @@ toolchain: $(TOOLCHAIN)
 
 # One rule produces all three files: with a target per file, `make -j`
 # would run wit-bindgen once for each into the same directory.
-bindings/.generated: $(WIT)
-	mkdir -p bindings
-	wit-bindgen c --world plugin --out-dir bindings $(dir $(WIT))
+# The Makefile is a prerequisite too: the world is named here, and a change
+# of world with the WIT untouched would otherwise leave stale bindings.
+bindings/.generated: $(WIT) Makefile
+	rm -rf bindings && mkdir -p bindings
+	wit-bindgen c --world plugin-rules --out-dir bindings $(dir $(WIT))
 	touch $@
 
-bindings/plugin.h bindings/plugin.c bindings/plugin_component_type.o: bindings/.generated
+bindings/plugin_rules.h bindings/plugin_rules.c bindings/plugin_rules_component_type.o: bindings/.generated
 
 bindings: bindings/.generated
 
@@ -123,10 +125,10 @@ build/%.o: $(LUA_SRC)/%.c | build $(TOOLCHAIN)
 build/lauxlib.o: $(LUA_SRC)/lauxlib.c | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -DluaL_loadfilex=luaL_loadfilex_unused -c $< -o $@
 
-build/%.o: %.c bindings/plugin.h | build $(TOOLCHAIN)
+build/%.o: %.c bindings/plugin_rules.h | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/plugin.o: bindings/plugin.c | build $(TOOLCHAIN)
+build/plugin_rules.o: bindings/plugin_rules.c | build $(TOOLCHAIN)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 nginx_lint_lua.h: nginx_lint.lua
@@ -140,7 +142,7 @@ build/stubs.o: stubs.c Makefile
 # versions go into the producers section, where the crate's tests read them.
 # wit-bindgen is recorded too, since the bindings it generates from the WIT
 # are an input the hash does not see.
-runtime.core.wasm: $(LUA_OBJS) build/stubs.o build/shim.o build/plugin.o bindings/plugin_component_type.o $(STAMP_INPUTS)
+runtime.core.wasm: $(LUA_OBJS) build/stubs.o build/shim.o build/plugin_rules.o bindings/plugin_rules_component_type.o $(STAMP_INPUTS)
 	$(CC) $(CFLAGS) $(filter %.o,$^) $(LDFLAGS) -o build/runtime.linked.wasm
 	@$(MAKE) --no-print-directory check-imports MODULE=build/runtime.linked.wasm
 	wasm-tools metadata add build/runtime.linked.wasm \

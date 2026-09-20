@@ -396,6 +396,15 @@ jobs:
         # it drifting.
         working-directory: plugins/nginx-lint-plugin-sdk
         run: make test-e2e
+      - name: Call a Lua component with several rules at once
+        # The host asks one rule per call, so the SDK's e2e cannot show what
+        # one rule's failure does to its siblings' findings in a single
+        # call; this host test calls the failing-rules component, built by
+        # the step above, with all three names.
+        run: |
+          test -f plugins/nginx-lint-plugin-sdk/tests/failing-rules/failing-rules.wasm
+          cargo test --features plugins --lib lua_rules_fail_one_at_a_time 2>&1 | tee lua.log
+          grep -q 'test result: ok. 1 passed' lua.log
       - name: Upload Lua WASM plugin
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

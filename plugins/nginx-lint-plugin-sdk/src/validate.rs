@@ -32,9 +32,10 @@ dofile = function() error("no file system in the plugin sandbox") end
 print = function() end
 "#;
 
-/// Loads `script` under `name` and checks that it returns a plugin table:
+/// Loads `script` under `name` and checks that it returns a rule table —
 /// `spec` a table (or a function returning one) with the required fields,
-/// `check` a function.
+/// `check` a function — or a list of them with distinct names. The runtime
+/// reads the script the same way (see `rules_from_script` in shim.c).
 pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     // The same libraries as the runtime's shim: no io, os, package or debug.
     let libs = StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::MATH | StdLib::UTF8;
@@ -66,11 +67,61 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
         .map_err(lua_message)?;
     let Value::Table(plugin) = plugin else {
         bail!(
-            "{name}: the script must return a table with `spec` and `check`, not a {}",
+            "{name}: the script must return a rule table (`spec` and `check`) or a list of them, not a {}",
             plugin.type_name()
         );
     };
 
+    // One rule, or a list of them: a rule table has `check`, a list has
+    // an array part
+    let rules: Vec<Table> = if plugin.contains_key("check")? || plugin.contains_key("spec")? {
+        vec![plugin]
+    } else {
+        // The runtime reads the list with lua_rawlen, whose border can
+        // sit past a nil hole (`{ a, cond and b or nil, c }`), so the
+        // same border is read here: a hole is a nil entry, refused below,
+        // rather than the end of the list
+        let len = plugin.raw_len();
+        let rules: Vec<Value> = (1..=len)
+            .map(|i| plugin.raw_get::<Value>(i))
+            .collect::<Result<_, _>>()?;
+        if rules.is_empty() {
+            bail!(
+                "{name}: the script returned neither a rule table (`spec` and `check`) nor a list of them"
+            );
+        }
+        rules
+            .into_iter()
+            .enumerate()
+            .map(|(i, rule)| match rule {
+                Value::Table(rule) => Ok(rule),
+                other => bail!(
+                    "{name}: rule {} is a{} {}, not a table",
+                    i + 1,
+                    if other.type_name().starts_with("i") {
+                        "n"
+                    } else {
+                        ""
+                    },
+                    other.type_name()
+                ),
+            })
+            .collect::<Result<_>>()?
+    };
+
+    let mut names: Vec<String> = Vec::new();
+    for rule in &rules {
+        let rule_name = validate_rule(name, rule)?;
+        if names.contains(&rule_name) {
+            bail!("{name}: two rules are named {rule_name:?}");
+        }
+        names.push(rule_name);
+    }
+    Ok(())
+}
+
+/// Checks one rule table, returning its name.
+fn validate_rule(name: &str, plugin: &Table) -> Result<String> {
     let spec = match plugin.get::<Value>("spec")? {
         Value::Table(spec) => spec,
         Value::Function(spec) => match spec.call::<Value>(()).map_err(lua_message)? {
@@ -151,13 +202,14 @@ pub fn validate(name: &str, script: &[u8]) -> Result<()> {
     }
 
     match plugin.get::<Value>("check")? {
-        Value::Function(_) => Ok(()),
+        Value::Function(_) => {}
         Value::Nil => bail!("{name}: `check` is missing"),
         other => bail!(
             "{name}: `check` must be a function, not a {}",
             other.type_name()
         ),
     }
+    Ok(spec.get::<String>("name")?)
 }
 
 /// Lua's own message (with its traceback, for a runtime error), without
@@ -177,6 +229,16 @@ mod tests {
     use super::*;
 
     const EXAMPLE: &[u8] = include_bytes!("../../lua/server-tokens-enabled-lua/plugin.lua");
+
+    #[test]
+    fn accepts_the_two_rule_script() {
+        let script = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/two-rules/plugin.lua"
+        ))
+        .unwrap();
+        validate("plugin.lua", &script).unwrap();
+    }
 
     #[test]
     fn accepts_the_example_plugin() {
@@ -228,7 +290,10 @@ mod tests {
             b"(function() return { check = function() end } end)()",
         )
         .unwrap_err();
-        assert!(err.to_string().contains("must return a table"), "{err}");
+        assert!(
+            err.to_string().contains("must return a rule table"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -242,7 +307,7 @@ mod tests {
     #[test]
     fn requires_a_plugin_table_with_spec_and_check() {
         for (script, expected) in [
-            (&b"return 42"[..], "must return a table"),
+            (&b"return 42"[..], "must return a rule table"),
             (b"return { check = function() end }", "spec` must be a table"),
             (b"return { spec = { name = 'x', category = 'c', description = 'd' } }", "`check` is missing"),
             (b"return { spec = { name = 'x', category = 'c', description = 'd' }, check = 1 }", "`check` must be a function"),
@@ -253,6 +318,26 @@ mod tests {
             (b"return { spec = function() return 1 end, check = function() end }", "`spec` returned a"),
         ] {
             let err = validate("rule.lua", script).unwrap_err();
+            assert!(err.to_string().contains(expected), "{expected}: {err}");
+        }
+    }
+
+    #[test]
+    fn accepts_a_list_of_rules_with_distinct_names() {
+        validate(
+            "rules.lua",
+            b"local function rule(name) return { spec = { name = name, category = 'c', description = 'd' }, check = function() end } end\nreturn { rule('a'), rule('b') }",
+        )
+        .unwrap();
+        for (script, expected) in [
+            (&b"return {}"[..], "neither a rule table"),
+            (b"return { 1 }", "rule 1 is an integer, not a table"),
+            // A nil hole is a nil entry to the runtime's lua_rawlen, not the end
+            (b"local r = { spec = { name = 'a', category = 'c', description = 'd' }, check = function() end }\nreturn { r, nil, r }", "rule 2 is a nil, not a table"),
+            (b"local r = { spec = { name = 'a', category = 'c', description = 'd' }, check = function() end }\nreturn { r, r }", "two rules are named \"a\""),
+            (b"return { { spec = { name = 'a', category = 'c', description = 'd' } } }", "`check` is missing"),
+        ] {
+            let err = validate("rules.lua", script).unwrap_err();
             assert!(err.to_string().contains(expected), "{expected}: {err}");
         }
     }

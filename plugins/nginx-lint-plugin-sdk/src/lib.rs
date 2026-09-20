@@ -2,7 +2,7 @@
 //!
 //! The heavy lifting was done once, when `runtimes/lua/runtime.core.wasm` was
 //! built: it is the Lua interpreter plus the glue that implements the
-//! `plugin` world by calling into a script. What is left to do per plugin
+//! `plugin-rules` world by calling into a script's rules. What is left to do per plugin
 //! is to put the script where the runtime expects it and wrap the result
 //! as a component. Neither step needs a compiler, so a plugin author needs
 //! nothing but this tool.

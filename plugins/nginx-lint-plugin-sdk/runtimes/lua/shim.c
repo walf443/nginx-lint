@@ -1,13 +1,14 @@
-/* Bridges the nginx-lint plugin world to a Lua script: `spec` and `check`
- * are implemented by calling into the script through one lazily created
- * Lua state. */
+/* Bridges the nginx-lint plugin-rules world to a Lua script: `specs` and
+ * `check` are implemented by calling into the script's rules through one
+ * lazily created Lua state. A script returns one rule table (`spec` and
+ * `check`) or a list of them. */
 #include <stdlib.h>
 #include <string.h>
 
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
-#include "plugin.h"
+#include "plugin_rules.h"
 
 #include "nginx_lint_lua.h"   /* nginx_lint_lua[], nginx_lint_lua_len */
 
@@ -37,9 +38,12 @@ static uint32_t read_u32(const char *p) {
 }
 
 static lua_State *state;
-/* Registry keys */
-static const char PLUGIN_KEY = 'p';
-static const char SPEC_KEY = 's';
+/* Registry keys: the rules as a list of tables, their specs as a parallel
+ * list of tables (a spec function already called), the rule whose check is
+ * running (its spec, for the findings' rule and category), the library. */
+static const char RULES_KEY = 'p';
+static const char SPECS_KEY = 's';
+static const char CURRENT_SPEC_KEY = 'c';
 static const char LIB_KEY = 'l';
 
 static int lua_require(lua_State *L) {
@@ -100,8 +104,10 @@ static int is_lone_record(lua_State *L, int index, const char *key) {
     return found;
 }
 
-/* Runs the plugin script, keeping its table in the registry. Returns NULL on
- * success, or the error message (owned by the Lua stack). */
+static const char *rules_from_script(lua_State *L);
+
+/* Runs the plugin script, keeping its rules in the registry. Returns NULL
+ * on success, or the error message (owned by the Lua stack). */
 static const char *load_plugin(lua_State *L) {
     for (const luaL_Reg *lib = libs; lib->func; lib++) {
         luaL_requiref(L, lib->name, lib->func, 1);
@@ -135,23 +141,85 @@ static const char *load_plugin(lua_State *L) {
         return error_message(L);
     }
     if (!lua_istable(L, -1)) {
-        lua_pushstring(L, "plugin script must return a table with `spec` and `check`");
+        lua_pushstring(L, "plugin script must return a rule table (`spec` and `check`) or a list of them");
         return lua_tostring(L, -1);
     }
-    lua_rawsetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
+    return rules_from_script(L);
+}
 
-    /* spec may be a table or a function returning one */
-    lua_rawgetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
-    lua_getfield(L, -1, "spec");
-    if (lua_isfunction(L, -1)) {
-        if (lua_pcall(L, 0, 1, 0) != LUA_OK) return error_message(L);
+/* Normalizes the script's table at the top of the stack — one rule, or a
+ * list of them — into the RULES_KEY and SPECS_KEY lists, checking what the
+ * host would refuse the component for: a rule without a name, or two with
+ * one name. The build-time validator applies the same rules (validate.rs),
+ * so this is heard there first; here it is what keeps a mismatch from
+ * reaching the host as an opaque failure. Returns NULL on success, or the
+ * error message (owned by the Lua stack). */
+static const char *rules_from_script(lua_State *L) {
+    /* A rule table has `check`; a list has an array part */
+    lua_getfield(L, -1, "check");
+    int single = !lua_isnil(L, -1);
+    lua_pop(L, 1);
+    if (single) {
+        lua_createtable(L, 1, 0);
+        lua_insert(L, -2);
+        lua_rawseti(L, -2, 1);
     }
-    if (!lua_istable(L, -1)) {
-        lua_pushstring(L, "plugin `spec` must be a table or a function returning one");
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &RULES_KEY);
+
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &RULES_KEY);
+    int rules = lua_gettop(L);
+    size_t n = lua_rawlen(L, rules);
+    if (n == 0) {
+        lua_pushstring(L, "plugin script returned neither a rule table (`spec` and `check`) nor a list of them");
         return lua_tostring(L, -1);
     }
-    lua_rawsetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
-    lua_pop(L, 1);
+    lua_createtable(L, (int)n, 0);
+    int specs = lua_gettop(L);
+    lua_createtable(L, 0, (int)n);
+    int seen = lua_gettop(L);
+    for (size_t i = 1; i <= n; i++) {
+        lua_rawgeti(L, rules, (lua_Integer)i);
+        if (!lua_istable(L, -1)) {
+            lua_pushfstring(L, "rule %d is a %s, not a table", (int)i, luaL_typename(L, -1));
+            return lua_tostring(L, -1);
+        }
+        lua_getfield(L, -1, "check");
+        if (!lua_isfunction(L, -1)) {
+            lua_pushfstring(L, "rule %d: `check` must be a function, not a %s", (int)i, luaL_typename(L, -1));
+            return lua_tostring(L, -1);
+        }
+        lua_pop(L, 1);
+        /* spec may be a table or a function returning one */
+        lua_getfield(L, -1, "spec");
+        if (lua_isfunction(L, -1)) {
+            if (lua_pcall(L, 0, 1, 0) != LUA_OK) return error_message(L);
+        }
+        if (!lua_istable(L, -1)) {
+            lua_pushfstring(L, "rule %d: `spec` must be a table or a function returning one", (int)i);
+            return lua_tostring(L, -1);
+        }
+        lua_getfield(L, -1, "name");
+        size_t name_len = 0;
+        const char *name = lua_tolstring(L, -1, &name_len);
+        if (!name || name_len == 0) {
+            lua_pushfstring(L, "rule %d: spec.name is missing or empty", (int)i);
+            return lua_tostring(L, -1);
+        }
+        lua_pushvalue(L, -1);
+        lua_rawget(L, seen);
+        if (!lua_isnil(L, -1)) {
+            lua_pushfstring(L, "two rules are named \"%s\"", name);
+            return lua_tostring(L, -1);
+        }
+        lua_pop(L, 1);
+        lua_pushboolean(L, 1);
+        lua_rawset(L, seen);                    /* seen[name] = true */
+        lua_rawseti(L, specs, (lua_Integer)i);  /* specs[i] = spec */
+        lua_pop(L, 1);                          /* the rule */
+    }
+    lua_settop(L, specs);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &SPECS_KEY);
+    lua_pop(L, 1);                          /* rules */
     return NULL;
 }
 
@@ -224,7 +292,7 @@ static void *checked_alloc(lua_State *L, size_t size) {
  * result over one bad byte; a message built with string.sub on multibyte
  * text is the usual way to get one. Each ill-formed byte becomes U+FFFD
  * instead, so the finding survives and says almost what it meant. */
-static void dup_utf8(lua_State *L, plugin_string_t *out, const char *s, size_t len) {
+static void dup_utf8(lua_State *L, plugin_rules_string_t *out, const char *s, size_t len) {
     const unsigned char *bytes = (const unsigned char *)s;
     size_t i = 0, out_len = 0;
     while (i < len) {
@@ -255,7 +323,7 @@ static void dup_utf8(lua_State *L, plugin_string_t *out, const char *s, size_t l
     out->len = out_len;
 }
 
-static void string_field(lua_State *L, int index, const char *key, plugin_string_t *out) {
+static void string_field(lua_State *L, int index, const char *key, plugin_rules_string_t *out) {
     lua_getfield(L, index, key);
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
@@ -263,7 +331,7 @@ static void string_field(lua_State *L, int index, const char *key, plugin_string
     lua_pop(L, 1);
 }
 
-static void option_string_field(lua_State *L, int index, const char *key, plugin_option_string_t *out) {
+static void option_string_field(lua_State *L, int index, const char *key, plugin_rules_option_string_t *out) {
     lua_getfield(L, index, key);
     size_t len = 0;
     const char *s = lua_tolstring(L, -1, &len);
@@ -275,7 +343,7 @@ static void option_string_field(lua_State *L, int index, const char *key, plugin
 /* Any number with an integral value counts: `/` yields floats in Lua, so an
  * offset computed as (a + b) / 2 is 3.0, and dropping it would silently turn
  * a range fix into a whole-line one. */
-static void option_u32_field(lua_State *L, int index, const char *key, plugin_option_u32_t *out) {
+static void option_u32_field(lua_State *L, int index, const char *key, plugin_rules_option_u32_t *out) {
     lua_getfield(L, index, key);
     int isnum = 0;
     lua_Integer v = lua_tointegerx(L, -1, &isnum);
@@ -291,13 +359,13 @@ static bool bool_field(lua_State *L, int index, const char *key) {
     return v;
 }
 
-static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
+static void spec_from_lua(lua_State *L, int index, plugin_rules_plugin_spec_t *ret) {
     memset(ret, 0, sizeof(*ret));
     index = lua_absindex(L, index);
     string_field(L, index, "name", &ret->name);
     string_field(L, index, "category", &ret->category);
     string_field(L, index, "description", &ret->description);
-    plugin_string_dup(&ret->api_version, API_VERSION);
+    plugin_rules_string_dup(&ret->api_version, API_VERSION);
     option_string_field(L, index, "severity", &ret->severity);
     option_string_field(L, index, "why", &ret->why);
     option_string_field(L, index, "bad_example", &ret->bad_example);
@@ -311,7 +379,7 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
         ret->references.is_some = true;
         /* ptr before len, here and below: checked_alloc raises on failure,
          * and the cleanup that follows walks len entries through ptr. */
-        ret->references.val.ptr = checked_alloc(L, n * sizeof(plugin_string_t));
+        ret->references.val.ptr = checked_alloc(L, n * sizeof(plugin_rules_string_t));
         ret->references.val.len = n;
         for (size_t i = 0; i < n; i++) {
             lua_rawgeti(L, -1, (lua_Integer)i + 1);
@@ -327,7 +395,7 @@ static void spec_from_lua(lua_State *L, int index, plugin_plugin_spec_t *ret) {
 static void fix_from_lua(lua_State *L, int index, nginx_lint_plugin_types_fix_t *fix) {
     memset(fix, 0, sizeof(*fix));
     index = lua_absindex(L, index);
-    plugin_option_u32_t line;
+    plugin_rules_option_u32_t line;
     option_u32_field(L, index, "line", &line);
     fix->line = line.is_some ? line.val : 0;
     option_string_field(L, index, "old_text", &fix->old_text);
@@ -340,10 +408,10 @@ static void fix_from_lua(lua_State *L, int index, nginx_lint_plugin_types_fix_t 
 
 /* Fills one lint-error from the table at `index`; rule and category come
  * from the spec so a script only says what and where. */
-static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
+static void error_from_lua(lua_State *L, int index, plugin_rules_lint_error_t *e) {
     memset(e, 0, sizeof(*e));
     index = lua_absindex(L, index);
-    lua_rawgetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
     string_field(L, -1, "name", &e->rule);
     string_field(L, -1, "category", &e->category);
     lua_pop(L, 1);
@@ -389,10 +457,11 @@ static void error_from_lua(lua_State *L, int index, plugin_lint_error_t *e) {
     lua_pop(L, 1);
 }
 
-/* Fills the list at argument 1 (a light userdata) from the findings table
- * at argument 2. Runs under lua_pcall, so the shape checks are luaL_error. */
+/* Appends the findings table at argument 2 to the list at argument 1 (a
+ * light userdata), which grows: one list collects every asked rule's
+ * findings. Runs under lua_pcall, so the shape checks are luaL_error. */
 static int convert_findings(lua_State *L) {
-    plugin_list_lint_error_t *ret = lua_touserdata(L, 1);
+    plugin_rules_list_lint_error_t *ret = lua_touserdata(L, 1);
     if (lua_isnoneornil(L, 2)) return 0;
     if (!lua_istable(L, 2)) {
         return luaL_error(L, "check() must return a list of findings, not a %s", luaL_typename(L, 2));
@@ -403,52 +472,66 @@ static int convert_findings(lua_State *L) {
     if (is_lone_record(L, 2, "message")) {
         return luaL_error(L, "check() must return a list of findings; got a single finding (wrap it in { })");
     }
-    ret->ptr = checked_alloc(L, n * sizeof(plugin_lint_error_t));
-    ret->len = n;
+    if (n == 0) return 0;
+    size_t start = ret->len;
+    plugin_rules_lint_error_t *grown = checked_alloc(L, (start + n) * sizeof(plugin_rules_lint_error_t));
+    if (start) memcpy(grown, ret->ptr, start * sizeof(plugin_rules_lint_error_t));
+    free(ret->ptr);
+    ret->ptr = grown;
+    ret->len = start + n;
     for (size_t i = 0; i < n; i++) {
         lua_rawgeti(L, 2, (lua_Integer)i + 1);
         if (!lua_istable(L, -1)) {
             return luaL_error(L, "finding %d returned by check() is a %s, not a table",
                               (int)i + 1, luaL_typename(L, -1));
         }
-        error_from_lua(L, -1, &ret->ptr[i]);
+        error_from_lua(L, -1, &ret->ptr[start + i]);
         lua_pop(L, 1);
     }
     return 0;
 }
 
-/* A single error-severity finding carrying `message`, for failures of the
- * runtime itself (a script that does not load, or throws). */
-static void runtime_failure(lua_State *L, const char *message, plugin_list_lint_error_t *ret) {
-    plugin_lint_error_t *e = checked_alloc(L, sizeof(*e));
+/* Appends one error-severity finding carrying `message` to the list, for
+ * failures of the runtime itself (a script that does not load, or throws).
+ * Findings already in the list stay: a rule that threw does not take the
+ * findings of the rules before it with it. */
+static void runtime_failure(lua_State *L, const char *message, plugin_rules_list_lint_error_t *ret) {
+    size_t start = ret->len;
+    plugin_rules_lint_error_t *grown = checked_alloc(L, (start + 1) * sizeof(*grown));
+    if (start) memcpy(grown, ret->ptr, start * sizeof(*grown));
+    free(ret->ptr);
+    ret->ptr = grown;
+    ret->len = start + 1;
+    plugin_rules_lint_error_t *e = &grown[start];
     if (L) {
-        lua_rawgetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
+        /* Under the rule that was running, if one was; a failure before
+         * any rule ran goes out under the runtime's own name, which the
+         * host passes through as a name the component does not declare */
+        lua_rawgetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
         if (lua_istable(L, -1)) {
             string_field(L, -1, "name", &e->rule);
             string_field(L, -1, "category", &e->category);
         }
         lua_pop(L, 1);
     }
-    if (!e->rule.ptr) plugin_string_dup(&e->rule, "lua-plugin");
-    if (!e->category.ptr) plugin_string_dup(&e->category, "plugin");
+    if (!e->rule.ptr) plugin_rules_string_dup(&e->rule, "lua-plugin");
+    if (!e->category.ptr) plugin_rules_string_dup(&e->category, "plugin");
     dup_utf8(L, &e->message, message, strlen(message));
     e->severity = NGINX_LINT_PLUGIN_TYPES_SEVERITY_ERROR;
-    ret->ptr = e;
-    ret->len = 1;
 }
 
 /* --- C -> Lua conversions ------------------------------------------------ */
 
-static void push_string(lua_State *L, const plugin_string_t *s) {
+static void push_string(lua_State *L, const plugin_rules_string_t *s) {
     lua_pushlstring(L, (const char *)s->ptr, s->len);
 }
 
-static void set_string(lua_State *L, const char *key, const plugin_string_t *s) {
+static void set_string(lua_State *L, const char *key, const plugin_rules_string_t *s) {
     push_string(L, s);
     lua_setfield(L, -2, key);
 }
 
-static void set_option_string(lua_State *L, const char *key, const plugin_option_string_t *s) {
+static void set_option_string(lua_State *L, const char *key, const plugin_rules_option_string_t *s) {
     if (!s->is_some) return;
     set_string(L, key, &s->val);
 }
@@ -458,7 +541,7 @@ static void set_integer(lua_State *L, const char *key, lua_Integer v) {
     lua_setfield(L, -2, key);
 }
 
-static void set_option_u32(lua_State *L, const char *key, const plugin_option_u32_t *v) {
+static void set_option_u32(lua_State *L, const char *key, const plugin_rules_option_u32_t *v) {
     if (v->is_some) set_integer(L, key, v->val);
 }
 
@@ -477,7 +560,7 @@ static const char *argument_type_name(nginx_lint_plugin_data_types_argument_type
 }
 
 static void push_directive(lua_State *L, const nginx_lint_plugin_data_types_directive_data_t *d,
-                           const plugin_list_u32_t *children) {
+                           const plugin_rules_list_u32_t *children) {
     lua_createtable(L, 0, 24);
     lua_pushstring(L, "directive");
     lua_setfield(L, -2, "kind");
@@ -555,7 +638,7 @@ static void push_blank_line(lua_State *L, const nginx_lint_plugin_data_types_bla
  * failure, including running out of memory on a large config; the caller
  * is protected. */
 static void push_config(lua_State *L, const nginx_lint_plugin_config_api_config_snapshot_t *snap,
-                        const plugin_string_t *path) {
+                        const plugin_rules_string_t *path) {
     lua_rawgetp(L, LUA_REGISTRYINDEX, &LIB_KEY);
     lua_getfield(L, -1, "_build_config");
     lua_remove(L, -2);
@@ -603,26 +686,32 @@ static void push_config(lua_State *L, const nginx_lint_plugin_config_api_config_
  * a wasm trap, where inside it is a finding that says "not enough
  * memory". Arguments are light userdata. */
 
-/* (spec-out) */
-static int protected_spec(lua_State *L) {
-    plugin_plugin_spec_t *ret = lua_touserdata(L, 1);
-    lua_rawgetp(L, LUA_REGISTRYINDEX, &SPEC_KEY);
-    spec_from_lua(L, -1, ret);
+/* (specs-out): converts every rule's spec into the list. */
+static int protected_specs(lua_State *L) {
+    plugin_rules_list_plugin_spec_t *ret = lua_touserdata(L, 1);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &SPECS_KEY);
+    size_t n = lua_rawlen(L, -1);
+    ret->ptr = checked_alloc(L, n * sizeof(plugin_rules_plugin_spec_t));
+    ret->len = n;
+    for (size_t i = 0; i < n; i++) {
+        lua_rawgeti(L, -1, (lua_Integer)i + 1);
+        spec_from_lua(L, -1, &ret->ptr[i]);
+        lua_pop(L, 1);
+    }
     return 0;
 }
 
-/* (snapshot, path, findings-out): builds the config, calls check() and
- * converts what it returns. Shape errors are luaL_error, so a finding or
- * fix that is not a table reads as a message rather than a trap. */
-static int protected_check(lua_State *L) {
-    const nginx_lint_plugin_config_api_config_snapshot_t *snap = lua_touserdata(L, 1);
-    const plugin_string_t *path = lua_touserdata(L, 2);
-    plugin_list_lint_error_t *ret = lua_touserdata(L, 3);
+/* (config, path, rule, findings-out): calls one rule's check() over the
+ * config and appends what it returns. Runs under its own lua_pcall, so a
+ * rule that throws — or returns findings of the wrong shape, which is a
+ * luaL_error — is reported for that rule alone, and the rules before and
+ * after it keep their findings. */
+static int protected_rule_check(lua_State *L) {
+    const plugin_rules_string_t *path = lua_touserdata(L, 2);
+    plugin_rules_list_lint_error_t *ret = lua_touserdata(L, 4);
 
-    lua_rawgetp(L, LUA_REGISTRYINDEX, &PLUGIN_KEY);
-    lua_getfield(L, -1, "check");
-    lua_remove(L, -2);
-    push_config(L, snap, path);
+    lua_getfield(L, 3, "check");
+    lua_pushvalue(L, 1);
     push_string(L, path);
     lua_call(L, 2, 1);
 
@@ -633,36 +722,118 @@ static int protected_check(lua_State *L) {
     return 0;
 }
 
-void exports_plugin_spec(plugin_plugin_spec_t *ret) {
-    memset(ret, 0, sizeof(*ret));
+/* (snapshot, path, asked, findings-out): builds the config once and runs
+ * every rule whose name is in `asked` — in the script's order, ignoring
+ * names the script does not carry — each under protected_rule_check. What
+ * can still fail here is building the config itself (out of memory, for
+ * a large file), which is then the only finding, under the runtime's own
+ * name. */
+static int protected_check(lua_State *L) {
+    const nginx_lint_plugin_config_api_config_snapshot_t *snap = lua_touserdata(L, 1);
+    const plugin_rules_string_t *path = lua_touserdata(L, 2);
+    const plugin_rules_list_string_t *asked = lua_touserdata(L, 3);
+    plugin_rules_list_lint_error_t *ret = lua_touserdata(L, 4);
+
+    /* The asked names as a set */
+    lua_createtable(L, 0, (int)asked->len);
+    for (size_t i = 0; i < asked->len; i++) {
+        push_string(L, &asked->ptr[i]);
+        lua_pushboolean(L, 1);
+        lua_rawset(L, -3);
+    }
+    int set = lua_gettop(L);
+
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &RULES_KEY);
+    int rules = lua_gettop(L);
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &SPECS_KEY);
+    int specs = lua_gettop(L);
+    size_t n = lua_rawlen(L, rules);
+
+    int config = 0;
+    for (size_t i = 1; i <= n; i++) {
+        lua_rawgeti(L, specs, (lua_Integer)i);
+        lua_getfield(L, -1, "name");
+        lua_rawget(L, set);
+        int wanted = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        if (!wanted) {
+            lua_pop(L, 1);
+            continue;
+        }
+        /* The config is built once, for the first rule that needs it, and
+         * before that rule's spec is made current: a failure building it
+         * is the runtime's, not the rule's */
+        if (!config) {
+            push_config(L, snap, path);         /* [.., spec, config] */
+            lua_insert(L, -2);                  /* [.., config, spec] */
+            config = lua_gettop(L) - 1;
+        }
+        /* This rule's spec names its findings */
+        lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
+
+        int top = lua_gettop(L);
+        size_t before = ret->len;
+        lua_pushcfunction(L, protected_rule_check);
+        lua_pushvalue(L, config);
+        lua_pushlightuserdata(L, (void *)path);
+        lua_rawgeti(L, rules, (lua_Integer)i);
+        lua_pushlightuserdata(L, ret);
+        if (lua_pcall(L, 4, 0, 0) != LUA_OK) {
+            /* This rule's failure, as its finding, in place of whatever
+             * convert_findings had appended for it before the error —
+             * possibly entries it had grown the list by and not filled.
+             * The rules before it keep theirs. */
+            for (size_t j = before; j < ret->len; j++) {
+                plugin_rules_lint_error_free(&ret->ptr[j]);
+            }
+            ret->len = before;
+            runtime_failure(L, error_message(L), ret);
+        }
+        lua_settop(L, top);
+    }
+    lua_pushnil(L);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
+    return 0;
+}
+
+void exports_plugin_rules_specs(plugin_rules_list_plugin_spec_t *ret) {
+    ret->ptr = NULL;
+    ret->len = 0;
     lua_State *L = get_state();
     const char *failure = load_error;
     if (L) {
         int top = lua_gettop(L);
-        lua_pushcfunction(L, protected_spec);
+        lua_pushcfunction(L, protected_specs);
         lua_pushlightuserdata(L, ret);
         if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
-            plugin_plugin_spec_free(ret);
-            memset(ret, 0, sizeof(*ret));
+            plugin_rules_list_plugin_spec_free(ret);
+            ret->ptr = NULL;
+            ret->len = 0;
             failure = error_message(L);
         }
         if (!failure) {
             lua_settop(L, top);
             return;
         }
-        /* The message is owned by the stack; copy it before unwinding */
-        dup_utf8(L, &ret->description, failure, strlen(failure));
-        lua_settop(L, top);
-    } else {
-        dup_utf8(NULL, &ret->description, failure, strlen(failure));
     }
-    /* Surface the failure through the spec so the host shows it */
-    plugin_string_dup(&ret->name, "lua-plugin");
-    plugin_string_dup(&ret->category, "plugin");
-    plugin_string_dup(&ret->api_version, API_VERSION);
+    /* Surface the failure through one spec so the host shows it */
+    plugin_rules_plugin_spec_t *e = checked_alloc(L, sizeof(*e));
+    if (L) {
+        /* The message is owned by the stack; copy it before unwinding */
+        dup_utf8(L, &e->description, failure, strlen(failure));
+        lua_settop(L, 0);
+    } else {
+        dup_utf8(NULL, &e->description, failure, strlen(failure));
+    }
+    plugin_rules_string_dup(&e->name, "lua-plugin");
+    plugin_rules_string_dup(&e->category, "plugin");
+    plugin_rules_string_dup(&e->api_version, API_VERSION);
+    ret->ptr = e;
+    ret->len = 1;
 }
 
-void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plugin_list_lint_error_t *ret) {
+void exports_plugin_rules_check(plugin_rules_borrow_config_t cfg, plugin_rules_string_t *path,
+                                plugin_rules_list_string_t *asked, plugin_rules_list_lint_error_t *ret) {
     ret->ptr = NULL;
     ret->len = 0;
     lua_State *L = get_state();
@@ -680,12 +851,19 @@ void exports_plugin_check(plugin_borrow_config_t cfg, plugin_string_t *path, plu
     lua_pushcfunction(L, protected_check);
     lua_pushlightuserdata(L, &snap);
     lua_pushlightuserdata(L, path);
+    lua_pushlightuserdata(L, asked);
     lua_pushlightuserdata(L, ret);
-    int status = lua_pcall(L, 3, 0, 0);
+    int status = lua_pcall(L, 4, 0, 0);
     nginx_lint_plugin_config_api_config_snapshot_free(&snap);
     if (status != LUA_OK) {
-        plugin_list_lint_error_free(ret);
+        /* The generated free leaves ptr and len as they were, and
+         * runtime_failure appends to what they describe */
+        plugin_rules_list_lint_error_free(ret);
+        ret->ptr = NULL;
+        ret->len = 0;
         runtime_failure(L, error_message(L), ret);
+        lua_pushnil(L);
+        lua_rawsetp(L, LUA_REGISTRYINDEX, &CURRENT_SPEC_KEY);
     }
     lua_settop(L, top);
 }

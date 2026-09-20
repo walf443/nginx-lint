@@ -1435,6 +1435,68 @@ mod tests {
         );
     }
 
+    /// The host asks a component for one rule per call, so what one rule's
+    /// failure does to its siblings' findings in the same call is not
+    /// something the CLI can show. This calls the Lua SDK's failing-rules
+    /// component with all three of its rules at once: the working rule's
+    /// finding has to come back beside the two failures, each under its
+    /// own rule. Skips unless `make -C plugins/nginx-lint-plugin-sdk
+    /// test-e2e` has built the component.
+    #[test]
+    fn lua_rules_fail_one_at_a_time() {
+        use crate::plugin::{CompilationCache, PluginLoader};
+
+        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("plugins/nginx-lint-plugin-sdk/tests/failing-rules/failing-rules.wasm");
+        if !wasm_path.exists() {
+            eprintln!("SKIP: run `make -C plugins/nginx-lint-plugin-sdk test-e2e` first");
+            return;
+        }
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        let bytes = std::fs::read(&wasm_path).unwrap();
+        let rules = loader
+            .load_component_from_bytes(&wasm_path, &bytes)
+            .unwrap();
+        let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+        assert_eq!(names, ["ok-rule", "shape-rule", "throw-rule"]);
+
+        // Every rule shares the component; call it directly with all three
+        let rule = &rules[0];
+        let Exports::Rules { pre, .. } = &rule.exports else {
+            panic!("the Lua runtime targets plugin-rules");
+        };
+        let mut store =
+            ComponentLintRule::create_store(pre.engine(), rule.memory_limit, rule.timeout_ticks);
+        let component = pre.instantiate(&mut store).unwrap();
+        let config =
+            Arc::new(crate::parser::parse_string("http {\n    server_tokens on;\n}\n").unwrap());
+        let handle = store
+            .data_mut()
+            .table
+            .push(ConfigResource { config })
+            .unwrap();
+        let asked: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+        let findings = component
+            .call_check(&mut store, handle, "t.conf", &asked)
+            .unwrap();
+
+        let summary: Vec<(String, String)> = findings
+            .iter()
+            .map(|e| (e.rule.clone(), e.message.clone()))
+            .collect();
+        assert_eq!(summary.len(), 3, "{summary:?}");
+        assert_eq!(summary[0], ("ok-rule".to_string(), "found".to_string()));
+        assert_eq!(summary[1].0, "shape-rule");
+        assert!(
+            summary[1]
+                .1
+                .contains("finding 2 returned by check() is a number"),
+            "{summary:?}"
+        );
+        assert_eq!(summary[2].0, "throw-rule");
+        assert!(summary[2].1.contains("boom"), "{summary:?}");
+    }
+
     /// Load the two-rule example component, skipping the test if
     /// `make -C plugins/rust/security-rules build` has not been run.
     fn load_real_two_rule_plugin() -> Option<Vec<ComponentLintRule>> {
