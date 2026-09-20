@@ -3,37 +3,18 @@
 //! This module provides the bridge between the existing Plugin trait
 //! and the WIT-generated Guest trait for component model plugins.
 
-// Generate guest-side bindings from the WIT file. The `plugin` world's own
-// exports are no longer what the SDK produces (see `rules` below); this
-// invocation is what generates the shared interface types, `config-api`
-// and the rest, that both worlds import.
-wit_bindgen::generate!({
-    path: "wit/nginx-lint-plugin.wit",
-    world: "plugin",
-    pub_export_macro: true,
-});
-
 /// Bindings for the `plugin-rules` world, the one
 /// [`export_component_plugins!`](crate::export_component_plugins) (and so
-/// every plugin built with this SDK) targets. It imports the same
-/// interfaces as `plugin`, which are mapped onto the modules generated
-/// above so the conversions in this module serve both worlds; only the
-/// world's own `Guest` trait and export macro are new.
+/// every plugin built with this SDK) targets. Generating the world
+/// generates the interfaces it imports — `types`, `config-api` and the
+/// rest — which the conversions in this module use through the
+/// [`nginx_lint`] re-export.
 pub mod rules {
     wit_bindgen::generate!({
         path: "wit/nginx-lint-plugin.wit",
         world: "plugin-rules",
         pub_export_macro: true,
         export_macro_name: "export_rules",
-        // wit-bindgen wants the interface ids with the package version
-        // (an unversioned key is reported as an unused remapping), so a
-        // bump of the `package` version in the WIT has to be repeated here
-        with: {
-            "nginx-lint:plugin/types@4.0.0": super::nginx_lint::plugin::types,
-            "nginx-lint:plugin/data-types@4.0.0": super::nginx_lint::plugin::data_types,
-            "nginx-lint:plugin/parser-types@4.0.0": super::nginx_lint::plugin::parser_types,
-            "nginx-lint:plugin/config-api@4.0.0": super::nginx_lint::plugin::config_api,
-        },
     });
 
     use super::nginx_lint::plugin::config_api::Config as WitConfig;
@@ -104,6 +85,11 @@ pub mod rules {
             .collect()
     }
 }
+
+/// The generated interface modules (`nginx_lint::plugin::types`,
+/// `config_api`, ...), at the path the rest of the SDK and the export
+/// macro use them by.
+pub use rules::nginx_lint;
 
 /// Convert SDK PluginSpec to WIT PluginSpec
 pub fn convert_spec(sdk_spec: super::PluginSpec) -> nginx_lint::plugin::types::PluginSpec {
