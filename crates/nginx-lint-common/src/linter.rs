@@ -295,6 +295,34 @@ pub trait LintRule: Send + Sync {
         self.check(config, path)
     }
 
+    /// A key shared by rules that can be checked together in one call.
+    ///
+    /// Several rules of one WASM component are one such group: the linter
+    /// calls [`check_shared_batch`](Self::check_shared_batch) once for the
+    /// group, on any one of its rules, with every group member's name,
+    /// instead of [`check_shared`](Self::check_shared) once per rule. The
+    /// component is then instantiated, and the config transferred to it,
+    /// once per file rather than once per rule. Rules with no key — the
+    /// default — are checked one at a time.
+    fn batch_key(&self) -> Option<u64> {
+        None
+    }
+
+    /// Check every rule named in `names` — all sharing this rule's
+    /// [`batch_key`](Self::batch_key), this one among them — and return
+    /// their findings together, each naming its rule in
+    /// [`LintError::rule`]. The default checks this rule alone, which is
+    /// right for a rule with no key, on which the linter never calls this
+    /// with other names.
+    fn check_shared_batch(
+        &self,
+        _names: &[&str],
+        config: &std::sync::Arc<Config>,
+        path: &Path,
+    ) -> Vec<LintError> {
+        self.check_shared(config, path)
+    }
+
     /// Whether this rule wants the raw file content directly.
     ///
     /// Rules that need to re-derive diagnostics from the source text itself
@@ -427,6 +455,49 @@ pub fn run_rule(
     } else {
         rule.check(config, path)
     }
+}
+
+/// Run a group of rules sharing a [`batch_key`](LintRule::batch_key) in one
+/// call, through the first rule's [`check_shared_batch`](LintRule::check_shared_batch).
+/// A group of one is run through [`run_rule`], so a rule with a key of its
+/// own costs nothing extra.
+pub fn run_batch(
+    rules: &[&dyn LintRule],
+    config: &Config,
+    path: &Path,
+    shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+) -> Vec<LintError> {
+    match rules {
+        [] => Vec::new(),
+        [rule] => run_rule(*rule, config, path, shared_config),
+        [first, ..] => {
+            let names: Vec<&str> = rules.iter().map(|rule| rule.name()).collect();
+            let shared = shared_config.get_or_init(|| std::sync::Arc::new(config.clone()));
+            first.check_shared_batch(&names, shared, path)
+        }
+    }
+}
+
+/// Group rules for [`run_batch`]: rules sharing a [`batch_key`](LintRule::batch_key)
+/// form one group, in the order their first member appears; every other
+/// rule is a group of its own, in place. The order of findings across
+/// groups is the caller's to fix, as it is across rules today.
+pub fn batch_rules<'a>(rules: &'a [Box<dyn LintRule>]) -> Vec<Vec<&'a dyn LintRule>> {
+    let mut groups: Vec<Vec<&'a dyn LintRule>> = Vec::new();
+    let mut by_key: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    for rule in rules {
+        match rule.batch_key() {
+            Some(key) => match by_key.get(&key) {
+                Some(&index) => groups[index].push(rule.as_ref()),
+                None => {
+                    by_key.insert(key, groups.len());
+                    groups.push(vec![rule.as_ref()]);
+                }
+            },
+            None => groups.push(vec![rule.as_ref()]),
+        }
+    }
+    groups
 }
 
 /// Like [`run_rule`], but additionally dispatches to
@@ -964,5 +1035,60 @@ mod fix_tests {
         let (result, count) = apply_fixes_to_content(content, &fixes);
         assert_eq!(result, "listen 80;\nserver_name new;\n");
         assert_eq!(count, 1);
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+
+    struct Keyed(&'static str, Option<u64>);
+
+    impl LintRule for Keyed {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn category(&self) -> &'static str {
+            "test"
+        }
+        fn description(&self) -> &'static str {
+            "keyed"
+        }
+        fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+            Vec::new()
+        }
+        fn batch_key(&self) -> Option<u64> {
+            self.1
+        }
+    }
+
+    /// Rules sharing a key group at the position of their first member;
+    /// the rest stay single, in place.
+    #[test]
+    fn batch_rules_groups_by_key_in_first_appearance_order() {
+        let rules: Vec<Box<dyn LintRule>> = vec![
+            Box::new(Keyed("a1", Some(1))),
+            Box::new(Keyed("n", None)),
+            Box::new(Keyed("b1", Some(2))),
+            Box::new(Keyed("a2", Some(1))),
+            Box::new(Keyed("m", None)),
+            Box::new(Keyed("a3", Some(1))),
+        ];
+        let groups: Vec<Vec<&str>> = batch_rules(&rules)
+            .iter()
+            .map(|group| group.iter().map(|rule| rule.name()).collect())
+            .collect();
+        assert_eq!(
+            groups,
+            vec![vec!["a1", "a2", "a3"], vec!["n"], vec!["b1"], vec!["m"]]
+        );
+    }
+
+    /// Two keyless rules never share a group, however similar.
+    #[test]
+    fn batch_rules_keeps_keyless_rules_apart() {
+        let rules: Vec<Box<dyn LintRule>> =
+            vec![Box::new(Keyed("x", None)), Box::new(Keyed("y", None))];
+        assert_eq!(batch_rules(&rules).len(), 2);
     }
 }

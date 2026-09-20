@@ -2,7 +2,7 @@
 use nginx_lint_common::config::LintConfig;
 use nginx_lint_common::ignore::IgnoreTracker;
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
-use nginx_lint_common::linter::{run_rule, run_rule_with_content};
+use nginx_lint_common::linter::{batch_rules, run_batch, run_rule, run_rule_with_content};
 use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
@@ -508,16 +508,19 @@ impl Linter {
     /// memory (see [`lint_with_content`](Self::lint_with_content)), in which
     /// case rules that [want it](nginx_lint_common::linter::LintRule::wants_content)
     /// receive it directly instead of re-reading the file from disk.
+    ///
+    /// Rules that share a [`batch_key`](LintRule::batch_key) — the rules of
+    /// one WASM component — are checked in one call, so the component is
+    /// instantiated and handed the config once per file rather than once
+    /// per rule; the unit of parallelism is that group. Every other rule
+    /// is a group of one.
     #[cfg(feature = "cli")]
     fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
-        self.rules
+        batch_rules(&self.rules)
             .par_iter()
-            .map(|rule| match content {
-                Some(c) => run_rule_with_content(rule.as_ref(), config, path, c, &shared_config),
-                None => run_rule(rule.as_ref(), config, path, &shared_config),
-            })
+            .map(|group| run_group(group, config, path, content, &shared_config))
             .collect::<Vec<_>>()
             .into_iter()
             .flatten()
@@ -530,12 +533,9 @@ impl Linter {
     fn lint_internal(&self, config: &Config, path: &Path, content: Option<&str>) -> Vec<LintError> {
         let shared_config = std::sync::OnceLock::new();
 
-        self.rules
+        batch_rules(&self.rules)
             .iter()
-            .flat_map(|rule| match content {
-                Some(c) => run_rule_with_content(rule.as_ref(), config, path, c, &shared_config),
-                None => run_rule(rule.as_ref(), config, path, &shared_config),
-            })
+            .flat_map(|group| run_group(group, config, path, content, &shared_config))
             .collect()
     }
 
@@ -652,6 +652,23 @@ impl Linter {
         errors.extend(warnings_to_errors(warnings));
         errors.extend(warnings_to_errors(result.unused_warnings));
         (errors, result.ignored_count, profiles)
+    }
+}
+
+/// Run one group from [`batch_rules`]: a group of one through the per-rule
+/// dispatch (which is where a rule that wants the file content gets it),
+/// a group of several through [`run_batch`].
+fn run_group(
+    group: &[&dyn LintRule],
+    config: &Config,
+    path: &Path,
+    content: Option<&str>,
+    shared_config: &std::sync::OnceLock<std::sync::Arc<Config>>,
+) -> Vec<LintError> {
+    match (group, content) {
+        ([rule], Some(c)) => run_rule_with_content(*rule, config, path, c, shared_config),
+        ([rule], None) => run_rule(*rule, config, path, shared_config),
+        (group, _) => run_batch(group, config, path, shared_config),
     }
 }
 
@@ -872,5 +889,128 @@ mod version_filter_tests {
         let target = NginxVersion::parse("0.9.0").unwrap();
         let gate = evaluate_version_gate(&rule, Some(&target), None);
         assert!(matches!(gate, VersionGate::SkipSilently));
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A rule that records how it was called: alone, or as part of a batch
+    /// and with which names.
+    struct Batched {
+        name: &'static str,
+        key: Option<u64>,
+        calls: Arc<Mutex<Vec<Vec<String>>>>,
+        single_calls: Arc<AtomicUsize>,
+    }
+
+    impl LintRule for Batched {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn category(&self) -> &'static str {
+            "test"
+        }
+        fn description(&self) -> &'static str {
+            "records its calls"
+        }
+        fn check(&self, _config: &Config, _path: &Path) -> Vec<LintError> {
+            self.single_calls.fetch_add(1, Ordering::SeqCst);
+            vec![LintError::new(
+                self.name,
+                "test",
+                "alone",
+                Severity::Warning,
+            )]
+        }
+        fn batch_key(&self) -> Option<u64> {
+            self.key
+        }
+        fn check_shared_batch(
+            &self,
+            names: &[&str],
+            _config: &Arc<Config>,
+            _path: &Path,
+        ) -> Vec<LintError> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(names.iter().map(|n| n.to_string()).collect());
+            names
+                .iter()
+                .map(|n| LintError::new(n, "test", "batched", Severity::Warning))
+                .collect()
+        }
+    }
+
+    /// Rules sharing a key are checked in one call, with every member's
+    /// name; rules with no key, or a key of their own, are checked alone.
+    #[test]
+    fn rules_of_one_component_are_checked_in_one_call() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let single = Arc::new(AtomicUsize::new(0));
+        let rule = |name, key| {
+            Box::new(Batched {
+                name,
+                key,
+                calls: calls.clone(),
+                single_calls: single.clone(),
+            }) as Box<dyn LintRule>
+        };
+        let mut linter = Linter::new();
+        linter.add_rule(rule("a", Some(1)));
+        linter.add_rule(rule("native", None));
+        linter.add_rule(rule("b", Some(1)));
+        linter.add_rule(rule("other", Some(2)));
+        linter.add_rule(rule("c", Some(1)));
+
+        let config = crate::parser::parse_string("http {}").unwrap();
+        let mut errors = linter.lint(&config, Path::new("t.conf"));
+        errors.sort_by(|x, y| x.rule.cmp(&y.rule));
+
+        let batched: Vec<(String, String)> = errors
+            .iter()
+            .map(|e| (e.rule.clone(), e.message.clone()))
+            .collect();
+        assert_eq!(
+            batched,
+            [
+                ("a".to_string(), "batched".to_string()),
+                ("b".to_string(), "batched".to_string()),
+                ("c".to_string(), "batched".to_string()),
+                ("native".to_string(), "alone".to_string()),
+                ("other".to_string(), "alone".to_string()),
+            ]
+        );
+        // One batched call, for the three rules of component 1, in order
+        assert_eq!(*calls.lock().unwrap(), vec![vec!["a", "b", "c"]]);
+        // The keyless rule and the lone rule of component 2 ran alone
+        assert_eq!(single.load(Ordering::SeqCst), 2);
+    }
+
+    /// Profiling is per rule, so it never batches: a rule's time is its own.
+    #[test]
+    #[cfg(feature = "cli")]
+    fn profiling_checks_rules_one_at_a_time() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let single = Arc::new(AtomicUsize::new(0));
+        let mut linter = Linter::new();
+        for name in ["a", "b"] {
+            linter.add_rule(Box::new(Batched {
+                name,
+                key: Some(1),
+                calls: calls.clone(),
+                single_calls: single.clone(),
+            }));
+        }
+        let config = crate::parser::parse_string("http {}").unwrap();
+        let (errors, profiles) = linter.lint_with_profile(&config, Path::new("t.conf"));
+        assert_eq!(errors.len(), 2);
+        assert_eq!(profiles.len(), 2);
+        assert!(calls.lock().unwrap().is_empty());
+        assert_eq!(single.load(Ordering::SeqCst), 2);
     }
 }

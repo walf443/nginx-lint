@@ -986,6 +986,9 @@ enum Exports {
         /// The names of every rule the component carries, so a check can
         /// tell a finding of a sibling rule from one under an unknown name
         names: Arc<[String]>,
+        /// Identifies the component: every rule loaded from it carries the
+        /// same id, which is what lets the linter check them in one call
+        id: u64,
     },
     /// The original `plugin` world: the component is one rule. Kept so
     /// components built before `plugin-rules` existed stay loadable.
@@ -1072,7 +1075,8 @@ impl ComponentLintRule {
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
             let specs = Self::get_rule_specs(&pre, &path, memory_limit, timeout_ticks)?;
             let names: Arc<[String]> = specs.iter().map(|spec| sanitize_text(&spec.name)).collect();
-            (Exports::Rules { pre, names }, specs)
+            let id = next_component_id();
+            (Exports::Rules { pre, names, id }, specs)
         } else {
             let pre = PluginPre::new(instance_pre)
                 .map_err(|e| PluginError::instantiate_error(&path, e.to_string()))?;
@@ -1217,9 +1221,12 @@ impl ComponentLintRule {
         Ok(specs)
     }
 
-    /// Execute the check function using resource-based config access
+    /// Execute the check function using resource-based config access.
+    /// `asked` names the rules to run, for a `plugin-rules` component: this
+    /// one alone, or every rule of the component the linter has enabled.
     fn execute_check(
         &self,
+        asked: &[&str],
         config: Arc<Config>,
         file_path: &Path,
     ) -> Result<Vec<LintError>, PluginError> {
@@ -1248,28 +1255,24 @@ impl ComponentLintRule {
             }
         };
         let wit_errors = match &self.exports {
-            Exports::Rules { pre, names } => {
+            Exports::Rules { pre, names, .. } => {
                 let rules = pre
                     .instantiate(&mut store)
                     .map_err(|e| PluginError::instantiate_error(&self.path, e.to_string()))?;
+                let asked_owned: Vec<String> = asked.iter().map(|name| name.to_string()).collect();
                 let mut errors = rules
-                    .call_check(
-                        &mut store,
-                        config_resource,
-                        &path_str,
-                        &[self.name.to_string()],
-                    )
+                    .call_check(&mut store, config_resource, &path_str, &asked_owned)
                     .map_err(check_failed)?;
-                // Only this rule was asked for. A component that ignores
-                // the list and reports every rule would otherwise have each
-                // of its findings repeated once per rule it carries, so a
-                // sibling's findings are dropped. A finding under a name
-                // the component does not carry at all is kept: that is a
-                // rule whose spec and findings disagree on its name, which
+                // Only the asked rules' findings. A component that ignores
+                // the list and reports every rule would otherwise have the
+                // findings of rules that are disabled, so a sibling's
+                // findings are dropped. A finding under a name the
+                // component does not carry at all is kept: that is a rule
+                // whose spec and findings disagree on its name, which
                 // test-plugins diagnoses from what it gets back.
                 errors.retain(|e| {
                     let rule = sanitize_text(&e.rule);
-                    rule == self.name || !names.contains(&rule)
+                    asked.contains(&rule.as_str()) || !names.contains(&rule)
                 });
                 errors
             }
@@ -1291,21 +1294,34 @@ impl ComponentLintRule {
         Ok(wit_errors.iter().map(convert_lint_error).collect())
     }
 
-    /// Run a check with a shared config handle, converting failures into a
-    /// reported lint error
-    fn run_check(&self, config: Arc<Config>, path: &Path) -> Vec<LintError> {
-        match self.execute_check(config, path) {
+    /// Run a check for the asked rules with a shared config handle,
+    /// converting a failure into a reported lint error under each of them:
+    /// a rule the user asked for — with `--rule-only`, say — is what they
+    /// look for the failure under.
+    fn run_check(&self, asked: &[&str], config: Arc<Config>, path: &Path) -> Vec<LintError> {
+        match self.execute_check(asked, config, path) {
             Ok(errors) => errors,
-            Err(e) => {
-                vec![LintError::new(
-                    self.name,
-                    self.category,
-                    &format!("Plugin execution failed: {}", e),
-                    Severity::Error,
-                )]
-            }
+            Err(e) => asked
+                .iter()
+                .map(|name| {
+                    LintError::new(
+                        name,
+                        self.category,
+                        &format!("Plugin execution failed: {}", e),
+                        Severity::Error,
+                    )
+                })
+                .collect(),
         }
     }
+}
+
+/// The next component id (see `Exports::Rules::id`). Ids only have to be
+/// distinct within a process; components are never unloaded.
+fn next_component_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl LintRule for ComponentLintRule {
@@ -1324,7 +1340,7 @@ impl LintRule for ComponentLintRule {
     fn check(&self, config: &Config, path: &Path) -> Vec<LintError> {
         // Direct callers only have a borrowed Config, so this pays a deep
         // clone. The linter passes a shared handle via check_shared instead.
-        self.run_check(Arc::new(config.clone()), path)
+        self.run_check(&[self.name], Arc::new(config.clone()), path)
     }
 
     fn wants_shared_config(&self) -> bool {
@@ -1332,7 +1348,26 @@ impl LintRule for ComponentLintRule {
     }
 
     fn check_shared(&self, config: &Arc<Config>, path: &Path) -> Vec<LintError> {
-        self.run_check(config.clone(), path)
+        self.run_check(&[self.name], config.clone(), path)
+    }
+
+    /// Every rule of a `plugin-rules` component shares its id, so the
+    /// linter checks them in one call; a rule of the original `plugin`
+    /// world is the component, and has none.
+    fn batch_key(&self) -> Option<u64> {
+        match &self.exports {
+            Exports::Rules { id, .. } => Some(*id),
+            Exports::Plugin(_) => None,
+        }
+    }
+
+    fn check_shared_batch(
+        &self,
+        names: &[&str],
+        config: &Arc<Config>,
+        path: &Path,
+    ) -> Vec<LintError> {
+        self.run_check(names, config.clone(), path)
     }
 
     fn why(&self) -> Option<&str> {
@@ -1857,29 +1892,40 @@ mod tests {
         }
     }
 
-    /// Temporary measurement harness for the WIT-boundary cost investigation.
-    /// Run manually with:
+    /// Measurement harness for the WIT-boundary cost investigation: what
+    /// a check costs, split into instantiation, host-side conversion and
+    /// the guest's own work. Run manually with:
     /// cargo test --release --features plugins --lib phase_timing -- --ignored --nocapture
+    /// It measures the builtin server_tokens_enabled component, or the one
+    /// named by NGINX_LINT_BENCH_COMPONENT — a Python or TypeScript
+    /// component, say, whose instantiation is the runtime's.
     #[test]
     #[ignore]
     fn phase_timing() {
         use crate::plugin::{CompilationCache, PluginLoader};
         use std::time::Instant;
 
-        let wasm_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target/builtin-plugins/server_tokens_enabled.wasm");
+        let wasm_path = match std::env::var_os("NGINX_LINT_BENCH_COMPONENT") {
+            Some(path) => std::path::PathBuf::from(path),
+            None => std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target/builtin-plugins/server_tokens_enabled.wasm"),
+        };
         if !wasm_path.exists() {
-            eprintln!("SKIP: run `make build-plugins` first");
+            eprintln!("SKIP: run `make build-plugins` first (missing {wasm_path:?})");
             return;
         }
 
-        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled).unwrap();
+        // WASI allowed, for a Go component; the builtins import none
+        let loader = PluginLoader::new_with_cache(CompilationCache::Disabled)
+            .unwrap()
+            .with_wasi(true);
         let bytes = std::fs::read(&wasm_path).unwrap();
         let rule = loader
             .load_component_from_bytes(&wasm_path, &bytes)
             .unwrap()
             .pop()
             .unwrap();
+        println!("component: {} ({} bytes)", wasm_path.display(), bytes.len());
 
         for n_servers in [30, 300] {
             let mut src = String::from("http {\n  gzip on;\n");
