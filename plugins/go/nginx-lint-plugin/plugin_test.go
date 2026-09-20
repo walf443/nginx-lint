@@ -1,8 +1,10 @@
 package nginxlint_test
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	nginxlint "github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin"
@@ -199,14 +201,26 @@ type stubRule struct{ name string }
 func (r stubRule) Spec() nginxlint.Spec                       { return nginxlint.Spec{Name: r.name} }
 func (stubRule) Check(nginxlint.Config) []nginxlint.LintError { return nil }
 
+// Registration is process-wide and never reset, and a name registers once,
+// so every test registers names of its own that survive -count, -shuffle
+// and -run.
+var registrations atomic.Int64
+
+func uniqueName(t *testing.T) string {
+	return fmt.Sprintf("%s-%d", t.Name(), registrations.Add(1))
+}
+
 func TestRegister(t *testing.T) {
-	nginxlint.Register(stubRule{"stub"}, stubRule{"other"})
+	first, second := uniqueName(t), uniqueName(t)
+	nginxlint.Register(stubRule{first}, stubRule{second})
+
 	var names []string
 	for _, rule := range nginxlint.Registered() {
 		names = append(names, rule.Spec().Name)
 	}
-	if got := strings.Join(names, ","); got != "stub,other" {
-		t.Errorf("Registered() names = %q, want \"stub,other\"", got)
+	joined := "," + strings.Join(names, ",") + ","
+	if !strings.Contains(joined, ","+first+","+second+",") {
+		t.Errorf("Registered() = %q, want %q then %q in registration order", names, first, second)
 	}
 }
 
@@ -221,6 +235,12 @@ func TestRegisterRefusesWhatTheHostWould(t *testing.T) {
 		register()
 	}
 	mustPanic("an empty name", func() { nginxlint.Register(stubRule{""}) })
-	// "stub" is registered by TestRegister; registration is process-wide
-	mustPanic("a duplicate name", func() { nginxlint.Register(stubRule{"stub"}) })
+
+	name := uniqueName(t)
+	nginxlint.Register(stubRule{name})
+	mustPanic("a duplicate name", func() { nginxlint.Register(stubRule{name}) })
+	mustPanic("a duplicate within one call", func() {
+		twice := uniqueName(t)
+		nginxlint.Register(stubRule{twice}, stubRule{twice})
+	})
 }
