@@ -372,14 +372,12 @@ fn findings(plugin: &dyn LintRule, source: &str, path: &str) -> Checked {
 /// just this rule's: what its siblings' rules look for is what the shared
 /// config holds that its own would not, and their examples are where it
 /// appears.
+///
+/// A rule without a bad example of its own is still compared over its
+/// siblings' — that is where it would leak — but agreeing there is not a
+/// pass: it has reported nothing beside nothing, and a rule that declares
+/// no examples must not count as checked on the strength of that.
 fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outcome {
-    // A rule without a bad example of its own has nothing this can compare
-    // that means anything — nothing alone against nothing together — and
-    // must not count as checked, or a rule that declares no examples would
-    // pass this one check and the run would not say so
-    if plugin.bad_example().is_none_or(str::is_empty) {
-        return Outcome::Skipped("the plugin declares no bad example".to_string());
-    }
     let names: Vec<&str> = group.iter().map(|rule| rule.name()).collect();
     let siblings = names
         .iter()
@@ -395,15 +393,18 @@ fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outc
                 .map(|example| (rule.name(), example))
         })
         .collect();
+    let has_own_example = examples.iter().any(|(owner, _)| *owner == plugin.name());
     if examples.is_empty() {
         return Outcome::Skipped("no rule of the component declares a bad example".to_string());
     }
 
-    // Compared as sets: what a rule reports must not depend on company,
-    // but the order it reports in may
+    // Compared as sets, and in full — position, message, severity and
+    // every fix — since what a rule reports must not depend on company,
+    // while the order it reports in may
     let sorted = |mut errors: Vec<LintError>| {
-        errors.sort_by(|a, b| (a.line, a.column, &a.message).cmp(&(b.line, b.column, &b.message)));
-        describe(&errors)
+        let mut lines: Vec<String> = errors.drain(..).map(|e| fingerprint(&e)).collect();
+        lines.sort();
+        lines.join("\n")
     };
 
     for (owner, example) in examples {
@@ -435,7 +436,43 @@ fn check_beside_siblings(plugin: &dyn LintRule, group: &[&dyn LintRule]) -> Outc
             ));
         }
     }
-    Outcome::Passed
+    if has_own_example {
+        Outcome::Passed
+    } else {
+        Outcome::Skipped(
+            "the plugin declares no bad example; beside its siblings it reports what it reports alone"
+                .to_string(),
+        )
+    }
+}
+
+/// Everything a finding says, on one line, for comparing two runs of a
+/// rule: position, message, severity and each fix in full.
+fn fingerprint(error: &LintError) -> String {
+    let fixes: Vec<String> = error
+        .fixes
+        .iter()
+        .map(|fix| {
+            format!(
+                "[line {} old {:?} new {:?} delete {} after {} range {:?}..{:?}]",
+                fix.line,
+                fix.old_text,
+                fix.new_text,
+                fix.delete_line,
+                fix.insert_after,
+                fix.start_offset,
+                fix.end_offset
+            )
+        })
+        .collect();
+    format!(
+        "{}:{}: {:?} {} {}",
+        error.line.unwrap_or(0),
+        error.column.unwrap_or(0),
+        error.severity,
+        error.message,
+        fixes.join(" ")
+    )
 }
 
 fn check_bad_example(plugin: &dyn LintRule) -> Outcome {
@@ -1363,6 +1400,8 @@ mod sibling_tests {
         /// When batched, the rule also reports its sibling's directive: what
         /// a rule that reads its siblings' pruning into its own does
         SeesSiblings,
+        /// When batched, the finding is the same but its fix is not
+        FixDiffers,
     }
 
     fn report(name: &str, config: &Config, directive: &str) -> Vec<LintError> {
@@ -1420,6 +1459,20 @@ mod sibling_tests {
                         let mut all = report(name, config, "server_tokens");
                         all.extend(report(name, config, "autoindex"));
                         all
+                    })
+                    .collect()),
+                BatchBehaviour::FixDiffers => Ok(names
+                    .iter()
+                    .flat_map(|name| {
+                        let directive = match *name {
+                            "tokens" => "server_tokens",
+                            _ => "autoindex",
+                        };
+                        report(name, config, directive).into_iter().map(|e| {
+                            e.with_fix(nginx_lint_common::linter::Fix::replace_range(
+                                0, 1, "batched",
+                            ))
+                        })
                     })
                     .collect()),
             }
@@ -1486,10 +1539,11 @@ mod sibling_tests {
         }
     }
 
-    /// A rule with no bad example is not checked, rather than passing on
-    /// an empty comparison: the run has to say it could check nothing.
+    /// A rule with no bad example of its own is still compared over its
+    /// siblings' — a leak shows there — but agreeing is a skip, not a pass:
+    /// the run has to say it could check nothing of the rule's own.
     #[test]
-    fn a_rule_without_a_bad_example_is_skipped() {
+    fn a_rule_without_a_bad_example_is_compared_but_not_passed() {
         let mute = Member {
             bad: None,
             ..TOKENS
@@ -1498,5 +1552,29 @@ mod sibling_tests {
             outcome(mute, [mute, AUTOINDEX]),
             Outcome::Skipped(_)
         ));
+
+        let mute_and_leaky = Member {
+            bad: None,
+            batch: BatchBehaviour::SeesSiblings,
+            ..TOKENS
+        };
+        match outcome(mute_and_leaky, [mute_and_leaky, AUTOINDEX]) {
+            Outcome::Failed(why) => assert!(why.contains("over autoindex's bad example"), "{why}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A finding that differs only in its fix is a difference: the shared
+    /// config is what a fix is computed from.
+    #[test]
+    fn a_fix_that_differs_when_batched_fails_the_check() {
+        let with_fix = Member {
+            batch: BatchBehaviour::FixDiffers,
+            ..TOKENS
+        };
+        match outcome(with_fix, [with_fix, AUTOINDEX]) {
+            Outcome::Failed(why) => assert!(why.contains("new \"batched\""), "{why}"),
+            other => panic!("{other:?}"),
+        }
     }
 }
