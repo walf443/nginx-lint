@@ -349,10 +349,10 @@ cargo install --path . --no-default-features --features cli,wasm-builtin-plugins
 
 | Feature | Description |
 |---------|-------------|
-| `cli` | Command-line interface (default) |
+| `cli` | Command-line interface (default); includes `plugins` |
 | `native-builtin-plugins` | Compile builtin plugins as native Rust (default) |
 | `wasm-builtin-plugins` | Embed builtin WASM plugins in the binary (requires `make build-plugins`) |
-| `plugins` | Support loading external WASM plugins |
+| `plugins` | Loading external WASM plugins with `--plugins`; part of `cli`, on its own for library use |
 | `web-server` | Built-in web server for browser UI |
 | `wasm` | WebAssembly target support |
 

@@ -41,7 +41,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build binary
-        run: cargo build --release --features plugins
+        run: cargo build --release
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
 

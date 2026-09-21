@@ -1,9 +1,7 @@
 pub mod config;
 pub mod guide;
 pub mod lint;
-#[cfg(feature = "plugins")]
 pub mod plugin_opts;
-#[cfg(feature = "plugins")]
 pub mod test_plugins;
 pub mod web;
 pub mod why;
@@ -61,10 +59,9 @@ pub struct Cli {
     #[arg(long, value_name = "CONTEXT")]
     pub context: Option<String>,
 
-    /// Directory containing WASM plugins for custom lint rules (requires plugins feature)
+    /// Directory containing WASM plugins for custom lint rules
     // global: `why` reads it too, so it has to be accepted after the
     // subcommand as well as before it
-    #[cfg(feature = "plugins")]
     #[arg(long, value_name = "DIR", global = true)]
     pub plugins: Option<PathBuf>,
 
@@ -78,19 +75,16 @@ pub struct Cli {
     /// as plugins.allow_wasi_plugins in .nginx-lint.toml.
     // global: `why --plugins` loads the same plugins, so it has to be
     // accepted after the subcommand as well as before it
-    #[cfg(feature = "plugins")]
     #[arg(long, global = true)]
     pub allow_wasi_plugins: bool,
 
     /// Cache directory for nginx-lint (the WASM plugin compilation cache is stored
     /// under "plugins/" beneath it). Defaults to the per-user cache directory
     /// (e.g. ~/.cache/nginx-lint on Linux). Overrides cache_dir in .nginx-lint.toml.
-    #[cfg(feature = "plugins")]
     #[arg(long, value_name = "DIR", conflicts_with = "no_cache", global = true)]
     pub cache_dir: Option<PathBuf>,
 
     /// Disable the cache (WASM plugins are compiled on every run)
-    #[cfg(feature = "plugins")]
     #[arg(long, global = true)]
     pub no_cache: bool,
 
@@ -131,7 +125,6 @@ pub enum Commands {
     /// Show getting started guide (installation, usage, configuration)
     Guide,
     /// Check that the plugins in a --plugins directory work
-    #[cfg(feature = "plugins")]
     TestPlugins {
         /// Directory of fixture cases, each with error/nginx.conf and/or
         /// expected/nginx.conf (the layout the SDKs document). When the

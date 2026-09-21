@@ -32,7 +32,7 @@ is deterministic; lint rules should not need randomness.
 
 ```bash
 cd ../../..
-cargo run --features plugins -- \
+cargo run -- \
     --plugins plugins/python/server-tokens-enabled-py \
     plugins/python/server-tokens-enabled-py/examples/bad.conf
 ```

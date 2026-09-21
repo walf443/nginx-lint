@@ -53,7 +53,11 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["cli", "native-builtin-plugins"]
-cli = ["clap", "colored", "glob", "rayon"]
+# The command line always loads external WASM plugins: `--plugins` is part
+# of the interface, so the binary the Dockerfile and `cargo install` build
+# is the one the release ships. Only the browser build (`wasm`) leaves
+# `plugins` out, since wasmtime does not compile to wasm32.
+cli = ["clap", "colored", "glob", "rayon", "plugins"]
 wasm = ["wasm-bindgen", "console_error_panic_hook"]
 web-server = ["tiny_http"]
 # Embed WASM files into the binary (requires web/pkg/ to exist at build time)
