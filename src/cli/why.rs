@@ -20,7 +20,6 @@ fn find_rule_doc(name: &str, cli: &Cli) -> Result<Option<RuleDocOwned>, ()> {
         return Ok(Some(doc));
     }
 
-    #[cfg(feature = "plugins")]
     if let Some(doc) = external_plugin_docs(cli)?
         .into_iter()
         .find(|d| d.name == name)
@@ -28,7 +27,6 @@ fn find_rule_doc(name: &str, cli: &Cli) -> Result<Option<RuleDocOwned>, ()> {
         return Ok(Some(doc));
     }
 
-    let _ = cli;
     Ok(None)
 }
 
@@ -58,10 +56,8 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     // One entry per name: the loader skips a plugin rule named after one
     // the host ships, or after one an earlier file provides, as it does
     // for `lint`
-    #[cfg(feature = "plugins")]
     docs.extend(external_plugin_docs(cli)?);
 
-    let _ = cli;
     Ok(docs)
 }
 
@@ -71,7 +67,6 @@ fn collect_rule_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
 /// directory cannot be loaded, and `why` says nothing useful about a rule
 /// it never managed to load, so it fails the same way rather than
 /// pretending the directory contributed nothing.
-#[cfg(feature = "plugins")]
 fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     use super::plugin_opts::{allow_wasi, cache_config};
 
@@ -91,7 +86,6 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     // rule up never loads plugins, so without this the same unusable
     // --plugins or --cache-dir would be reported for one rule name and
     // silently ignored for another.
-    #[cfg(feature = "plugins")]
     if let Some(ref dir) = cli.plugins {
         if !dir.is_dir() {
             eprintln!(
@@ -113,7 +107,7 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
     // The builtin WASM plugins are compiled through a process-global
     // loader, so the cache flags have to reach it before anything loads
     // them (mirrors run_lint).
-    #[cfg(all(feature = "wasm-builtin-plugins", feature = "plugins"))]
+    #[cfg(feature = "wasm-builtin-plugins")]
     nginx_lint::plugin::builtin::configure_builtin_plugin_cache(super::plugin_opts::cache_config(
         cli,
     ));

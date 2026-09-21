@@ -210,7 +210,7 @@ jobs:
         with:
           shared-key: "build-host"
       - name: Build nginx-lint
-        run: cargo build --release --no-default-features --features cli,plugins
+        run: cargo build --release --no-default-features --features cli
       - name: Package binaries
         run: |
           mkdir -p artifacts
@@ -388,7 +388,7 @@ jobs:
         # or to the WIT without a rebuild fails here.
         run: make check-lua-runtime
       - name: Build the host
-        run: cargo build --features plugins
+        run: cargo build
       - name: Build and test the Lua plugin
         # The builder needs nothing installed: it carries the runtime and
         # wraps the script into a component itself. test-plugins then runs
@@ -410,7 +410,7 @@ jobs:
         # the step above, with all three names.
         run: |
           test -f plugins/nginx-lint-plugin-sdk/tests/failing-rules/failing-rules.wasm
-          cargo test --features plugins --lib lua_rules_fail_one_at_a_time 2>&1 | tee lua.log
+          cargo test --lib lua_rules_fail_one_at_a_time 2>&1 | tee lua.log
           grep -q 'test result: ok. 1 passed' lua.log
       - name: Upload Lua WASM plugin
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

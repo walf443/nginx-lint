@@ -73,7 +73,6 @@ enum FileResult {
 /// The rule names a plugin cannot take: the rules this build ships, plus
 /// whatever the linter has registered so far, which at plugin-loading time
 /// is only host rules.
-#[cfg(feature = "plugins")]
 fn reserved_rule_names(linter: &Linter) -> HashSet<String> {
     let mut names = linter.rule_names();
     names.extend(nginx_lint::plugin::shipped_rule_names());
@@ -594,7 +593,6 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     // 8. Resolve the cache root and create the linter
     // Cache root precedence: --no-cache > --cache-dir > cache_dir in
     // .nginx-lint.toml (relative to the config file) > per-user default
-    #[cfg(feature = "plugins")]
     let compilation_cache = {
         use nginx_lint::plugin::CompilationCache;
 
@@ -617,30 +615,10 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     // needs it on every run, so there is no way to say no from the command
     // line. The configuration file cannot name a plugins directory, so this
     // only widens what a plugin the command line already asked for is granted.
-    #[cfg(feature = "plugins")]
     let allow_wasi_plugins = cli.allow_wasi_plugins
         || lint_config
             .as_ref()
             .is_some_and(|c| c.plugins.allow_wasi_plugins);
-
-    // In builds without the plugins feature the cache is never used; tell the
-    // user instead of silently ignoring their configuration.
-    #[cfg(not(feature = "plugins"))]
-    if lint_config.as_ref().and_then(|c| c.cache_dir()).is_some() {
-        eprintln!(
-            "Warning: cache_dir in the configuration file has no effect in this build (compiled without the plugins feature)"
-        );
-    }
-
-    #[cfg(not(feature = "plugins"))]
-    if lint_config
-        .as_ref()
-        .is_some_and(|c| c.plugins.allow_wasi_plugins)
-    {
-        eprintln!(
-            "Warning: plugins.allow_wasi_plugins in the configuration file has no effect in this build (compiled without the plugins feature)"
-        );
-    }
 
     // Builtin WASM plugins are compiled through a process-global loader, so
     // the cache root must be configured before the first Linter is created.
@@ -674,7 +652,6 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // Load custom plugins if specified
-    #[cfg(feature = "plugins")]
     if let Some(ref plugins_dir) = cli.plugins {
         use nginx_lint::plugin::PluginLoader;
 

@@ -99,7 +99,7 @@ collect-plugins-only:
 # Every directory with a Cargo.toml has to be reached: silently skipping a
 # plugin whose component did not get built would leave the run green over a
 # subset, and this target is the only thing covering the builtins.
-NGINX_LINT ?= cargo run --quiet --features plugins --
+NGINX_LINT ?= cargo run --quiet --
 
 test-builtin-plugins: collect-plugins-only
 	@fail=0; ran=0; expected=0; missing=""; \
@@ -262,7 +262,7 @@ lint-plugin-examples:
 			name=$$(basename "$$dir"); \
 			echo "  Checking $$name examples..."; \
 			for conf in "$$dir"/examples/*.conf; do \
-				if ! cargo run --quiet --features cli -- --no-fail-on-warnings "$$conf" 2>/dev/null; then \
+				if ! cargo run --quiet -- --no-fail-on-warnings "$$conf" 2>/dev/null; then \
 					echo "    ERROR: $$conf failed to parse"; \
 					fail=1; \
 				else \

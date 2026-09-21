@@ -29,7 +29,7 @@ typecheck:
 # reported, the good one to be clean, and the fixes to resolve the bad one.
 test-e2e: build
 	cd ../../.. && \
-	cargo run --features plugins -- test-plugins \
+	cargo run -- test-plugins \
 		--plugins plugins/python/server-tokens-enabled-py
 
 clean:

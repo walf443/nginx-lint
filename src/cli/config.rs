@@ -114,7 +114,6 @@ fn run_validate(config_path: PathBuf, cli: &Cli) -> ExitCode {
 /// grants it can configure the rules it makes loadable. Returns `Err`
 /// after reporting the failure, so the caller exits 2, as `lint` and `why`
 /// do for a directory that cannot be loaded.
-#[cfg(feature = "plugins")]
 fn external_rule_names(
     cli: &Cli,
     config_path: &std::path::Path,
@@ -130,14 +129,6 @@ fn external_rule_names(
         .map_err(|e| {
             eprintln!("Error loading plugins: {}", e);
         })
-}
-
-#[cfg(not(feature = "plugins"))]
-fn external_rule_names(
-    _cli: &Cli,
-    _config_path: &std::path::Path,
-) -> Result<std::collections::HashSet<String>, ()> {
-    Ok(Default::default())
 }
 
 fn run_schema(format: SchemaFormat) -> ExitCode {
