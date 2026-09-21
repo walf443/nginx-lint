@@ -10,6 +10,7 @@ use std::sync::Arc;
 /// for, and the batched check runs whichever rules are asked for over
 /// the shared config — or fails, or leaks a sibling's directive into
 /// what a rule sees, as the test dictates.
+#[derive(Clone, Copy)]
 struct Member {
     name: &'static str,
     directive: &'static str,
@@ -118,13 +119,6 @@ impl LintRule for Member {
         }
     }
 }
-
-impl Clone for Member {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl Copy for Member {}
 
 const TOKENS: Member = Member {
     name: "tokens",
