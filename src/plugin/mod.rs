@@ -10,6 +10,8 @@ mod component_rule;
 #[cfg(feature = "plugins")]
 mod error;
 #[cfg(feature = "plugins")]
+mod host;
+#[cfg(feature = "plugins")]
 mod loader;
 #[cfg(feature = "native-builtin-plugins")]
 pub mod native_builtin;
