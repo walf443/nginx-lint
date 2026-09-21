@@ -25,7 +25,7 @@ nginx-lint/
 │   │   ├── loader.rs          # Plugin loader
 │   │   ├── component_rule.rs  # Component model rule wrapper
 │   │   ├── host/              # What the host provides a component: bindings, store, WASI subset,
-│   │   │                      #   config-api Host impls, conversion of returned findings/specs
+│   │   │                      #   config-api Host impls, snapshots, conversion of returned findings
 │   │   ├── builtin.rs         # Embedded builtin plugins
 │   │   └── error.rs           # Plugin errors
 │   ├── rules/                 # Native lint rules

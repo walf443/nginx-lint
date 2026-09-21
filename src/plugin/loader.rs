@@ -241,7 +241,7 @@ impl PluginLoader {
     /// runtime pulls in stdio, environment, clocks and randomness even for a
     /// plugin that only reads the config it is handed. Enabling this links a
     /// subset of `wasi:*` backed by an empty context; see `add_wasi_subset`
-    /// in `component_rule.rs` for what that does and does not grant.
+    /// in `plugin/host/mod.rs` for what that does and does not grant.
     ///
     /// It is opt-in because it widens the sandbox for every plugin loaded by
     /// this loader, not only the ones that need it: a plugin gains a clock

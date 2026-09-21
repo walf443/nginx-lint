@@ -1,11 +1,13 @@
 //! What the host provides to a component: the generated bindings of both
 //! worlds, the store data every instance runs in — resource table, memory
 //! limit, the WASI subset a plugin may be granted — and the `Host` impls of
-//! the imported interfaces (`config-api` in [`config_api_host`]; what a
-//! component returns is converted in [`findings`]).
+//! the imported interfaces (`config-api` in [`config_api_host`], the
+//! snapshots it hands out in [`snapshot`]; what a component returns is
+//! converted in [`findings`]).
 
 pub(crate) mod config_api_host;
 pub(crate) mod findings;
+pub(crate) mod snapshot;
 
 use crate::parser::ast::{self, Config};
 use std::sync::Arc;
