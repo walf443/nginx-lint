@@ -121,7 +121,7 @@ impl LintRule for Member {
 
 impl Clone for Member {
     fn clone(&self) -> Self {
-        Member { ..*self }
+        *self
     }
 }
 impl Copy for Member {}
