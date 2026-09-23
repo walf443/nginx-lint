@@ -122,13 +122,13 @@ wasm-bindgen = { version = "0.2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 
 # Plugin system dependencies
-wasmtime = { version = "48", features = ["component-model"], optional = true }
+wasmtime = { version = "49", features = ["component-model"], optional = true }
 # Only linked into plugins that ask for it (see --allow-wasi-plugins); the
 # subset and the empty context are chosen in src/plugin/component_rule.rs
 # p2 only: the host links the component-model bindings
 # (wasmtime_wasi::p2::bindings), and the default features would also pull
 # in the preview1/wiggle stack that nothing here uses.
-wasmtime-wasi = { version = "48", optional = true, default-features = false, features = ["p2"] }
+wasmtime-wasi = { version = "49", optional = true, default-features = false, features = ["p2"] }
 
 # Native plugin dependencies
 nginx-lint-plugin = { version = "0.24.0", path = "crates/nginx-lint-plugin", optional = true }
