@@ -1,12 +1,12 @@
 module github.com/walf443/nginx-lint/plugins/go/server-tokens-enabled-go
 
-go 1.26.0
+go 1.27.1
 
 require github.com/walf443/nginx-lint/plugins/go/nginx-lint-plugin v0.0.0
 
 require (
 	github.com/tetratelabs/wazero v1.12.0 // indirect
-	go.bytecodealliance.org/pkg v0.2.3 // indirect
+	go.bytecodealliance.org/pkg v0.3.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )
 
