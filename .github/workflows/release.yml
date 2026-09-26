@@ -60,7 +60,9 @@ jobs:
       # enables, dev-dependencies included, so nginx-lint's SBOM also lists
       # crates that only its builtin plugins' tests use (testcontainers and
       # what it pulls in via nginx-lint-plugin's container-testing), which
-      # the binary does not link.
+      # the binary does not link. The SDK's, conversely, misses the C code it
+      # carries: Lua, which mlua compiles through a build dependency, and the
+      # prebuilt Lua runtime, which cargo does not know about.
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
           tool: cargo-cyclonedx@0.5.9
