@@ -1,8 +1,17 @@
-use crate::docs::RuleDoc;
+//! include-path-exists: an include directive naming a file that does not
+//! exist. The rule reads the filesystem and is cli-only; its DOC is not, so
+//! that `why` and the web UI describe it in every build.
+
+#[cfg(feature = "cli")]
 use crate::include::{apply_path_mapping, resolve_include_pattern};
+use crate::rules::rule_doc::RuleDoc;
+#[cfg(feature = "cli")]
 use nginx_lint_common::config::PathMapping;
+#[cfg(feature = "cli")]
 use nginx_lint_common::linter::{LintError, LintRule, Severity};
+#[cfg(feature = "cli")]
 use nginx_lint_common::parser::ast::Config;
+#[cfg(feature = "cli")]
 use std::path::{Path, PathBuf};
 
 /// Rule documentation
@@ -21,17 +30,20 @@ accepted by nginx without error, so only literal paths are checked."#,
 };
 
 /// Check that files referenced by include directives exist
+#[cfg(feature = "cli")]
 pub struct IncludePathExists {
     path_mappings: Vec<PathMapping>,
     prefix: Option<PathBuf>,
 }
 
+#[cfg(feature = "cli")]
 impl Default for IncludePathExists {
     fn default() -> Self {
         Self::new()
     }
 }
 
+#[cfg(feature = "cli")]
 impl IncludePathExists {
     pub fn new() -> Self {
         Self {
@@ -59,10 +71,12 @@ impl IncludePathExists {
 }
 
 /// Returns true if the pattern contains glob wildcard characters
+#[cfg(feature = "cli")]
 fn is_glob_pattern(pattern: &str) -> bool {
     pattern.contains('*') || pattern.contains('?') || pattern.contains('[')
 }
 
+#[cfg(feature = "cli")]
 impl LintRule for IncludePathExists {
     fn name(&self) -> &'static str {
         "include-path-exists"
@@ -132,7 +146,7 @@ impl LintRule for IncludePathExists {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "cli"))]
 mod tests {
     use super::*;
     use std::fs;

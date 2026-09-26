@@ -1,4 +1,5 @@
 pub mod best_practices;
+pub mod rule_doc;
 pub mod security;
 pub mod style;
 pub mod syntax;

@@ -1,4 +1,4 @@
-use crate::docs::RuleDoc;
+use crate::rules::rule_doc::RuleDoc;
 use nginx_lint_common::config::IndentSize;
 use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::parser::ast::{Config, ConfigItem};
