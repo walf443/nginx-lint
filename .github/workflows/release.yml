@@ -53,6 +53,27 @@ jobs:
         env:
           CARGO_BUILD_TARGET: ${{ matrix.target }}
 
+      # A CycloneDX SBOM per binary, attached to the release beside its
+      # archive. cargo-cyclonedx always writes one per workspace member next
+      # to its Cargo.toml; only the two shipped binaries' are kept. It reads
+      # `cargo metadata`, whose resolve merges the features every member
+      # enables, dev-dependencies included, so nginx-lint's SBOM also lists
+      # crates that only its builtin plugins' tests use (testcontainers and
+      # what it pulls in via nginx-lint-plugin's container-testing), which
+      # the binary does not link. The SDK's, conversely, misses the C code it
+      # carries: Lua, which mlua compiles through a build dependency, and the
+      # prebuilt Lua runtime, which cargo does not know about.
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-cyclonedx@0.5.9
+      - name: Generate SBOMs
+        run: |
+          cargo cyclonedx --format json --spec-version 1.5 --describe binaries \
+            --target ${{ matrix.target }} --no-build-deps --quiet
+          cp nginx-lint_bin.cdx.json nginx-lint-${{ matrix.target }}.cdx.json
+          cp plugins/nginx-lint-plugin-sdk/nginx-lint-plugin-sdk_bin.cdx.json \
+            nginx-lint-plugin-sdk-${{ matrix.target }}.cdx.json
+
       - name: Archive binaries
         run: |
           mkdir -p dist
@@ -69,6 +90,8 @@ jobs:
           path: |
             nginx-lint-${{ matrix.target }}.tar.gz
             nginx-lint-plugin-sdk-${{ matrix.target }}.tar.gz
+            nginx-lint-${{ matrix.target }}.cdx.json
+            nginx-lint-plugin-sdk-${{ matrix.target }}.cdx.json
 
   release:
     name: Release
@@ -87,7 +110,9 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           generate_release_notes: true
-          files: nginx-lint-*.tar.gz
+          files: |
+            nginx-lint-*.tar.gz
+            nginx-lint-*.cdx.json
 
   tag-go-module:
     name: Tag the Go SDK module

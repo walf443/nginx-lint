@@ -365,3 +365,14 @@ The binary also contains third-party crates under their own licenses;
 [licenses/THIRD-PARTY-NOTICES](licenses/THIRD-PARTY-NOTICES), regenerated with
 `make build-licenses`). `nginx-lint-plugin-sdk license` does the same for
 the plugin SDK binary and the Lua runtime it embeds in plugins.
+
+Each [GitHub release](https://github.com/walf443/nginx-lint/releases) also
+carries a CycloneDX SBOM beside every archive
+(`nginx-lint-<target>.cdx.json`, `nginx-lint-plugin-sdk-<target>.cdx.json`).
+The one for nginx-lint over-reports: it also lists crates used only by the
+builtin plugins' tests (testcontainers and its dependencies), which the
+binary does not contain. The one for nginx-lint-plugin-sdk under-reports: it
+lists Rust crates only, so the C code it carries is missing — Lua, compiled
+into the binary through mlua, and the embedded Lua runtime (Lua, wasi-libc,
+LLVM compiler-rt) that also goes into every plugin it builds.
+`nginx-lint-plugin-sdk license` names those components.
