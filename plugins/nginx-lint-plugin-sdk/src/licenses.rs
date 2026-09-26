@@ -1,7 +1,9 @@
-//! Third-party notices for the code compiled into the Lua runtime, which
-//! travels inside this binary and inside every plugin it builds. The texts
-//! are the verbatim files under `licenses/`; see the README there for
-//! where each came from.
+//! Third-party notices: first for the code compiled into the Lua runtime,
+//! which travels inside this binary and inside every plugin it builds, then
+//! for the Rust crates compiled into this binary alone. The runtime's texts
+//! are the verbatim files under `licenses/`; see the README there for where
+//! each came from. The crates' are `licenses/THIRD-PARTY-NOTICES`, generated
+//! by cargo-about (`make build-licenses` at the repository root).
 
 /// One embedded component: its name, what of it is in the runtime, and its
 /// license text.
@@ -46,7 +48,12 @@ pub const NOTICES: &[Notice] = &[
     },
 ];
 
-/// Renders every notice, each under a heading naming the component.
+/// The license texts of the Rust crates compiled into this binary, grouped
+/// by license. The plugins it builds contain none of them.
+pub const CRATE_NOTICES: &str = include_str!("../licenses/THIRD-PARTY-NOTICES");
+
+/// Renders every runtime notice, each under a heading naming the component,
+/// followed by the crates' notices.
 pub fn render() -> String {
     let mut out = String::from(
         "nginx-lint-plugin-sdk embeds a Lua runtime, compiled to WebAssembly, in this \
@@ -66,6 +73,13 @@ pub fn render() -> String {
         out.push_str(notice.text.trim_end());
         out.push('\n');
     }
+    out.push_str("\n\n");
+    out.push_str(&"#".repeat(72));
+    out.push_str(
+        "\n\nThe Rust crates below are in the nginx-lint-plugin-sdk binary only; \
+         the plugins it builds contain none of them.\n\n",
+    );
+    out.push_str(CRATE_NOTICES);
     out
 }
 
@@ -80,5 +94,12 @@ mod tests {
             assert!(rendered.contains(notice.component));
             assert!(rendered.contains(notice.text.trim_end()));
         }
+        assert!(rendered.ends_with(CRATE_NOTICES));
+        // The crates' notices name the binary's dependencies
+        assert!(
+            CRATE_NOTICES
+                .split_whitespace()
+                .any(|word| word == "wit-component")
+        );
     }
 }

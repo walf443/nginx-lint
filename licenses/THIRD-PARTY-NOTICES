@@ -1,4 +1,4 @@
-nginx-lint contains the following third-party code, grouped by license.
+The following third-party crates are compiled into this binary, grouped by license.
 
 ========================================================================
 Apache License 2.0

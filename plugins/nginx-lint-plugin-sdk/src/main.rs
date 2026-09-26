@@ -1,3 +1,4 @@
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -45,8 +46,14 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::License => {
-            print!("{}", nginx_lint_plugin_sdk::licenses::render());
-            Ok(())
+            // write_all rather than print!, which panics when the reader
+            // (`| head`, a pager) closes the pipe before the text has all
+            // been written
+            let notices = nginx_lint_plugin_sdk::licenses::render();
+            match std::io::stdout().lock().write_all(notices.as_bytes()) {
+                Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+                result => result.context("failed to write the notices"),
+            }
         }
     }
 }

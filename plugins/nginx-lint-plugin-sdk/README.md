@@ -119,3 +119,10 @@ result. The module records a hash of those inputs and the plugin API
 version in its producers section (`wasm-tools metadata show` prints them),
 and this crate's tests check them against the tree, so a forgotten rebuild
 fails `cargo test -p nginx-lint-plugin-sdk` — with no C toolchain needed.
+
+## Licenses
+
+`nginx-lint-plugin-sdk license` prints the notices of the third-party code
+this tool distributes: the Lua runtime's (Lua, wasi-libc, LLVM compiler-rt),
+which every plugin it builds carries too, and those of the Rust crates in the
+`nginx-lint-plugin-sdk` binary itself.
