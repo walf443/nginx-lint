@@ -8,3 +8,5 @@
 /test_builtin_plugins
 /web/api/
 .claude/settings.local.json
+# cargo-cyclonedx output (the release workflow generates it)
+*.cdx.json
