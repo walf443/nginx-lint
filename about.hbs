@@ -1,0 +1,10 @@
+nginx-lint contains the following third-party code, grouped by license.
+{{#each licenses}}
+
+========================================================================
+{{name}}
+Used by:{{#each used_by}}{{#unless (or (eq crate.name "nginx-lint-common") (eq crate.name "nginx-lint-parser") (eq crate.name "nginx-lint-plugin"))}} {{crate.name}}{{/unless}}{{/each}}
+========================================================================
+
+{{{text}}}
+{{/each}}

@@ -359,3 +359,8 @@ cargo install --path . --no-default-features --features cli,wasm-builtin-plugins
 ## License
 
 [MIT](LICENSE)
+
+The binary also contains third-party crates under their own licenses;
+`nginx-lint license` prints their notices (kept in
+[licenses/THIRD-PARTY-NOTICES](licenses/THIRD-PARTY-NOTICES), regenerated with
+`make build-licenses`).

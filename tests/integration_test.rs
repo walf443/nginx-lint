@@ -3504,3 +3504,39 @@ fn test_plugin_world_component_loads_with_a_deprecation_warning() {
         );
     }
 }
+
+// `nginx-lint license` prints the committed notices: the third-party crates
+// by name (wasmtime, the bulk of the binary) and the vendored zstd C code's
+// own BSD text, which comes from zstd-sys's bundled LICENSE rather than the
+// crate's declared license
+#[test]
+fn test_license_command_prints_third_party_notices() {
+    use std::process::Command;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .arg("license")
+        .output()
+        .expect("Failed to run nginx-lint license");
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.split_whitespace().any(|word| word == "wasmtime"),
+        "stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Copyright (c) Meta Platforms, Inc. and affiliates."),
+        "stdout:\n{stdout}"
+    );
+    // The workspace's own crates are not third-party code
+    assert!(
+        !stdout
+            .split_whitespace()
+            .any(|word| word == "nginx-lint-common"),
+        "stdout:\n{stdout}"
+    );
+}

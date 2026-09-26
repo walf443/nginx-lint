@@ -1,5 +1,6 @@
 pub mod config;
 pub mod guide;
+pub mod license;
 pub mod lint;
 pub mod plugin_opts;
 pub mod test_plugins;
@@ -124,6 +125,8 @@ pub enum Commands {
     },
     /// Show getting started guide (installation, usage, configuration)
     Guide,
+    /// Print the licenses of the third-party code compiled into nginx-lint
+    License,
     /// Check that the plugins in a --plugins directory work
     TestPlugins {
         /// Directory of fixture cases, each with error/nginx.conf and/or

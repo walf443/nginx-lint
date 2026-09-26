@@ -1,0 +1,19 @@
+# cargo-about configuration for THIRD-PARTY-NOTICES, which `nginx-lint license`
+# prints. Regenerate with `make build-licenses`; CI runs `make check-licenses`.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+ignore-dev-dependencies = true
+# Build scripts' dependencies (cc for zstd-sys) run at build time and are not
+# linked into the binary.
+ignore-build-dependencies = true
+# The workspace's own crates are nginx-lint itself, not third-party code.
+private = { ignore = true }
