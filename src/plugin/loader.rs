@@ -4,7 +4,7 @@
 
 use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
-use crate::linter::LintRule;
+use nginx_lint_common::linter::LintRule;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fs;

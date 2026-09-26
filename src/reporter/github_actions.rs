@@ -1,5 +1,5 @@
-use crate::LintError;
-use crate::Severity;
+use nginx_lint_common::linter::LintError;
+use nginx_lint_common::linter::Severity;
 use std::path::Path;
 
 pub(crate) fn report(

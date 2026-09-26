@@ -3,9 +3,9 @@
 //! This module provides functionality to recursively resolve `include` directives
 //! and collect all files that should be linted.
 
-use crate::parser::ast::Config;
 use glob::glob;
 use nginx_lint_common::config::PathMapping;
+use nginx_lint_common::parser::ast::Config;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -125,7 +125,7 @@ fn collect_recursive<F>(
         // Try to read file and parse context comment
         std::fs::read_to_string(path)
             .ok()
-            .and_then(|content| crate::ignore::parse_context_comment(&content))
+            .and_then(|content| nginx_lint_common::ignore::parse_context_comment(&content))
             .unwrap_or_default()
     };
 
@@ -198,13 +198,13 @@ fn find_include_paths_with_context(
 
 /// Recursively find include directives while tracking the context stack
 fn find_includes_recursive(
-    items: &[crate::parser::ast::ConfigItem],
+    items: &[nginx_lint_common::parser::ast::ConfigItem],
     parent_dir: &Path,
     context: &[String],
     path_mappings: &[PathMapping],
     results: &mut Vec<(PathBuf, Vec<String>)>,
 ) {
-    use crate::parser::ast::ConfigItem;
+    use nginx_lint_common::parser::ast::ConfigItem;
 
     for item in items {
         if let ConfigItem::Directive(directive) = item {
@@ -694,7 +694,7 @@ mod tests {
             &root,
             |path| {
                 let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-                crate::parser::parse_string(&content).map_err(|e| e.to_string())
+                nginx_lint_common::parser::parse_string(&content).map_err(|e| e.to_string())
             },
             &[],
             None,
@@ -714,7 +714,7 @@ mod tests {
             &root,
             |path| {
                 let content = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-                crate::parser::parse_string(&content).map_err(|e| e.to_string())
+                nginx_lint_common::parser::parse_string(&content).map_err(|e| e.to_string())
             },
             &[],
             Some(base),

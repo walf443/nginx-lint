@@ -10,8 +10,8 @@ use super::host::bindings::{self, Plugin, PluginPre};
 use super::host::findings::{PluginSpec, convert_lint_error, convert_plugin_spec, sanitize_text};
 use super::host::rules_bindings::PluginRulesPre;
 use super::host::{ComponentStoreData, ConfigResource, add_wasi_subset};
-use crate::linter::{LintError, LintRule, Severity};
-use crate::parser::ast::Config;
+use nginx_lint_common::linter::{LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::Config;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use wasmtime::component::ResourceTable;
@@ -568,17 +568,17 @@ mod tests {
         assert_eq!(rule.category(), "security");
 
         let bad = rule.bad_example().expect("the spec carries a bad example");
-        let config = Arc::new(crate::parser::parse_string(bad).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(bad).unwrap());
         let errors = rule.check_shared(&config, Path::new("bad.conf"));
         assert_eq!(errors.len(), 1, "{errors:?}");
         assert_eq!(errors[0].rule, "server-tokens-enabled-lua");
         assert_eq!(errors[0].fixes.len(), 1);
 
         // The fix, applied the way --fix applies it, resolves the finding
-        let fixes: Vec<&crate::linter::Fix> = errors[0].fixes.iter().collect();
+        let fixes: Vec<&nginx_lint_common::linter::Fix> = errors[0].fixes.iter().collect();
         let (fixed, applied) = crate::apply_fixes_to_content(bad, &fixes);
         assert_eq!(applied, 1);
-        let config = Arc::new(crate::parser::parse_string(&fixed).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(&fixed).unwrap());
         assert!(
             rule.check_shared(&config, Path::new("fixed.conf"))
                 .is_empty(),
@@ -588,14 +588,14 @@ mod tests {
         let good = rule
             .good_example()
             .expect("the spec carries a good example");
-        let config = Arc::new(crate::parser::parse_string(good).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(good).unwrap());
         assert!(
             rule.check_shared(&config, Path::new("good.conf"))
                 .is_empty()
         );
 
         // Batched, it answers only for itself: its check takes no list
-        let config = Arc::new(crate::parser::parse_string(bad).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(bad).unwrap());
         let own = rule
             .check_shared_batch(
                 &["server-tokens-enabled-lua"],
@@ -651,8 +651,9 @@ mod tests {
         let mut store =
             ComponentLintRule::create_store(pre.engine(), rule.memory_limit, rule.timeout_ticks);
         let component = pre.instantiate(&mut store).unwrap();
-        let config =
-            Arc::new(crate::parser::parse_string("http {\n    server_tokens on;\n}\n").unwrap());
+        let config = Arc::new(
+            nginx_lint_common::parser::parse_string("http {\n    server_tokens on;\n}\n").unwrap(),
+        );
         let handle = store
             .data_mut()
             .table
@@ -731,7 +732,7 @@ mod tests {
         assert!(rules[0].batch_key().is_some());
 
         let src = "http { server_tokens on; server { location / { autoindex on; } } }";
-        let config = Arc::new(crate::parser::parse_string(src).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(src).unwrap());
 
         // The batched call itself succeeds with both findings — asserted
         // directly, since through the linter a failed batch would fall back
@@ -767,7 +768,7 @@ mod tests {
         };
 
         let src = "http { server_tokens on; server { location / { autoindex on; } } }";
-        let config = Arc::new(crate::parser::parse_string(src).unwrap());
+        let config = Arc::new(nginx_lint_common::parser::parse_string(src).unwrap());
         for rule in &rules {
             let errors = rule.check_shared(&config, Path::new("test.conf"));
             assert_eq!(errors.len(), 1, "{}: {errors:?}", rule.name());
@@ -807,7 +808,7 @@ mod tests {
         ];
 
         for (src, expected_count) in cases {
-            let config = Arc::new(crate::parser::parse_string(src).unwrap());
+            let config = Arc::new(nginx_lint_common::parser::parse_string(src).unwrap());
             let errors = rule.check_shared(&config, Path::new("test.conf"));
             assert_eq!(
                 errors.len(),
@@ -850,7 +851,7 @@ mod tests {
         ];
 
         for (src, include_context, expected_count) in cases {
-            let mut config = crate::parser::parse_string(src).unwrap();
+            let mut config = nginx_lint_common::parser::parse_string(src).unwrap();
             config.include_context = include_context.iter().map(|s| s.to_string()).collect();
             let config = Arc::new(config);
             let errors = rule.check_shared(&config, Path::new("test.conf"));
@@ -1058,9 +1059,11 @@ mod tests {
             for (label, path, min_or_exact_zero) in cases {
                 let content = std::fs::read_to_string(&path)
                     .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
-                let config = Arc::new(crate::parser::parse_string(&content).unwrap_or_else(|e| {
-                    panic!("failed to parse {path:?}: {e}");
-                }));
+                let config = Arc::new(
+                    nginx_lint_common::parser::parse_string(&content).unwrap_or_else(|e| {
+                        panic!("failed to parse {path:?}: {e}");
+                    }),
+                );
                 let errors = rule.check_shared(&config, Path::new("test.conf"));
                 let rule_errors: Vec<_> = errors.iter().filter(|e| e.rule == rule_name).collect();
 
@@ -1122,7 +1125,7 @@ mod tests {
                 ));
             }
             src.push_str("}\n");
-            let config = crate::parser::parse_string(&src).unwrap();
+            let config = nginx_lint_common::parser::parse_string(&src).unwrap();
             let n_directives = config.all_directives().count();
             let shared = Arc::new(config);
             let iters = 200;
@@ -1223,7 +1226,7 @@ mod tests {
                     );
                 }
                 src.push_str("}\n");
-                let config = crate::parser::parse_string(&src).unwrap();
+                let config = nginx_lint_common::parser::parse_string(&src).unwrap();
                 let n_directives = config.all_directives().count();
                 let shared = Arc::new(config);
                 let iters = 200;

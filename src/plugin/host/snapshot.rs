@@ -5,7 +5,7 @@
 //! context and drops everything else.
 
 use super::{bindings, config_api};
-use crate::parser::ast::{self, Config};
+use nginx_lint_common::parser::ast::{self, Config};
 
 /// The whole config, flattened.
 pub(super) fn snapshot(config: &Config) -> config_api::ConfigSnapshot {
@@ -234,7 +234,7 @@ http {
 "#;
         let config = Config {
             include_context: vec!["http".to_string()],
-            ..crate::parser::parse_string(source).unwrap()
+            ..nginx_lint_common::parser::parse_string(source).unwrap()
         };
 
         let snapshot = snapshot(&config);

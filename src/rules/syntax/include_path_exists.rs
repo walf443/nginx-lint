@@ -1,8 +1,8 @@
 use crate::docs::RuleDoc;
 use crate::include::{apply_path_mapping, resolve_include_pattern};
-use crate::linter::{LintError, LintRule, Severity};
-use crate::parser::ast::Config;
 use nginx_lint_common::config::PathMapping;
+use nginx_lint_common::linter::{LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::Config;
 use std::path::{Path, PathBuf};
 
 /// Rule documentation
@@ -154,7 +154,7 @@ mod tests {
         path_mappings: Vec<PathMapping>,
     ) -> Vec<LintError> {
         let config_path = create_test_file(dir, config_name, content);
-        let config = crate::parser::parse_string(content).unwrap();
+        let config = nginx_lint_common::parser::parse_string(content).unwrap();
         let rule = IncludePathExists::with_path_mappings(path_mappings);
         rule.check(&config, &config_path)
     }
@@ -334,7 +334,7 @@ http {
 
         // Malformed include with no argument — should not panic
         let config_path = create_test_file(dir, "nginx.conf", "include;");
-        let config = crate::parser::parse_string("include;").unwrap();
+        let config = nginx_lint_common::parser::parse_string("include;").unwrap();
         let rule = IncludePathExists::new();
         let errors = rule.check(&config, &config_path);
         assert!(errors.is_empty());
@@ -354,9 +354,10 @@ http {
             "conf.d/server.conf",
             "server {\n    include snippets/upstream.conf;\n}",
         );
-        let config =
-            crate::parser::parse_string("server {\n    include snippets/upstream.conf;\n}")
-                .unwrap();
+        let config = nginx_lint_common::parser::parse_string(
+            "server {\n    include snippets/upstream.conf;\n}",
+        )
+        .unwrap();
 
         // Without prefix: resolves from conf.d/ → error
         let rule = IncludePathExists::new();

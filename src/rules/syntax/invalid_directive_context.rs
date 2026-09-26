@@ -1,6 +1,6 @@
 use crate::docs::RuleDoc;
-use crate::linter::{LintError, LintRule, Severity};
-use crate::parser::ast::{Config, ConfigItem};
+use nginx_lint_common::linter::{LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::{Config, ConfigItem};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -204,7 +204,7 @@ impl LintRule for InvalidDirectiveContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::parse_string;
+    use nginx_lint_common::parser::parse_string;
     use std::path::PathBuf;
 
     fn check_config(content: &str) -> Vec<LintError> {

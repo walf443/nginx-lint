@@ -1,9 +1,9 @@
 use crate::docs::RuleDoc;
-use crate::linter::{Fix, LintError, LintRule, Severity};
-use crate::parser::ast::Config;
-use crate::parser::line_index::LineIndex;
-use crate::parser::parse_string_rowan;
-use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
+use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::Config;
+use nginx_lint_common::parser::line_index::LineIndex;
+use nginx_lint_common::parser::parse_string_rowan;
+use nginx_lint_common::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode};
 use std::fs;
 use std::path::Path;
 
@@ -173,7 +173,10 @@ impl UnmatchedBraces {
             }
 
             let name = &source[first.offset..first.offset + first.len];
-            if !crate::parser::is_block_directive_with_extras(name, additional_block_directives) {
+            if !nginx_lint_common::parser::is_block_directive_with_extras(
+                name,
+                additional_block_directives,
+            ) {
                 continue;
             }
 
@@ -273,7 +276,7 @@ impl UnmatchedBraces {
                 }
                 SyntaxElement::Node(child_node) => {
                     if child_node.kind() == SyntaxKind::BLOCK
-                        && crate::parser::is_raw_block_cst_node(&child_node)
+                        && nginx_lint_common::parser::is_raw_block_cst_node(&child_node)
                     {
                         // For raw blocks, only emit L_BRACE and R_BRACE so
                         // brace counting and line analysis work correctly.
@@ -528,7 +531,7 @@ impl LintRule for UnmatchedBraces {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::ast::Config;
+    use nginx_lint_common::parser::ast::Config;
     use std::io::Write;
     use tempfile::NamedTempFile;
 

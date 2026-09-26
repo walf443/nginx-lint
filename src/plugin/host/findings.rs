@@ -2,7 +2,7 @@
 //! findings, with every string it hands over sanitized.
 
 use super::bindings;
-use crate::linter::{LintError, Severity};
+use nginx_lint_common::linter::{LintError, Severity};
 
 /// Plugin spec returned by the plugin
 #[derive(Debug, Clone)]
@@ -63,8 +63,8 @@ fn convert_severity(severity: &bindings::nginx_lint::plugin::types::Severity) ->
 }
 
 /// Convert WIT Fix to crate Fix
-fn convert_fix(fix: &bindings::nginx_lint::plugin::types::Fix) -> crate::linter::Fix {
-    crate::linter::Fix {
+fn convert_fix(fix: &bindings::nginx_lint::plugin::types::Fix) -> nginx_lint_common::linter::Fix {
+    nginx_lint_common::linter::Fix {
         line: fix.line as usize,
         old_text: fix.old_text.clone(),
         new_text: fix.new_text.clone(),

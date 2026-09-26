@@ -1,7 +1,7 @@
-use crate::LintError;
-use crate::Severity;
-use crate::config::{Color, ColorConfig};
 use colored::{ColoredString, Colorize};
+use nginx_lint_common::config::{Color, ColorConfig};
+use nginx_lint_common::linter::LintError;
+use nginx_lint_common::linter::Severity;
 use std::io::Write;
 use std::path::Path;
 
