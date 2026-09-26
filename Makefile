@@ -230,22 +230,37 @@ check-lua-runtime:
 # builtin plugins `wasm-builtin-plugins` embeds are built with
 # nginx-lint-plugin's `wit-export`, which cargo-about cannot be told about
 # (it ignores `crate/feature` in --features), so their wit-bindgen runtime is
-# not listed. Release binaries enable neither of these features. The template
-# names crates without their versions, so a plain dependency bump leaves the
-# file as it is; it goes stale when a crate enters or leaves the tree or a
-# license text changes, and check-licenses (run in CI) catches that. CI uses
-# cargo-about 0.9.2 (cargo install cargo-about --locked --features cli);
-# another version may render the texts differently.
-LICENSES_FEATURES = web-server,wasm-builtin-plugins,wasm
-LICENSES_NOTICES = licenses/THIRD-PARTY-NOTICES
+# not listed. Release binaries enable neither of these features.
+#
+# plugins/nginx-lint-plugin-sdk/licenses/THIRD-PARTY-NOTICES is the same for
+# the nginx-lint-plugin-sdk binary, which `nginx-lint-plugin-sdk license`
+# prints after the notices of its Lua runtime.
+#
+# The template names crates without their versions, so a plain dependency
+# bump leaves the files as they are; they go stale when a crate enters or
+# leaves the tree or a license text changes, and check-licenses (run in CI)
+# catches that. CI uses cargo-about 0.9.2 (cargo install cargo-about --locked
+# --features cli); another version may render the texts differently.
+LICENSES_ABOUT = cargo about generate --locked --fail -c about.toml
+LICENSES_CLI_ARGS = --features web-server,wasm-builtin-plugins,wasm
+LICENSES_CLI_NOTICES = licenses/THIRD-PARTY-NOTICES
+LICENSES_SDK_ARGS = -m plugins/nginx-lint-plugin-sdk/Cargo.toml
+LICENSES_SDK_NOTICES = plugins/nginx-lint-plugin-sdk/licenses/THIRD-PARTY-NOTICES
+
+# $(1) is CLI or SDK
+define check_notices
+	@fresh=$$(mktemp) && trap 'rm -f "$$fresh"' EXIT && \
+		$(LICENSES_ABOUT) $(LICENSES_$(1)_ARGS) about.hbs -o "$$fresh" && \
+		{ diff -u $(LICENSES_$(1)_NOTICES) "$$fresh" || { echo "$(LICENSES_$(1)_NOTICES) is stale; run make build-licenses and commit the result" >&2; exit 1; }; }
+endef
 
 build-licenses:
-	cargo about generate --locked --fail --features $(LICENSES_FEATURES) about.hbs -o $(LICENSES_NOTICES)
+	$(LICENSES_ABOUT) $(LICENSES_CLI_ARGS) about.hbs -o $(LICENSES_CLI_NOTICES)
+	$(LICENSES_ABOUT) $(LICENSES_SDK_ARGS) about.hbs -o $(LICENSES_SDK_NOTICES)
 
 check-licenses:
-	@fresh=$$(mktemp) && trap 'rm -f "$$fresh"' EXIT && \
-		cargo about generate --locked --fail --features $(LICENSES_FEATURES) about.hbs -o "$$fresh" && \
-		{ diff -u $(LICENSES_NOTICES) "$$fresh" || { echo "$(LICENSES_NOTICES) is stale; run make build-licenses and commit the result" >&2; exit 1; }; }
+	$(call check_notices,CLI)
+	$(call check_notices,SDK)
 
 # Build nginx-lint-parser as WASM Component for TypeScript plugin testing
 build-parser-wasm: copy-wit
@@ -332,8 +347,8 @@ help:
 	@echo "  make build-with-wasm-plugins - Build CLI with embedded WASM plugins"
 	@echo "  make build-parser-wasm  - Build parser WASM for TypeScript plugin testing"
 	@echo "  make copy-wit           - Refresh the WIT vendored into the parser/plugin crates"
-	@echo "  make build-licenses     - Regenerate licenses/THIRD-PARTY-NOTICES (needs cargo-about)"
-	@echo "  make check-licenses     - Check that licenses/THIRD-PARTY-NOTICES is up to date"
+	@echo "  make build-licenses     - Regenerate the CLI and SDK third-party notices (needs cargo-about)"
+	@echo "  make check-licenses     - Check that the third-party notices are up to date"
 	@echo "  make build-fixer-wasm   - Build fix-applier WASM for TypeScript plugin testing"
 	@echo "                            (the TypeScript SDK imports both; build them together)"
 	@echo "  make build-wasm         - Build WASM for web (without plugins)"

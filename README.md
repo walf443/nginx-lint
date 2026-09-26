@@ -363,4 +363,5 @@ cargo install --path . --no-default-features --features cli,wasm-builtin-plugins
 The binary also contains third-party crates under their own licenses;
 `nginx-lint license` prints their notices (kept in
 [licenses/THIRD-PARTY-NOTICES](licenses/THIRD-PARTY-NOTICES), regenerated with
-`make build-licenses`).
+`make build-licenses`). `nginx-lint-plugin-sdk license` does the same for
+the plugin SDK binary and the Lua runtime it embeds in plugins.
