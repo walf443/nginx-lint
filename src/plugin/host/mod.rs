@@ -9,7 +9,7 @@ pub(crate) mod config_api_host;
 pub(crate) mod findings;
 pub(crate) mod snapshot;
 
-use crate::parser::ast::{self, Config};
+use nginx_lint_common::parser::ast::{self, Config};
 use std::sync::Arc;
 use wasmtime::StoreLimits;
 use wasmtime::component::{Resource, ResourceTable};

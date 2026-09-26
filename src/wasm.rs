@@ -5,9 +5,10 @@
 
 use wasm_bindgen::prelude::*;
 
-use crate::linter::{LintError, Linter, Severity};
-use crate::parser::parse_string_with_errors;
+use crate::linter::Linter;
 use crate::syntax_errors_to_lint_errors;
+use nginx_lint_common::linter::{LintError, Severity};
+use nginx_lint_common::parser::parse_string_with_errors;
 
 /// Initialize the WASM module (sets up panic hook for better error messages)
 #[wasm_bindgen(start)]
@@ -141,9 +142,9 @@ pub fn lint(content: &str) -> Result<WasmLintResult, JsValue> {
 /// A `WasmLintResult` containing the lint errors as JSON
 #[wasm_bindgen]
 pub fn lint_with_config(content: &str, config_toml: &str) -> Result<WasmLintResult, JsValue> {
-    use crate::config::LintConfig;
-    use crate::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
     use crate::rules::{Indent, MissingSemicolon, UnclosedQuote, UnmatchedBraces};
+    use nginx_lint_common::config::LintConfig;
+    use nginx_lint_common::ignore::{IgnoreTracker, filter_errors, warnings_to_errors};
 
     // Parse TOML configuration
     let lint_config = if config_toml.is_empty() {
@@ -398,7 +399,7 @@ pub fn debug_plugin_status() -> String {
 /// Get the default configuration template
 #[wasm_bindgen]
 pub fn get_default_config() -> String {
-    crate::config::DEFAULT_CONFIG_TEMPLATE.to_string()
+    nginx_lint_common::config::DEFAULT_CONFIG_TEMPLATE.to_string()
 }
 
 /// Apply fixes to content string
@@ -415,10 +416,10 @@ pub fn apply_fixes(content: &str, errors_json: &str) -> Result<String, JsValue> 
         serde_json::from_str(errors_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     // Convert JsLintError fixes to Fix references
-    let fixes: Vec<crate::linter::Fix> = errors
+    let fixes: Vec<nginx_lint_common::linter::Fix> = errors
         .iter()
         .flat_map(|e| {
-            e.fixes.iter().map(|f| crate::linter::Fix {
+            e.fixes.iter().map(|f| nginx_lint_common::linter::Fix {
                 line: f.line,
                 old_text: f.old_text.clone(),
                 new_text: f.new_text.clone(),
@@ -430,7 +431,7 @@ pub fn apply_fixes(content: &str, errors_json: &str) -> Result<String, JsValue> 
         })
         .collect();
 
-    let fix_refs: Vec<&crate::linter::Fix> = fixes.iter().collect();
+    let fix_refs: Vec<&nginx_lint_common::linter::Fix> = fixes.iter().collect();
     let (result, _) = crate::apply_fixes_to_content(content, &fix_refs);
     Ok(result)
 }

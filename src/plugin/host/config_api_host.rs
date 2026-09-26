@@ -8,7 +8,7 @@ use super::snapshot::{
 use super::{
     ComponentStoreData, ConfigResource, DirectiveResource, config_api, resolve_block_items,
 };
-use crate::parser::ast::{self, Config};
+use nginx_lint_common::parser::ast::{self, Config};
 use std::sync::Arc;
 use wasmtime::component::{Resource, ResourceTable};
 

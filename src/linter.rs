@@ -1002,7 +1002,7 @@ mod batch_tests {
         linter.add_rule(rule("other", Some(2)));
         linter.add_rule(rule("c", Some(1)));
 
-        let config = crate::parser::parse_string("http {}").unwrap();
+        let config = nginx_lint_common::parser::parse_string("http {}").unwrap();
         let mut errors = linter.lint(&config, Path::new("t.conf"));
         errors.sort_by(|x, y| x.rule.cmp(&y.rule));
 
@@ -1043,7 +1043,7 @@ mod batch_tests {
                 fail_batch: true,
             }));
         }
-        let config = crate::parser::parse_string("http {}").unwrap();
+        let config = nginx_lint_common::parser::parse_string("http {}").unwrap();
         let mut errors = linter.lint(&config, Path::new("t.conf"));
         errors.sort_by(|x, y| x.rule.cmp(&y.rule));
         let outcomes: Vec<(String, String)> = errors
@@ -1095,7 +1095,7 @@ mod batch_tests {
         let mut linter = Linter::new();
         linter.add_rule(Box::new(KeyedOnly("x")));
         linter.add_rule(Box::new(KeyedOnly("y")));
-        let config = crate::parser::parse_string("http {}").unwrap();
+        let config = nginx_lint_common::parser::parse_string("http {}").unwrap();
         let mut names: Vec<String> = linter
             .lint(&config, Path::new("t.conf"))
             .into_iter()
@@ -1121,7 +1121,7 @@ mod batch_tests {
                 fail_batch: false,
             }));
         }
-        let config = crate::parser::parse_string("http {}").unwrap();
+        let config = nginx_lint_common::parser::parse_string("http {}").unwrap();
         let (errors, profiles) = linter.lint_with_profile(&config, Path::new("t.conf"));
         assert_eq!(errors.len(), 2);
         assert_eq!(profiles.len(), 2);

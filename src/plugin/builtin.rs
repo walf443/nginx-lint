@@ -6,7 +6,7 @@
 #[cfg(feature = "wasm-builtin-plugins")]
 use super::{ComponentLintRule, PluginError, PluginLoader};
 #[cfg(feature = "wasm-builtin-plugins")]
-use crate::linter::LintRule;
+use nginx_lint_common::linter::LintRule;
 
 /// Embedded WASM bytes for builtin plugins
 #[cfg(feature = "wasm-builtin-plugins")]

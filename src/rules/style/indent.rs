@@ -1,7 +1,7 @@
-use crate::config::IndentSize;
 use crate::docs::RuleDoc;
-use crate::linter::{Fix, LintError, LintRule, Severity};
-use crate::parser::ast::{Config, ConfigItem};
+use nginx_lint_common::config::IndentSize;
+use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::{Config, ConfigItem};
 use std::path::Path;
 
 /// Rule documentation
@@ -56,7 +56,7 @@ impl Indent {
     /// Check indentation on content string directly (used by WASM and docs)
     pub fn check_content(&self, content: &str) -> Vec<LintError> {
         // Parse with error recovery so we get an AST even for broken configs
-        let (config, errors) = crate::parser::parse_string_with_errors(content);
+        let (config, errors) = nginx_lint_common::parser::parse_string_with_errors(content);
         // Unbalanced braces make the recovered AST's block nesting a guess, so
         // every depth we'd compute — and every fix built from it — is unreliable
         // (e.g. closing braces synthesised at EOF produce spurious "indent the
@@ -188,7 +188,9 @@ impl LintRule for Indent {
 /// nesting intact — indent should keep working) and for a missing opening
 /// brace; since the message can't tell them apart and the missing-`;` case is
 /// the common one, this diagnostic doesn't suppress indentation.
-pub(crate) fn has_brace_structure_error(errors: &[crate::parser::parser::SyntaxError]) -> bool {
+pub(crate) fn has_brace_structure_error(
+    errors: &[nginx_lint_common::parser::parser::SyntaxError],
+) -> bool {
     errors.iter().any(|e| e.message.contains('}'))
 }
 
@@ -278,7 +280,7 @@ mod tests {
 
     /// Apply range-based fixes to content (sorted by offset descending)
     fn apply_range_fixes(content: &str, errors: &[LintError]) -> String {
-        let mut fixes: Vec<&crate::linter::Fix> =
+        let mut fixes: Vec<&nginx_lint_common::linter::Fix> =
             errors.iter().flat_map(|e| e.fixes.iter()).collect();
         fixes.sort_by(|a, b| {
             b.start_offset
@@ -297,7 +299,7 @@ mod tests {
     }
 
     fn check_content_with_config(content: &str) -> Vec<LintError> {
-        let config = crate::parser::parse_string(content).unwrap();
+        let config = nginx_lint_common::parser::parse_string(content).unwrap();
         let rule = Indent::default();
         rule.check(&config, Path::new("test.conf"))
     }
@@ -557,13 +559,16 @@ content_by_lua_block {
     #[test]
     fn test_detect_indent_size() {
         // Test the detection function directly
-        let config_4 = crate::parser::parse_string("http {\n    server {\n    }\n}\n").unwrap();
+        let config_4 =
+            nginx_lint_common::parser::parse_string("http {\n    server {\n    }\n}\n").unwrap();
         assert_eq!(detect_indent_size_from_ast(&config_4.items), Some(4));
 
-        let config_2 = crate::parser::parse_string("http {\n  server {\n  }\n}\n").unwrap();
+        let config_2 =
+            nginx_lint_common::parser::parse_string("http {\n  server {\n  }\n}\n").unwrap();
         assert_eq!(detect_indent_size_from_ast(&config_2.items), Some(2));
 
-        let config_tab = crate::parser::parse_string("http {\n\tserver {\n\t}\n}\n").unwrap();
+        let config_tab =
+            nginx_lint_common::parser::parse_string("http {\n\tserver {\n\t}\n}\n").unwrap();
         // Tab indentation returns None (not space-based)
         assert_eq!(detect_indent_size_from_ast(&config_tab.items), None);
     }
@@ -674,7 +679,7 @@ content_by_lua_block {
 
     #[test]
     fn test_has_brace_structure_error() {
-        use crate::parser::parse_string_with_errors;
+        use nginx_lint_common::parser::parse_string_with_errors;
 
         let (_c, unclosed) = parse_string_with_errors("http {\n  server {\n");
         assert!(has_brace_structure_error(&unclosed));

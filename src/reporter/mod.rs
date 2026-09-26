@@ -2,8 +2,8 @@ mod errorformat;
 mod github_actions;
 mod json;
 
-use crate::LintError;
-use crate::config::ColorConfig;
+use nginx_lint_common::config::ColorConfig;
+use nginx_lint_common::linter::LintError;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, Default)]

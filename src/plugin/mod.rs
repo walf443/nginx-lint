@@ -83,7 +83,7 @@ pub fn shipped_rule_names() -> std::collections::HashSet<String> {
     #[cfg(not(any(feature = "wasm-builtin-plugins", feature = "native-builtin-plugins")))]
     let builtin: &[&str] = &["invalid-directive-context"];
 
-    crate::LintConfig::NATIVE_RULE_NAMES
+    nginx_lint_common::LintConfig::NATIVE_RULE_NAMES
         .iter()
         .chain(builtin)
         .map(|name| name.to_string())

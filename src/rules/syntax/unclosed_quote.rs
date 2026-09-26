@@ -1,9 +1,9 @@
 use crate::docs::RuleDoc;
-use crate::linter::{Fix, LintError, LintRule, Severity};
-use crate::parser::ast::Config;
-use crate::parser::line_index::LineIndex;
-use crate::parser::parse_string_rowan;
-use crate::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
+use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
+use nginx_lint_common::parser::ast::Config;
+use nginx_lint_common::parser::line_index::LineIndex;
+use nginx_lint_common::parser::parse_string_rowan;
+use nginx_lint_common::parser::syntax_kind::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 use std::fs;
 use std::path::Path;
 
@@ -71,7 +71,7 @@ impl UnclosedQuote {
                 SyntaxElement::Node(child_node) => {
                     // Skip raw block contents
                     if child_node.kind() == SyntaxKind::BLOCK
-                        && crate::parser::is_raw_block_cst_node(&child_node)
+                        && nginx_lint_common::parser::is_raw_block_cst_node(&child_node)
                     {
                         continue;
                     }

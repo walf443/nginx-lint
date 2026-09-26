@@ -178,7 +178,7 @@ pub fn get_rule_doc_with_plugins(name: &str) -> Option<RuleDocOwned> {
     feature = "native-builtin-plugins",
     feature = "plugins"
 ))]
-fn rule_to_doc(rule: &dyn crate::linter::LintRule) -> RuleDocOwned {
+fn rule_to_doc(rule: &dyn nginx_lint_common::linter::LintRule) -> RuleDocOwned {
     RuleDocOwned {
         name: rule.name().to_string(),
         category: rule.category().to_string(),
@@ -217,8 +217,8 @@ pub fn external_plugin_docs(
 /// Get documentation from native plugins
 #[cfg(feature = "native-builtin-plugins")]
 fn get_builtin_plugin_docs() -> Vec<RuleDocOwned> {
-    use crate::linter::LintRule;
     use crate::plugin::native_builtin::load_native_builtin_plugins;
+    use nginx_lint_common::linter::LintRule;
 
     let plugins: Vec<Box<dyn LintRule>> = load_native_builtin_plugins();
     plugins
@@ -280,12 +280,13 @@ mod tests {
 #[cfg(test)]
 mod example_tests {
     use super::*;
-    use crate::linter::{Fix, Linter};
+    use crate::linter::Linter;
+    use nginx_lint_common::linter::Fix;
     use nginx_lint_common::parse_string;
     use std::path::Path;
 
     /// Apply all fixes to content (delegates to the unified offset-based apply logic)
-    fn apply_fixes(content: &str, errors: &[crate::linter::LintError]) -> String {
+    fn apply_fixes(content: &str, errors: &[nginx_lint_common::linter::LintError]) -> String {
         let fixes: Vec<&Fix> = errors.iter().flat_map(|e| e.fixes.iter()).collect();
         let (result, _) = crate::apply_fixes_to_content(content, &fixes);
         result
