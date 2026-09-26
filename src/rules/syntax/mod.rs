@@ -1,4 +1,4 @@
-#[cfg(feature = "cli")]
+// Not cli-only as a whole: its DOC is shown in every build (see the module)
 pub mod include_path_exists;
 pub mod invalid_directive_context;
 pub mod missing_semicolon;

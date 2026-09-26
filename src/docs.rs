@@ -3,59 +3,7 @@
 //! This module provides detailed documentation for each lint rule,
 //! explaining why the rule exists and what the recommended configuration is.
 
-/// Documentation for a lint rule (static version for native rules)
-pub struct RuleDoc {
-    /// Rule name (e.g., "server-tokens-enabled")
-    pub name: &'static str,
-    /// Category (e.g., "security")
-    pub category: &'static str,
-    /// Short description
-    pub description: &'static str,
-    /// Severity level
-    pub severity: &'static str,
-    /// Why this rule exists
-    pub why: &'static str,
-    /// Example of bad configuration
-    pub bad_example: &'static str,
-    /// Example of good configuration
-    pub good_example: &'static str,
-    /// References (URLs, documentation links)
-    pub references: &'static [&'static str],
-    /// Minimum nginx version this rule applies to (inclusive), if declared.
-    pub min_nginx_version: Option<&'static str>,
-    /// Maximum nginx version this rule applies to (inclusive), if declared.
-    pub max_nginx_version: Option<&'static str>,
-}
-
-impl RuleDoc {
-    /// Field defaults for use with Rust's struct-update syntax:
-    ///
-    /// ```ignore
-    /// pub static DOC: RuleDoc = RuleDoc {
-    ///     name: "my-rule",
-    ///     // ...required fields...
-    ///     ..RuleDoc::DEFAULTS
-    /// };
-    /// ```
-    ///
-    /// Currently only the optional `min_nginx_version` / `max_nginx_version`
-    /// fields have meaningful defaults; the rest are empty placeholders that
-    /// you should override. Future additive fields with sensible defaults
-    /// can be added here so existing DOC literals automatically pick them
-    /// up via `..RuleDoc::DEFAULTS` without each call site needing edits.
-    pub const DEFAULTS: RuleDoc = RuleDoc {
-        name: "",
-        category: "",
-        description: "",
-        severity: "",
-        why: "",
-        bad_example: "",
-        good_example: "",
-        references: &[],
-        min_nginx_version: None,
-        max_nginx_version: None,
-    };
-}
+pub use crate::rules::rule_doc::RuleDoc;
 
 /// Documentation for a lint rule (owned version, supports plugins)
 #[derive(Debug, Clone)]
@@ -108,25 +56,13 @@ pub fn get_rule_doc(name: &str) -> Option<&'static RuleDoc> {
 }
 
 /// Get all rule documentation (native rules only)
-/// Rule documentation for include-path-exists (cli-only rule, but docs are always available)
-static INCLUDE_PATH_EXISTS_DOC: RuleDoc = RuleDoc {
-    name: "include-path-exists",
-    category: "syntax",
-    description: "Detects include directives that reference non-existent files",
-    severity: "error",
-    why: r#"When an include directive references a file that does not exist,
-nginx will fail to start. Glob patterns that match no files are
-accepted by nginx but may indicate a misconfiguration."#,
-    bad_example: include_str!("rules/syntax/include_path_exists/bad.conf"),
-    good_example: include_str!("rules/syntax/include_path_exists/good.conf"),
-    references: &["https://nginx.org/en/docs/ngx_core_module.html#include"],
-    ..RuleDoc::DEFAULTS
-};
-
 pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
     use crate::rules::{
         style::indent,
-        syntax::{invalid_directive_context, missing_semicolon, unclosed_quote, unmatched_braces},
+        syntax::{
+            include_path_exists, invalid_directive_context, missing_semicolon, unclosed_quote,
+            unmatched_braces,
+        },
     };
 
     static DOCS: &[&RuleDoc] = &[
@@ -135,7 +71,7 @@ pub fn all_rule_docs() -> &'static [&'static RuleDoc] {
         &unclosed_quote::DOC,
         &missing_semicolon::DOC,
         &invalid_directive_context::DOC,
-        &INCLUDE_PATH_EXISTS_DOC,
+        &include_path_exists::DOC,
         // Style
         &indent::DOC,
     ];

@@ -1,4 +1,4 @@
-use crate::docs::RuleDoc;
+use crate::rules::rule_doc::RuleDoc;
 use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::parser::ast::Config;
 use nginx_lint_common::parser::line_index::LineIndex;
