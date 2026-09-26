@@ -283,3 +283,4 @@ prefix = "/etc/nginx"
 | `nginx-lint config init` | Generate default config |
 | `nginx-lint config schema` | Output JSON Schema for config file |
 | `nginx-lint config schema --format markdown` | Configuration reference in Markdown |
+| `nginx-lint license` | Licenses of the third-party code in the binary |

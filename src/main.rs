@@ -18,6 +18,7 @@ fn main() -> ExitCode {
     match &cli.command {
         Some(Commands::Config { command }) => cli::config::run_config(command, &cli),
         Some(Commands::Guide) => cli::guide::run_guide(),
+        Some(Commands::License) => cli::license::run_license(),
         Some(Commands::Web { port, open }) => cli::web::run_web(*port, *open),
         Some(Commands::TestPlugins { fixtures }) => {
             cli::test_plugins::run_test_plugins(fixtures.clone(), &cli)
