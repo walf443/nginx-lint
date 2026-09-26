@@ -239,8 +239,9 @@ check-lua-runtime:
 # The template names crates without their versions, so a plain dependency
 # bump leaves the files as they are; they go stale when a crate enters or
 # leaves the tree or a license text changes, and check-licenses (run in CI)
-# catches that. CI uses cargo-about 0.9.2 (cargo install cargo-about --locked
-# --features cli); another version may render the texts differently.
+# catches that. Use the cargo-about version ci.yml pins (`tool: cargo-about@…`;
+# cargo install cargo-about --locked --features cli --version <it>): another
+# version may render the texts differently.
 LICENSES_ABOUT = cargo about generate --locked --fail -c about.toml
 LICENSES_CLI_ARGS = --features web-server,wasm-builtin-plugins,wasm
 LICENSES_CLI_NOTICES = licenses/THIRD-PARTY-NOTICES

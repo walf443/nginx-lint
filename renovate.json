@@ -18,6 +18,17 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\s+\\w+:\\s+\"(?<currentValue>[^\"]+)\""
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "The tools taiki-e/install-action installs are pinned as `tool: <crate>@<version>` in its inputs, which the github-actions manager does not read (it updates the action's own ref only). They are all crates.io crates: cargo-about in ci.yml, cargo-cyclonedx in release.yml. A cargo-about bump that renders the notices differently fails `make check-licenses` in its pull request; run `make build-licenses` on that branch.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "tool:\\s*(?<depName>[a-z0-9_-]+)@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "crate"
     }
   ],
   "packageRules": [
