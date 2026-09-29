@@ -234,22 +234,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           # The lowest version the SDK supports, so CI catches anything that
-          # needs a newer one. The abi3 wheel it builds runs on 3.11+.
+          # needs a newer one.
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          shared-key: "python-plugin"
-          workspaces: "plugins/python/nginx-lint-plugin"
-      - name: Lint the native module
-        # This crate is its own workspace, so the repository-wide Format and
-        # Clippy jobs do not reach it
-        working-directory: plugins/python/nginx-lint-plugin
-        run: |
-          cargo fmt --check
-          cargo clippy -- -D warnings
       - name: Install Python tooling
         # From the example plugin's dependency group, so CI and the
         # documented developer setup install the same versions.
@@ -260,9 +246,10 @@ jobs:
           pip install --group dev
       - name: Install nginx-lint-plugin SDK
         working-directory: plugins/python/nginx-lint-plugin
-        # `make install` regenerates the bindings from the WIT first: they are
-        # not committed, so everything downstream builds against the current
-        # wit/nginx-lint-plugin.wit by construction.
+        # `make install` regenerates the bindings from the WIT and copies in
+        # the Go SDK's testkit wasm modules first: neither is committed here,
+        # so everything downstream builds against the current
+        # wit/nginx-lint-plugin.wit and parser by construction.
         run: make install
       - name: Type-check the Python plugin
         working-directory: plugins/python/server-tokens-enabled-py

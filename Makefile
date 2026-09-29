@@ -187,7 +187,10 @@ testkit-wasm: copy-wit
 	cargo build --manifest-path crates/nginx-lint-common/Cargo.toml \
 		--target wasm32-unknown-unknown --release --features wasm-json
 
-# Refresh the committed copies. Run this after changing either crate.
+# Refresh the committed copies. Run this after changing either crate. The
+# Python SDK copies these same files out of the Go SDK (its `make
+# copy-testkit`) and runs them under wasmtime-py, so both SDKs test against
+# them.
 build-testkit-wasm: testkit-wasm
 	cp $(TESTKIT_PARSER) $(GO_SDK)/nginxlinttest/parser.wasm
 	cp $(TESTKIT_FIXER) $(GO_SDK)/nginxlinttest/fixer.wasm

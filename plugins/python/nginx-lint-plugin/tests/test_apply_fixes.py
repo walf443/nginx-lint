@@ -10,7 +10,7 @@ directive it meant to insert before, and every unit test stayed green.
 import pytest
 
 from nginx_lint_plugin import Fix
-from nginx_lint_plugin.testing import apply_fixes, parse_config
+from nginx_lint_plugin.testing import _apply_fix_records, apply_fixes, parse_config
 
 NESTED = "http {\n    server_tokens on;\n}\n"
 
@@ -166,9 +166,7 @@ def test_unapplicable_fix_is_counted_as_skipped():
 def test_apply_fixes_rejects_a_malformed_fix():
     with pytest.raises(ValueError):
         # line and new_text are required; a Fix missing them cannot be a fix
-        from nginx_lint_plugin.testing import _native
-
-        _native.apply_fixes_json(NESTED, '[{"old_text": null}]')
+        _apply_fix_records(NESTED, [{"old_text": None}])
 
 
 # ── Documented edge cases ───────────────────────────────────────────
@@ -194,10 +192,8 @@ def test_a_fix_with_an_unknown_field_is_rejected():
     # keys are refused rather than dropped: a renamed WIT field would
     # otherwise default insert_after to false, turning an insert into a
     # whole-line replacement while the test kept passing.
-    from nginx_lint_plugin.testing import _native
-
     with pytest.raises(ValueError):
-        _native.apply_fixes_json(
+        _apply_fix_records(
             NESTED,
-            '[{"line": 2, "new_text": "x", "insert_after_renamed": true}]',
+            [{"line": 2, "new_text": "x", "insert_after_renamed": True}],
         )

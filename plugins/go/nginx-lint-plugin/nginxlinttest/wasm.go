@@ -18,6 +18,11 @@ import (
 // modules embed the crate version, and the freshness test requires it to
 // match a fresh build.
 //
+// The Python SDK's testing module runs these same two files under
+// wasmtime-py (`make copy-testkit` in plugins/python/nginx-lint-plugin copies
+// them into that package), so they must keep working without imports and
+// with this JSON interface; moving or renaming them breaks that copy too.
+//
 //go:embed parser.wasm
 var parserWasm []byte
 

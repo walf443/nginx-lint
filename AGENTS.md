@@ -88,19 +88,15 @@ cd crates/nginx-lint-common && cargo build && cargo test
 cd crates/nginx-lint-plugin && cargo build && cargo test
 ```
 
-The Python SDK's crate (`plugins/python/nginx-lint-plugin`) must be built
-from its own directory, never with `--manifest-path` from elsewhere. It
-depends on `nginx-lint-parser` and `nginx-lint-common` by published version,
-and `plugins/python/.cargo/config.toml` patches them back to the working
-tree; cargo discovers that config by walking up from the current directory,
-so building from anywhere else silently compiles against the released crates
-instead (and fails outright between a version bump and its crates.io
-publish).
-
-For the same reason Renovate is disabled for that manifest (it runs cargo
-from the repository root), so its `pyo3` and `serde` dependencies are bumped
-by hand. `pyo3` in particular has to stay new enough for the newest released
-CPython: an older one hard-errors on a newer interpreter even with abi3.
+The Python SDK (`plugins/python/nginx-lint-plugin`) is pure Python, built
+with hatchling. Its `testing` module runs the real parser and fix applier
+under wasmtime-py, using the Go SDK's committed test-helper modules (see
+below): `make install` / `make develop` copy them into the package, next to
+the regenerated bindings and the WIT. Only `testing` may import wasmtime —
+componentize-py executes a plugin's imports at build time and cannot load a
+native extension. The package version in `pyproject.toml` is bumped by
+`scripts/bump-version.sh`, and the SDK's tests require it to match the
+version the wasm modules carry.
 
 The Go SDK (`plugins/go/nginx-lint-plugin`) commits both its generated
 bindings and its copy of the WIT, unlike the TypeScript and Python SDKs which
@@ -138,7 +134,8 @@ The Go SDK's `nginxlinttest` package runs the real parser and the real fix
 applier from a plain `go test`, by embedding them as core wasm modules built
 from `nginx-lint-parser --features wasm-json` and `nginx-lint-common --features
 wasm-json` and running them under wazero (Go has no component-model runtime).
-Those modules are committed. After changing either crate, and after every
+Those modules are committed, and the Python SDK's `testing` runs the same
+pair under wasmtime-py. After changing either crate, and after every
 version bump, rebuild and commit them with `make build-testkit-wasm` at the
 root. `make check-testkit-wasm` answers whether the committed copies are still
 current: it builds fresh ones without overwriting them and requires the two to
