@@ -326,8 +326,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  build-python-sdist:
-    name: Build Python sdist
+  build-python:
+    name: Build Python wheel and sdist
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
@@ -339,77 +339,28 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - name: Generate the bindings and bundle the WIT
-        # Neither is committed, and a `tool.maturin.include` glob that matches
+      - name: Generate the bindings, bundle the WIT and the testkit wasm
+        # None of them is committed here, and an `artifacts` glob that matches
         # nothing is silent, so the build would otherwise produce a
         # publishable but unusable package
         working-directory: plugins/python/nginx-lint-plugin
         run: |
           python -m pip install --upgrade pip
-          pip install componentize-py==0.25.0
-          make bindings copy-wit
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          command: sdist
-          args: --out dist
-          working-directory: plugins/python/nginx-lint-plugin
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-dist-sdist
-          path: plugins/python/nginx-lint-plugin/dist/
-
-  build-python-wheels:
-    name: Build Python wheel (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-26.04
-            manylinux: "2014"
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-            manylinux: "2014"
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            manylinux: auto
-          # Cross-compiled from the arm runner; the macOS SDK is universal
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            manylinux: auto
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          # The floor the wheel is built against: abi3-py311 means this one
-          # wheel per platform covers every Python >= 3.11
-          python-version: "3.11"
-      - name: Generate the bindings and bundle the WIT
+          pip install --group dev build
+          make bindings copy-wit copy-testkit
+      - name: Build
+        # Pure Python: one py3-none-any wheel covers every platform
+        # wasmtime-py ships for
         working-directory: plugins/python/nginx-lint-plugin
-        run: |
-          python -m pip install --upgrade pip
-          pip install componentize-py==0.25.0
-          make bindings copy-wit
-      - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
-        with:
-          command: build
-          target: ${{ matrix.target }}
-          args: --release --out dist
-          manylinux: ${{ matrix.manylinux }}
-          working-directory: plugins/python/nginx-lint-plugin
+        run: python -m build --outdir dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-dist-${{ matrix.target }}
+          name: python-dist
           path: plugins/python/nginx-lint-plugin/dist/
 
   verify-python-wheel:
     name: Verify Python wheel
-    needs: build-python-wheels
+    needs: build-python
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
@@ -423,12 +374,12 @@ jobs:
           python-version: "3.11"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-dist-x86_64-unknown-linux-gnu
+          name: python-dist
           path: dist
       # Everything below runs against the wheel in a venv, never the source
-      # tree: this checkout has no generated bindings and no bundled WIT, so a
-      # wheel missing either fails here rather than after an upload PyPI will
-      # not let us replace.
+      # tree: this checkout has no generated bindings, bundled WIT or copied
+      # testkit wasm, so a wheel missing any of them fails here rather than
+      # after an upload PyPI will not let us replace.
       - name: Install the wheel into a clean environment
         run: |
           python -m venv "$RUNNER_TEMP/wheel-venv"
@@ -439,7 +390,7 @@ jobs:
           "$RUNNER_TEMP/wheel-venv/bin/python" - <<'PY'
           import componentize_py_types, wit_world  # the generated bindings
           import nginx_lint_plugin
-          from nginx_lint_plugin import testing  # pulls in the native module
+          from nginx_lint_plugin import testing  # pulls in wasmtime and the wasm
 
           wit = nginx_lint_plugin.wit_dir() / "nginx-lint-plugin.wit"
           assert wit.is_file(), f"bundled WIT missing: {wit}"
@@ -461,44 +412,31 @@ jobs:
 
   verify-python-sdist:
     name: Verify Python sdist
-    # Only after the crates are on crates.io: the sdist depends on them by
-    # version rather than vendoring them, so this is the first moment it can
-    # build the way a user's `pip install` will. Failing here blocks the
-    # upload, which PyPI would not let us replace.
-    needs: [publish-crates, build-python-sdist]
+    # Failing here blocks the upload, which PyPI would not let us replace.
+    needs: build-python
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-dist-sdist
+          name: python-dist
           path: dist
       - name: Build and install the sdist from source
         run: |
           python -m venv "$RUNNER_TEMP/sdist-venv"
           "$RUNNER_TEMP/sdist-venv/bin/pip" install --upgrade pip
-          # The crates.io index can lag the publish step, so retry rather
-          # than fail the release on propagation timing
-          for attempt in 1 2 3; do
-            if "$RUNNER_TEMP/sdist-venv/bin/pip" install dist/*.tar.gz; then
-              exit 0
-            fi
-            echo "attempt $attempt failed"
-            [ "$attempt" -lt 3 ] && sleep 60
-          done
-          exit 1
+          "$RUNNER_TEMP/sdist-venv/bin/pip" install dist/*.tar.gz
       - name: Check the sdist-built package works
         run: |
           "$RUNNER_TEMP/sdist-venv/bin/python" - <<'PY'
           import componentize_py_types, wit_world  # the generated bindings
           import nginx_lint_plugin
-          from nginx_lint_plugin import testing  # pulls in the native module
+          from nginx_lint_plugin import testing  # pulls in wasmtime and the wasm
 
           wit = nginx_lint_plugin.wit_dir() / "nginx-lint-plugin.wit"
           assert wit.is_file(), f"bundled WIT missing: {wit}"
@@ -508,8 +446,8 @@ jobs:
 
   publish-pypi:
     name: Publish to PyPI
-    # publish-crates (through verify-python-sdist) already waits on docker
-    needs: [verify-python-wheel, verify-python-sdist]
+    # After docker, like publish-npm, so a failed release publishes nothing
+    needs: [docker, verify-python-wheel, verify-python-sdist]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     environment: release
@@ -519,8 +457,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: python-dist-*
-          merge-multiple: true
+          name: python-dist
           path: dist
       # Trusted publishing, like the crates.io and npm jobs; PyPI's
       # project-level publisher is configured on pypi.org

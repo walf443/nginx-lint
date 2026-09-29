@@ -1,8 +1,8 @@
 """Unit tests for the server-tokens-enabled-py plugin.
 
 Python port of plugins/typescript/server-tokens-enabled-ts/src/plugin.test.ts —
-same cases, same assertions, run with plain pytest against the real Rust
-parser (via the SDK's nginx_lint_plugin._native module).
+same cases, same assertions, run with plain pytest against nginx-lint's own
+parser (compiled to wasm and run by the SDK's testing module).
 """
 
 from pathlib import Path

@@ -5,7 +5,7 @@ WASM := server-tokens-enabled-py.wasm
 WIT_DIR = $(shell python -c 'import nginx_lint_plugin as p; print(p.wit_dir())')
 # componentize-py does not follow the .pth link an editable install leaves in
 # site-packages, so point it at wherever the SDK actually lives (site-packages
-# for a regular install, the source tree for `maturin develop`).
+# for a regular install, the source tree for `make develop`).
 SDK_DIR = $(shell python -c 'import nginx_lint_plugin as p, pathlib; print(pathlib.Path(p.__file__).parent.parent)')
 
 .PHONY: build test typecheck test-e2e clean

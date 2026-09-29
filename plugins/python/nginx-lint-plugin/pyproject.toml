@@ -1,6 +1,6 @@
 [build-system]
-requires = ["maturin>=1.0,<2.0"]
-build-backend = "maturin"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "nginx-lint-plugin"
@@ -13,8 +13,14 @@ license = "MIT"
 license-files = ["LICENSE"]
 # 3.11+: the committed componentize-py bindings use typing.Self
 requires-python = ">=3.11"
-# Version comes from Cargo.toml
-dynamic = ["version"]
+# Keep in sync with the repository version (scripts/bump-version.sh does);
+# tests/test_testkit.py checks it against the bundled wasm modules
+version = "0.24.0"
+dependencies = [
+    # Runs the parser and fix applier behind nginx_lint_plugin.testing. Only
+    # the core-module API is used, which is stable across releases.
+    "wasmtime>=49",
+]
 
 authors = [{ name = "walf443" }]
 keywords = ["nginx", "lint", "linter", "wasm", "plugin", "component-model"]
@@ -22,7 +28,6 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Rust",
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: System :: Systems Administration",
     "Typing :: Typed",
@@ -34,9 +39,8 @@ Repository = "https://github.com/walf443/nginx-lint"
 Issues = "https://github.com/walf443/nginx-lint/issues"
 Documentation = "https://github.com/walf443/nginx-lint/blob/main/plugins/python/nginx-lint-plugin/README.md"
 
-# Tools the Makefile targets need. `make install` gets maturin through pip's
-# build isolation, but `make develop` and `make bindings` invoke the maturin
-# and componentize-py CLIs directly. Install with `pip install --group dev`.
+# Tools the Makefile targets need: `make bindings` invokes the
+# componentize-py CLI directly. Install with `pip install --group dev`.
 #
 # The componentize-py pin must match the one in
 # ../server-tokens-enabled-py/pyproject.toml: this generates the bindings a
@@ -45,28 +49,32 @@ Documentation = "https://github.com/walf443/nginx-lint/blob/main/plugins/python/
 # build error.
 [dependency-groups]
 dev = [
-    "maturin>=1.0,<2.0",
     "pytest",
     "componentize-py==0.25.1",
 ]
 
-[tool.maturin]
-# Mixed Rust/Python project: pure-Python packages live under python/
-# (nginx_lint_plugin plus the componentize-py bindings wit_world /
-# componentize_py_types, which must stay top-level so the same imports
-# resolve inside a componentized plugin), and the Rust parser bridge is
-# compiled into nginx_lint_plugin._native.
-python-source = "python"
-module-name = "nginx_lint_plugin._native"
-# maturin only auto-includes the module-name package from python-source;
-# the componentize-py bindings must ship as additional top-level modules
-include = [
-    { path = "python/wit_world/**/*.py", format = ["sdist", "wheel"] },
-    { path = "python/componentize_py_types.py", format = ["sdist", "wheel"] },
-    # The WIT itself, so plugin authors can run componentize-py against a
-    # plain `pip install` (see nginx_lint_plugin.wit_dir())
-    { path = "python/nginx_lint_plugin/wit/*.wit", format = ["sdist", "wheel"] },
-    # PEP 561 markers, so downstream type checkers use the annotations
-    { path = "python/nginx_lint_plugin/py.typed", format = ["sdist", "wheel"] },
-    { path = "python/wit_world/py.typed", format = ["sdist", "wheel"] },
+[tool.hatch.build]
+# The generated bindings, the bundled WIT and the copied wasm modules are
+# gitignored, which hatchling would otherwise leave out of both the wheel
+# and the sdist
+artifacts = [
+    "python/wit_world/**/*.py",
+    "python/wit_world/py.typed",
+    "python/componentize_py_types.py",
+    "python/nginx_lint_plugin/wit/*.wit",
+    "python/nginx_lint_plugin/wasm/*.wasm",
 ]
+
+[tool.hatch.build.targets.wheel]
+# Everything under python/ installs top-level: nginx_lint_plugin plus the
+# componentize-py bindings wit_world / componentize_py_types, which must
+# stay top-level so the same imports resolve inside a componentized plugin
+only-include = [
+    "python/nginx_lint_plugin",
+    "python/wit_world",
+    "python/componentize_py_types.py",
+]
+sources = ["python"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["python", "tests", "Makefile", "README.md", "LICENSE"]

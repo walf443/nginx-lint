@@ -4,9 +4,10 @@ Port of the TypeScript SDK's testing entry: provides ``parse_config()``
 to parse real nginx configuration strings into WIT-compatible Config
 objects, and ``PluginTestRunner`` for assertion-based testing.
 
-Parsing uses the ``nginx_lint_plugin._native`` module (the Rust parser
-compiled into this wheel by maturin), so tests exercise the same parser
-the production linter uses. Usage:
+Parsing and fixing run nginx-lint's own Rust parser and fix applier,
+compiled to core wasm modules and executed with wasmtime (see
+``_testkit``), so tests exercise the same code the production linter
+uses. Usage:
 
     from nginx_lint_plugin.testing import parse_config, PluginTestRunner
 
@@ -16,7 +17,7 @@ the production linter uses. Usage:
 
 import json
 from dataclasses import asdict
-from typing import List, NamedTuple, Optional, cast
+from typing import Any, List, NamedTuple, Optional, cast
 
 from wit_world.imports.config_api import Config
 from wit_world.imports import parser_types
@@ -30,17 +31,20 @@ from wit_world.imports.data_types import (
 from wit_world.imports.parser_types import ParseOutput
 from wit_world.imports.types import Fix, LintError
 
-from . import _native
+from . import _testkit
 from .config_builder import build_config_from_parse_output
 from .rules import Rule, reconstruct_for
 
 # ── JSON → generated dataclasses ────────────────────────────────────
 
+# The parser module serializes the wit-bindgen types with serde's defaults:
+# enum cases and variant arms under their Rust names, a variant as a
+# single-key object.
 _ARGUMENT_TYPES = {
-    "literal": ArgumentType.LITERAL,
-    "quoted-string": ArgumentType.QUOTED_STRING,
-    "single-quoted-string": ArgumentType.SINGLE_QUOTED_STRING,
-    "variable": ArgumentType.VARIABLE,
+    "Literal": ArgumentType.LITERAL,
+    "QuotedString": ArgumentType.QUOTED_STRING,
+    "SingleQuotedString": ArgumentType.SINGLE_QUOTED_STRING,
+    "Variable": ArgumentType.VARIABLE,
 }
 
 
@@ -84,14 +88,12 @@ def _directive_data_from_json(d: dict) -> DirectiveData:
 
 
 def _config_item_from_json(d: dict) -> parser_types.ConfigItem:
-    value = d["value"]
-    tag = value["tag"]
-    val = value["val"]
-    if tag == "directive-item":
+    ((tag, val),) = d["value"].items()
+    if tag == "DirectiveItem":
         item_value = parser_types.ConfigItemValue_DirectiveItem(
             value=_directive_data_from_json(val)
         )
-    elif tag == "comment-item":
+    elif tag == "CommentItem":
         item_value = parser_types.ConfigItemValue_CommentItem(
             value=CommentInfo(
                 text=val["text"],
@@ -139,8 +141,8 @@ def parse_config(
 ) -> Config:
     """Parse an nginx configuration string into a WIT-compatible Config.
 
-    Uses the native nginx-lint-parser module for parsing identical to the
-    production Rust parser. Raises ValueError on parse errors.
+    Runs nginx-lint-parser itself, so the result is what the production
+    linter would parse. Raises ValueError on parse errors.
 
     The result is a :class:`BuiltConfig`, which reproduces the host-backed
     `config` resource's methods without inheriting from it (the generated
@@ -148,8 +150,13 @@ def parse_config(
     that a plugin's ``check(cfg: Config, ...)`` type-checks when called
     with a parsed config; the substitution is contained here.
     """
-    raw = _native.parse_config_json(source, include_context or [])
-    built = build_config_from_parse_output(_parse_output_from_json(json.loads(raw)))
+    # An empty argument means no include context to the module
+    context = json.dumps(include_context).encode() if include_context else b""
+    raw = _testkit.call("parser", "parse_config_json", source.encode(), context)
+    response = json.loads(raw)
+    if "error" in response:
+        raise ValueError(response["error"])
+    built = build_config_from_parse_output(_parse_output_from_json(response["output"]))
     return cast(Config, built)
 
 
@@ -181,8 +188,16 @@ def apply_fixes(content: str, fixes: List[Fix]) -> FixResult:
     applied, where the result is the input plus that newline rather than
     the input itself.
     """
-    raw = _native.apply_fixes_json(content, json.dumps([asdict(f) for f in fixes]))
-    result = json.loads(raw)
+    return _apply_fix_records(content, [asdict(f) for f in fixes])
+
+
+def _apply_fix_records(content: str, fixes: List[Any]) -> FixResult:
+    """Apply fixes given as JSON-shaped records, raising ValueError when the
+    applier refuses them. Split out so tests can hand it malformed ones."""
+    request = json.dumps({"content": content, "fixes": fixes})
+    result = json.loads(_testkit.call("fixer", "apply_fixes_json", request.encode()))
+    if "error" in result:
+        raise ValueError(result["error"])
     return FixResult(
         content=result["content"],
         applied=result["applied"],

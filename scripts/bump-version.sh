@@ -35,9 +35,6 @@ CARGO_FILES=(
     "$ROOT_DIR/crates/nginx-lint-parser/Cargo.toml"
     "$ROOT_DIR/crates/nginx-lint-common/Cargo.toml"
     "$ROOT_DIR/crates/nginx-lint-plugin/Cargo.toml"
-    # The Python SDK's crate version is the wheel version (pyproject
-    # declares version dynamic), so it bumps with everything else
-    "$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
     # The Lua plugin builder is released as a binary next to nginx-lint
     "$ROOT_DIR/plugins/nginx-lint-plugin-sdk/Cargo.toml"
     "$ROOT_DIR/plugins/rust/security-rules/Cargo.toml"
@@ -68,11 +65,6 @@ for file in "${CARGO_FILES[@]}"; do
     sed_inplace "s/\(nginx-lint-parser = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     sed_inplace "s/\(nginx-lint-common = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     sed_inplace "s/\(nginx-lint-plugin = { version = \"\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
-    # The Python SDK's crate depends on the two library crates by version
-    # only (see plugins/python/.cargo/config.toml for why), so those lines
-    # have no `{ version = ... }` wrapper to match above
-    sed_inplace "s/^\(nginx-lint-parser = \"=\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
-    sed_inplace "s/^\(nginx-lint-common = \"=\)[0-9]*\.[0-9]*\.[0-9]*/\1$NEW_VERSION/" "$file"
     echo "  Updated $relative"
 done
 
@@ -90,13 +82,12 @@ if [ -f "$TS_PLUGIN_README" ]; then
     echo "  Updated plugins/typescript/nginx-lint-plugin/README.md"
 fi
 
-# The Python SDK is a separate cargo workspace, so no root cargo command
-# refreshes its lockfile; without this it keeps the old version and the next
-# build silently rewrites it.
-PY_SDK_MANIFEST="$ROOT_DIR/plugins/python/nginx-lint-plugin/Cargo.toml"
-if [ -f "$PY_SDK_MANIFEST" ]; then
-    (cd "$(dirname "$PY_SDK_MANIFEST")" && cargo update --workspace --quiet)
-    echo "  Updated plugins/python/nginx-lint-plugin/Cargo.lock"
+# The Python SDK's package version; its tests require it to match the
+# version the testkit wasm modules (rebuilt below) carry.
+PY_SDK_PYPROJECT="$ROOT_DIR/plugins/python/nginx-lint-plugin/pyproject.toml"
+if [ -f "$PY_SDK_PYPROJECT" ]; then
+    sed_inplace "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW_VERSION\"/" "$PY_SDK_PYPROJECT"
+    echo "  Updated plugins/python/nginx-lint-plugin/pyproject.toml"
 fi
 
 # The Go SDK's test helper embeds a committed build of nginx-lint-parser and
@@ -113,4 +104,4 @@ dockerfile-pin run --write
 echo ""
 echo "Done! Updated ${#CARGO_FILES[@]} Cargo.toml files and TypeScript plugin to version $NEW_VERSION."
 echo ""
-echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml plugins/python/nginx-lint-plugin/Cargo.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json && grep 'nginx-lint-plugin' plugins/typescript/nginx-lint-plugin/README.md"
+echo "Verify with: grep -r '^version' Cargo.toml crates/*/Cargo.toml plugins/builtin/*/*/Cargo.toml && grep '^version' plugins/python/nginx-lint-plugin/pyproject.toml && grep '\"version\"' plugins/typescript/nginx-lint-plugin/package.json && grep 'nginx-lint-plugin' plugins/typescript/nginx-lint-plugin/README.md"
