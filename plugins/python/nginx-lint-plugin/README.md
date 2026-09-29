@@ -168,11 +168,14 @@ surface of the componentize-py bindings.
 ## Why core wasm modules instead of the parser WASM component?
 
 The TS SDK runs the parser as a WASM component inside Node (via jco).
-Python has no maintained component-model runtime — wasmtime-py runs core
-modules only — so this SDK runs the parser and the fix applier as core
-modules with a JSON entry point instead, the same pair the Go SDK runs under
-wazero. Same parser code, same output shape, and no compiled code of its
-own: the wheel is `py3-none-any` and runs wherever wasmtime-py has a wheel.
+wasmtime-py can run components too (`wasmtime.component`, since 39.0.0), but
+the parser and fixer components are not committed anywhere, so using them
+would mean building them in this package's release or keeping a second
+committed copy with its own freshness check. The Go SDK already commits the
+same two crates as core modules with a JSON entry point, kept current by
+`make check-testkit-wasm`, so this SDK runs that pair instead. Same parser
+code, same output shape, and no compiled code of its own: the wheel is
+`py3-none-any` and runs wherever wasmtime-py has a wheel.
 
 ## Checking the built plugin
 

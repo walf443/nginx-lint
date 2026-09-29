@@ -4,8 +4,9 @@ These are the Go SDK's test-helper modules (``plugins/go/nginx-lint-plugin/
 nginxlinttest/{parser,fixer}.wasm``): ``nginx-lint-parser`` and
 ``nginx-lint-common`` built with ``--features wasm-json``, committed there and
 copied into this package by ``make copy-testkit``. They have no imports and
-no canonical ABI — one JSON string in, one out — so a plain wasm runtime
-runs them, and wasmtime-py, which has no component-model support, is enough.
+no canonical ABI — one JSON string in, one out — so wasmtime's core-module
+API runs them. Reusing that committed, freshness-checked pair is why this
+does not run the parser component through ``wasmtime.component`` instead.
 
 Only ``testing`` imports this module. wasmtime is a native extension, so a
 module a plugin imports must never reach it: componentize-py executes the
