@@ -84,7 +84,7 @@ jobs:
           tar czf ../nginx-lint-plugin-sdk-${{ matrix.target }}.tar.gz nginx-lint-plugin-sdk
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: nginx-lint-${{ matrix.target }}
           path: |
@@ -224,17 +224,17 @@ jobs:
         run: npm run build
         working-directory: plugins/typescript/nginx-lint-plugin
       - name: Upload dist
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-package-dist
           path: plugins/typescript/nginx-lint-plugin/dist/
       - name: Upload wit
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-package-wit
           path: plugins/typescript/nginx-lint-plugin/wit/
       - name: Upload wasm
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: npm-package-wasm
           path: plugins/typescript/nginx-lint-plugin/wasm/
@@ -353,7 +353,7 @@ jobs:
         # wasmtime-py ships for
         working-directory: plugins/python/nginx-lint-plugin
         run: python -m build --outdir dist
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-dist
           path: plugins/python/nginx-lint-plugin/dist/
