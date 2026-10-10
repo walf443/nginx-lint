@@ -1062,7 +1062,7 @@ Used by: ipnet
 
 ========================================================================
 Apache License 2.0
-Used by: clap clap_builder clap_derive clap_lex
+Used by: clap clap_builder clap_derive clap_lex serde_spanned toml toml_datetime toml_parser toml_writer
 ========================================================================
 
                                  Apache License
@@ -1479,7 +1479,7 @@ Used by: winapi
 
 ========================================================================
 Apache License 2.0
-Used by: anstyle cobs crc32fast serde_spanned toml toml_datetime toml_parser toml_writer
+Used by: anstyle cobs crc32fast
 ========================================================================
 
                                  Apache License
