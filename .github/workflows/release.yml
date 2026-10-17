@@ -63,7 +63,7 @@ jobs:
       # the binary does not link. The SDK's, conversely, misses the C code it
       # carries: Lua, which mlua compiles through a build dependency, and the
       # prebuilt Lua runtime, which cargo does not know about.
-      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
           tool: cargo-cyclonedx@0.5.9
       - name: Generate SBOMs
