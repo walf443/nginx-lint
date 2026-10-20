@@ -10,13 +10,6 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r#"# nginx-lint configuration file
 # Per-rule `skip_version_check = true` forces a rule to run regardless.
 # target_nginx_version = "1.31.0"
 
-# Cache directory for nginx-lint. Cacheable artifacts are stored in
-# subdirectories beneath it (e.g. the WASM plugin compilation cache under
-# "plugins/"). Defaults to the per-user cache directory (e.g.
-# ~/.cache/nginx-lint on Linux). A relative path is resolved against the
-# directory containing this file.
-# cache_dir = ".nginx-lint-cache"
-
 # Color output settings
 [color]
 # Color mode: "auto", "always", or "never"

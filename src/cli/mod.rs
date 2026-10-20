@@ -81,7 +81,8 @@ pub struct Cli {
 
     /// Cache directory for nginx-lint (the WASM plugin compilation cache is stored
     /// under "plugins/" beneath it). Defaults to the per-user cache directory
-    /// (e.g. ~/.cache/nginx-lint on Linux). Overrides cache_dir in .nginx-lint.toml.
+    /// (e.g. ~/.cache/nginx-lint on Linux, following XDG_CACHE_HOME). cache_dir
+    /// in .nginx-lint.toml is ignored.
     #[arg(long, value_name = "DIR", conflicts_with = "no_cache", global = true)]
     pub cache_dir: Option<PathBuf>,
 

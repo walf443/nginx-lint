@@ -1,8 +1,8 @@
 //! Cache directory resolution
 //!
 //! nginx-lint keeps all cacheable artifacts under a single cache root so
-//! that the cache location can be configured in one place (the `cache_dir`
-//! config value or the `--cache-dir` CLI flag). Each cache consumer owns a
+//! that the cache location can be configured in one place (the `--cache-dir`
+//! CLI flag; the `cache_dir` config value is not read). Each cache consumer owns a
 //! subdirectory beneath the root; currently the only consumer is the WASM
 //! plugin compilation cache under [`PLUGIN_CACHE_SUBDIR`].
 

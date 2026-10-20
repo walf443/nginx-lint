@@ -2900,6 +2900,147 @@ fn test_why_reports_unusable_cache_dir() {
     }
 }
 
+#[cfg(feature = "plugins")]
+#[test]
+fn test_lint_ignores_cache_dir_from_config() {
+    use std::process::Command;
+
+    // A .nginx-lint.toml usually belongs to the tree being linted, not to the
+    // user running nginx-lint. Precompiled plugin code is loaded from the
+    // cache root as native code, so that file must not be able to choose it,
+    // whether it is discovered or passed with --config, and whether the path
+    // is relative or absolute: the per-user default is used instead.
+    for (case, explicit_config, absolute) in [
+        ("discovered, relative", false, false),
+        ("discovered, absolute", false, true),
+        ("--config, relative", true, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let planted = project.join("planted-cache");
+        let cache_dir_value = if absolute {
+            planted.display().to_string()
+        } else {
+            "planted-cache".to_string()
+        };
+        let config_path = project.join(".nginx-lint.toml");
+        std::fs::write(&config_path, format!("cache_dir = '{}'\n", cache_dir_value)).unwrap();
+        let conf = project.join("nginx.conf");
+        std::fs::write(&conf, "http {\n    server_tokens off;\n}\n").unwrap();
+        let plugins_dir = dir.path().join("plugins");
+        std::fs::create_dir(&plugins_dir).unwrap();
+        // Keep the per-user default cache inside the temporary directory.
+        let home = dir.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        let default_plugin_cache = if cfg!(target_os = "macos") {
+            home.join("Library/Caches/nginx-lint/plugins")
+        } else if cfg!(windows) {
+            home.join("nginx-lint").join("plugins")
+        } else {
+            home.join(".cache/nginx-lint/plugins")
+        };
+
+        let mut command = Command::new(env!("CARGO_BIN_EXE_nginx-lint"));
+        command
+            .current_dir(dir.path())
+            .env("HOME", &home)
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("LOCALAPPDATA", &home);
+        if explicit_config {
+            command.arg("--config").arg(&config_path);
+        }
+        let output = command
+            .arg("--plugins")
+            .arg(&plugins_dir)
+            .arg(&conf)
+            .output()
+            .expect("Failed to run nginx-lint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_ne!(
+            output.status.code(),
+            Some(2),
+            "{}: lint should run; got:\n{}",
+            case,
+            stderr
+        );
+        assert!(
+            !planted.exists(),
+            "{}: cache_dir from .nginx-lint.toml must not be used as the cache root",
+            case
+        );
+        assert!(
+            default_plugin_cache.is_dir(),
+            "{}: the per-user default cache should be used, expected {}",
+            case,
+            default_plugin_cache.display()
+        );
+        let warning = format!("cache_dir in {} is ignored", config_path.display());
+        assert!(
+            stderr.contains(&warning),
+            "{}: lint should warn that cache_dir is ignored, naming the file; got:\n{}",
+            case,
+            stderr
+        );
+    }
+}
+
+#[cfg(feature = "plugins")]
+#[test]
+fn test_ignored_cache_dir_warning() {
+    use std::process::Command;
+
+    // The warning names the file that set cache_dir, is printed by the
+    // subcommands that load a configuration file too, and stays silent when
+    // --cache-dir or --no-cache is given, since the file's value never
+    // applied then.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".nginx-lint.toml");
+    std::fs::write(&config_path, "cache_dir = 'planted-cache'\n").unwrap();
+    let conf = dir.path().join("nginx.conf");
+    std::fs::write(&conf, "http {\n    server_tokens off;\n}\n").unwrap();
+    let plugins_dir = dir.path().join("plugins");
+    std::fs::create_dir(&plugins_dir).unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let flag_cache = dir.path().join("flag-cache");
+    // test-plugins finds the file from the current directory, so it prints
+    // the path as ./.nginx-lint.toml.
+    let warning = ".nginx-lint.toml is ignored";
+
+    let plugins = plugins_dir.to_str().unwrap();
+    let conf = conf.to_str().unwrap();
+    let flag_cache = flag_cache.to_str().unwrap();
+    for (args, expect_warning) in [
+        (vec!["test-plugins", "--plugins", plugins], true),
+        (
+            vec!["--plugins", plugins, "--cache-dir", flag_cache, conf],
+            false,
+        ),
+        (vec!["--plugins", plugins, "--no-cache", conf], false),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .current_dir(dir.path())
+            .env("HOME", &home)
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("LOCALAPPDATA", &home)
+            .args(&args)
+            .output()
+            .expect("Failed to run nginx-lint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(
+            stderr.contains(warning),
+            expect_warning,
+            "{:?}: expected warning = {}; got:\n{}",
+            args,
+            expect_warning,
+            stderr
+        );
+    }
+}
+
 // ============================================================================
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================

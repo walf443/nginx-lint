@@ -1,8 +1,9 @@
-//! Resolving the plugin-related options that `why` and `test-plugins` share.
+//! Resolving the plugin-related options shared by the subcommands.
 //!
-//! `lint` resolves the same things, but does it inline against a
-//! configuration file it has already loaded for the linting itself; these two
-//! subcommands have no file to lint, so they resolve them here.
+//! [`cache_config`] and [`warn_ignored_cache_dir`] serve every subcommand.
+//! `lint` resolves WASI inline against a configuration file it has already
+//! loaded for the linting itself; `why`, `test-plugins` and `config` have no
+//! file to lint, so they resolve it here with [`allow_wasi`].
 
 use crate::Cli;
 
@@ -38,22 +39,29 @@ pub fn allow_wasi_from(cli: &Cli, config_path: Option<&std::path::Path>) -> Resu
         // pointing at the configuration file. A discovered file stays silent,
         // which is what find_and_load does for `lint` too.
         Some(path) => match LintConfig::from_file(path) {
-            Ok(config) => Some(config),
+            Ok(config) => Some((config, path.to_path_buf())),
             Err(e) => {
                 eprintln!("Error: {}", e);
                 return Err(());
             }
         },
-        None => LintConfig::find_and_load(std::path::Path::new(".")).map(|(cfg, _)| cfg),
+        None => LintConfig::find_and_load(std::path::Path::new(".")),
     };
 
-    Ok(config.is_some_and(|cfg| cfg.plugins.allow_wasi_plugins))
+    if let Some((ref config, ref path)) = config {
+        warn_ignored_cache_dir(cli, config, path);
+    }
+    Ok(config.is_some_and(|(cfg, _)| cfg.plugins.allow_wasi_plugins))
 }
 
-/// Resolve the compilation cache from the CLI flags.
+/// Resolve the compilation cache from the CLI flags: `--no-cache` >
+/// `--cache-dir` > the per-user default.
 ///
-/// Only the flags are honoured; cache_dir is not read from the configuration
-/// file, so a plugin compiled here may not be the copy `lint` cached.
+/// `cache_dir` in the configuration file is not read. The cache holds
+/// precompiled native code that wasmtime loads after only an
+/// engine-compatibility check, with no integrity check, and the
+/// configuration file is usually found in the tree being linted, so it must
+/// not choose where that code comes from.
 pub fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     use nginx_lint::plugin::CompilationCache;
 
@@ -64,4 +72,21 @@ pub fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     } else {
         CompilationCache::Default
     }
+}
+
+/// Warn that `cache_dir` in the configuration file at `path` is ignored (see
+/// [`cache_config`]). Silent when `--no-cache` or `--cache-dir` is given,
+/// since the file's value never applied then.
+pub fn warn_ignored_cache_dir(
+    cli: &Cli,
+    config: &nginx_lint_common::config::LintConfig,
+    path: &std::path::Path,
+) {
+    if cli.no_cache || cli.cache_dir.is_some() || config.cache_dir().is_none() {
+        return;
+    }
+    eprintln!(
+        "Warning: cache_dir in {} is ignored; use --cache-dir to choose the cache directory",
+        path.display()
+    );
 }
