@@ -2976,10 +2976,66 @@ fn test_lint_ignores_cache_dir_from_config() {
             case,
             default_plugin_cache.display()
         );
+        let warning = format!("cache_dir in {} is ignored", config_path.display());
         assert!(
-            stderr.contains("cache_dir in .nginx-lint.toml is ignored"),
-            "{}: lint should warn that cache_dir is ignored; got:\n{}",
+            stderr.contains(&warning),
+            "{}: lint should warn that cache_dir is ignored, naming the file; got:\n{}",
             case,
+            stderr
+        );
+    }
+}
+
+#[cfg(feature = "plugins")]
+#[test]
+fn test_ignored_cache_dir_warning() {
+    use std::process::Command;
+
+    // The warning names the file that set cache_dir, is printed by the
+    // subcommands that load a configuration file too, and stays silent when
+    // --cache-dir or --no-cache is given, since the file's value never
+    // applied then.
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join(".nginx-lint.toml");
+    std::fs::write(&config_path, "cache_dir = 'planted-cache'\n").unwrap();
+    let conf = dir.path().join("nginx.conf");
+    std::fs::write(&conf, "http {\n    server_tokens off;\n}\n").unwrap();
+    let plugins_dir = dir.path().join("plugins");
+    std::fs::create_dir(&plugins_dir).unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let flag_cache = dir.path().join("flag-cache");
+    // test-plugins finds the file from the current directory, so it prints
+    // the path as ./.nginx-lint.toml.
+    let warning = ".nginx-lint.toml is ignored";
+
+    let plugins = plugins_dir.to_str().unwrap();
+    let conf = conf.to_str().unwrap();
+    let flag_cache = flag_cache.to_str().unwrap();
+    for (args, expect_warning) in [
+        (vec!["test-plugins", "--plugins", plugins], true),
+        (
+            vec!["--plugins", plugins, "--cache-dir", flag_cache, conf],
+            false,
+        ),
+        (vec!["--plugins", plugins, "--no-cache", conf], false),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .current_dir(dir.path())
+            .env("HOME", &home)
+            .env("XDG_CACHE_HOME", home.join(".cache"))
+            .env("LOCALAPPDATA", &home)
+            .args(&args)
+            .output()
+            .expect("Failed to run nginx-lint");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        assert_eq!(
+            stderr.contains(warning),
+            expect_warning,
+            "{:?}: expected warning = {}; got:\n{}",
+            args,
+            expect_warning,
             stderr
         );
     }

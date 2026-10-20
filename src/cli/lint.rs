@@ -500,14 +500,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     };
 
     // 3. Load configuration
-    let (lint_config, config_dir) = if let Some(config_path) = &cli.config {
+    let (lint_config, config_path) = if let Some(config_path) = &cli.config {
         match LintConfig::from_file(config_path) {
             Ok(cfg) => {
                 if cli.verbose {
                     eprintln!("Using config: {}", config_path.display());
                 }
-                let dir = config_path.parent().map(|p| p.to_path_buf());
-                (Some(cfg), dir)
+                (Some(cfg), Some(config_path.clone()))
             }
             Err(e) => {
                 eprintln!("Error: {}", e);
@@ -528,12 +527,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                 if cli.verbose {
                     eprintln!("Found .nginx-lint.toml: {}", config_path.display());
                 }
-                let dir = config_path.parent().map(|p| p.to_path_buf());
-                (Some(cfg), dir)
+                (Some(cfg), Some(config_path))
             }
             None => (None, None),
         }
     };
+    let config_dir = config_path
+        .as_deref()
+        .and_then(|path| path.parent())
+        .map(|dir| dir.to_path_buf());
 
     // 4. Configure color output (CLI flags take precedence over config)
     if cli.color {
@@ -591,19 +593,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // 8. Resolve the cache root and create the linter
-    // Cache root precedence: --no-cache > --cache-dir > per-user default,
-    // resolved by the same helper the other subcommands use. cache_dir in
-    // .nginx-lint.toml is not read: the cache holds precompiled native code
-    // that wasmtime loads after only an engine-compatibility check, with no
-    // integrity check, and that file is usually found in the tree being
-    // linted, so it must not choose where that code comes from.
-    if lint_config
-        .as_ref()
-        .is_some_and(|c| c.cache_dir().is_some())
-    {
-        eprintln!(
-            "Warning: cache_dir in .nginx-lint.toml is ignored; use --cache-dir to choose the cache directory"
-        );
+    // See cache_config for why the configuration file's cache_dir is not read.
+    if let (Some(config), Some(path)) = (lint_config.as_ref(), config_path.as_deref()) {
+        super::plugin_opts::warn_ignored_cache_dir(&cli, config, path);
     }
     let compilation_cache = super::plugin_opts::cache_config(&cli);
 
