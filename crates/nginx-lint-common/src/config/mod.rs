@@ -64,11 +64,11 @@ pub struct LintConfig {
     pub target_nginx_version: Option<String>,
     /// Cache directory for nginx-lint.
     ///
-    /// Cacheable artifacts are stored in subdirectories beneath it (e.g.
-    /// the WASM plugin compilation cache under `plugins/`). Defaults to the
-    /// per-user cache directory (e.g. `~/.cache/nginx-lint` on Linux). A
-    /// relative path is resolved against the directory containing the
-    /// config file.
+    /// Ignored by the command line; use `--cache-dir` (without it the
+    /// per-user cache directory, e.g. `~/.cache/nginx-lint` on Linux, is
+    /// used). Kept so existing files still parse. The cache holds
+    /// precompiled native code, and a configuration file found in the
+    /// linted tree must not choose where that code is loaded from.
     #[serde(default)]
     pub cache_dir: Option<String>,
 }
@@ -248,8 +248,8 @@ impl LintConfig {
         self.include.prefix.as_deref()
     }
 
-    /// Get the cache directory for nginx-lint (e.g. the WASM plugin
-    /// compilation cache is stored under `plugins/` beneath it)
+    /// Get the `cache_dir` value as written in the file. The command line
+    /// does not use it (see the `cache_dir` field).
     pub fn cache_dir(&self) -> Option<&str> {
         self.cache_dir.as_deref()
     }

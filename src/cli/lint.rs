@@ -591,8 +591,11 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // 8. Resolve the cache root and create the linter
-    // Cache root precedence: --no-cache > --cache-dir > cache_dir in
-    // .nginx-lint.toml (relative to the config file) > per-user default
+    // Cache root precedence: --no-cache > --cache-dir > per-user default.
+    // cache_dir in .nginx-lint.toml is not read: the cache holds precompiled
+    // native code that is loaded without being checked, and that file is
+    // usually found in the tree being linted, so it must not choose where
+    // that code comes from. This matches cache_config for the subcommands.
     let compilation_cache = {
         use nginx_lint::plugin::CompilationCache;
 
@@ -600,11 +603,6 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             CompilationCache::Disabled
         } else if let Some(ref cache_dir) = cli.cache_dir {
             CompilationCache::Directory(cache_dir.clone())
-        } else if let Some(cache_dir) = lint_config.as_ref().and_then(|c| c.cache_dir()) {
-            CompilationCache::Directory(resolve_against_config_dir(
-                PathBuf::from(cache_dir),
-                config_dir.as_deref(),
-            ))
         } else {
             CompilationCache::Default
         }

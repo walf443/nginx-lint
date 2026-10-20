@@ -2900,6 +2900,54 @@ fn test_why_reports_unusable_cache_dir() {
     }
 }
 
+#[cfg(feature = "plugins")]
+#[test]
+fn test_lint_ignores_cache_dir_from_discovered_config() {
+    use std::process::Command;
+
+    // A .nginx-lint.toml found next to the linted file belongs to the tree
+    // being linted, not to the user running nginx-lint. Precompiled plugin
+    // code is loaded from the cache root as native code, so that file must
+    // not be able to choose it: the per-user default is used instead.
+    let dir = tempfile::tempdir().unwrap();
+    let project = dir.path().join("project");
+    std::fs::create_dir(&project).unwrap();
+    std::fs::write(
+        project.join(".nginx-lint.toml"),
+        "cache_dir = \"planted-cache\"\n",
+    )
+    .unwrap();
+    let conf = project.join("nginx.conf");
+    std::fs::write(&conf, "http {\n    server_tokens off;\n}\n").unwrap();
+    let plugins_dir = dir.path().join("plugins");
+    std::fs::create_dir(&plugins_dir).unwrap();
+    // Keep the per-user default cache inside the temporary directory.
+    let home = dir.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .current_dir(dir.path())
+        .env("HOME", &home)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("LOCALAPPDATA", &home)
+        .arg("--plugins")
+        .arg(&plugins_dir)
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+
+    assert_ne!(
+        output.status.code(),
+        Some(2),
+        "lint should run; got:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !project.join("planted-cache").exists(),
+        "cache_dir from a discovered .nginx-lint.toml must not be used as the cache root"
+    );
+}
+
 // ============================================================================
 // CLI --fix tests - unfixable errors must still be reported
 // ============================================================================

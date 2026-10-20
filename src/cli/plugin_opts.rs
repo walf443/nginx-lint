@@ -53,7 +53,7 @@ pub fn allow_wasi_from(cli: &Cli, config_path: Option<&std::path::Path>) -> Resu
 /// Resolve the compilation cache from the CLI flags.
 ///
 /// Only the flags are honoured; cache_dir is not read from the configuration
-/// file, so a plugin compiled here may not be the copy `lint` cached.
+/// file, the same as for `lint`.
 pub fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     use nginx_lint::plugin::CompilationCache;
 
