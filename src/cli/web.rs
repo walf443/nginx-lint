@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 #[cfg(feature = "web-server")]
-pub fn run_web(port: u16, open_browser: bool) -> ExitCode {
+pub fn run_web(host: &str, port: u16, open_browser: bool) -> ExitCode {
     use tiny_http::{Response, Server};
 
     // Embedded web HTML
@@ -17,25 +17,27 @@ pub fn run_web(port: u16, open_browser: bool) -> ExitCode {
     // Check if pkg directory exists (only when not embedding)
     #[cfg(not(feature = "web-server-embed-wasm"))]
     {
-        let pkg_dir = std::path::Path::new("pkg");
+        let pkg_dir = std::path::Path::new("web/pkg");
         if !pkg_dir.exists() {
-            eprintln!("Error: pkg/ directory not found.");
+            eprintln!("Error: web/pkg/ directory not found.");
             eprintln!();
             eprintln!("Please build the WASM package first:");
             eprintln!(
-                "  wasm-pack build --target web --out-dir pkg --no-default-features --features wasm"
-            );
-            eprintln!();
-            eprintln!("Or rebuild with embedded WASM:");
-            eprintln!(
                 "  wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm"
             );
+            eprintln!();
+            eprintln!("Then run again, or embed it in the binary:");
             eprintln!("  cargo build --features web-server-embed-wasm");
             return ExitCode::from(2);
         }
     }
 
-    let addr = format!("0.0.0.0:{}", port);
+    // A bare IPv6 address needs brackets to be followed by a port.
+    let addr = if host.contains(':') {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    };
     let server = match Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
@@ -45,6 +47,12 @@ pub fn run_web(port: u16, open_browser: bool) -> ExitCode {
     };
 
     let url = format!("http://localhost:{}", port);
+    if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+        eprintln!(
+            "Warning: listening on {}; anyone who can reach this address can use the server",
+            addr
+        );
+    }
     eprintln!("Starting nginx-lint web server at {}", url);
     #[cfg(feature = "web-server-embed-wasm")]
     eprintln!("(WASM embedded in binary)");
@@ -110,27 +118,6 @@ pub fn run_web(port: u16, open_browser: bool) -> ExitCode {
                     serve_file_from_disk("./web/pkg/nginx_lint_bg.wasm", "application/wasm")
                 }
             }
-            path if path.starts_with("/pkg/") => {
-                #[cfg(feature = "web-server-embed-wasm")]
-                {
-                    // Other pkg files not embedded
-                    Response::from_string("Not Found").with_status_code(404)
-                }
-                #[cfg(not(feature = "web-server-embed-wasm"))]
-                {
-                    let file_path = format!("./web{}", path);
-                    let content_type = if path.ends_with(".js") {
-                        "application/javascript"
-                    } else if path.ends_with(".wasm") {
-                        "application/wasm"
-                    } else if path.ends_with(".d.ts") {
-                        "application/typescript"
-                    } else {
-                        "application/octet-stream"
-                    };
-                    serve_file_from_disk(&file_path, content_type)
-                }
-            }
             _ => Response::from_string("Not Found").with_status_code(404),
         };
 
@@ -150,14 +137,12 @@ fn serve_file_from_disk(
         Ok(content) => Response::from_data(content).with_header(
             tiny_http::Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes()).unwrap(),
         ),
-        Err(_) => Response::from_string("Not Found")
-            .with_status_code(404)
-            .into(),
+        Err(_) => Response::from_string("Not Found").with_status_code(404),
     }
 }
 
 #[cfg(not(feature = "web-server"))]
-pub fn run_web(_port: u16, _open_browser: bool) -> ExitCode {
+pub fn run_web(_host: &str, _port: u16, _open_browser: bool) -> ExitCode {
     eprintln!("Error: Web server feature is not enabled.");
     eprintln!();
     eprintln!("Rebuild with the web-server feature:");
