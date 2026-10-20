@@ -591,22 +591,21 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     }
 
     // 8. Resolve the cache root and create the linter
-    // Cache root precedence: --no-cache > --cache-dir > per-user default.
-    // cache_dir in .nginx-lint.toml is not read: the cache holds precompiled
-    // native code that is loaded without being checked, and that file is
-    // usually found in the tree being linted, so it must not choose where
-    // that code comes from. This matches cache_config for the subcommands.
-    let compilation_cache = {
-        use nginx_lint::plugin::CompilationCache;
-
-        if cli.no_cache {
-            CompilationCache::Disabled
-        } else if let Some(ref cache_dir) = cli.cache_dir {
-            CompilationCache::Directory(cache_dir.clone())
-        } else {
-            CompilationCache::Default
-        }
-    };
+    // Cache root precedence: --no-cache > --cache-dir > per-user default,
+    // resolved by the same helper the other subcommands use. cache_dir in
+    // .nginx-lint.toml is not read: the cache holds precompiled native code
+    // that wasmtime loads after only an engine-compatibility check, with no
+    // integrity check, and that file is usually found in the tree being
+    // linted, so it must not choose where that code comes from.
+    if lint_config
+        .as_ref()
+        .is_some_and(|c| c.cache_dir().is_some())
+    {
+        eprintln!(
+            "Warning: cache_dir in .nginx-lint.toml is ignored; use --cache-dir to choose the cache directory"
+        );
+    }
+    let compilation_cache = super::plugin_opts::cache_config(&cli);
 
     // WASI precedence: --allow-wasi-plugins or plugins.allow_wasi_plugins in
     // .nginx-lint.toml, whichever says yes. A project whose plugins need WASI

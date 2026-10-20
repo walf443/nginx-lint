@@ -1,8 +1,9 @@
 //! Resolving the plugin-related options that `why` and `test-plugins` share.
 //!
-//! `lint` resolves the same things, but does it inline against a
-//! configuration file it has already loaded for the linting itself; these two
-//! subcommands have no file to lint, so they resolve them here.
+//! `lint` resolves WASI inline against a configuration file it has already
+//! loaded for the linting itself; these two subcommands have no file to lint,
+//! so they resolve it here. The compilation cache reads no configuration
+//! file, so [`cache_config`] serves `lint` as well.
 
 use crate::Cli;
 
@@ -53,7 +54,7 @@ pub fn allow_wasi_from(cli: &Cli, config_path: Option<&std::path::Path>) -> Resu
 /// Resolve the compilation cache from the CLI flags.
 ///
 /// Only the flags are honoured; cache_dir is not read from the configuration
-/// file, the same as for `lint`.
+/// file. Used by `lint` and the other subcommands alike.
 pub fn cache_config(cli: &Cli) -> nginx_lint::plugin::CompilationCache {
     use nginx_lint::plugin::CompilationCache;
 
