@@ -90,23 +90,12 @@ impl Plugin for WeakSslCiphersPlugin {
             // Check for missing exclusions
             let missing_exclusions = find_missing_exclusions(cipher_string);
             if !missing_exclusions.is_empty() {
-                // Generate fix with required exclusions added
-                let fixed_cipher_string =
-                    generate_fixed_cipher_string(cipher_string, &missing_exclusions);
-
-                // Determine if original uses quotes
-                let quote_char = if cipher_arg.raw.starts_with('\'') {
-                    "'"
-                } else if cipher_arg.raw.starts_with('"') {
-                    "\""
-                } else {
-                    ""
-                };
-
-                // Use range-based fix to replace the directive content
+                // Add the exclusions to the argument as written, not to its
+                // decoded value: re-quoting that would let an escaped quote in
+                // it close the string early and turn the rest into directives.
                 let fix = directive.replace_with(&format!(
-                    "ssl_ciphers {}{}{};",
-                    quote_char, fixed_cipher_string, quote_char
+                    "ssl_ciphers {};",
+                    append_exclusions(&cipher_arg.raw, &missing_exclusions)
                 ));
 
                 let message = format!(
@@ -178,18 +167,20 @@ fn find_missing_exclusions(cipher_string: &str) -> Vec<String> {
         .collect()
 }
 
-/// Generate a fixed cipher string with missing exclusions added
-fn generate_fixed_cipher_string(original: &str, missing: &[String]) -> String {
-    if missing.is_empty() {
-        return original.to_string();
-    }
-
-    // Add missing exclusions at the end
+/// Append the missing exclusions to `raw`, the cipher argument as written,
+/// inside its quotes when it has them.
+fn append_exclusions(raw: &str, missing: &[String]) -> String {
     let additions = missing.join(":");
-    if original.is_empty() {
-        additions
+    let (body, quote) = match raw.chars().next() {
+        Some(quote @ ('"' | '\'')) if raw.len() >= 2 && raw.ends_with(quote) => {
+            (&raw[1..raw.len() - 1], quote.to_string())
+        }
+        _ => (raw, String::new()),
+    };
+    if body.is_empty() {
+        format!("{quote}{additions}{quote}")
     } else {
-        format!("{}:{}", original, additions)
+        format!("{quote}{body}:{additions}{quote}")
     }
 }
 
@@ -348,12 +339,29 @@ server {
     }
 
     #[test]
-    fn test_generate_fixed_cipher_string() {
-        let fixed = generate_fixed_cipher_string("HIGH", &["!RC4".to_string(), "!MD5".to_string()]);
-        assert_eq!(fixed, "HIGH:!RC4:!MD5");
+    fn test_append_exclusions() {
+        let missing = ["!RC4".to_string(), "!MD5".to_string()];
+        assert_eq!(append_exclusions("HIGH", &missing), "HIGH:!RC4:!MD5");
+        assert_eq!(append_exclusions("'HIGH'", &missing), "'HIGH:!RC4:!MD5'");
+        assert_eq!(
+            append_exclusions("\"HIGH\"", &missing),
+            "\"HIGH:!RC4:!MD5\""
+        );
+        assert_eq!(append_exclusions("\"\"", &missing), "\"!RC4:!MD5\"");
+        // An escaped quote stays escaped
+        assert_eq!(
+            append_exclusions(r#""HIGH\";autoindex on;#""#, &missing),
+            r#""HIGH\";autoindex on;#:!RC4:!MD5""#
+        );
+    }
 
-        let fixed = generate_fixed_cipher_string("", &["!RC4".to_string()]);
-        assert_eq!(fixed, "!RC4");
+    #[test]
+    fn test_fix_keeps_escaped_quote() {
+        let runner = PluginTestRunner::new(WeakSslCiphersPlugin);
+        runner.assert_fix_produces(
+            include_str!("../tests/fixtures/003_escaped_quote/error/nginx.conf"),
+            include_str!("../tests/fixtures/003_escaped_quote/expected/nginx.conf"),
+        );
     }
 
     #[test]

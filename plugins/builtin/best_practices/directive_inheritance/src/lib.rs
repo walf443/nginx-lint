@@ -1226,6 +1226,15 @@ http {
     }
 
     #[test]
+    fn test_fix_keeps_escaped_quote() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
+        runner.assert_fix_produces(
+            include_str!("../tests/fixtures/014_add_header_escaped_quote/error/nginx.conf"),
+            include_str!("../tests/fixtures/014_add_header_escaped_quote/expected/nginx.conf"),
+        );
+    }
+
+    #[test]
     fn test_fixtures() {
         let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
         runner.test_fixtures(nginx_lint_plugin::fixtures_dir!());

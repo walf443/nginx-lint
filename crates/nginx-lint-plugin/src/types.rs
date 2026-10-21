@@ -834,17 +834,71 @@ impl DirectiveExt for Box<Directive> {
 
 /// Extension trait for Argument to add source reconstruction
 pub trait ArgumentExt {
-    /// Reconstruct the source text for this argument
+    /// The source text for this argument, as written in the configuration.
+    ///
+    /// This is [`raw`](Argument::raw), so text built from it means what the
+    /// original meant. Re-quoting the decoded value instead would let an
+    /// escaped quote such as `"x\"; return 302 ...; #"` close the string
+    /// early, turning the rest into directives in the fixed file.
+    ///
+    /// An argument built by hand with an empty `raw` falls back to quoting
+    /// the decoded value, escaping `\` and the quote. A `$` is written as is,
+    /// since the decoded value no longer says whether it was `\$`.
     fn to_source(&self) -> String;
 }
 
 impl ArgumentExt for Argument {
     fn to_source(&self) -> String {
+        if !self.raw.is_empty() {
+            return self.raw.clone();
+        }
         match &self.value {
             ArgumentValue::Literal(s) => s.clone(),
-            ArgumentValue::QuotedString(s) => format!("\"{}\"", s),
-            ArgumentValue::SingleQuotedString(s) => format!("'{}'", s),
+            ArgumentValue::QuotedString(s) => {
+                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+            }
+            ArgumentValue::SingleQuotedString(s) => {
+                format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+            }
             ArgumentValue::Variable(s) => format!("${}", s),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn first_arg(source: &str) -> Argument {
+        let config = nginx_lint_common::parse_string(source).unwrap();
+        config.all_directives().next().unwrap().args[0].clone()
+    }
+
+    #[test]
+    fn to_source_keeps_the_written_form() {
+        for (source, arg) in [
+            ("a b;", "b"),
+            ("a $host;", "$host"),
+            ("a 'x';", "'x'"),
+            (
+                r#"a "x\"; return 302 https://evil.example/; #";"#,
+                r#""x\"; return 302 https://evil.example/; #""#,
+            ),
+            (r#"a "\$var";"#, r#""\$var""#),
+            (r"a 'it\'s';", r"'it\'s'"),
+        ] {
+            assert_eq!(first_arg(source).to_source(), arg, "{}", source);
+        }
+    }
+
+    #[test]
+    fn to_source_escapes_when_raw_is_missing() {
+        let mut arg = first_arg(r#"a "x\"y\\z";"#);
+        arg.raw.clear();
+        assert_eq!(arg.to_source(), r#""x\"y\\z""#);
+
+        let mut arg = first_arg(r"a 'it\'s';");
+        arg.raw.clear();
+        assert_eq!(arg.to_source(), r"'it\'s'");
     }
 }
