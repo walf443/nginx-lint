@@ -195,6 +195,9 @@ Start the browser-based linting interface locally:
 nginx-lint web --open
 ```
 
+The server listens on 127.0.0.1 only; pass `--host 0.0.0.0` to reach it from
+other machines.
+
 The Web UI provides:
 
 - Real-time linting as you type

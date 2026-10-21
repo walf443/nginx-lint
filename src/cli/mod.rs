@@ -116,6 +116,11 @@ pub enum Commands {
     },
     /// Start a web server to try nginx-lint in the browser
     Web {
+        /// Address to listen on. Defaults to localhost only; pass 0.0.0.0 to
+        /// accept connections from other machines
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+
         /// Port to listen on
         #[arg(short, long, default_value = "8080")]
         port: u16,

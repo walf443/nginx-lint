@@ -7,7 +7,7 @@ This allows you to try nginx-lint in your browser.
 1. Build the WASM package:
    ```bash
    cargo install wasm-pack
-   wasm-pack build --target web --no-default-features --features wasm
+   wasm-pack build --target web --out-dir web/pkg --no-default-features --features wasm
    ```
 
 2. Start the web server:
