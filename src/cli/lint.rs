@@ -1,6 +1,7 @@
 use super::Cli;
 use clap::CommandFactory;
 use colored::control;
+use nginx_lint::reporter::{one_line, one_line_path};
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content_detailed, collect_included_files,
@@ -21,7 +22,7 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
         eprintln!(
             "Warning: skipped {} fix(es) with invalid offsets in {}",
             skipped,
-            path.display()
+            one_line_path(path)
         );
     }
 }
@@ -276,7 +277,11 @@ fn fix_file(inc: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
                     profiles,
                 };
             }
-            eprintln!("Applied {} fix(es) to {}", result.applied, path.display());
+            eprintln!(
+                "Applied {} fix(es) to {}",
+                result.applied,
+                one_line_path(&path)
+            );
             let FileResult::LintErrors {
                 errors: remaining,
                 ignored_count: remaining_ignored,
@@ -296,7 +301,7 @@ fn fix_file(inc: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
             }
         }
         Err(e) => {
-            eprintln!("Error applying fixes to {}: {}", path.display(), e);
+            eprintln!("Error applying fixes to {}: {}", one_line_path(&path), e);
             // Nothing was written: every error still stands.
             FileResult::LintErrors {
                 path,
@@ -525,7 +530,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         match LintConfig::find_and_load(search_dir) {
             Some((cfg, config_path)) => {
                 if cli.verbose {
-                    eprintln!("Found .nginx-lint.toml: {}", config_path.display());
+                    eprintln!("Found .nginx-lint.toml: {}", one_line_path(&config_path));
                 }
                 (Some(cfg), Some(config_path))
             }
@@ -589,7 +594,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if cli.verbose
         && let Some(ref prefix) = include_prefix
     {
-        eprintln!("Include prefix: {}", prefix.display());
+        eprintln!("Include prefix: {}", one_line_path(prefix));
     }
 
     // 8. Resolve the cache root and create the linter
@@ -696,9 +701,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             let note = if enabled { "" } else { " [disabled]" };
                             eprintln!(
                                 "  - {} ({}) [{}]{}",
-                                name,
-                                plugin.rule.description(),
-                                plugin.path.display(),
+                                one_line(name),
+                                one_line(plugin.rule.description()),
+                                one_line_path(&plugin.path),
                                 note
                             );
                         }
@@ -860,7 +865,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         if cli.verbose {
             eprintln!("Linting {} file(s)", included_files.len());
             for inc in &included_files {
-                eprintln!("  - {}", inc.path.display());
+                eprintln!("  - {}", one_line_path(&inc.path));
             }
         }
 

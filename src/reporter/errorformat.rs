@@ -5,6 +5,8 @@ use nginx_lint_common::linter::Severity;
 use std::io::Write;
 use std::path::Path;
 
+use super::{one_line, one_line_path};
+
 pub(crate) fn report(
     writer: &mut dyn Write,
     errors: &[LintError],
@@ -12,7 +14,7 @@ pub(crate) fn report(
     colors: &ColorConfig,
     ignored_count: usize,
 ) -> std::io::Result<()> {
-    let path_str = path.display();
+    let path_str = one_line_path(path);
 
     let mut sorted_errors: Vec<_> = errors.iter().collect();
     sorted_errors.sort_by(|a, b| match (a.line, b.line) {
@@ -35,7 +37,7 @@ pub(crate) fn report(
         let location = match (error.line, error.column) {
             (Some(line), Some(col)) => format!("{}:{}:{}", path_str, line, col),
             (Some(line), None) => format!("{}:{}", path_str, line),
-            _ => format!("{}", path_str),
+            _ => path_str.clone(),
         };
 
         let (severity_label, color) = match error.severity {
@@ -44,12 +46,23 @@ pub(crate) fn report(
         };
 
         let severity_str = apply_color(
-            &format!("{}[{}/{}]", severity_label, error.category, error.rule),
+            &format!(
+                "{}[{}/{}]",
+                severity_label,
+                one_line(&error.category),
+                one_line(&error.rule)
+            ),
             color,
         )
         .bold();
 
-        writeln!(writer, "{}: {}: {}", location, severity_str, error.message)?;
+        writeln!(
+            writer,
+            "{}: {}: {}",
+            location,
+            severity_str,
+            one_line(&error.message)
+        )?;
     }
 
     if !errors.is_empty() || ignored_count > 0 {
@@ -84,12 +97,12 @@ pub(crate) fn report(
 
 #[cfg(test)]
 fn format_line(error: &LintError, path: &Path) -> String {
-    let path_str = path.display();
+    let path_str = one_line_path(path);
 
     let location = match (error.line, error.column) {
         (Some(line), Some(col)) => format!("{}:{}:{}", path_str, line, col),
         (Some(line), None) => format!("{}:{}", path_str, line),
-        _ => format!("{}", path_str),
+        _ => path_str.clone(),
     };
 
     let severity_label = match error.severity {
@@ -99,7 +112,11 @@ fn format_line(error: &LintError, path: &Path) -> String {
 
     format!(
         "{}: {}[{}/{}]: {}",
-        location, severity_label, error.category, error.rule, error.message
+        location,
+        severity_label,
+        one_line(&error.category),
+        one_line(&error.rule),
+        one_line(&error.message)
     )
 }
 

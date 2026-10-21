@@ -87,6 +87,6 @@ pub fn warn_ignored_cache_dir(
     }
     eprintln!(
         "Warning: cache_dir in {} is ignored; use --cache-dir to choose the cache directory",
-        path.display()
+        nginx_lint::reporter::one_line_path(path)
     );
 }
