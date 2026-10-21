@@ -90,26 +90,19 @@ impl Plugin for WeakSslCiphersPlugin {
             // Check for missing exclusions
             let missing_exclusions = find_missing_exclusions(cipher_string);
             if !missing_exclusions.is_empty() {
-                // Add the exclusions to the argument as written, not to its
-                // decoded value: re-quoting that would let an escaped quote in
-                // it close the string early and turn the rest into directives.
-                let fix = directive.replace_with(&format!(
-                    "ssl_ciphers {};",
-                    append_exclusions(&cipher_arg.raw, &missing_exclusions)
-                ));
-
                 let message = format!(
                     "Missing cipher exclusions: {}",
                     missing_exclusions.join(", ")
                 );
-                errors.push(
-                    err.warning(
-                        &message,
-                        cipher_arg.span.start.line,
-                        cipher_arg.span.start.column,
-                    )
-                    .with_fix(fix),
+                let error = err.warning(
+                    &message,
+                    cipher_arg.span.start.line,
+                    cipher_arg.span.start.column,
                 );
+                errors.push(match exclusions_fix(cipher_arg, &missing_exclusions) {
+                    Some(fix) => error.with_fix(fix),
+                    None => error,
+                });
             }
         }
 
@@ -167,21 +160,27 @@ fn find_missing_exclusions(cipher_string: &str) -> Vec<String> {
         .collect()
 }
 
-/// Append the missing exclusions to `raw`, the cipher argument as written,
-/// inside its quotes when it has them.
-fn append_exclusions(raw: &str, missing: &[String]) -> String {
-    let additions = missing.join(":");
-    let (body, quote) = match raw.chars().next() {
-        Some(quote @ ('"' | '\'')) if raw.len() >= 2 && raw.ends_with(quote) => {
-            (&raw[1..raw.len() - 1], quote.to_string())
+/// A fix inserting the missing exclusions at the end of the cipher argument,
+/// inside its quotes when it has them, leaving the rest as written.
+///
+/// Inserting rather than rebuilding the argument from its decoded value keeps
+/// an escaped quote in it escaped; re-quoting the decoded value would let it
+/// close the string early and turn the rest into directives. A string that is
+/// never closed gets no fix.
+fn exclusions_fix(cipher_arg: &Argument, missing: &[String]) -> Option<Fix> {
+    let offset = match cipher_arg.value {
+        ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_) => {
+            cipher_arg.closing_quote_offset()?
         }
-        _ => (raw, String::new()),
+        _ => cipher_arg.span.start.offset + cipher_arg.raw.len(),
     };
-    if body.is_empty() {
-        format!("{quote}{additions}{quote}")
+    let additions = missing.join(":");
+    let text = if cipher_arg.as_str().is_empty() {
+        additions
     } else {
-        format!("{quote}{body}:{additions}{quote}")
-    }
+        format!(":{}", additions)
+    };
+    Some(Fix::replace_range(offset, offset, &text))
 }
 
 nginx_lint_plugin::export_component_plugin!(WeakSslCiphersPlugin);
@@ -339,20 +338,28 @@ server {
     }
 
     #[test]
-    fn test_append_exclusions() {
-        let missing = ["!RC4".to_string(), "!MD5".to_string()];
-        assert_eq!(append_exclusions("HIGH", &missing), "HIGH:!RC4:!MD5");
-        assert_eq!(append_exclusions("'HIGH'", &missing), "'HIGH:!RC4:!MD5'");
-        assert_eq!(
-            append_exclusions("\"HIGH\"", &missing),
-            "\"HIGH:!RC4:!MD5\""
-        );
-        assert_eq!(append_exclusions("\"\"", &missing), "\"!RC4:!MD5\"");
-        // An escaped quote stays escaped
-        assert_eq!(
-            append_exclusions(r#""HIGH\";autoindex on;#""#, &missing),
-            r#""HIGH\";autoindex on;#:!RC4:!MD5""#
-        );
+    fn test_fix_appends_inside_the_argument() {
+        let runner = PluginTestRunner::new(WeakSslCiphersPlugin);
+        let all = ":!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5";
+        for (before, after) in [
+            ("ssl_ciphers HIGH;", format!("ssl_ciphers HIGH{all};")),
+            ("ssl_ciphers 'HIGH';", format!("ssl_ciphers 'HIGH{all}';")),
+            (
+                r#"ssl_ciphers "HIGH";"#,
+                format!(r#"ssl_ciphers "HIGH{all}";"#),
+            ),
+            (
+                r#"ssl_ciphers "";"#,
+                format!(r#"ssl_ciphers "{}";"#, &all[1..]),
+            ),
+            // Everything else in the directive stays as written
+            (
+                r#"ssl_ciphers  "HIGH"  extra ;"#,
+                format!(r#"ssl_ciphers  "HIGH{all}"  extra ;"#),
+            ),
+        ] {
+            runner.assert_fix_produces(before, &after);
+        }
     }
 
     #[test]

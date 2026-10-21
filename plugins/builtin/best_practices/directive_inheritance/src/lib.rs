@@ -148,12 +148,22 @@ impl DirectiveInheritancePlugin {
     }
 
     /// Reconstruct directive text from a Directive AST node
+    ///
+    /// Arguments are written as in the source, and ones that touch there
+    /// (`$scheme://$host` is three tokens) stay joined: a space between them
+    /// would make separate arguments in nginx.
     fn directive_to_text(directive: &Directive) -> Rc<str> {
-        let mut parts = vec![directive.name.clone()];
+        let mut text = directive.name.clone();
+        let mut previous_end = None;
         for arg in &directive.args {
-            parts.push(arg.to_source());
+            if previous_end != Some(arg.span.start.offset) {
+                text.push(' ');
+            }
+            text.push_str(&arg.to_source());
+            previous_end = Some(arg.span.end.offset);
         }
-        Rc::from(format!("{};", parts.join(" ")))
+        text.push(';');
+        Rc::from(text)
     }
 
     /// Normalize a key based on the directive spec
@@ -1222,6 +1232,15 @@ http {
         runner.test_examples(
             include_str!("../examples/bad.conf"),
             include_str!("../examples/good.conf"),
+        );
+    }
+
+    #[test]
+    fn test_fix_keeps_touching_arguments_joined() {
+        let runner = PluginTestRunner::new(DirectiveInheritancePlugin::default());
+        runner.assert_fix_produces(
+            "server {\n    add_header X-Origin $scheme://$host;\n    location / {\n        add_header X-A b;\n    }\n}\n",
+            "server {\n    add_header X-Origin $scheme://$host;\n    location / {\n        add_header X-Origin $scheme://$host;\n        add_header X-A b;\n    }\n}\n",
         );
     }
 

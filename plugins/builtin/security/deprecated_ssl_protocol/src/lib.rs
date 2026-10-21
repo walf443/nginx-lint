@@ -64,8 +64,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             }
 
             // Generate the fixed protocol list
-            let current_protocols: Vec<&str> = directive.args.iter().map(|a| a.as_str()).collect();
-            let fixed_protocols = generate_fixed_protocols(&current_protocols);
+            let fixed_protocols = generate_fixed_protocols(&directive.args);
 
             // Use range-based fix to replace the directive content
             let fix = directive.replace_with(&format!("ssl_protocols {};", fixed_protocols));
@@ -93,38 +92,39 @@ impl Plugin for DeprecatedSslProtocolPlugin {
 }
 
 /// Generate the fixed protocol list by removing deprecated protocols
-fn generate_fixed_protocols(current: &[&str]) -> String {
-    // Filter out deprecated protocols from current
-    let safe_current: Vec<&str> = current
+///
+/// Arguments that stay are written as they appear in the source
+/// ([`ArgumentExt::to_source`]), and only compared by their decoded value:
+/// writing the decoded value unquoted would let a quoted `;` in it end the
+/// directive and turn the rest into directives.
+fn generate_fixed_protocols(current: &[Argument]) -> String {
+    // (decoded value, text to write) of each protocol that stays
+    let mut protocols: Vec<(String, String)> = current
         .iter()
-        .filter(|p| !DEPRECATED_PROTOCOLS.contains(p))
-        .copied()
+        .filter(|arg| !DEPRECATED_PROTOCOLS.contains(&arg.as_str()))
+        .map(|arg| (arg.as_str().to_string(), arg.to_source()))
         .collect();
-
-    // Start with safe current protocols
-    let mut protocols: Vec<String> = safe_current.iter().map(|s| s.to_string()).collect();
 
     // Add allowed protocols that aren't already present
     for proto in ALLOWED_PROTOCOLS {
-        if !protocols.iter().any(|p| p == *proto) {
-            protocols.push(proto.to_string());
+        if !protocols.iter().any(|(value, _)| value == proto) {
+            protocols.push((proto.to_string(), proto.to_string()));
         }
     }
 
-    // If still empty, use all allowed protocols
-    if protocols.is_empty() {
-        return ALLOWED_PROTOCOLS.join(" ");
-    }
-
     // Sort protocols for consistent output
-    protocols.sort_by(|a, b| {
+    protocols.sort_by(|(a, _), (b, _)| {
         let order = ["TLSv1.2", "TLSv1.3"];
         let a_idx = order.iter().position(|x| x == a).unwrap_or(99);
         let b_idx = order.iter().position(|x| x == b).unwrap_or(99);
         a_idx.cmp(&b_idx)
     });
 
-    protocols.join(" ")
+    protocols
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 nginx_lint_plugin::export_component_plugin!(DeprecatedSslProtocolPlugin);
@@ -271,20 +271,31 @@ server {
 
     #[test]
     fn test_generate_fixed_protocols() {
-        // All deprecated -> use allowed
-        assert_eq!(
-            generate_fixed_protocols(&["SSLv3", "TLSv1"]),
-            "TLSv1.2 TLSv1.3"
-        );
-
-        // Mix of deprecated and safe
-        assert_eq!(
-            generate_fixed_protocols(&["SSLv3", "TLSv1.2"]),
-            "TLSv1.2 TLSv1.3"
-        );
-
-        // Only TLSv1.2 -> add TLSv1.3
-        assert_eq!(generate_fixed_protocols(&["TLSv1.2"]), "TLSv1.2 TLSv1.3");
+        let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
+        for (before, after) in [
+            // All deprecated -> use allowed
+            (
+                "ssl_protocols SSLv3 TLSv1;",
+                "ssl_protocols TLSv1.2 TLSv1.3;",
+            ),
+            // Mix of deprecated and safe
+            (
+                "ssl_protocols SSLv3 TLSv1.2;",
+                "ssl_protocols TLSv1.2 TLSv1.3;",
+            ),
+            // A quoted protocol stays quoted, and still counts as present
+            (
+                r#"ssl_protocols TLSv1 "TLSv1.2";"#,
+                r#"ssl_protocols "TLSv1.2" TLSv1.3;"#,
+            ),
+            // A quoted `;` stays inside the quotes
+            (
+                r#"ssl_protocols TLSv1 "TLSv1.2;autoindex on;#";"#,
+                r#"ssl_protocols TLSv1.2 TLSv1.3 "TLSv1.2;autoindex on;#";"#,
+            ),
+        ] {
+            runner.assert_fix_produces(before, after);
+        }
     }
 
     #[test]
