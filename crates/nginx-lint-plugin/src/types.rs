@@ -834,17 +834,135 @@ impl DirectiveExt for Box<Directive> {
 
 /// Extension trait for Argument to add source reconstruction
 pub trait ArgumentExt {
-    /// Reconstruct the source text for this argument
+    /// The source text for this argument, as written in the configuration.
+    ///
+    /// This is [`raw`](Argument::raw), so text built from it means what the
+    /// original meant. Re-quoting the decoded value instead would let an
+    /// escaped quote such as `"x\"; return 302 ...; #"` close the string
+    /// early, turning the rest into directives in the fixed file.
+    ///
+    /// An argument built by hand with an empty `raw` falls back to quoting
+    /// the decoded value, escaping `\` and the quote; a literal is quoted the
+    /// same way when it holds whitespace or a character nginx gives meaning
+    /// to. A `$` is written as is, since the decoded value no longer says
+    /// whether it was `\$`.
     fn to_source(&self) -> String;
+
+    /// Byte offset where inserted text extends this argument's value, leaving
+    /// the argument otherwise as written: before the closing quote of a
+    /// quoted argument, or at the end of an unquoted one.
+    ///
+    /// `None` for a string that is never closed, whose last quote is an
+    /// escaped one, so no offset keeps the insertion inside it. The default
+    /// is `None`, for implementations outside this crate.
+    fn value_end_offset(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl ArgumentExt for Argument {
     fn to_source(&self) -> String {
+        if !self.raw.is_empty() {
+            return self.raw.clone();
+        }
         match &self.value {
-            ArgumentValue::Literal(s) => s.clone(),
-            ArgumentValue::QuotedString(s) => format!("\"{}\"", s),
-            ArgumentValue::SingleQuotedString(s) => format!("'{}'", s),
+            ArgumentValue::Literal(s) if !needs_quotes(s) => s.clone(),
+            ArgumentValue::Literal(s) | ArgumentValue::QuotedString(s) => {
+                format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+            }
+            ArgumentValue::SingleQuotedString(s) => {
+                format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+            }
             ArgumentValue::Variable(s) => format!("${}", s),
         }
+    }
+
+    fn value_end_offset(&self) -> Option<usize> {
+        let quote = match self.value {
+            ArgumentValue::QuotedString(_) => '"',
+            ArgumentValue::SingleQuotedString(_) => '\'',
+            _ => return Some(self.span.end.offset),
+        };
+        let body = self.raw.strip_prefix(quote)?.strip_suffix(quote)?;
+        // The final quote closes the string only when it is not escaped.
+        let backslashes = body.chars().rev().take_while(|&c| c == '\\').count();
+        (backslashes % 2 == 0).then(|| self.span.end.offset - quote.len_utf8())
+    }
+}
+
+/// Whether a literal must be quoted to stay one argument.
+fn needs_quotes(s: &str) -> bool {
+    s.is_empty()
+        || s.chars()
+            .any(|c| c.is_whitespace() || matches!(c, ';' | '{' | '}' | '#' | '"' | '\'' | '\\'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn first_arg(source: &str) -> Argument {
+        let config = nginx_lint_common::parse_string(source).unwrap();
+        config.all_directives().next().unwrap().args[0].clone()
+    }
+
+    #[test]
+    fn to_source_keeps_the_written_form() {
+        for (source, arg) in [
+            ("a b;", "b"),
+            ("a $host;", "$host"),
+            ("a 'x';", "'x'"),
+            (
+                r#"a "x\"; return 302 https://evil.example/; #";"#,
+                r#""x\"; return 302 https://evil.example/; #""#,
+            ),
+            (r#"a "\$var";"#, r#""\$var""#),
+            (r"a 'it\'s';", r"'it\'s'"),
+        ] {
+            assert_eq!(first_arg(source).to_source(), arg, "{}", source);
+        }
+    }
+
+    #[test]
+    fn to_source_escapes_when_raw_is_missing() {
+        let mut arg = first_arg(r#"a "x\"y\\z";"#);
+        arg.raw.clear();
+        assert_eq!(arg.to_source(), r#""x\"y\\z""#);
+
+        let mut arg = first_arg(r"a 'it\'s';");
+        arg.raw.clear();
+        assert_eq!(arg.to_source(), r"'it\'s'");
+
+        let mut arg = first_arg("a b;");
+        arg.raw.clear();
+        assert_eq!(arg.to_source(), "b");
+        arg.value = ArgumentValue::Literal("x; return 302 https://evil.example/; #".into());
+        assert_eq!(
+            arg.to_source(),
+            r#""x; return 302 https://evil.example/; #""#
+        );
+    }
+
+    #[test]
+    fn value_end_offset_points_at_the_end_of_the_value() {
+        for (source, rest) in [
+            (r#"a "HIGH";"#, r#"";"#),
+            ("a 'HIGH';", "';"),
+            (r#"a "x\\";"#, r#"";"#),
+            ("a HIGH;", ";"),
+            ("a $var ;", " ;"),
+        ] {
+            let offset = first_arg(source).value_end_offset().unwrap();
+            assert_eq!(&source[offset..], rest, "{}", source);
+        }
+    }
+
+    #[test]
+    fn value_end_offset_rejects_an_unclosed_string() {
+        // What the error-tolerant parse the CLI uses gives for `a "HIGH\"` at
+        // the end of the file: the last quote is the escaped one.
+        let mut arg = first_arg(r#"a "HIGH";"#);
+        arg.raw = r#""HIGH\""#.to_string();
+        assert_eq!(arg.value_end_offset(), None);
     }
 }

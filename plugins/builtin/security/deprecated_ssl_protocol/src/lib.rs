@@ -56,7 +56,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             let deprecated_args: Vec<_> = directive
                 .args
                 .iter()
-                .filter(|arg| DEPRECATED_PROTOCOLS.contains(&arg.as_str()))
+                .filter(|arg| is_deprecated(arg))
                 .collect();
 
             if deprecated_args.is_empty() {
@@ -64,8 +64,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             }
 
             // Generate the fixed protocol list
-            let current_protocols: Vec<&str> = directive.args.iter().map(|a| a.as_str()).collect();
-            let fixed_protocols = generate_fixed_protocols(&current_protocols);
+            let fixed_protocols = generate_fixed_protocols(&directive.args);
 
             // Use range-based fix to replace the directive content
             let fix = directive.replace_with(&format!("ssl_protocols {};", fixed_protocols));
@@ -92,39 +91,56 @@ impl Plugin for DeprecatedSslProtocolPlugin {
     }
 }
 
-/// Generate the fixed protocol list by removing deprecated protocols
-fn generate_fixed_protocols(current: &[&str]) -> String {
-    // Filter out deprecated protocols from current
-    let safe_current: Vec<&str> = current
-        .iter()
-        .filter(|p| !DEPRECATED_PROTOCOLS.contains(p))
-        .copied()
-        .collect();
+/// Whether `arg` names `protocol`. nginx matches the names
+/// case-insensitively. A variable names no protocol, even when its name looks
+/// like one.
+fn names_protocol(arg: &Argument, protocol: &str) -> bool {
+    !matches!(arg.value, ArgumentValue::Variable(_)) && arg.as_str().eq_ignore_ascii_case(protocol)
+}
 
-    // Start with safe current protocols
-    let mut protocols: Vec<String> = safe_current.iter().map(|s| s.to_string()).collect();
+fn is_deprecated(arg: &Argument) -> bool {
+    DEPRECATED_PROTOCOLS
+        .iter()
+        .any(|protocol| names_protocol(arg, protocol))
+}
+
+/// Generate the fixed protocol list by removing deprecated protocols
+///
+/// Arguments that stay are written as they appear in the source
+/// ([`ArgumentExt::to_source`]), and only compared by their decoded value:
+/// writing the decoded value unquoted would let a quoted `;` in it end the
+/// directive and turn the rest into directives.
+fn generate_fixed_protocols(current: &[Argument]) -> String {
+    let order = ["TLSv1.2", "TLSv1.3"];
+    // (position in `order`, text to write) of each protocol that stays
+    let mut protocols: Vec<(usize, String)> = current
+        .iter()
+        .filter(|arg| !is_deprecated(arg))
+        .map(|arg| {
+            let position = order
+                .iter()
+                .position(|protocol| names_protocol(arg, protocol))
+                .unwrap_or(usize::MAX);
+            (position, arg.to_source())
+        })
+        .collect();
 
     // Add allowed protocols that aren't already present
     for proto in ALLOWED_PROTOCOLS {
-        if !protocols.iter().any(|p| p == *proto) {
-            protocols.push(proto.to_string());
+        if !current.iter().any(|arg| names_protocol(arg, proto)) {
+            let position = order.iter().position(|x| x == proto).unwrap_or(usize::MAX);
+            protocols.push((position, proto.to_string()));
         }
     }
 
-    // If still empty, use all allowed protocols
-    if protocols.is_empty() {
-        return ALLOWED_PROTOCOLS.join(" ");
-    }
-
     // Sort protocols for consistent output
-    protocols.sort_by(|a, b| {
-        let order = ["TLSv1.2", "TLSv1.3"];
-        let a_idx = order.iter().position(|x| x == a).unwrap_or(99);
-        let b_idx = order.iter().position(|x| x == b).unwrap_or(99);
-        a_idx.cmp(&b_idx)
-    });
+    protocols.sort_by_key(|(position, _)| *position);
 
-    protocols.join(" ")
+    protocols
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 nginx_lint_plugin::export_component_plugin!(DeprecatedSslProtocolPlugin);
@@ -271,20 +287,50 @@ server {
 
     #[test]
     fn test_generate_fixed_protocols() {
-        // All deprecated -> use allowed
-        assert_eq!(
-            generate_fixed_protocols(&["SSLv3", "TLSv1"]),
-            "TLSv1.2 TLSv1.3"
-        );
+        let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
+        for (before, after) in [
+            // All deprecated -> use allowed
+            (
+                "ssl_protocols SSLv3 TLSv1;",
+                "ssl_protocols TLSv1.2 TLSv1.3;",
+            ),
+            // Mix of deprecated and safe
+            (
+                "ssl_protocols SSLv3 TLSv1.2;",
+                "ssl_protocols TLSv1.2 TLSv1.3;",
+            ),
+            // A quoted protocol stays quoted, and still counts as present
+            (
+                r#"ssl_protocols TLSv1 "TLSv1.2";"#,
+                r#"ssl_protocols "TLSv1.2" TLSv1.3;"#,
+            ),
+            // Names match case-insensitively, as in nginx
+            (
+                "ssl_protocols TLSv1 tlsv1.2;",
+                "ssl_protocols tlsv1.2 TLSv1.3;",
+            ),
+            // A variable is not the protocol its name looks like
+            (
+                "ssl_protocols $TLSv1 TLSv1;",
+                "ssl_protocols TLSv1.2 TLSv1.3 $TLSv1;",
+            ),
+            // A quoted `;` stays inside the quotes
+            (
+                r#"ssl_protocols TLSv1 "TLSv1.2;autoindex on;#";"#,
+                r#"ssl_protocols TLSv1.2 TLSv1.3 "TLSv1.2;autoindex on;#";"#,
+            ),
+        ] {
+            runner.assert_fix_produces(before, after);
+        }
+    }
 
-        // Mix of deprecated and safe
-        assert_eq!(
-            generate_fixed_protocols(&["SSLv3", "TLSv1.2"]),
-            "TLSv1.2 TLSv1.3"
+    #[test]
+    fn test_fix_keeps_quoted_semicolon() {
+        let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
+        runner.assert_fix_produces(
+            include_str!("../tests/fixtures/002_quoted_semicolon/error/nginx.conf"),
+            include_str!("../tests/fixtures/002_quoted_semicolon/expected/nginx.conf"),
         );
-
-        // Only TLSv1.2 -> add TLSv1.3
-        assert_eq!(generate_fixed_protocols(&["TLSv1.2"]), "TLSv1.2 TLSv1.3");
     }
 
     #[test]

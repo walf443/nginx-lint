@@ -90,37 +90,19 @@ impl Plugin for WeakSslCiphersPlugin {
             // Check for missing exclusions
             let missing_exclusions = find_missing_exclusions(cipher_string);
             if !missing_exclusions.is_empty() {
-                // Generate fix with required exclusions added
-                let fixed_cipher_string =
-                    generate_fixed_cipher_string(cipher_string, &missing_exclusions);
-
-                // Determine if original uses quotes
-                let quote_char = if cipher_arg.raw.starts_with('\'') {
-                    "'"
-                } else if cipher_arg.raw.starts_with('"') {
-                    "\""
-                } else {
-                    ""
-                };
-
-                // Use range-based fix to replace the directive content
-                let fix = directive.replace_with(&format!(
-                    "ssl_ciphers {}{}{};",
-                    quote_char, fixed_cipher_string, quote_char
-                ));
-
                 let message = format!(
                     "Missing cipher exclusions: {}",
                     missing_exclusions.join(", ")
                 );
-                errors.push(
-                    err.warning(
-                        &message,
-                        cipher_arg.span.start.line,
-                        cipher_arg.span.start.column,
-                    )
-                    .with_fix(fix),
+                let error = err.warning(
+                    &message,
+                    cipher_arg.span.start.line,
+                    cipher_arg.span.start.column,
                 );
+                errors.push(match exclusions_fix(cipher_arg, &missing_exclusions) {
+                    Some(fix) => error.with_fix(fix),
+                    None => error,
+                });
             }
         }
 
@@ -178,19 +160,22 @@ fn find_missing_exclusions(cipher_string: &str) -> Vec<String> {
         .collect()
 }
 
-/// Generate a fixed cipher string with missing exclusions added
-fn generate_fixed_cipher_string(original: &str, missing: &[String]) -> String {
-    if missing.is_empty() {
-        return original.to_string();
-    }
-
-    // Add missing exclusions at the end
+/// A fix inserting the missing exclusions at the end of the cipher argument,
+/// inside its quotes when it has them, leaving the rest as written.
+///
+/// Inserting rather than rebuilding the argument from its decoded value keeps
+/// an escaped quote in it escaped; re-quoting the decoded value would let it
+/// close the string early and turn the rest into directives. A string that is
+/// never closed gets no fix.
+fn exclusions_fix(cipher_arg: &Argument, missing: &[String]) -> Option<Fix> {
+    let offset = cipher_arg.value_end_offset()?;
     let additions = missing.join(":");
-    if original.is_empty() {
+    let text = if cipher_arg.as_str().is_empty() {
         additions
     } else {
-        format!("{}:{}", original, additions)
-    }
+        format!(":{}", additions)
+    };
+    Some(Fix::replace_range(offset, offset, &text))
 }
 
 nginx_lint_plugin::export_component_plugin!(WeakSslCiphersPlugin);
@@ -348,12 +333,37 @@ server {
     }
 
     #[test]
-    fn test_generate_fixed_cipher_string() {
-        let fixed = generate_fixed_cipher_string("HIGH", &["!RC4".to_string(), "!MD5".to_string()]);
-        assert_eq!(fixed, "HIGH:!RC4:!MD5");
+    fn test_fix_appends_inside_the_argument() {
+        let runner = PluginTestRunner::new(WeakSslCiphersPlugin);
+        let all = ":!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5";
+        for (before, after) in [
+            ("ssl_ciphers HIGH;", format!("ssl_ciphers HIGH{all};")),
+            ("ssl_ciphers 'HIGH';", format!("ssl_ciphers 'HIGH{all}';")),
+            (
+                r#"ssl_ciphers "HIGH";"#,
+                format!(r#"ssl_ciphers "HIGH{all}";"#),
+            ),
+            (
+                r#"ssl_ciphers "";"#,
+                format!(r#"ssl_ciphers "{}";"#, &all[1..]),
+            ),
+            // Everything else in the directive stays as written
+            (
+                r#"ssl_ciphers  "HIGH"  extra ;"#,
+                format!(r#"ssl_ciphers  "HIGH{all}"  extra ;"#),
+            ),
+        ] {
+            runner.assert_fix_produces(before, &after);
+        }
+    }
 
-        let fixed = generate_fixed_cipher_string("", &["!RC4".to_string()]);
-        assert_eq!(fixed, "!RC4");
+    #[test]
+    fn test_fix_keeps_escaped_quote() {
+        let runner = PluginTestRunner::new(WeakSslCiphersPlugin);
+        runner.assert_fix_produces(
+            include_str!("../tests/fixtures/003_escaped_quote/error/nginx.conf"),
+            include_str!("../tests/fixtures/003_escaped_quote/expected/nginx.conf"),
+        );
     }
 
     #[test]
