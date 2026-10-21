@@ -56,7 +56,7 @@ impl Plugin for DeprecatedSslProtocolPlugin {
             let deprecated_args: Vec<_> = directive
                 .args
                 .iter()
-                .filter(|arg| DEPRECATED_PROTOCOLS.contains(&arg.as_str()))
+                .filter(|arg| is_deprecated(arg))
                 .collect();
 
             if deprecated_args.is_empty() {
@@ -91,6 +91,19 @@ impl Plugin for DeprecatedSslProtocolPlugin {
     }
 }
 
+/// Whether `arg` names `protocol`. nginx matches the names
+/// case-insensitively. A variable names no protocol, even when its name looks
+/// like one.
+fn names_protocol(arg: &Argument, protocol: &str) -> bool {
+    !matches!(arg.value, ArgumentValue::Variable(_)) && arg.as_str().eq_ignore_ascii_case(protocol)
+}
+
+fn is_deprecated(arg: &Argument) -> bool {
+    DEPRECATED_PROTOCOLS
+        .iter()
+        .any(|protocol| names_protocol(arg, protocol))
+}
+
 /// Generate the fixed protocol list by removing deprecated protocols
 ///
 /// Arguments that stay are written as they appear in the source
@@ -98,27 +111,30 @@ impl Plugin for DeprecatedSslProtocolPlugin {
 /// writing the decoded value unquoted would let a quoted `;` in it end the
 /// directive and turn the rest into directives.
 fn generate_fixed_protocols(current: &[Argument]) -> String {
-    // (decoded value, text to write) of each protocol that stays
-    let mut protocols: Vec<(String, String)> = current
+    let order = ["TLSv1.2", "TLSv1.3"];
+    // (position in `order`, text to write) of each protocol that stays
+    let mut protocols: Vec<(usize, String)> = current
         .iter()
-        .filter(|arg| !DEPRECATED_PROTOCOLS.contains(&arg.as_str()))
-        .map(|arg| (arg.as_str().to_string(), arg.to_source()))
+        .filter(|arg| !is_deprecated(arg))
+        .map(|arg| {
+            let position = order
+                .iter()
+                .position(|protocol| names_protocol(arg, protocol))
+                .unwrap_or(usize::MAX);
+            (position, arg.to_source())
+        })
         .collect();
 
     // Add allowed protocols that aren't already present
     for proto in ALLOWED_PROTOCOLS {
-        if !protocols.iter().any(|(value, _)| value == proto) {
-            protocols.push((proto.to_string(), proto.to_string()));
+        if !current.iter().any(|arg| names_protocol(arg, proto)) {
+            let position = order.iter().position(|x| x == proto).unwrap_or(usize::MAX);
+            protocols.push((position, proto.to_string()));
         }
     }
 
     // Sort protocols for consistent output
-    protocols.sort_by(|(a, _), (b, _)| {
-        let order = ["TLSv1.2", "TLSv1.3"];
-        let a_idx = order.iter().position(|x| x == a).unwrap_or(99);
-        let b_idx = order.iter().position(|x| x == b).unwrap_or(99);
-        a_idx.cmp(&b_idx)
-    });
+    protocols.sort_by_key(|(position, _)| *position);
 
     protocols
         .iter()
@@ -288,6 +304,16 @@ server {
                 r#"ssl_protocols TLSv1 "TLSv1.2";"#,
                 r#"ssl_protocols "TLSv1.2" TLSv1.3;"#,
             ),
+            // Names match case-insensitively, as in nginx
+            (
+                "ssl_protocols TLSv1 tlsv1.2;",
+                "ssl_protocols tlsv1.2 TLSv1.3;",
+            ),
+            // A variable is not the protocol its name looks like
+            (
+                "ssl_protocols $TLSv1 TLSv1;",
+                "ssl_protocols TLSv1.2 TLSv1.3 $TLSv1;",
+            ),
             // A quoted `;` stays inside the quotes
             (
                 r#"ssl_protocols TLSv1 "TLSv1.2;autoindex on;#";"#,
@@ -296,6 +322,15 @@ server {
         ] {
             runner.assert_fix_produces(before, after);
         }
+    }
+
+    #[test]
+    fn test_fix_keeps_quoted_semicolon() {
+        let runner = PluginTestRunner::new(DeprecatedSslProtocolPlugin);
+        runner.assert_fix_produces(
+            include_str!("../tests/fixtures/002_quoted_semicolon/error/nginx.conf"),
+            include_str!("../tests/fixtures/002_quoted_semicolon/expected/nginx.conf"),
+        );
     }
 
     #[test]

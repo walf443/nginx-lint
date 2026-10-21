@@ -848,11 +848,16 @@ pub trait ArgumentExt {
     /// whether it was `\$`.
     fn to_source(&self) -> String;
 
-    /// Byte offset of the closing quote of a quoted argument, where text
-    /// inserted ends up inside the string as written. `None` for an unquoted
-    /// argument, and for a string that is never closed, whose last quote is
-    /// an escaped one.
-    fn closing_quote_offset(&self) -> Option<usize>;
+    /// Byte offset where inserted text extends this argument's value, leaving
+    /// the argument otherwise as written: before the closing quote of a
+    /// quoted argument, or at the end of an unquoted one.
+    ///
+    /// `None` for a string that is never closed, whose last quote is an
+    /// escaped one, so no offset keeps the insertion inside it. The default
+    /// is `None`, for implementations outside this crate.
+    fn value_end_offset(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl ArgumentExt for Argument {
@@ -872,16 +877,16 @@ impl ArgumentExt for Argument {
         }
     }
 
-    fn closing_quote_offset(&self) -> Option<usize> {
+    fn value_end_offset(&self) -> Option<usize> {
         let quote = match self.value {
             ArgumentValue::QuotedString(_) => '"',
             ArgumentValue::SingleQuotedString(_) => '\'',
-            _ => return None,
+            _ => return Some(self.span.end.offset),
         };
         let body = self.raw.strip_prefix(quote)?.strip_suffix(quote)?;
         // The final quote closes the string only when it is not escaped.
         let backslashes = body.chars().rev().take_while(|&c| c == '\\').count();
-        (backslashes % 2 == 0).then(|| self.span.start.offset + self.raw.len() - 1)
+        (backslashes % 2 == 0).then(|| self.span.end.offset - quote.len_utf8())
     }
 }
 
@@ -939,29 +944,25 @@ mod tests {
     }
 
     #[test]
-    fn closing_quote_offset_points_inside_the_string() {
-        let source = r#"a "HIGH";"#;
-        let offset = first_arg(source).closing_quote_offset().unwrap();
-        assert_eq!(&source[offset..], r#"";"#);
-
-        let source = r"a 'HIGH';";
-        let offset = first_arg(source).closing_quote_offset().unwrap();
-        assert_eq!(&source[offset..], "';");
-
-        let source = r#"a "x\\";"#;
-        let offset = first_arg(source).closing_quote_offset().unwrap();
-        assert_eq!(&source[offset..], r#"";"#);
-
-        assert_eq!(first_arg("a HIGH;").closing_quote_offset(), None);
-        assert_eq!(first_arg("a $var;").closing_quote_offset(), None);
+    fn value_end_offset_points_at_the_end_of_the_value() {
+        for (source, rest) in [
+            (r#"a "HIGH";"#, r#"";"#),
+            ("a 'HIGH';", "';"),
+            (r#"a "x\\";"#, r#"";"#),
+            ("a HIGH;", ";"),
+            ("a $var ;", " ;"),
+        ] {
+            let offset = first_arg(source).value_end_offset().unwrap();
+            assert_eq!(&source[offset..], rest, "{}", source);
+        }
     }
 
     #[test]
-    fn closing_quote_offset_rejects_an_unclosed_string() {
+    fn value_end_offset_rejects_an_unclosed_string() {
         // What the error-tolerant parse the CLI uses gives for `a "HIGH\"` at
         // the end of the file: the last quote is the escaped one.
         let mut arg = first_arg(r#"a "HIGH";"#);
         arg.raw = r#""HIGH\""#.to_string();
-        assert_eq!(arg.closing_quote_offset(), None);
+        assert_eq!(arg.value_end_offset(), None);
     }
 }

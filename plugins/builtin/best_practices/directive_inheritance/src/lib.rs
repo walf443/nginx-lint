@@ -151,16 +151,18 @@ impl DirectiveInheritancePlugin {
     ///
     /// Arguments are written as in the source, and ones that touch there
     /// (`$scheme://$host` is three tokens) stay joined: a space between them
-    /// would make separate arguments in nginx.
+    /// would make separate arguments in nginx. Only spans that cover text
+    /// count, so arguments built without positions are kept apart.
     fn directive_to_text(directive: &Directive) -> Rc<str> {
         let mut text = directive.name.clone();
         let mut previous_end = None;
         for arg in &directive.args {
-            if previous_end != Some(arg.span.start.offset) {
+            let has_span = arg.span.end.offset > arg.span.start.offset;
+            if !has_span || previous_end != Some(arg.span.start.offset) {
                 text.push(' ');
             }
             text.push_str(&arg.to_source());
-            previous_end = Some(arg.span.end.offset);
+            previous_end = has_span.then_some(arg.span.end.offset);
         }
         text.push(';');
         Rc::from(text)
@@ -1241,6 +1243,19 @@ http {
         runner.assert_fix_produces(
             "server {\n    add_header X-Origin $scheme://$host;\n    location / {\n        add_header X-A b;\n    }\n}\n",
             "server {\n    add_header X-Origin $scheme://$host;\n    location / {\n        add_header X-Origin $scheme://$host;\n        add_header X-A b;\n    }\n}\n",
+        );
+    }
+
+    #[test]
+    fn test_directive_to_text_without_spans() {
+        let config = nginx_lint_plugin::parse_string("add_header X-A b;").unwrap();
+        let mut directive = config.all_directives().next().unwrap().clone();
+        for arg in &mut directive.args {
+            arg.span = Span::default();
+        }
+        assert_eq!(
+            &*DirectiveInheritancePlugin::directive_to_text(&directive),
+            "add_header X-A b;"
         );
     }
 

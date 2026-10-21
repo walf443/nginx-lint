@@ -168,12 +168,7 @@ fn find_missing_exclusions(cipher_string: &str) -> Vec<String> {
 /// close the string early and turn the rest into directives. A string that is
 /// never closed gets no fix.
 fn exclusions_fix(cipher_arg: &Argument, missing: &[String]) -> Option<Fix> {
-    let offset = match cipher_arg.value {
-        ArgumentValue::QuotedString(_) | ArgumentValue::SingleQuotedString(_) => {
-            cipher_arg.closing_quote_offset()?
-        }
-        _ => cipher_arg.span.start.offset + cipher_arg.raw.len(),
-    };
+    let offset = cipher_arg.value_end_offset()?;
     let additions = missing.join(":");
     let text = if cipher_arg.as_str().is_empty() {
         additions
