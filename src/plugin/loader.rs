@@ -69,7 +69,7 @@ pub fn plugin_world_deprecation(path: &Path) -> String {
         "Warning: {} was built against the original `plugin` world, which a future major \
          release of nginx-lint will stop loading; rebuild it with a current SDK, which \
          produces the `plugin-rules` world",
-        path.display()
+        one_line_path(path)
     )
 }
 
@@ -310,7 +310,11 @@ impl PluginLoader {
             let rules = match file.loaded {
                 Ok(rules) => rules,
                 Err(e) => {
-                    eprintln!("Warning: Failed to load plugin {:?}: {}", file.path, e);
+                    eprintln!(
+                        "Warning: Failed to load plugin {}: {}",
+                        one_line_path(&file.path),
+                        one_line(&e.to_string())
+                    );
                     continue;
                 }
             };
