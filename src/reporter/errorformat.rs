@@ -7,6 +7,22 @@ use std::path::Path;
 
 use super::{one_line, one_line_path};
 
+/// The path an errorformat line starts with, on one line and never starting
+/// with `:`.
+///
+/// A GitHub Actions runner takes an output line whose start, after leading
+/// whitespace, is `::` for a workflow command. A relative path such as
+/// `::stop-commands::zz.conf`, reached through an include glob, would start
+/// one; `./` in front names the same file.
+fn location_path(path: &Path) -> String {
+    let text = one_line_path(path);
+    if path.is_relative() && text.trim_start().starts_with(':') {
+        format!("./{}", text)
+    } else {
+        text
+    }
+}
+
 pub(crate) fn report(
     writer: &mut dyn Write,
     errors: &[LintError],
@@ -14,7 +30,7 @@ pub(crate) fn report(
     colors: &ColorConfig,
     ignored_count: usize,
 ) -> std::io::Result<()> {
-    let path_str = one_line_path(path);
+    let path_str = location_path(path);
 
     let mut sorted_errors: Vec<_> = errors.iter().collect();
     sorted_errors.sort_by(|a, b| match (a.line, b.line) {
@@ -97,7 +113,7 @@ pub(crate) fn report(
 
 #[cfg(test)]
 fn format_line(error: &LintError, path: &Path) -> String {
-    let path_str = one_line_path(path);
+    let path_str = location_path(path);
 
     let location = match (error.line, error.column) {
         (Some(line), Some(col)) => format!("{}:{}:{}", path_str, line, col),

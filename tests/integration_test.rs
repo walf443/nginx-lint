@@ -3689,7 +3689,8 @@ fn workflow_command_lines(output: &std::process::Output) -> Vec<String> {
     stdout
         .lines()
         .chain(stderr.lines())
-        .filter(|line| line.starts_with("::"))
+        // The runner trims a line before looking for the `::`
+        .filter(|line| line.trim_start().starts_with("::"))
         .map(str::to_string)
         .collect()
 }
@@ -3757,4 +3758,38 @@ fn test_file_name_cannot_start_a_workflow_command() {
             .all(|line| !line.starts_with("::stop-commands")),
         "{commands:?}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_relative_path_cannot_start_a_workflow_command() {
+    use std::process::Command;
+
+    // An errorformat line starts with the file's path. Linted from its own
+    // directory, a file reached through an include glob shows as a relative
+    // path, which here would start the line with a command.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nginx.conf"),
+        "http {\n    server_tokens off;\n    include *.conf.inc;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("::stop-commands::zz.conf.inc"),
+        "server {\nlisten 80;\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .current_dir(dir.path())
+        .args(["--no-cache", "nginx.conf"])
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("./::stop-commands::zz.conf.inc:"),
+        "{stdout}"
+    );
+    let commands = workflow_command_lines(&output);
+    assert!(commands.is_empty(), "{commands:?}");
 }
