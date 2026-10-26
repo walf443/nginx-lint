@@ -56,9 +56,9 @@ pub fn run_batch(
                     if memo.remember_failed(key) {
                         eprintln!(
                             "Warning: checking {} together failed on {} ({}); checking them one at a time from now on",
-                            names.join(", "),
-                            path.display(),
-                            why
+                            crate::output::one_line(&names.join(", ")),
+                            crate::output::one_line_path(path),
+                            crate::output::one_line(&why.to_string())
                         );
                     }
                     one_at_a_time()

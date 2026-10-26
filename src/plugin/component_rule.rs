@@ -136,6 +136,9 @@ impl ComponentLintRule {
             let spec = Self::get_plugin_spec(&pre, &path, memory_limit, timeout_ticks)?;
             (Exports::Plugin(pre), vec![spec])
         };
+        for spec in &specs {
+            Self::check_single_line_fields(spec, &path)?;
+        }
 
         Ok(specs
             .iter()
@@ -212,6 +215,37 @@ impl ComponentLintRule {
         plugin
             .call_spec(&mut store)
             .map_err(|e| PluginError::execution_error(path, format!("spec() call failed: {}", e)))
+    }
+
+    /// Reject a rule whose name, category or nginx version bounds hold a
+    /// control character, `\n` and `\t` included.
+    ///
+    /// sanitize_text keeps `\n` and `\t`, which descriptions and messages
+    /// may use, but these fields are printed inside one-line notices and
+    /// reports, where a newline would start a line of the plugin's choosing
+    /// (in a GitHub Actions job, a workflow command). The places that print
+    /// them pass them through `one_line` as well.
+    fn check_single_line_fields(
+        spec: &bindings::nginx_lint::plugin::types::PluginSpec,
+        path: &Path,
+    ) -> Result<(), PluginError> {
+        let fields = [
+            ("name", Some(&spec.name)),
+            ("category", Some(&spec.category)),
+            ("min_nginx_version", spec.min_nginx_version.as_ref()),
+            ("max_nginx_version", spec.max_nginx_version.as_ref()),
+        ];
+        for (field, value) in fields {
+            if let Some(value) = value
+                && value.chars().any(char::is_control)
+            {
+                return Err(PluginError::invalid_plugin_spec(
+                    path,
+                    format!("the rule {} {:?} contains control characters", field, value),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Get the specs of a `plugin-rules` component by instantiating it and
@@ -523,6 +557,38 @@ mod tests {
     use super::*;
     use crate::plugin::host::config_api;
     use wasmtime::component::Resource;
+
+    #[test]
+    fn single_line_fields_reject_line_breaks() {
+        let spec = |name: &str, category: &str, min: Option<&str>| {
+            bindings::nginx_lint::plugin::types::PluginSpec {
+                name: name.to_string(),
+                category: category.to_string(),
+                description: "multi\nline\tdescription".to_string(),
+                api_version: "1.0".to_string(),
+                severity: None,
+                why: None,
+                bad_example: None,
+                good_example: None,
+                references: None,
+                min_nginx_version: min.map(str::to_string),
+                max_nginx_version: None,
+            }
+        };
+        let path = Path::new("p.wasm");
+        assert!(
+            ComponentLintRule::check_single_line_fields(&spec("r", "c", Some("1.25.0")), path)
+                .is_ok()
+        );
+        for bad in [
+            spec("r\n::stop-commands::zz", "c", None),
+            spec("r", "c\tx", None),
+            spec("r", "c", Some("1.0\n::error::forged")),
+        ] {
+            let err = ComponentLintRule::check_single_line_fields(&bad, path).unwrap_err();
+            assert!(err.to_string().contains("control characters"), "{err}");
+        }
+    }
 
     /// Load a real compiled builtin plugin by rule-table name (e.g.
     /// `"autoindex_enabled"`), skipping the test if `make build-plugins`

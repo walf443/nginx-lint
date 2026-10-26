@@ -6,6 +6,8 @@ use nginx_lint_common::config::ColorConfig;
 use nginx_lint_common::linter::LintError;
 use std::path::Path;
 
+pub use nginx_lint_common::output::{one_line, one_line_path};
+
 #[derive(Debug, Clone, Copy, Default)]
 pub enum OutputFormat {
     #[default]
