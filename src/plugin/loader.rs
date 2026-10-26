@@ -5,6 +5,7 @@
 use super::component_rule::ComponentLintRule;
 use super::error::PluginError;
 use nginx_lint_common::linter::LintRule;
+use nginx_lint_common::output::{one_line, one_line_path};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -321,17 +322,17 @@ impl PluginLoader {
                 if reserved.contains(name) {
                     eprintln!(
                         "Warning: skipping rule '{}' from {}: the host ships a rule of that name",
-                        name,
-                        file.path.display()
+                        one_line(name),
+                        one_line_path(&file.path)
                     );
                     continue;
                 }
                 match provided_by.entry(name.to_string()) {
                     Entry::Occupied(earlier) => eprintln!(
                         "Warning: skipping rule '{}' from {}: already provided by {}",
-                        name,
-                        file.path.display(),
-                        earlier.get().display()
+                        one_line(name),
+                        one_line_path(&file.path),
+                        one_line_path(earlier.get())
                     ),
                     Entry::Vacant(slot) => {
                         slot.insert(file.path.clone());

@@ -156,8 +156,8 @@ fn display_profile(profiles: &[RuleProfile]) {
             time_display,
             pct_str,
             error_count,
-            name,
-            category.dimmed()
+            one_line(name),
+            one_line(category).dimmed()
         );
     }
 
