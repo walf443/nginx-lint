@@ -8,6 +8,7 @@ use nginx_lint::{
     collect_included_files_with_context, parse_config, parse_string_with_errors,
     syntax_errors_to_lint_errors,
 };
+use nginx_lint_common::output::guard_lines;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -490,7 +491,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                 if !nginx_conf.exists() {
                     eprintln!(
                         "Error: nginx.conf not found in directory {}",
-                        file.display()
+                        one_line_path(file)
                     );
                     return ExitCode::from(2);
                 }
@@ -509,12 +510,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         match LintConfig::from_file(config_path) {
             Ok(cfg) => {
                 if cli.verbose {
-                    eprintln!("Using config: {}", config_path.display());
+                    eprintln!("Using config: {}", one_line_path(config_path));
                 }
                 (Some(cfg), Some(config_path.clone()))
             }
             Err(e) => {
-                eprintln!("Error: {}", e);
+                // A parse error quotes the file over several lines
+                eprintln!("Error: {}", guard_lines(&e.to_string()));
                 return ExitCode::from(2);
             }
         }
@@ -662,14 +664,14 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             "Loaded {} rule(s) from {} plugin(s) in {}",
                             plugins.len(),
                             files.len(),
-                            plugins_dir.display()
+                            one_line_path(plugins_dir)
                         );
                         if let (Some(cache_dir), Some((hits, misses))) =
                             (loader.cache_directory(), loader.cache_stats())
                         {
                             eprintln!(
                                 "Plugin compilation cache: {} ({} hit(s), {} miss(es))",
-                                cache_dir.display(),
+                                one_line_path(cache_dir),
                                 hits,
                                 misses
                             );
@@ -716,12 +718,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     linter.set_inactive_rules(disabled);
                 }
                 Err(e) => {
-                    eprintln!("Error loading plugins: {}", e);
+                    eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
                     return ExitCode::from(2);
                 }
             },
             Err(e) => {
-                eprintln!("Error initializing plugin loader: {}", e);
+                eprintln!(
+                    "Error initializing plugin loader: {}",
+                    one_line(&e.to_string())
+                );
                 return ExitCode::from(2);
             }
         }
@@ -783,7 +788,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             available.dedup();
             eprintln!("Loaded rules:");
             for name in &available {
-                eprintln!("  - {}", name);
+                eprintln!("  - {}", one_line(name));
             }
             return ExitCode::from(2);
         }

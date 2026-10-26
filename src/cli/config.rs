@@ -1,6 +1,7 @@
 use crate::Cli;
 use clap::Subcommand;
 use nginx_lint::LintConfig;
+use nginx_lint_common::output::{guard_lines, one_line, one_line_path};
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -90,19 +91,20 @@ fn run_validate(config_path: PathBuf, cli: &Cli) -> ExitCode {
     match LintConfig::validate_file_with_rules(&config_path, &external_rules) {
         Ok(errors) => {
             if errors.is_empty() {
-                eprintln!("{}: OK", config_path.display());
+                eprintln!("{}: OK", one_line_path(&config_path));
                 ExitCode::SUCCESS
             } else {
-                eprintln!("{}:", config_path.display());
+                eprintln!("{}:", one_line_path(&config_path));
                 for error in &errors {
-                    eprintln!("  - {}", error);
+                    eprintln!("  - {}", one_line(&error.to_string()));
                 }
                 eprintln!("\nFound {} error(s)", errors.len());
                 ExitCode::from(1)
             }
         }
         Err(e) => {
-            eprintln!("Error: {}", e);
+            // A parse error quotes the file over several lines
+            eprintln!("Error: {}", guard_lines(&e.to_string()));
             ExitCode::from(2)
         }
     }
@@ -127,7 +129,7 @@ fn external_rule_names(
     nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi)
         .map(|docs| docs.into_iter().map(|doc| doc.name).collect())
         .map_err(|e| {
-            eprintln!("Error loading plugins: {}", e);
+            eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
         })
 }
 

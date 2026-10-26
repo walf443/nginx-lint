@@ -24,6 +24,26 @@ pub fn one_line_path(path: &Path) -> String {
     one_line(&path.display().to_string()).into_owned()
 }
 
+/// One line of a multi-line block (an example, a diff), with a `\` put in
+/// front when the line, after leading whitespace, starts with `::`.
+///
+/// A block keeps its line breaks, so [`one_line`] does not apply, but the
+/// runner trims each line and takes one starting with `::` for a workflow
+/// command, so such a line must not reach the output as is.
+pub fn guard_line(line: &str) -> std::borrow::Cow<'_, str> {
+    let indent = line.len() - line.trim_start().len();
+    if line[indent..].starts_with("::") {
+        format!("{}\\{}", &line[..indent], &line[indent..]).into()
+    } else {
+        line.into()
+    }
+}
+
+/// [`guard_line`] for each line of a multi-line block.
+pub fn guard_lines(text: &str) -> String {
+    text.lines().map(guard_line).collect::<Vec<_>>().join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -42,5 +62,20 @@ mod tests {
             one_line_path(Path::new("conf.d/x\n::y.conf")),
             r"conf.d/x\n::y.conf"
         );
+    }
+
+    #[test]
+    fn guard_line_breaks_a_leading_command() {
+        assert_eq!(
+            guard_line("  ::stop-commands::zz"),
+            r"  \::stop-commands::zz"
+        );
+        assert_eq!(guard_line("::error::x"), r"\::error::x");
+        assert!(matches!(
+            guard_line("a ::b"),
+            std::borrow::Cow::Borrowed("a ::b")
+        ));
+        assert!(matches!(guard_line(":a"), std::borrow::Cow::Borrowed(":a")));
+        assert_eq!(guard_lines("a\n  ::b\nc"), "a\n  \\::b\nc");
     }
 }

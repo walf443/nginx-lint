@@ -6,6 +6,7 @@ use nginx_lint_common::linter::{
 };
 pub use nginx_lint_common::linter::{Fix, LintError, LintRule, Severity};
 use nginx_lint_common::nginx_version::{NginxVersion, format_range, is_in_range};
+use nginx_lint_common::output::one_line;
 use nginx_lint_common::parser::ast::Config;
 #[cfg(feature = "cli")]
 use rayon::prelude::*;
@@ -41,7 +42,10 @@ fn parse_plugin_bound(
                 eprintln!(
                     "warning: rule '{}' declares an unparseable {}_nginx_version '{}': {} \
                      (treated as unbounded; rule will not be version-filtered on this side)",
-                    rule_name, which, raw, e
+                    one_line(rule_name),
+                    which,
+                    one_line(raw),
+                    one_line(&e.to_string())
                 );
             }
             None
@@ -382,7 +386,7 @@ impl Linter {
                 Err(e) => {
                     eprintln!(
                         "warning: ignoring target_nginx_version: {} (skipping version-based rule filtering)",
-                        e
+                        one_line(&e.to_string())
                     );
                     None
                 }
@@ -412,7 +416,10 @@ impl Linter {
                         eprintln!(
                             "warning: rule '{}' requires {} but target_nginx_version is {}; \
                              skipping. Set [rules.{}] skip_version_check = true to override.",
-                            name, range, target, name
+                            one_line(&name),
+                            one_line(&range),
+                            one_line(&target.to_string()),
+                            one_line(&name)
                         );
                         filtered_out.insert(name);
                         false

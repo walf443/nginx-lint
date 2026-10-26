@@ -1,6 +1,7 @@
 use crate::Cli;
 use nginx_lint::docs::RuleDocOwned;
 use nginx_lint_common::nginx_version::format_range;
+use nginx_lint_common::output::{guard_line, one_line, one_line_path};
 use std::process::ExitCode;
 
 /// Look up one rule, loading plugins only if the name is not a native rule.
@@ -75,7 +76,7 @@ fn external_plugin_docs(cli: &Cli) -> Result<Vec<RuleDocOwned>, ()> {
     };
 
     nginx_lint::docs::external_plugin_docs(dir, cache_config(cli), allow_wasi(cli)?).map_err(|e| {
-        eprintln!("Error loading plugins: {}", e);
+        eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
     })
 }
 
@@ -90,7 +91,7 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         if !dir.is_dir() {
             eprintln!(
                 "Error loading plugins: Plugin directory not found: {}",
-                dir.display()
+                one_line_path(dir)
             );
             return ExitCode::from(2);
         }
@@ -99,7 +100,7 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         if let Err(e) =
             nginx_lint::plugin::PluginLoader::new_with_cache(super::plugin_opts::cache_config(cli))
         {
-            eprintln!("Error loading plugins: {}", e);
+            eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
             return ExitCode::from(2);
         }
     }
@@ -129,13 +130,13 @@ pub fn run_why(rule: Option<String>, list: bool, cli: &Cli) -> ExitCode {
         }
 
         let print_category = |category: &str, rules: &[&RuleDocOwned]| {
-            eprintln!("  {} {}", "▸".cyan(), category.bold());
+            eprintln!("  {} {}", "▸".cyan(), one_line(category).bold());
             for doc in rules {
                 let suffix = if doc.is_plugin { " (plugin)" } else { "" };
                 eprintln!(
                     "    {} - {}{}",
-                    doc.name.yellow(),
-                    doc.description,
+                    one_line(&doc.name).yellow(),
+                    one_line(&doc.description),
                     suffix.dimmed()
                 );
             }
@@ -200,26 +201,26 @@ fn print_rule_doc(doc: &RuleDocOwned) {
     eprintln!(
         "{} {}{}",
         "Rule:".bold(),
-        doc.name.yellow(),
+        one_line(&doc.name).yellow(),
         if doc.is_plugin {
             " (plugin)".dimmed().to_string()
         } else {
             "".to_string()
         }
     );
-    eprintln!("{} {}", "Category:".bold(), doc.category);
-    eprintln!("{} {}", "Severity:".bold(), doc.severity);
+    eprintln!("{} {}", "Category:".bold(), one_line(&doc.category));
+    eprintln!("{} {}", "Severity:".bold(), one_line(&doc.severity));
     if let Some(range) = format_range(
         doc.min_nginx_version.as_deref(),
         doc.max_nginx_version.as_deref(),
     ) {
-        eprintln!("{} {}", "Applies to:".bold(), range);
+        eprintln!("{} {}", "Applies to:".bold(), one_line(&range));
     }
     eprintln!();
     if !doc.why.is_empty() {
         eprintln!("{}", "Why:".bold());
         for line in doc.why.lines() {
-            eprintln!("  {}", line);
+            eprintln!("  {}", guard_line(line));
         }
         eprintln!();
     }
@@ -227,7 +228,7 @@ fn print_rule_doc(doc: &RuleDocOwned) {
         eprintln!("{}", "Bad Example:".bold().red());
         eprintln!("{}", "─".repeat(60).dimmed());
         for line in doc.bad_example.lines() {
-            eprintln!("  {}", line);
+            eprintln!("  {}", guard_line(line));
         }
         eprintln!("{}", "─".repeat(60).dimmed());
         eprintln!();
@@ -236,7 +237,7 @@ fn print_rule_doc(doc: &RuleDocOwned) {
         eprintln!("{}", "Good Example:".bold().green());
         eprintln!("{}", "─".repeat(60).dimmed());
         for line in doc.good_example.lines() {
-            eprintln!("  {}", line);
+            eprintln!("  {}", guard_line(line));
         }
         eprintln!("{}", "─".repeat(60).dimmed());
     }
@@ -245,7 +246,7 @@ fn print_rule_doc(doc: &RuleDocOwned) {
         eprintln!();
         eprintln!("{}", "References:".bold());
         for reference in &doc.references {
-            eprintln!("  • {}", reference.cyan());
+            eprintln!("  • {}", one_line(reference).cyan());
         }
     }
     eprintln!();
