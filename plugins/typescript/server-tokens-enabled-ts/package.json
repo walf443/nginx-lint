@@ -12,7 +12,7 @@
   },
   "devDependencies": {
     "@bytecodealliance/componentize-js": "^0.23.0",
-    "@bytecodealliance/jco": "1.41.0",
+    "@bytecodealliance/jco": "1.42.0",
     "@bytecodealliance/preview2-shim": "^0.31.0",
     "@types/node": "^26.0.0",
     "esbuild": "^0.28.1",
