@@ -16,6 +16,7 @@ use colored::Colorize;
 use nginx_lint::plugin::PluginLoader;
 use nginx_lint_common::linter::apply_fixes_to_content_detailed;
 use nginx_lint_common::linter::{LintError, LintRule, batch_rules};
+use nginx_lint_common::output::{guard_line, one_line, one_line_path};
 use nginx_lint_common::parse_string_with_errors;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -69,7 +70,7 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     if !dir.is_dir() {
         eprintln!(
             "Error loading plugins: Plugin directory not found: {}",
-            dir.display()
+            one_line_path(dir)
         );
         return ExitCode::from(2);
     }
@@ -80,19 +81,19 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
     let loader = match PluginLoader::new_with_cache(super::plugin_opts::cache_config(cli)) {
         Ok(loader) => loader.with_wasi(allow_wasi),
         Err(e) => {
-            eprintln!("Error loading plugins: {}", e);
+            eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
             return ExitCode::from(2);
         }
     };
     let files = match loader.load_plugin_files(dir) {
         Ok(files) => files,
         Err(e) => {
-            eprintln!("Error loading plugins: {}", e);
+            eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
             return ExitCode::from(2);
         }
     };
     if files.is_empty() {
-        eprintln!("Error: no .wasm files in {}", dir.display());
+        eprintln!("Error: no .wasm files in {}", one_line_path(dir));
         return ExitCode::from(2);
     }
 
@@ -120,9 +121,9 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                     if let Some(earlier) = provided_by.get(rule.name()) {
                         eprintln!(
                             "Error: rule '{}' from {} is already provided by {}",
-                            rule.name(),
-                            file.path.display(),
-                            earlier.display()
+                            one_line(rule.name()),
+                            one_line_path(&file.path),
+                            one_line_path(earlier)
                         );
                         collides = true;
                     } else {
@@ -137,7 +138,11 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 // The loader's own message, in full: a Go plugin run without
                 // --allow-wasi-plugins is the common case here. Worded as the
                 // loader's warning is, which the CI integration test greps.
-                eprintln!("Error: Failed to load plugin {:?}: {}", file.path, e);
+                eprintln!(
+                    "Error: Failed to load plugin {}: {}",
+                    one_line_path(&file.path),
+                    one_line(&e.to_string())
+                );
                 unusable += 1;
             }
         }
@@ -147,7 +152,7 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
             "Error: {} of the {} .wasm file(s) in {} cannot be tested",
             unusable,
             files.len(),
-            dir.display()
+            one_line_path(dir)
         );
         return ExitCode::from(2);
     }
@@ -171,7 +176,7 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         Some(_) if plugins.len() == 1 => FixturesLayout::Flat,
         Some(dir) => {
             if !dir.is_dir() {
-                eprintln!("Error: --fixtures {}: not a directory", dir.display());
+                eprintln!("Error: --fixtures {}: not a directory", one_line_path(dir));
                 return ExitCode::from(2);
             }
             let loaded: HashSet<&str> = plugins.iter().map(|plugin| plugin.name()).collect();
@@ -191,10 +196,14 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                     "Error: --fixtures holds one rule's cases, but {} rules loaded from {}\n\n\
                      Put each rule's cases under a directory named after the rule:\n{}",
                     plugins.len(),
-                    dir.display(),
+                    one_line_path(dir),
                     plugins
                         .iter()
-                        .map(|plugin| format!("  {}/{}/<case>/", dir.display(), plugin.name()))
+                        .map(|plugin| format!(
+                            "  {}/{}/<case>/",
+                            one_line_path(dir),
+                            one_line(plugin.name())
+                        ))
                         .collect::<Vec<_>>()
                         .join("\n")
                 );
@@ -207,11 +216,11 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
                 eprintln!(
                     "Error: {} holds directories that are not a loaded rule's: {}\n\n\
                      Loaded rules:\n{}",
-                    dir.display(),
-                    others.join(", "),
+                    one_line_path(dir),
+                    one_line(&others.join(", ")),
                     plugins
                         .iter()
-                        .map(|plugin| format!("  - {}", plugin.name()))
+                        .map(|plugin| format!("  - {}", one_line(plugin.name())))
                         .collect::<Vec<_>>()
                         .join("\n")
                 );
@@ -283,7 +292,7 @@ pub fn run_test_plugins(fixtures: Option<PathBuf>, cli: &Cli) -> ExitCode {
         println!(
             "{} for {} — {}",
             "nothing could be checked".yellow(),
-            unchecked.join(", "),
+            one_line(&unchecked.join(", ")),
             "do they declare bad and good examples?".yellow()
         );
     }
@@ -743,22 +752,22 @@ fn fixture_case(plugin: &dyn LintRule, path: &Path, expect_findings: bool) -> Op
 }
 
 fn report(name: &str, checks: &[Check]) {
-    println!("{}", name.bold());
+    println!("{}", one_line(name).bold());
     for check in checks {
         match &check.outcome {
-            Outcome::Passed => println!("  {} {}", "ok".green(), check.name),
+            Outcome::Passed => println!("  {} {}", "ok".green(), one_line(check.name)),
             Outcome::Skipped(why) => {
                 println!(
                     "  {} {} — {}",
                     "--".dimmed(),
-                    check.name.dimmed(),
-                    why.dimmed()
+                    one_line(check.name).dimmed(),
+                    one_line(why).dimmed()
                 )
             }
             Outcome::Failed(detail) => {
-                println!("  {} {}", "FAILED".red().bold(), check.name);
+                println!("  {} {}", "FAILED".red().bold(), one_line(check.name));
                 for line in detail.lines() {
-                    println!("      {}", line);
+                    println!("      {}", guard_line(line));
                 }
             }
         }

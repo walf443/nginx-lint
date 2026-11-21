@@ -14,7 +14,7 @@ pub(crate) fn report(
 }
 
 pub(crate) fn format(errors: &[LintError], path: &Path) -> Vec<String> {
-    let path_str = path.display();
+    let path_str = escape_property(&path.display().to_string());
 
     let mut sorted_errors: Vec<_> = errors.iter().collect();
     sorted_errors.sort_by(|a, b| match (a.line, b.line) {
@@ -47,11 +47,37 @@ pub(crate) fn format(errors: &[LintError], path: &Path) -> Vec<String> {
         if let Some(col) = error.column {
             params.push_str(&format!(",col={}", col));
         }
-        params.push_str(&format!(",title={}/{}", error.category, error.rule));
+        params.push_str(&format!(
+            ",title={}",
+            escape_property(&format!("{}/{}", error.category, error.rule))
+        ));
 
-        lines.push(format!("::{} {}::{}", level, params, error.message));
+        lines.push(format!(
+            "::{} {}::{}",
+            level,
+            params,
+            escape_data(&error.message)
+        ));
     }
     lines
+}
+
+/// Escape a workflow command's message the way `@actions/core` does.
+///
+/// The message carries text from the linted files, and the runner reads every
+/// output line as a possible command: an unescaped newline would let that text
+/// start a command of its own, such as a forged annotation or a
+/// `::stop-commands::` that hides the real ones.
+fn escape_data(text: &str) -> String {
+    text.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// Escape a workflow command's property value, where `,` separates
+/// properties and `:` ends them, as well.
+fn escape_property(text: &str) -> String {
+    escape_data(text).replace(':', "%3A").replace(',', "%2C")
 }
 
 #[cfg(test)]
@@ -172,5 +198,31 @@ mod tests {
         let path = Path::new("nginx.conf");
         let lines = format(&errors, path);
         assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_escapes_text_that_could_start_a_command() {
+        let errors = vec![make_error(
+            "include-path-exists",
+            "syntax",
+            "Included file not found: x\n::error file=src/auth.rs::forged\r\n::stop-commands::zz 100%",
+            Severity::Error,
+            Some(1),
+            Some(9),
+        )];
+        let lines = format(&errors, Path::new("conf/a,b:c%.conf"));
+        assert_eq!(lines.len(), 1);
+        assert_eq!(
+            lines[0],
+            "::error file=conf/a%2Cb%3Ac%25.conf,line=1,col=9,title=syntax/include-path-exists::Included file not found: x%0A::error file=src/auth.rs::forged%0D%0A::stop-commands::zz 100%25"
+        );
+        assert!(!lines[0].contains('\n') && !lines[0].contains('\r'));
+    }
+
+    #[test]
+    fn test_escapes_title() {
+        let errors = vec![make_error("a,b", "c:d", "m", Severity::Warning, None, None)];
+        let lines = format(&errors, Path::new("nginx.conf"));
+        assert_eq!(lines[0], "::warning file=nginx.conf,title=c%3Ad/a%2Cb::m");
     }
 }

@@ -41,6 +41,7 @@ pub mod docs;
 pub mod ignore;
 pub mod linter;
 pub mod nginx_version;
+pub mod output;
 
 // Re-export parser crate
 pub use nginx_lint_parser as parser;

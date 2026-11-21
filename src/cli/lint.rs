@@ -1,12 +1,14 @@
 use super::Cli;
 use clap::CommandFactory;
 use colored::control;
+use nginx_lint::reporter::{one_line, one_line_path};
 use nginx_lint::{
     ColorMode, IncludedFile, LintConfig, LintError, Linter, Reporter, RuleProfile, Severity,
     apply_fixes, apply_fixes_to_content_detailed, collect_included_files,
     collect_included_files_with_context, parse_config, parse_string_with_errors,
     syntax_errors_to_lint_errors,
 };
+use nginx_lint_common::output::guard_lines;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::io::Read;
@@ -21,7 +23,7 @@ fn warn_skipped_fixes(skipped: usize, path: &Path) {
         eprintln!(
             "Warning: skipped {} fix(es) with invalid offsets in {}",
             skipped,
-            path.display()
+            one_line_path(path)
         );
     }
 }
@@ -155,8 +157,8 @@ fn display_profile(profiles: &[RuleProfile]) {
             time_display,
             pct_str,
             error_count,
-            name,
-            category.dimmed()
+            one_line(name),
+            one_line(category).dimmed()
         );
     }
 
@@ -276,7 +278,11 @@ fn fix_file(inc: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
                     profiles,
                 };
             }
-            eprintln!("Applied {} fix(es) to {}", result.applied, path.display());
+            eprintln!(
+                "Applied {} fix(es) to {}",
+                result.applied,
+                one_line_path(&path)
+            );
             let FileResult::LintErrors {
                 errors: remaining,
                 ignored_count: remaining_ignored,
@@ -296,7 +302,7 @@ fn fix_file(inc: &IncludedFile, linter: &Linter, profile: bool) -> FileResult {
             }
         }
         Err(e) => {
-            eprintln!("Error applying fixes to {}: {}", path.display(), e);
+            eprintln!("Error applying fixes to {}: {}", one_line_path(&path), e);
             // Nothing was written: every error still stands.
             FileResult::LintErrors {
                 path,
@@ -485,7 +491,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                 if !nginx_conf.exists() {
                     eprintln!(
                         "Error: nginx.conf not found in directory {}",
-                        file.display()
+                        one_line_path(file)
                     );
                     return ExitCode::from(2);
                 }
@@ -504,12 +510,13 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         match LintConfig::from_file(config_path) {
             Ok(cfg) => {
                 if cli.verbose {
-                    eprintln!("Using config: {}", config_path.display());
+                    eprintln!("Using config: {}", one_line_path(config_path));
                 }
                 (Some(cfg), Some(config_path.clone()))
             }
             Err(e) => {
-                eprintln!("Error: {}", e);
+                // A parse error quotes the file over several lines
+                eprintln!("Error: {}", guard_lines(&e.to_string()));
                 return ExitCode::from(2);
             }
         }
@@ -525,7 +532,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         match LintConfig::find_and_load(search_dir) {
             Some((cfg, config_path)) => {
                 if cli.verbose {
-                    eprintln!("Found .nginx-lint.toml: {}", config_path.display());
+                    eprintln!("Found .nginx-lint.toml: {}", one_line_path(&config_path));
                 }
                 (Some(cfg), Some(config_path))
             }
@@ -589,7 +596,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
     if cli.verbose
         && let Some(ref prefix) = include_prefix
     {
-        eprintln!("Include prefix: {}", prefix.display());
+        eprintln!("Include prefix: {}", one_line_path(prefix));
     }
 
     // 8. Resolve the cache root and create the linter
@@ -657,14 +664,14 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             "Loaded {} rule(s) from {} plugin(s) in {}",
                             plugins.len(),
                             files.len(),
-                            plugins_dir.display()
+                            one_line_path(plugins_dir)
                         );
                         if let (Some(cache_dir), Some((hits, misses))) =
                             (loader.cache_directory(), loader.cache_stats())
                         {
                             eprintln!(
                                 "Plugin compilation cache: {} ({} hit(s), {} miss(es))",
-                                cache_dir.display(),
+                                one_line_path(cache_dir),
                                 hits,
                                 misses
                             );
@@ -696,9 +703,9 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                             let note = if enabled { "" } else { " [disabled]" };
                             eprintln!(
                                 "  - {} ({}) [{}]{}",
-                                name,
-                                plugin.rule.description(),
-                                plugin.path.display(),
+                                one_line(name),
+                                one_line(plugin.rule.description()),
+                                one_line_path(&plugin.path),
                                 note
                             );
                         }
@@ -711,12 +718,15 @@ pub fn run_lint(cli: Cli) -> ExitCode {
                     linter.set_inactive_rules(disabled);
                 }
                 Err(e) => {
-                    eprintln!("Error loading plugins: {}", e);
+                    eprintln!("Error loading plugins: {}", one_line(&e.to_string()));
                     return ExitCode::from(2);
                 }
             },
             Err(e) => {
-                eprintln!("Error initializing plugin loader: {}", e);
+                eprintln!(
+                    "Error initializing plugin loader: {}",
+                    one_line(&e.to_string())
+                );
                 return ExitCode::from(2);
             }
         }
@@ -778,7 +788,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
             available.dedup();
             eprintln!("Loaded rules:");
             for name in &available {
-                eprintln!("  - {}", name);
+                eprintln!("  - {}", one_line(name));
             }
             return ExitCode::from(2);
         }
@@ -860,7 +870,7 @@ pub fn run_lint(cli: Cli) -> ExitCode {
         if cli.verbose {
             eprintln!("Linting {} file(s)", included_files.len());
             for inc in &included_files {
-                eprintln!("  - {}", inc.path.display());
+                eprintln!("  - {}", one_line_path(&inc.path));
             }
         }
 

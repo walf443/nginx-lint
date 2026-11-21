@@ -41,7 +41,11 @@ pub fn allow_wasi_from(cli: &Cli, config_path: Option<&std::path::Path>) -> Resu
         Some(path) => match LintConfig::from_file(path) {
             Ok(config) => Some((config, path.to_path_buf())),
             Err(e) => {
-                eprintln!("Error: {}", e);
+                // A parse error quotes the file over several lines
+                eprintln!(
+                    "Error: {}",
+                    nginx_lint_common::output::guard_lines(&e.to_string())
+                );
                 return Err(());
             }
         },
@@ -87,6 +91,6 @@ pub fn warn_ignored_cache_dir(
     }
     eprintln!(
         "Warning: cache_dir in {} is ignored; use --cache-dir to choose the cache directory",
-        path.display()
+        nginx_lint::reporter::one_line_path(path)
     );
 }

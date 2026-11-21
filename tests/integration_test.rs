@@ -3681,3 +3681,115 @@ fn test_license_command_prints_third_party_notices() {
         "stdout:\n{stdout}"
     );
 }
+
+/// Lines a GitHub Actions runner would take as workflow commands.
+fn workflow_command_lines(output: &std::process::Output) -> Vec<String> {
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    stdout
+        .lines()
+        .chain(stderr.lines())
+        // The runner trims a line before looking for the `::`
+        .filter(|line| line.trim_start().starts_with("::"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn test_config_text_cannot_start_a_workflow_command() {
+    use std::process::Command;
+
+    // The parser decodes \n in quoted strings, so the include target's name,
+    // which the include-path-exists message quotes, holds real newlines. The
+    // runner reads every output line, whatever the format, so none of them
+    // may start a command but the reporter's own annotations.
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("nginx.conf");
+    std::fs::write(
+        &conf,
+        "http {\n    server_tokens off;\n    include \"x\\n::error file=src/auth.rs::forged\\n::stop-commands::zz\";\n}\n",
+    )
+    .unwrap();
+
+    for format in ["errorformat", "github-actions"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+            .args(["--no-cache", "-o", format])
+            .arg(&conf)
+            .output()
+            .expect("Failed to run nginx-lint");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(stdout.contains("stop-commands"), "{format}: {stdout}");
+        // Only the reporter's own annotations, each on the linted file
+        let own = [
+            format!("::error file={},", conf.display()),
+            format!("::warning file={},", conf.display()),
+        ];
+        for line in workflow_command_lines(&output) {
+            assert!(
+                format == "github-actions" && own.iter().any(|start| line.starts_with(start)),
+                "{format}: {line}"
+            );
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn test_file_name_cannot_start_a_workflow_command() {
+    use std::process::Command;
+
+    // git allows a newline in a file name, and --fix and --verbose print the
+    // names of the files they touch to stderr, which the runner reads too.
+    let dir = tempfile::tempdir().unwrap();
+    let conf = dir.path().join("x\n::stop-commands::zz.conf");
+    std::fs::write(&conf, "http {\nserver_tokens off;\n}\n").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .args(["--no-cache", "--fix", "--verbose", "-o", "github-actions"])
+        .arg(&conf)
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Applied"), "{stderr}");
+    let commands = workflow_command_lines(&output);
+    assert!(
+        commands
+            .iter()
+            .all(|line| !line.starts_with("::stop-commands")),
+        "{commands:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_relative_path_cannot_start_a_workflow_command() {
+    use std::process::Command;
+
+    // An errorformat line starts with the file's path. Linted from its own
+    // directory, a file reached through an include glob shows as a relative
+    // path, which here would start the line with a command.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("nginx.conf"),
+        "http {\n    server_tokens off;\n    include *.conf.inc;\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("::stop-commands::zz.conf.inc"),
+        "server {\nlisten 80;\n}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nginx-lint"))
+        .current_dir(dir.path())
+        .args(["--no-cache", "nginx.conf"])
+        .output()
+        .expect("Failed to run nginx-lint");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("./::stop-commands::zz.conf.inc:"),
+        "{stdout}"
+    );
+    let commands = workflow_command_lines(&output);
+    assert!(commands.is_empty(), "{commands:?}");
+}
