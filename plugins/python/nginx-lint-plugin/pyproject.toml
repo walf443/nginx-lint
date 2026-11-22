@@ -15,7 +15,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11"
 # Keep in sync with the repository version (scripts/bump-version.sh does);
 # tests/test_testkit.py checks it against the bundled wasm modules
-version = "0.24.0"
+version = "0.25.0"
 dependencies = [
     # Runs the parser and fix applier behind nginx_lint_plugin.testing. Only
     # the core-module API is used, which is stable across releases.
